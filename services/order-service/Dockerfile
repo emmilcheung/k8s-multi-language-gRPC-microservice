@@ -1,16 +1,19 @@
 # ── Stage 1: build ───────────────────────────────────────────────────────────
-FROM eclipse-temurin:21-jdk-alpine AS builder
+# Use a Debian/Ubuntu-based Maven+Temurin image. Two reasons:
+#   1. Maven is pre-installed — no apk-triggered java-common conflict that hangs builds.
+#   2. glibc is present — protobuf-maven-plugin downloads glibc-linked protoc binaries
+#      that cannot execute on Alpine's musl libc, causing MojoFailureException.
+FROM maven:3.9.9-eclipse-temurin-21 AS builder
 
 WORKDIR /build
 
 # Copy the shared proto files needed by the protobuf-maven-plugin
 COPY proto/ /proto/
 
-# Copy Maven wrapper / pom first so dependency layer is cached separately
+# Copy pom first so dependency layer is cached separately
 COPY services/order-service/pom.xml .
 # Download dependencies offline (layer cache friendly)
-RUN apk add --no-cache maven && \
-    mvn dependency:go-offline -q
+RUN mvn dependency:go-offline -q
 
 # Copy source and build — skip tests (run separately in CI)
 COPY services/order-service/src/ src/

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/acme/ticket-service/internal/config"
+	grpcserver "github.com/acme/ticket-service/internal/grpc"
 	"github.com/acme/ticket-service/internal/handler"
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/middleware"
@@ -38,7 +39,7 @@ func main() {
 	}
 	defer log.Sync() //nolint:errcheck
 
-	log.Info("starting ticket-service", zap.String("env", cfg.Env), zap.Int("port", cfg.Port))
+	log.Info("starting ticket-service", zap.String("env", cfg.Env), zap.Int("port", cfg.Port), zap.Int("grpcPort", cfg.GrpcPort))
 
 	// MongoDB repository
 	repo, err := repository.NewMongoTicketRepository(context.Background(), cfg.MongoURI, cfg.MongoDB)
@@ -56,6 +57,17 @@ func main() {
 
 	// Business logic service
 	svc := service.NewTicketService(repo, producer, log)
+
+	// gRPC server — runs alongside HTTP in a separate goroutine
+	grpcCtx, grpcCancel := context.WithCancel(context.Background())
+	defer grpcCancel()
+	grpcAddr := fmt.Sprintf(":%d", cfg.GrpcPort)
+	grpcSrv := grpcserver.NewTicketGrpcServer(repo, log)
+	go func() {
+		if err := grpcserver.Start(grpcCtx, grpcAddr, grpcSrv, log); err != nil {
+			log.Fatal("gRPC server error", zap.Error(err))
+		}
+	}()
 
 	// Echo HTTP server
 	e := echo.New()
@@ -98,6 +110,7 @@ func main() {
 	<-quit
 
 	log.Info("shutting down ticket-service")
+	grpcCancel() // signal gRPC server to stop
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := e.Shutdown(ctx); err != nil {
