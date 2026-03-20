@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+      <customFields>{"service":"order-service"}</customFields>
+      <fieldNames>
+        <timestamp>timestamp</timestamp>
+        <message>message</message>
+        <logger>logger</logger>
+        <thread>thread</thread>
+        <level>level</level>
+      </fieldNames>
+    </encoder>
+  </appender>
+
+  <root level="${LOG_LEVEL:-INFO}">
+    <appender-ref ref="STDOUT"/>
+  </root>
+
+  <!-- Reduce noise from Hibernate and Spring internals -->
+  <logger name="org.hibernate.SQL" level="WARN"/>
+  <logger name="org.springframework.web" level="INFO"/>
+  <logger name="org.apache.kafka" level="WARN"/>
+  <logger name="org.springframework.kafka" level="INFO"/>
+</configuration>

@@ -1,0 +1,64 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:tc:postgresql:16:///order_test}
+    username: test
+    password: test
+    driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  kafka:
+    bootstrap-servers: ${spring.embedded.kafka.brokers}
+    consumer:
+      group-id: order-service-test
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      enable-auto-commit: false
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: false  # not supported by embedded Kafka
+    listener:
+      ack-mode: MANUAL_IMMEDIATE
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+grpc:
+  ticket-service:
+    host: localhost
+    port: 0  # overridden in tests with in-process gRPC server
+
+order:
+  expiration:
+    minutes: 15
+
+logging:
+  level:
+    com.ticketing: DEBUG
+    org.springframework.kafka: WARN
+    org.testcontainers: WARN
