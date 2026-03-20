@@ -1,5 +1,5 @@
 // components/nav-bar.tsx — Glassmorphism top navigation (Client Component).
-// Uses localStorage to determine auth state (token set by auth-service cookie).
+// Auth state is derived server-side (token httpOnly cookie) and passed as a prop.
 
 "use client";
 
@@ -11,14 +11,14 @@ import { signout } from "@/app/actions/auth";
 import { cn } from "@/lib/utils";
 import { Ticket, LayoutDashboard, LogOut, LogIn, UserPlus, Tag } from "lucide-react";
 
-export function NavBar() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+interface NavBarProps {
+  isLoggedIn: boolean;
+}
+
+export function NavBar({ isLoggedIn }: NavBarProps) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const token =
-      typeof window !== "undefined" ? localStorage.getItem("token") : null;
-    setIsLoggedIn(Boolean(token));
     setMounted(true);
   }, []);
 
