@@ -1,9 +1,9 @@
 # Platform Build Status Log
 
-> **Last Updated:** 2026-03-20 17:45 UTC  
+> **Last Updated:** 2026-03-20 UTC  
 > **Current Phase:** Service Implementation  
-> **Overall Progress:** 40% (2 of 5 backend services complete)  
-> **Git Status:** Initialized with conventional commits workflow
+> **Overall Progress:** 60% (3 of 5 backend services complete)  
+> **Git Status:** Conventional commits, feature branches, main up to date
 
 ---
 
@@ -15,6 +15,7 @@
 | **Project Setup** | ✅ Complete | PLAN.md, AGENTS.md, docker-compose, workflow tools |
 | **auth-service** | ✅ Complete | TypeScript/NestJS, Drizzle ORM, RS256 JWT, 28 tests (all passing) |
 | **ticket-service** | ✅ Complete | Go/Echo, MongoDB, Kafka producer, 29 tests (16 unit + 13 integration) |
+| **payment-service** | ✅ Complete | TypeScript/NestJS, Drizzle ORM, Stripe, Kafka consumer, 25 tests (all passing) |
 | **Build & Tests** | ✅ All Pass | No warnings or errors, real databases via Testcontainers |
 | **Git Workflow** | ✅ Initialized | Conventional commits, feature branches, main as default |
 | **CI/CD** | ⏭️ Pending | GitHub Actions pipelines deferred until all services ready |
@@ -121,13 +122,55 @@ go build ./...:          ✅ CLEAN (harmless ld pthread warning)
 
 ---
 
+### Milestone 4: payment-service Implementation
+
+**Branch:** `feat/payment-service` (merged to main)
+
+**Repository:** `services/payment-service/`  
+**Stack:** TypeScript, Node.js 24 LTS, NestJS 11, Drizzle ORM, PostgreSQL 16, Stripe, KafkaJS, pnpm, Vitest
+
+**Deliverables:**
+- ✅ Project structure: NestJS modules (payments, health, metrics) + Kafka consumer at AppModule level
+- ✅ Config validation: Joi schema, fail-loud startup
+- ✅ Database: Drizzle ORM schema, migrations, `payments` table with UUID PK
+- ✅ Payment processing: `POST /api/payments` — idempotent Stripe PaymentIntent creation
+- ✅ Idempotency: one payment per `orderId`; duplicate requests return `409 Conflict`
+- ✅ Kafka consumer: `orders.order.created` → pre-create `pending` payment record
+- ✅ Resilience: 3-attempt exponential back-off, DLQ routing to `orders.order.created.dlq`
+- ✅ Test isolation: `OrdersConsumer` lives in `AppModule`, not `PaymentsModule` — integration tests bootstrap `PaymentsModule` without Kafka
+- ✅ Test mock fast-path: `STRIPE_SECRET_KEY=test_mock` bypasses real Stripe calls
+- ✅ Health checks: `/healthz/live`, `/healthz/ready`
+- ✅ Metrics: Prometheus endpoint at `/metrics`
+- ✅ Logging: nestjs-pino structured JSON output
+- ✅ Docker: Multi-stage Dockerfile, Node 24 LTS, pnpm, pinned digest, non-root user
+- ✅ Tests: 25 total (14 unit + 11 integration)
+  - Unit: service idempotency, Stripe mock, controller validation (fast)
+  - Integration: real PostgreSQL via Testcontainers, full HTTP requests via Supertest
+- ✅ Documentation: README with API docs, env vars, Kafka topics, local setup
+
+**Key Architecture Decision:**
+- `OrdersConsumer` must NOT be in `PaymentsModule` — isolate it at `AppModule` level so integration tests can bootstrap the payments module without triggering Kafka connections. This is the canonical pattern for testing Kafka-consuming NestJS services.
+
+**Test Verification:**
+```
+pnpm test:              14/14 PASS
+pnpm test:integration:  11/11 PASS (real PostgreSQL via Testcontainers)
+pnpm build:             ✅ CLEAN
+```
+
+**Fixes included:**
+- `fix(auth-service)`: updated Dockerfile to pnpm/Node 24 LTS; added `@types/ms` (was missing, caused `nest build` failure)
+- Both `auth-service` and `payment-service` builds now pass cleanly
+
+---
+
 ## Remaining Services
 
 ### payment-service
-- **Stack:** TypeScript, Node.js 24 LTS, NestJS, Drizzle ORM, PostgreSQL
-- **Status:** Ready to start
-- **Est. Time:** 2–3 hours
-- **Key Feature:** Kafka consumer (order events), payment processing, webhook integration
+- **Stack:** TypeScript, Node.js 24 LTS, NestJS
+- **Status:** ✅ Complete (merged to main)
+- **Key Feature:** Stripe PaymentIntents, Kafka consumer for order events, DLQ routing
+- See Milestone 4 below for details.
 
 ### order-service
 - **Stack:** Java 21, Spring Boot 4, Spring Data JPA, PostgreSQL
@@ -169,15 +212,15 @@ microservices-schema-registry Up 2 hours (healthy)
 
 ## Code Metrics
 
-| Metric | auth-service | ticket-service | Combined |
-|---|---|---|---|
-| Source Files | 25 | 20 | 45 |
-| Lines of Code | ~2,500 | ~2,000 | ~4,500 |
-| Test Files | 7 | 4 | 11 |
-| Total Tests | 28 | 29 | 57 |
-| Coverage (est.) | 85%+ | 80%+ | 82%+ |
-| Build Time | 4s | 8s (Go linker) | — |
-| Test Time | 2.9s | 17.8s (Docker startup) | — |
+| Metric | auth-service | ticket-service | payment-service | Combined |
+|---|---|---|---|---|
+| Source Files | 25 | 20 | 22 | 67 |
+| Lines of Code | ~2,500 | ~2,000 | ~1,800 | ~6,300 |
+| Test Files | 7 | 4 | 3 | 14 |
+| Total Tests | 28 | 29 | 25 | 82 |
+| Coverage (est.) | 85%+ | 80%+ | 85%+ | 83%+ |
+| Build Time | 4s | 8s (Go linker) | 5s | — |
+| Test Time | 2.9s | 17.8s (Docker startup) | ~8s (Docker startup) | — |
 
 ---
 
@@ -268,11 +311,11 @@ git branch -d feat/auth-service
 
 ## Next Steps
 
-1. **Document Workflow** — Create CONTRIBUTING.md with commit/PR standards
-2. **Commit Setup** — `setup/project-infrastructure` → main
-3. **Commit auth-service** — `feat/auth-service` → main
-4. **Commit ticket-service** — `feat/ticket-service` → main
-5. **Start payment-service** — 2–3 hours, adds Kafka consumer pattern
+1. **order-service** — Java 21, Spring Boot 4, Spring Data JPA, PostgreSQL, order lifecycle state machine
+2. **expiration-service** — Go 1.23+, asynq, Redis, Kafka — order expiration jobs
+3. **client** — Next.js 15 App Router, Kong API Gateway integration
+4. **CI/CD** — GitHub Actions pipelines (deferred until all services ready)
+5. **Kubernetes** — `kind` cluster and Helm charts (deferred until all services ready)
 
 ---
 
@@ -280,9 +323,7 @@ git branch -d feat/auth-service
 
 **Blockers:** None  
 **Risk:** None  
-**Ready to proceed:** ✅ Yes
+**Ready to proceed:** ✅ Yes — awaiting approval to start order-service
 
-**Recommended next action:**
-- Commit current state to Git with proper milestone structure
-- Start payment-service (similar to auth-service, adds event handling)
-- Then order-service (gRPC client interaction, state machine)
+**Completed services:** auth-service, ticket-service, payment-service (3/5 — 60%)  
+**Remaining:** order-service, expiration-service, client
