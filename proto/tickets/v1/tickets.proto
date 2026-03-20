@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package acme.tickets.v1;
+
+option java_package = "com.ticketing.orders.grpc";
+option java_outer_classname = "TicketsProto";
+option java_multiple_files = true;
+option go_package = "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1";
+
+import "google/protobuf/timestamp.proto";
+
+service TicketService {
+  rpc GetTicket                  (GetTicketRequest)      returns (GetTicketResponse);
+  rpc ValidateTicketAvailability (ValidateTicketRequest) returns (ValidateTicketResponse);
+}
+
+message GetTicketRequest {
+  string ticket_id = 1;
+}
+
+message GetTicketResponse {
+  string                    ticket_id  = 1;
+  string                    title      = 2;
+  double                    price      = 3;
+  string                    user_id    = 4;
+  string                    order_id   = 5;
+  int64                     version    = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message ValidateTicketRequest {
+  string ticket_id = 1;
+}
+
+message ValidateTicketResponse {
+  bool   available = 1;
+  string ticket_id = 2;
+  double price     = 3;
+  string title     = 4;
+}
