@@ -152,6 +152,37 @@ services:
       retries: 5
       start_period: 20s
 
+  # ── Kong API Gateway (DB-less, declarative) ────────────────────────────────
+  # All external HTTP traffic enters through Kong on port 8000.
+  # Config is loaded from infra/kong/kong.yml at startup — no database needed.
+  # Admin API is bound to 127.0.0.1:8001 only (not exposed publicly).
+  kong:
+    image: kong:3.7-ubuntu
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+      KONG_ADMIN_LISTEN: "127.0.0.1:8001"
+      KONG_LOG_LEVEL: info
+      # Structured JSON logs
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+    volumes:
+      - ./infra/kong/kong.yml:/etc/kong/kong.yml:ro
+    ports:
+      - "8000:8000"   # public proxy — client → Kong
+      - "8001:8001"   # admin API (localhost only)
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
 volumes:
   postgres_auth_data:
   postgres_orders_data:

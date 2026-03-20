@@ -1,0 +1,215 @@
+# Kong declarative configuration (DB-less mode)
+# All traffic from external clients enters through Kong on port 8000 (HTTP).
+# Kong validates the JWT from the `token` cookie, injects X-User-Id from the
+# `sub` claim, then routes to the correct upstream service.
+#
+# Route layout (mirrors AGENTS.md §2.1 REST conventions):
+#   /api/users/*     → auth-service:3000
+#   /api/tickets/*   → ticket-service:3001
+#   /api/orders/*    → order-service:8082
+#   /api/payments/*  → payment-service:3002
+#   /.well-known/*   → auth-service:3000  (JWKS — public, no auth)
+#
+# Auth strategy:
+#   - jwt plugin validates the RS256 token read from the `token` cookie.
+#   - Kong adds X-Authenticated-Userid = JWT `sub` (user UUID) to upstream request.
+#   - request-transformer renames X-Authenticated-Userid → X-User-Id so all
+#     downstream services receive the header name they already expect.
+#   - Public routes (signup, signin, GET tickets, JWKS) bypass the jwt plugin.
+#
+# WARNING: The RSA public key embedded here is a DEV-ONLY key pair whose
+# private half lives in services/auth-service/.env (RSA_PRIVATE_KEY).
+# Rotate both when moving to staging/production.
+
+_format_version: "3.0"
+_transform: true
+
+# ── Consumer: maps the JWT issuer claim to a Kong consumer ──────────────────
+# The jwt plugin (OSS) requires a consumer with a jwt_secret entry in DB-less mode.
+# key = JWT `iss` claim value (set in auth-service AuthModule: issuer: 'auth-service')
+consumers:
+  - username: auth-service-issuer
+    jwt_secrets:
+      - key: auth-service
+        algorithm: RS256
+        rsa_public_key: |
+          -----BEGIN PUBLIC KEY-----
+          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkpv6683Fq6GxjGNNOG9N
+          Nb1rGoH2P/UgSkn+suxQrt945aEEx9ZhuztkU6ljOYPI6YgGRfNJEZIsp01XgADK
+          FM+WVrcfUKcW7Js1v4ycJu604NqOnHRhAsB+E07nFk3OrpqvsWoghqAlJ/2//iZe
+          YwYgQ/SsWQOGclYln9Cha/ZGfLB0m/KfA3Q0K6H3PC0lKc024YlZqF1960AdbpOz
+          9dZMpYmoGCug49zMkRzE6llw1VT5cZBp2J8HH8UmEKPj6fVBNVa1nVSVXSLX88Yv
+          sUIQWJYqEs7l5ms4QCMUGHdOqSDrUR5DhVaKGGhlXjn16rSRFKGSAAOO0D0g2mrQ
+          hQIDAQAB
+          -----END PUBLIC KEY-----
+
+# ── Upstream services ────────────────────────────────────────────────────────
+services:
+
+  # ── auth-service ────────────────────────────────────────────────────────────
+  - name: auth-service
+    url: http://auth-service:3000
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
+    routes:
+      # Public: signup / signin / signout — no JWT required
+      - name: auth-public
+        paths:
+          - /api/users/signup
+          - /api/users/signin
+          - /api/users/signout
+        methods: [POST]
+        strip_path: false
+
+      # Protected: currentuser — validates JWT, injects X-User-Id
+      - name: auth-currentuser
+        paths:
+          - /api/users/currentuser
+        methods: [GET]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [token]
+              claims_to_verify: [exp]
+          - name: request-transformer
+            config:
+              rename:
+                headers:
+                  - "X-Authenticated-Userid:X-User-Id"
+
+      # Public: JWKS endpoint consumed by tooling (no auth)
+      - name: auth-jwks
+        paths:
+          - /.well-known/jwks.json
+        methods: [GET]
+        strip_path: false
+
+  # ── ticket-service ──────────────────────────────────────────────────────────
+  - name: ticket-service
+    url: http://ticket-service:3001
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
+    routes:
+      # Public: list all tickets and get one — no JWT required
+      - name: tickets-read
+        paths:
+          - ~/api/tickets$
+          - ~/api/tickets/[^/]+$
+        methods: [GET]
+        strip_path: false
+
+      # Protected: create / update ticket — JWT required
+      - name: tickets-write
+        paths:
+          - ~/api/tickets$
+          - ~/api/tickets/[^/]+$
+        methods: [POST, PUT, PATCH, DELETE]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [token]
+              claims_to_verify: [exp]
+          - name: request-transformer
+            config:
+              rename:
+                headers:
+                  - "X-Authenticated-Userid:X-User-Id"
+
+  # ── order-service ───────────────────────────────────────────────────────────
+  - name: order-service
+    url: http://order-service:8082
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
+    routes:
+      # All order endpoints require auth
+      - name: orders-collection
+        paths:
+          - ~/api/orders$
+        methods: [GET, POST]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [token]
+              claims_to_verify: [exp]
+          - name: request-transformer
+            config:
+              rename:
+                headers:
+                  - "X-Authenticated-Userid:X-User-Id"
+
+      - name: orders-resource
+        paths:
+          - ~/api/orders/[^/]+$
+        methods: [GET, DELETE]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [token]
+              claims_to_verify: [exp]
+          - name: request-transformer
+            config:
+              rename:
+                headers:
+                  - "X-Authenticated-Userid:X-User-Id"
+
+  # ── payment-service ─────────────────────────────────────────────────────────
+  - name: payment-service
+    url: http://payment-service:3002
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
+    routes:
+      # All payment endpoints require auth
+      - name: payments-collection
+        paths:
+          - ~/api/payments$
+        methods: [GET, POST]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [token]
+              claims_to_verify: [exp]
+          - name: request-transformer
+            config:
+              rename:
+                headers:
+                  - "X-Authenticated-Userid:X-User-Id"
+
+      - name: payments-resource
+        paths:
+          - ~/api/payments/[^/]+$
+        methods: [GET]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [token]
+              claims_to_verify: [exp]
+          - name: request-transformer
+            config:
+              rename:
+                headers:
+                  - "X-Authenticated-Userid:X-User-Id"
+
+# ── Global plugins ────────────────────────────────────────────────────────────
+plugins:
+  # Inject a correlation ID on every request for distributed tracing
+  - name: correlation-id
+    config:
+      header_name: X-Request-ID
+      generator: uuid#counter
+      echo_downstream: true
