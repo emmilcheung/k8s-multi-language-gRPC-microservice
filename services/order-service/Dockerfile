@@ -1,15 +1,30 @@
-# ── Stage 1: copy pre-built JAR ──────────────────────────────────────────────────────────
-FROM alpine:latest AS jarcopier
-COPY services/order-service/target/order-service-0.0.1-SNAPSHOT.jar /app.jar
+# ── Stage 1: build ───────────────────────────────────────────────────────────
+FROM eclipse-temurin:21-jdk-alpine AS builder
+
+WORKDIR /build
+
+# Copy the shared proto files needed by the protobuf-maven-plugin
+COPY proto/ /proto/
+
+# Copy Maven wrapper / pom first so dependency layer is cached separately
+COPY services/order-service/pom.xml .
+# Download dependencies offline (layer cache friendly)
+RUN apk add --no-cache maven && \
+    mvn dependency:go-offline -q
+
+# Copy source and build — skip tests (run separately in CI)
+COPY services/order-service/src/ src/
+RUN mvn package -DskipTests -q
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine AS runtime
 
 # Non-root user (AGENTS.md §10.1)
 RUN addgroup -S app && adduser -S app -G app
+
 WORKDIR /app
 
-COPY --from=jarcopier /app.jar app.jar
+COPY --from=builder /build/target/order-service-*.jar app.jar
 
 USER app
 

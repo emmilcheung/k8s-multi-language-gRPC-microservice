@@ -43,6 +43,9 @@ spring:
       retries: 5
       properties:
         enable.idempotence: true
+        # request.timeout.ms must be <= delivery.timeout.ms - linger.ms
+        # Set request timeout to 5 s so delivery.timeout.ms (10 s) satisfies the constraint
+        request.timeout.ms: 5000
         delivery.timeout.ms: 10000
         max.in.flight.requests.per.connection: 1
     listener:
