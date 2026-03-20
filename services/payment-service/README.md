@@ -1,0 +1,194 @@
+# payment-service
+
+Processes payments for confirmed orders using Stripe PaymentIntents. Consumes `orders.order.created` events from Kafka and exposes a REST API for the client to trigger charges.
+
+## Responsibilities
+
+- Charge a payment method via Stripe (idempotent — one payment per order)
+- Listen to `orders.order.created` Kafka events and pre-create payment records
+- Publish `payments.payment.captured` or `payments.payment.failed` events (future)
+- Own the `payments` PostgreSQL database — no other service accesses it
+
+## Tech Stack
+
+| Concern | Choice |
+|---|---|
+| Runtime | Node.js 24 LTS |
+| Framework | NestJS 11 |
+| Language | TypeScript |
+| Database | PostgreSQL (Drizzle ORM) |
+| Messaging | Kafka (KafkaJS) |
+| Payment processor | Stripe |
+| Package manager | pnpm |
+| Test runner | Vitest |
+
+## Port
+
+`3001`
+
+## API Endpoints
+
+All external endpoints are exposed through the Kong API Gateway.
+
+### `POST /api/payments`
+
+Charge a payment method for an order.
+
+**Headers**
+
+| Header | Description |
+|---|---|
+| `x-user-id` | UUID of the authenticated user (injected by Kong) |
+
+**Request body**
+
+```json
+{
+  "orderId": "uuid",
+  "amount": 1000,
+  "currency": "usd",
+  "token": "pm_card_visa"
+}
+```
+
+- `orderId` — UUID of the order being paid (must not already have a completed payment)
+- `amount` — amount in smallest currency unit (e.g. cents for USD), minimum 1
+- `currency` — ISO 4217 currency code (default: `usd`)
+- `token` — Stripe PaymentMethod ID from client-side Stripe.js
+
+**Responses**
+
+| Status | Description |
+|---|---|
+| `201 Created` | Payment created and charge initiated |
+| `400 Bad Request` | Validation failure |
+| `409 Conflict` | A completed payment already exists for this order |
+| `422 Unprocessable Entity` | Stripe charge failed |
+| `500 Internal Server Error` | Unexpected error |
+
+**Success response body**
+
+```json
+{
+  "id": "uuid",
+  "orderId": "uuid",
+  "userId": "user-id",
+  "amount": 1000,
+  "currency": "usd",
+  "status": "completed",
+  "stripePaymentIntentId": "pi_...",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}
+```
+
+---
+
+### `GET /api/payments/:id`
+
+Retrieve a payment by its ID.
+
+**Responses**
+
+| Status | Description |
+|---|---|
+| `200 OK` | Payment record returned |
+| `404 Not Found` | No payment with that ID |
+
+---
+
+### `GET /healthz/live`
+
+Liveness probe — returns `200` if the process is running.
+
+### `GET /healthz/ready`
+
+Readiness probe — returns `200` when PostgreSQL and Kafka are reachable, `503` otherwise.
+
+### `GET /metrics`
+
+Prometheus metrics endpoint (RED method: request rate, error rate, duration).
+
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `NODE_ENV` | No | `development` \| `production` (default: `development`) |
+| `PORT` | No | HTTP port (default: `3001`) |
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `STRIPE_SECRET_KEY` | Yes | Stripe secret key. Set to `test_mock` to skip real Stripe calls in tests. |
+| `KAFKA_BROKERS` | Yes | Comma-separated Kafka broker addresses (e.g. `localhost:9092`) |
+
+Copy `.env.example` to `.env` and fill in values. Never commit `.env`.
+
+## Database Schema
+
+Single table: `payments`
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `uuid` (PK) | Auto-generated UUID v4 |
+| `order_id` | `uuid` (unique) | The order being paid — enforces one payment per order |
+| `user_id` | `text` | User who owns the order |
+| `amount` | `integer` | Amount in smallest currency unit |
+| `currency` | `text` | ISO 4217 currency code |
+| `status` | `text` | `pending` \| `completed` \| `failed` |
+| `stripe_payment_intent_id` | `text` (nullable) | Set once the Stripe charge is created |
+| `created_at` | `timestamptz` | Auto-set on insert |
+| `updated_at` | `timestamptz` | Auto-set on insert (update via application) |
+
+Migrations live in `migrations/` and are applied via an init container or CI step before the service starts.
+
+## Kafka
+
+### Consumed topics
+
+| Topic | Action |
+|---|---|
+| `orders.order.created` | Pre-create a `pending` payment record for the order |
+
+Consumer group: `payment-service`
+
+Failed messages (after 3 exponential-back-off retries) are routed to `orders.order.created.dlq`.
+
+### Produced topics (planned)
+
+| Topic | Trigger |
+|---|---|
+| `payments.payment.captured` | Successful charge |
+| `payments.payment.failed` | Stripe charge failure |
+
+## Running Locally
+
+```bash
+# 1. Start dependencies (Postgres, Kafka)
+docker compose up -d postgres-payments kafka
+
+# 2. Install dependencies
+pnpm install
+
+# 3. Copy env file and fill in values
+cp .env.example .env
+
+# 4. Apply migrations
+psql "$DATABASE_URL" -f migrations/001_init_payments.sql
+
+# 5. Start in watch mode
+pnpm start:dev
+```
+
+## Testing
+
+```bash
+# Unit tests
+pnpm test
+
+# Unit tests with coverage
+pnpm test:cov
+
+# Integration tests (requires Docker — spins up real PostgreSQL)
+pnpm test:integration
+```
+
+Unit tests: 14 passing  
+Integration tests: 11 passing

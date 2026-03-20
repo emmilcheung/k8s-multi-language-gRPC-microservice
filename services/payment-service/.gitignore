@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+*.log
+coverage/
+# Incremental tsc artifacts
+*.tsbuildinfo
+# Compiled JS co-located with TS source (should never happen, belt-and-suspenders)
+src/**/*.js
+test/**/*.js
+*.js
+!jest.config.js
+!eslint.config.mjs
