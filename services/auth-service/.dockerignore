@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+test/
+.env
+*.log
+.git
+.github
+*.md
+.eslintrc*
+eslint.config*
+prettier.config*
+vitest*.config.ts
+database.json

@@ -1,0 +1,18 @@
+# Environment — never commit real secrets
+.env
+
+# Build output
+dist/
+build/
+
+# Dependencies
+node_modules/
+
+# Coverage
+coverage/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
