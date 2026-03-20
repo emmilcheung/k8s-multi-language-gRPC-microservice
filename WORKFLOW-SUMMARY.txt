@@ -1,0 +1,229 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                     WORKFLOW STATUS & DECISION SYSTEM                        ║
+║                                                                              ║
+║  The platform now has a formal logging and pause/resume system for tracking ║
+║  progress, making decisions, and pausing between work sessions.             ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+QUICK START
+
+  Check Status:
+    ./workflow.sh status
+
+  See Decision Tree:
+    ./workflow.sh decision
+
+  Pause Work:
+    ./workflow.sh pause "description of checkpoint"
+
+  Resume Work:
+    ./workflow.sh resume
+
+  Check Docker:
+    ./workflow.sh docker
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NEW FILES
+
+  1. STATUS.md
+     → Comprehensive project status document
+     → 5 sections: executive summary, services, infrastructure, checkpoints, metrics
+     → Updated after each service completion
+     → Contains 10 predefined pause checkpoints
+
+  2. workflow.sh
+     → CLI tool for status, pause, resume, decision
+     → 5 commands: status, docker, pause, resume, decision
+     → Reads/writes STATUS.md and pause checkpoint file
+     → Color-coded output
+
+  3. WORKFLOW.md
+     → Guide to using the workflow system
+     → Examples, troubleshooting, integration notes
+     → Decision tree explanation
+     → Pause checkpoint reference
+
+  4. WORKFLOW-SUMMARY.txt
+     → This file
+     → Quick reference for all workflow features
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CURRENT STATE
+
+  ✅ Services Implemented:      1 / 5 (auth-service)
+  ✅ Test Coverage:             28 / 28 passing (100%)
+  ✅ Docker Infrastructure:     7 / 7 containers running (healthy)
+  ✅ Build Status:              Clean (no errors or warnings)
+  
+  ⏳ Kubernetes Local:          Not started (deferred until all services done)
+  ⏳ AWS EKS Infrastructure:    Not started (deferred until K8s working)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WORKFLOW SYSTEM FEATURES
+
+  ✅ Status Logging
+     → ./workflow.sh status shows complete snapshot
+     → Includes service progress, docker state, pause point
+     → Read from STATUS.md (single source of truth)
+
+  ✅ Pause/Resume
+     → ./workflow.sh pause "message" saves checkpoint
+     → ./workflow.sh resume clears checkpoint
+     → Checkpoint saved to .workflow-pause file
+     → Used to end work sessions and resume later
+
+  ✅ Decision Making
+     → ./workflow.sh decision shows 5 service options + recommendation
+     → Explains estimated duration and readiness for each
+     → Links to detailed descriptions in STATUS.md
+
+  ✅ Docker Monitoring
+     → ./workflow.sh docker lists containers and ports
+     → Shows connectivity status
+     → Can be called anytime to verify infrastructure
+
+  ✅ Checkpoint System
+     → 10 predefined checkpoints in STATUS.md
+     → From "auth-service complete" to "EKS deployment"
+     → Allows pausing at major milestones
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NEXT DECISION
+
+  Currently paused at: auth-service complete
+
+  Available services:
+    A) ticket-service    (Go / Echo + MongoDB + Kafka + gRPC)      2–3h
+    B) order-service     (Java / Spring Boot + JPA + gRPC client) 3–4h
+    C) payment-service   (TypeScript / NestJS + Drizzle + Kafka)  2–3h
+    D) expiration-service (Go + asynq + Redis + Kafka)            2–3h
+    E) client            (Next.js 15 App Router)                  3–4h
+    F) Pause for review  (Reflect on current progress)
+
+  Recommended dependency order: A → B → C → D → E → F (k8s)
+
+  Run: ./workflow.sh decision
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KEY IMPROVEMENTS OVER PREVIOUS APPROACH
+
+  Before:
+    ❌ Status scattered across console output
+    ❌ Hard to know where work ended/should resume
+    ❌ No formal checkpoint system
+    ❌ Difficult to switch between services mid-task
+
+  After:
+    ✅ Centralized STATUS.md document
+    ✅ ./workflow.sh command automates status queries
+    ✅ Explicit pause/resume with checkpoint file
+    ✅ Decision tree for choosing next work
+    ✅ Clear metrics and progress tracking
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WORKFLOW EXAMPLES
+
+  Example 1: Check status and resume
+  ──────────────────────────────────
+  $ ./workflow.sh resume
+  $ ./workflow.sh status
+  $ ./workflow.sh decision
+
+  Example 2: Pause after completing a service
+  ────────────────────────────────────────────
+  $ npm run build
+  $ npm test
+  $ npm run test:integration
+  $ ./workflow.sh pause "ticket-service complete: 24 tests pass, gRPC verified"
+
+  Example 3: Long work session with intermediate pause
+  ──────────────────────────────────────────────────────
+  $ ./workflow.sh status                    # Check where we are
+  $ # Work on order-service for 2 hours
+  $ ./workflow.sh pause "order-service 80% complete, transactional outbox done"
+  $ # Later...
+  $ ./workflow.sh resume
+  $ ./workflow.sh status                    # See where we left off
+  $ # Resume work on order-service
+
+  Example 4: Switch services due to blocker
+  ──────────────────────────────────────────
+  $ ./workflow.sh pause "ticket-service: gRPC proto import failed, blocked on buf"
+  $ ./workflow.sh decision
+  $ # Choose payment-service instead (simpler, no gRPC)
+  $ # Work on payment-service
+  $ ./workflow.sh pause "payment-service complete, can return to ticket-service gRPC fix"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+INTEGRATION WITH LLM SESSION MANAGEMENT
+
+  The workflow system allows:
+
+  1. Pause mid-session
+     → ./workflow.sh pause "session checkpoint"
+     → Checkpoint stored in .workflow-pause
+     → User can exit OpenCode and return later
+
+  2. Resume in new session
+     → ./workflow.sh resume
+     → Load checkpoint from .workflow-pause
+     → Agent can re-read STATUS.md and continue
+
+  3. Full state preservation
+     → Docker containers stay running (unless stopped manually)
+     → Git commits track code changes
+     → STATUS.md documents progress
+     → .workflow-pause file holds session context
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+REFERENCES
+
+  Main documents:
+    - STATUS.md           (Source of truth for project state)
+    - WORKFLOW.md         (Guide to using the workflow system)
+    - PLAN.md             (Architecture and tech decisions)
+    - AGENTS.md           (Engineering standards)
+
+  Tools:
+    - ./workflow.sh       (CLI for status/pause/resume/decision)
+    - docker-compose.yml  (Local dev infrastructure)
+
+  Code:
+    - services/auth-service/  (Complete reference implementation)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+GETTING STARTED NOW
+
+  1. Check current state:
+     $ ./workflow.sh status
+
+  2. Read the detailed guide:
+     $ cat WORKFLOW.md
+
+  3. Review project status:
+     $ cat STATUS.md
+
+  4. Decide next service:
+     $ ./workflow.sh decision
+
+  5. When ready to work on next service:
+     $ # Choose from A–F above
+     $ # Start implementation
+     $ # When done: ./workflow.sh pause "service complete"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Created: 2026-03-20 17:15 UTC
+Workflow system version: 1.0
+Status checkpoint: auth-service complete, docker running, ready for ticket-service

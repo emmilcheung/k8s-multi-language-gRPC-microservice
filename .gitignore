@@ -1,0 +1,48 @@
+# Git repository root-level .gitignore
+
+# Legacy reference (do not version control)
+/legacy
+
+# Environment files (local secrets)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build artifacts
+dist/
+build/
+target/
+*.o
+*.a
+*.so
+
+# Dependencies
+node_modules/
+vendor/
+go.sum.local
+
+# Test artifacts
+*.test
+coverage.out
+*.cover
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraformrc
+
+# Docker
+docker-compose.override.yml.local
+
+# OS
+.DS_Store
+Thumbs.db
