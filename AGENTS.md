@@ -587,3 +587,14 @@ The agent must **not** perform the following without explicit user confirmation 
 - All env vars: `SCREAMING_SNAKE_CASE`
 - Each service has a `.env.example` file — committed; `.env` — gitignored
 - Sensitive vars (passwords, keys) always have placeholder values in `.env.example`, never real values
+
+### 16.10 Merge Workflow (confirmed 2026-03-20)
+
+- **Never auto-merge a feature branch into `main`** during or after a development loop.
+- The correct sequence is:
+  1. Create `feat/<service>` branch from `main`.
+  2. Implement, commit on the feature branch.
+  3. Run all tests; ensure build is clean.
+  4. **Stop and explicitly request the owner's approval** before touching `main`.
+  5. Only after the owner reviews the branch content and gives the go-ahead does the merge happen.
+- This rule overrides any prior behaviour of automatically squash-merging after a service is complete.

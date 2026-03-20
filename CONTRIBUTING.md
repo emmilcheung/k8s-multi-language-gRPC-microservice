@@ -220,14 +220,23 @@ Closes #99
 
 ### Merging
 
-1. **Squash merge to main** (keeps history clean):
+> **Agent workflow rule (confirmed 2026-03-20):**  
+> The agent must **never** auto-merge a feature branch into `main`.  
+> After all work on a feature branch is committed and tests pass, the agent stops and requests explicit approval from the repository owner before any merge takes place.  
+> Only merge after the owner has reviewed the branch content and given the go-ahead.
+
+1. **Owner reviews the feature branch** — inspect commits, diffs, and test results.
+
+2. **Owner approves** — give explicit confirmation in the session.
+
+3. **Squash merge to main** (keeps history clean):
    ```bash
    git checkout main
    git pull origin main
    git merge --squash feat/your-feature-name
    ```
 
-2. **Create a single squash commit** with comprehensive message:
+4. **Create a single squash commit** with comprehensive message:
    ```bash
    git commit -m "feat(service-name): description
 
@@ -237,12 +246,12 @@ Closes #99
    Closes #123"
    ```
 
-3. **Push to main**:
+5. **Push to main**:
    ```bash
    git push origin main
    ```
 
-4. **Delete the feature branch**:
+6. **Delete the feature branch**:
    ```bash
    git branch -d feat/your-feature-name
    git push origin --delete feat/your-feature-name
