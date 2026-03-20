@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { cookies } from "next/headers";
 import { NavBar } from "@/components/nav-bar";
 
 const geistSans = Geist({
@@ -20,11 +21,13 @@ export const metadata: Metadata = {
   description: "The marketplace for live event tickets.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const cookieStore = await cookies();
+  const isLoggedIn = Boolean(cookieStore.get("token")?.value);
   return (
     <html
       lang="en"
@@ -41,7 +44,7 @@ export default function RootLayout({
           <div className="absolute bottom-0 right-1/4 h-[400px] w-[400px] rounded-full bg-indigo-900/15 blur-[100px]" />
         </div>
 
-        <NavBar />
+        <NavBar isLoggedIn={isLoggedIn} />
         <main className="flex-1 container mx-auto px-4 py-10 max-w-6xl">
           {children}
         </main>

@@ -47,7 +47,25 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
   async onModuleInit() {
     await this.producer.connect();
     await this.consumer.connect();
-    await this.consumer.subscribe({ topic: TOPIC, fromBeginning: false });
+
+    // On a cold-start Kafka the topic may not yet exist. Retry subscription with
+    // exponential back-off (max 10 attempts, ~30 s total) rather than crashing.
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      try {
+        await this.consumer.subscribe({ topic: TOPIC, fromBeginning: false });
+        break;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (attempt === 10) {
+          this.logger.error({ err: msg, topic: TOPIC }, 'Kafka subscribe failed after 10 attempts — giving up');
+          throw err;
+        }
+        const delay = Math.min(1000 * 2 ** (attempt - 1), 8000);
+        this.logger.warn({ attempt, topic: TOPIC, err: msg }, `Kafka subscribe failed — retrying in ${delay}ms`);
+        await sleep(delay);
+      }
+    }
+
     await this.consumer.run({ eachMessage: (payload) => this.handleMessage(payload) });
     this.logger.info({ topic: TOPIC }, 'Kafka consumer started');
   }

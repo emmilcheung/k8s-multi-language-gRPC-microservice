@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -43,6 +44,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<Map<String, Object>> handleConstraint(ConstraintViolationException ex) {
         return error(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", ex.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<Map<String, Object>> handleMissingHeader(MissingRequestHeaderException ex) {
+        // X-User-Id is injected by Kong after JWT validation. Its absence means the
+        // request bypassed the gateway or the token was not provided — treat as 401.
+        if ("X-User-Id".equalsIgnoreCase(ex.getHeaderName())) {
+            return error(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "Authentication required", List.of());
+        }
+        return error(HttpStatus.BAD_REQUEST, "BAD_REQUEST", ex.getMessage(), List.of());
     }
 
     @ExceptionHandler(Exception.class)

@@ -1,6 +1,6 @@
 module github.com/acme/ticket-service
 
-go 1.25.0
+go 1.25
 
 require (
 	github.com/confluentinc/confluent-kafka-go/v2 v2.13.3
@@ -10,6 +10,8 @@ require (
 	github.com/stretchr/testify v1.11.1
 	go.mongodb.org/mongo-driver/v2 v2.5.0
 	go.uber.org/zap v1.27.1
+	google.golang.org/grpc v1.78.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (

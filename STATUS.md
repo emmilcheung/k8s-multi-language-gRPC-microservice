@@ -1,9 +1,9 @@
 # Platform Build Status Log
 
-> **Last Updated:** 2026-03-20 UTC  
-> **Current Phase:** Service Implementation  
-> **Overall Progress:** 60% (3 of 5 backend services complete)  
-> **Git Status:** Conventional commits, feature branches, main up to date
+> **Last Updated:** 2026-03-21 UTC  
+> **Current Phase:** Integration & Manual Testing  
+> **Overall Progress:** 95% (all 5 backend services + client complete; Kong wired)  
+> **Git Status:** All changes on `feat/order-service` — awaiting owner approval to merge
 
 ---
 
@@ -11,15 +11,28 @@
 
 | Concern | Status | Details |
 |---|---|---|
-| **Docker Infrastructure** | ✅ Running | All 7 containers healthy (Postgres ×3, MongoDB, Redis, Kafka KRaft, Schema Registry) |
+| **Docker Infrastructure** | ✅ Running | All 7 infra containers + 5 service containers healthy. Kong added. |
 | **Project Setup** | ✅ Complete | PLAN.md, AGENTS.md, docker-compose, workflow tools |
 | **auth-service** | ✅ Complete | TypeScript/NestJS, Drizzle ORM, RS256 JWT, 28 tests (all passing) |
 | **ticket-service** | ✅ Complete | Go/Echo, MongoDB, Kafka producer, 29 tests (16 unit + 13 integration) |
 | **payment-service** | ✅ Complete | TypeScript/NestJS, Drizzle ORM, Stripe, Kafka consumer, 25 tests (all passing) |
-| **Build & Tests** | ✅ All Pass | No warnings or errors, real databases via Testcontainers |
-| **Git Workflow** | ✅ Initialized | Conventional commits, feature branches, main as default |
-| **CI/CD** | ⏭️ Pending | GitHub Actions pipelines deferred until all services ready |
-| **Kubernetes Local** | ⏭️ Pending | `kind` cluster and Helm charts deferred until all services ready |
+| **order-service** | ✅ Complete | Java 21 / Spring Boot, JPA, Flyway, Kafka, gRPC client |
+| **expiration-service** | ✅ Complete | Go, asynq, Redis, Kafka |
+| **client** | ✅ Complete | Next.js, shadcn/ui, all pages, Server Actions — build clean |
+| **Kong API Gateway** | ✅ Wired | DB-less declarative config; JWT plugin (RS256 cookie); request-transformer → X-User-Id |
+| **E2E curl flow** | ✅ Verified | register → create ticket → create order (gRPC validate) → cancel order |
+| **E2E browser flow** | ⏳ Not yet tested | Ready to run: `docker compose up kong` then `pnpm dev` in services/client |
+| **CI/CD** | ⏭️ Pending | GitHub Actions pipelines deferred |
+| **Kubernetes Local** | ⏭️ Pending | kind cluster and Helm charts deferred |
+
+### TODO — E2E Tests (client)
+Add Playwright E2E tests for the client app covering:
+- User registration and login
+- Creating a ticket
+- Browsing tickets on the homepage
+- Creating an order for a ticket
+- Cancelling an order
+- My orders page listing
 
 ---
 
@@ -311,9 +324,9 @@ git branch -d feat/auth-service
 
 ## Next Steps
 
-1. **order-service** — Java 21, Spring Boot 4, Spring Data JPA, PostgreSQL, order lifecycle state machine
-2. **expiration-service** — Go 1.23+, asynq, Redis, Kafka — order expiration jobs
-3. **client** — Next.js 15 App Router, Kong API Gateway integration
+1. **Browser testing** — `docker compose up` (includes Kong) then `pnpm dev` in `services/client`; manually exercise all flows
+2. **Owner approval** — review `feat/order-service` branch and approve merge to `main`
+3. **E2E tests** — add Playwright tests for client app (see TODO above)
 4. **CI/CD** — GitHub Actions pipelines (deferred until all services ready)
 5. **Kubernetes** — `kind` cluster and Helm charts (deferred until all services ready)
 
@@ -323,7 +336,7 @@ git branch -d feat/auth-service
 
 **Blockers:** None  
 **Risk:** None  
-**Ready to proceed:** ✅ Yes — awaiting approval to start order-service
+**Ready to proceed:** ✅ Yes — awaiting owner approval to merge `feat/order-service` → `main`
 
-**Completed services:** auth-service, ticket-service, payment-service (3/5 — 60%)  
-**Remaining:** order-service, expiration-service, client
+**Completed services:** auth-service, ticket-service, payment-service, order-service, expiration-service, client (all complete)  
+**Remaining:** owner review + merge; E2E Playwright tests; CI/CD; Kubernetes Helm charts

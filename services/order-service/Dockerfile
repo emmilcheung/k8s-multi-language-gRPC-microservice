@@ -1,15 +1,33 @@
-# ── Stage 1: copy pre-built JAR ──────────────────────────────────────────────────────────
-FROM alpine:latest AS jarcopier
-COPY services/order-service/target/order-service-0.0.1-SNAPSHOT.jar /app.jar
+# ── Stage 1: build ───────────────────────────────────────────────────────────
+# Use a Debian/Ubuntu-based Maven+Temurin image. Two reasons:
+#   1. Maven is pre-installed — no apk-triggered java-common conflict that hangs builds.
+#   2. glibc is present — protobuf-maven-plugin downloads glibc-linked protoc binaries
+#      that cannot execute on Alpine's musl libc, causing MojoFailureException.
+FROM maven:3.9.9-eclipse-temurin-21 AS builder
+
+WORKDIR /build
+
+# Copy the shared proto files needed by the protobuf-maven-plugin
+COPY proto/ /proto/
+
+# Copy pom first so dependency layer is cached separately
+COPY services/order-service/pom.xml .
+# Download dependencies offline (layer cache friendly)
+RUN mvn dependency:go-offline -q
+
+# Copy source and build — skip tests (run separately in CI)
+COPY services/order-service/src/ src/
+RUN mvn package -DskipTests -q
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine AS runtime
 
 # Non-root user (AGENTS.md §10.1)
 RUN addgroup -S app && adduser -S app -G app
+
 WORKDIR /app
 
-COPY --from=jarcopier /app.jar app.jar
+COPY --from=builder /build/target/order-service-*.jar app.jar
 
 USER app
 

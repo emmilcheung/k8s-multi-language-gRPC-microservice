@@ -10,3 +10,8 @@ target/
 .idea/
 *.iml
 .DS_Store
+
+# Eclipse IDE
+.settings/
+.classpath
+.project

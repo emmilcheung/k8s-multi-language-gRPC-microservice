@@ -13,6 +13,7 @@ import (
 type Config struct {
 	Env          string
 	Port         int
+	GrpcPort     int
 	LogLevel     string
 	MongoURI     string
 	MongoDB      string
@@ -31,6 +32,12 @@ func Load() (*Config, error) {
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port < 1 || port > 65535 {
 		errs = append(errs, fmt.Sprintf("PORT must be a valid port number, got %q", portStr))
+	}
+
+	grpcPortStr := getEnv("GRPC_PORT", "9090")
+	grpcPort, err := strconv.Atoi(grpcPortStr)
+	if err != nil || grpcPort < 1 || grpcPort > 65535 {
+		errs = append(errs, fmt.Sprintf("GRPC_PORT must be a valid port number, got %q", grpcPortStr))
 	}
 
 	mongoURI := os.Getenv("MONGO_URI")
@@ -53,6 +60,7 @@ func Load() (*Config, error) {
 	return &Config{
 		Env:          env,
 		Port:         port,
+		GrpcPort:     grpcPort,
 		LogLevel:     logLevel,
 		MongoURI:     mongoURI,
 		MongoDB:      mongoDB,

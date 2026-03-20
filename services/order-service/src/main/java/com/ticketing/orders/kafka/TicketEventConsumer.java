@@ -50,7 +50,7 @@ public class TicketEventConsumer {
             JsonNode root = objectMapper.readTree(message);
             JsonNode data = root.path("data");
 
-            UUID ticketId = UUID.fromString(data.path("ticketId").asText());
+            UUID ticketId = UUID.fromString(data.path("id").asText());
             String title = data.path("title").asText();
             BigDecimal price = new BigDecimal(data.path("price").asText());
 
