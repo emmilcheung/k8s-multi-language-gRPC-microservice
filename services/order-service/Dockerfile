@@ -1,22 +1,6 @@
-# ── Stage 1: build ────────────────────────────────────────────────────────────
-FROM eclipse-temurin:21-jdk-alpine AS builder
-WORKDIR /app
-
-# Copy Maven wrapper and POM first — allows Docker to cache the dependency layer
-COPY .mvn/ .mvn/
-COPY mvnw pom.xml ./
-
-# Download dependencies (offline-friendly layer cache)
-RUN ./mvnw dependency:go-offline -q
-
-# Copy proto sources (relative path from build context = services/order-service)
-COPY ../../proto /proto
-
-# Copy application sources
-COPY src ./src
-
-# Build — skip tests (tests run in CI, not during image build)
-RUN ./mvnw package -DskipTests -q
+# ── Stage 1: copy pre-built JAR ──────────────────────────────────────────────────────────
+FROM alpine:latest AS jarcopier
+COPY services/order-service/target/order-service-0.0.1-SNAPSHOT.jar /app.jar
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine AS runtime
@@ -25,7 +9,7 @@ FROM eclipse-temurin:21-jre-alpine AS runtime
 RUN addgroup -S app && adduser -S app -G app
 WORKDIR /app
 
-COPY --from=builder /app/target/order-service-*.jar app.jar
+COPY --from=jarcopier /app.jar app.jar
 
 USER app
 
