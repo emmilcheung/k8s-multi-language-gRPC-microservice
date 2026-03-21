@@ -17,7 +17,7 @@ interface OrderPaymentFormProps {
 const initialState: OrderState = {};
 
 export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFormProps) {
-  const boundPay = submitPayment.bind(null, orderId);
+  const boundPay = submitPayment.bind(null, orderId, amount);
   const boundCancel = cancelOrder.bind(null, orderId);
 
   const [payState, payAction, payPending] = useActionState(boundPay, initialState);

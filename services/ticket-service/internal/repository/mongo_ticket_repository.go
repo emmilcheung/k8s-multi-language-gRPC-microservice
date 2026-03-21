@@ -36,6 +36,10 @@ type TicketRepository interface {
 	FindByID(ctx context.Context, id string) (*Ticket, error)
 	FindAll(ctx context.Context) ([]*Ticket, error)
 	Update(ctx context.Context, t *Ticket) error
+	// ReserveTicket sets the orderId on a ticket (idempotent).
+	ReserveTicket(ctx context.Context, ticketID, orderID string) error
+	// ReleaseTicket clears the orderId on a ticket (idempotent).
+	ReleaseTicket(ctx context.Context, ticketID string) error
 	Ping(ctx context.Context) error
 	Close(ctx context.Context) error
 }
@@ -221,4 +225,52 @@ func (r *MongoTicketRepository) Ping(ctx context.Context) error {
 // Close disconnects the MongoDB client gracefully.
 func (r *MongoTicketRepository) Close(ctx context.Context) error {
 	return r.client.Disconnect(ctx)
+}
+
+// ReserveTicket atomically sets orderId on a ticket.
+// It is idempotent: if the ticket already has the same orderId the update is a no-op.
+func (r *MongoTicketRepository) ReserveTicket(ctx context.Context, ticketID, orderID string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	filter := bson.M{"_id": ticketID}
+	update := bson.M{
+		"$set": bson.M{
+			"orderId":   orderID,
+			"updatedAt": time.Now().UTC(),
+		},
+		"$inc": bson.M{"version": 1},
+	}
+
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("reserve ticket %s: %w", ticketID, err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrTicketNotFound
+	}
+	return nil
+}
+
+// ReleaseTicket atomically clears the orderId on a ticket.
+// It is idempotent: if orderId is already empty the update is a no-op.
+func (r *MongoTicketRepository) ReleaseTicket(ctx context.Context, ticketID string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	filter := bson.M{"_id": ticketID}
+	update := bson.M{
+		"$unset": bson.M{"orderId": ""},
+		"$set":   bson.M{"updatedAt": time.Now().UTC()},
+		"$inc":   bson.M{"version": 1},
+	}
+
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("release ticket %s: %w", ticketID, err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrTicketNotFound
+	}
+	return nil
 }

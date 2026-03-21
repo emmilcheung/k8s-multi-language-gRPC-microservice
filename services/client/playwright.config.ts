@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:4000";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -11,7 +11,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "pnpm dev",
+    command: "pnpm dev --port 4000",
     url: baseURL,
     reuseExistingServer: true,
     timeout: 120000,

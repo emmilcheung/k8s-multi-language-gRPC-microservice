@@ -69,6 +69,30 @@ func (m *mockRepo) Update(ctx context.Context, t *repository.Ticket) error {
 func (m *mockRepo) Ping(ctx context.Context) error  { return m.err }
 func (m *mockRepo) Close(ctx context.Context) error { return nil }
 
+func (m *mockRepo) ReserveTicket(ctx context.Context, ticketID, orderID string) error {
+	if m.err != nil {
+		return m.err
+	}
+	t, ok := m.tickets[ticketID]
+	if !ok {
+		return repository.ErrTicketNotFound
+	}
+	t.OrderID = orderID
+	return nil
+}
+
+func (m *mockRepo) ReleaseTicket(ctx context.Context, ticketID string) error {
+	if m.err != nil {
+		return m.err
+	}
+	t, ok := m.tickets[ticketID]
+	if !ok {
+		return repository.ErrTicketNotFound
+	}
+	t.OrderID = ""
+	return nil
+}
+
 // --- Mock event publisher ---
 
 type mockPublisher struct {

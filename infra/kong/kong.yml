@@ -12,9 +12,10 @@
 #
 # Auth strategy:
 #   - jwt plugin validates the RS256 token read from the `token` cookie.
-#   - Kong adds X-Authenticated-Userid = JWT `sub` (user UUID) to upstream request.
-#   - request-transformer renames X-Authenticated-Userid → X-User-Id so all
-#     downstream services receive the header name they already expect.
+#   - pre-function plugin reads `kong.ctx.shared.authenticated_jwt_token.claims.sub`
+#     (set by the jwt plugin handler) and writes it as X-User-Id on the upstream
+#     request. This is the only reliable way to forward the sub claim in Kong OSS;
+#     request-transformer cannot reference JWT claim values.
 #   - Public routes (signup, signin, GET tickets, JWKS) bypass the jwt plugin.
 #
 # WARNING: The RSA public key embedded here is a DEV-ONLY key pair whose
@@ -34,13 +35,13 @@ consumers:
         algorithm: RS256
         rsa_public_key: |
           -----BEGIN PUBLIC KEY-----
-          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkpv6683Fq6GxjGNNOG9N
-          Nb1rGoH2P/UgSkn+suxQrt945aEEx9ZhuztkU6ljOYPI6YgGRfNJEZIsp01XgADK
-          FM+WVrcfUKcW7Js1v4ycJu604NqOnHRhAsB+E07nFk3OrpqvsWoghqAlJ/2//iZe
-          YwYgQ/SsWQOGclYln9Cha/ZGfLB0m/KfA3Q0K6H3PC0lKc024YlZqF1960AdbpOz
-          9dZMpYmoGCug49zMkRzE6llw1VT5cZBp2J8HH8UmEKPj6fVBNVa1nVSVXSLX88Yv
-          sUIQWJYqEs7l5ms4QCMUGHdOqSDrUR5DhVaKGGhlXjn16rSRFKGSAAOO0D0g2mrQ
-          hQIDAQAB
+          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt8uMfbACvz5PukgGGvE4
+          CpU20xzm0+ZAmE0SIwjbVl3WKpg9R90b5jjuA9hNOXXjmeWk7oJ6CebASuSoGodq
+          B79RYtAf+gk/yU9Glv+CtaCPER2cr6uQhKL23zeF0AbuaS8sjjfOThEcPy4QBtXw
+          9V8p6uE+5XAU/wXO33veChvLNuAo20L+FDNJXTR6fXHS3pJiaM7NzgFAnCIuYQsM
+          DlBKo8UaqzxXig1yFCp924rPApZ4r/NnGNBiU5xHD3Cz+RpCaX5YffKMJN31P4rd
+          cMIZSduteWxEhWXbD/9ilRZKbdVugV0MUcPNG705hn/nZxy2PDcg4L5BOKplYdli
+          hwIDAQAB
           -----END PUBLIC KEY-----
 
 # ── Upstream services ────────────────────────────────────────────────────────
@@ -62,7 +63,7 @@ services:
         methods: [POST]
         strip_path: false
 
-      # Protected: currentuser — validates JWT, injects X-User-Id
+      # Protected: currentuser — validates JWT, injects X-User-Id from sub claim
       - name: auth-currentuser
         paths:
           - /api/users/currentuser
@@ -74,11 +75,25 @@ services:
               key_claim_name: iss
               cookie_names: [token]
               claims_to_verify: [exp]
-          - name: request-transformer
+          - name: post-function
             config:
-              rename:
-                headers:
-                  - "X-Authenticated-Userid:X-User-Id"
+              access:
+                - |
+                  local token_str = kong.ctx.shared.authenticated_jwt_token
+                  if type(token_str) == "string" then
+                    local b64_payload = token_str:match("^[^.]+%.([^.]+)%.")
+                    if b64_payload then
+                      local pad = (4 - #b64_payload % 4) % 4
+                      b64_payload = b64_payload .. string.rep("=", pad)
+                      local payload_json = ngx.decode_base64(b64_payload)
+                      if payload_json then
+                        local sub = payload_json:match('"sub"%s*:%s*"([^"]+)"')
+                        if sub then
+                          kong.service.request.set_header("X-User-Id", sub)
+                        end
+                      end
+                    end
+                  end
 
       # Public: JWKS endpoint consumed by tooling (no auth)
       - name: auth-jwks
@@ -102,7 +117,7 @@ services:
         methods: [GET]
         strip_path: false
 
-      # Protected: create / update ticket — JWT required
+      # Protected: create / update ticket — JWT required, sub → X-User-Id
       - name: tickets-write
         paths:
           - ~/api/tickets$
@@ -115,11 +130,25 @@ services:
               key_claim_name: iss
               cookie_names: [token]
               claims_to_verify: [exp]
-          - name: request-transformer
+          - name: post-function
             config:
-              rename:
-                headers:
-                  - "X-Authenticated-Userid:X-User-Id"
+              access:
+                - |
+                  local token_str = kong.ctx.shared.authenticated_jwt_token
+                  if type(token_str) == "string" then
+                    local b64_payload = token_str:match("^[^.]+%.([^.]+)%.")
+                    if b64_payload then
+                      local pad = (4 - #b64_payload % 4) % 4
+                      b64_payload = b64_payload .. string.rep("=", pad)
+                      local payload_json = ngx.decode_base64(b64_payload)
+                      if payload_json then
+                        local sub = payload_json:match('"sub"%s*:%s*"([^"]+)"')
+                        if sub then
+                          kong.service.request.set_header("X-User-Id", sub)
+                        end
+                      end
+                    end
+                  end
 
   # ── order-service ───────────────────────────────────────────────────────────
   - name: order-service
@@ -140,11 +169,25 @@ services:
               key_claim_name: iss
               cookie_names: [token]
               claims_to_verify: [exp]
-          - name: request-transformer
+          - name: post-function
             config:
-              rename:
-                headers:
-                  - "X-Authenticated-Userid:X-User-Id"
+              access:
+                - |
+                  local token_str = kong.ctx.shared.authenticated_jwt_token
+                  if type(token_str) == "string" then
+                    local b64_payload = token_str:match("^[^.]+%.([^.]+)%.")
+                    if b64_payload then
+                      local pad = (4 - #b64_payload % 4) % 4
+                      b64_payload = b64_payload .. string.rep("=", pad)
+                      local payload_json = ngx.decode_base64(b64_payload)
+                      if payload_json then
+                        local sub = payload_json:match('"sub"%s*:%s*"([^"]+)"')
+                        if sub then
+                          kong.service.request.set_header("X-User-Id", sub)
+                        end
+                      end
+                    end
+                  end
 
       - name: orders-resource
         paths:
@@ -157,11 +200,25 @@ services:
               key_claim_name: iss
               cookie_names: [token]
               claims_to_verify: [exp]
-          - name: request-transformer
+          - name: post-function
             config:
-              rename:
-                headers:
-                  - "X-Authenticated-Userid:X-User-Id"
+              access:
+                - |
+                  local token_str = kong.ctx.shared.authenticated_jwt_token
+                  if type(token_str) == "string" then
+                    local b64_payload = token_str:match("^[^.]+%.([^.]+)%.")
+                    if b64_payload then
+                      local pad = (4 - #b64_payload % 4) % 4
+                      b64_payload = b64_payload .. string.rep("=", pad)
+                      local payload_json = ngx.decode_base64(b64_payload)
+                      if payload_json then
+                        local sub = payload_json:match('"sub"%s*:%s*"([^"]+)"')
+                        if sub then
+                          kong.service.request.set_header("X-User-Id", sub)
+                        end
+                      end
+                    end
+                  end
 
   # ── payment-service ─────────────────────────────────────────────────────────
   - name: payment-service
@@ -182,11 +239,25 @@ services:
               key_claim_name: iss
               cookie_names: [token]
               claims_to_verify: [exp]
-          - name: request-transformer
+          - name: post-function
             config:
-              rename:
-                headers:
-                  - "X-Authenticated-Userid:X-User-Id"
+              access:
+                - |
+                  local token_str = kong.ctx.shared.authenticated_jwt_token
+                  if type(token_str) == "string" then
+                    local b64_payload = token_str:match("^[^.]+%.([^.]+)%.")
+                    if b64_payload then
+                      local pad = (4 - #b64_payload % 4) % 4
+                      b64_payload = b64_payload .. string.rep("=", pad)
+                      local payload_json = ngx.decode_base64(b64_payload)
+                      if payload_json then
+                        local sub = payload_json:match('"sub"%s*:%s*"([^"]+)"')
+                        if sub then
+                          kong.service.request.set_header("X-User-Id", sub)
+                        end
+                      end
+                    end
+                  end
 
       - name: payments-resource
         paths:
@@ -199,11 +270,25 @@ services:
               key_claim_name: iss
               cookie_names: [token]
               claims_to_verify: [exp]
-          - name: request-transformer
+          - name: post-function
             config:
-              rename:
-                headers:
-                  - "X-Authenticated-Userid:X-User-Id"
+              access:
+                - |
+                  local token_str = kong.ctx.shared.authenticated_jwt_token
+                  if type(token_str) == "string" then
+                    local b64_payload = token_str:match("^[^.]+%.([^.]+)%.")
+                    if b64_payload then
+                      local pad = (4 - #b64_payload % 4) % 4
+                      b64_payload = b64_payload .. string.rep("=", pad)
+                      local payload_json = ngx.decode_base64(b64_payload)
+                      if payload_json then
+                        local sub = payload_json:match('"sub"%s*:%s*"([^"]+)"')
+                        if sub then
+                          kong.service.request.set_header("X-User-Id", sub)
+                        end
+                      end
+                    end
+                  end
 
 # ── Global plugins ────────────────────────────────────────────────────────────
 plugins:

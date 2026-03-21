@@ -15,3 +15,6 @@ target/
 .settings/
 .classpath
 .project
+
+# Local build output directory (Docker build materialises this on the host)
+bin/

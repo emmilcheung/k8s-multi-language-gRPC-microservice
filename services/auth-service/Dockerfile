@@ -15,6 +15,7 @@ RUN pnpm install --frozen-lockfile --silent
 # Copy source and compile
 COPY tsconfig*.json nest-cli.json ./
 COPY src/ ./src/
+COPY migrations/ ./migrations/
 RUN pnpm build
 
 # Prune devDependencies so only prod deps land in the runtime image
@@ -33,8 +34,8 @@ COPY --from=builder --chown=app:app /app/node_modules ./node_modules
 COPY --from=builder --chown=app:app /app/dist ./dist
 COPY --from=builder --chown=app:app /app/package.json ./package.json
 
-# Migrations are applied externally (init container / CI step) — ship the SQL files
-COPY --chown=app:app migrations/ ./migrations/
+# Migration SQL files — read at runtime by drizzle-orm/migrator
+COPY --from=builder --chown=app:app /app/migrations ./migrations
 
 USER app
 
@@ -43,4 +44,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:3000/healthz/live || exit 1
 
-CMD ["node", "dist/main"]
+CMD ["sh", "-c", "node dist/migrate && node dist/main"]

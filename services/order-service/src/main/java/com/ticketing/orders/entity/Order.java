@@ -71,9 +71,9 @@ public class Order {
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
 
-    /** True when this order is in a state that allows payment. */
+    /** True when this order is in a state that allows payment (CREATED or AWAITING_PAYMENT). */
     public boolean isAwaitingPayment() {
-        return this.status == OrderStatus.AWAITING_PAYMENT;
+        return this.status == OrderStatus.AWAITING_PAYMENT || this.status == OrderStatus.CREATED;
     }
 
     /** True when the order is in a terminal state. */

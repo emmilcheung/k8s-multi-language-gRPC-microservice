@@ -55,6 +55,15 @@ func main() {
 	}
 	defer producer.Close()
 
+	// Kafka consumer — listens to order events and keeps ticket reservation state in sync
+	orderConsumer, err := kafka.NewOrderConsumer(cfg.KafkaBrokers, "ticket-service", repo, log)
+	if err != nil {
+		log.Fatal("failed to create Kafka order consumer", zap.Error(err))
+	}
+	consumerCtx, consumerCancel := context.WithCancel(context.Background())
+	defer consumerCancel()
+	go orderConsumer.Start(consumerCtx)
+
 	// Business logic service
 	svc := service.NewTicketService(repo, producer, log)
 
