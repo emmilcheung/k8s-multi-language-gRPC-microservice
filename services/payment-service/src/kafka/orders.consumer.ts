@@ -1,7 +1,8 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { Kafka, Consumer, EachMessagePayload, KafkaMessage } from 'kafkajs';
+import { Kafka, Consumer, EachMessagePayload, KafkaMessage, Producer } from 'kafkajs';
+import * as net from 'net';
 import { PaymentsService } from '../modules/payments/payments.service';
 
 /** Shape of the CloudEvents envelope we expect from order-service. */
@@ -26,27 +27,54 @@ const MAX_RETRIES = 3;
 
 @Injectable()
 export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
-  private consumer: Consumer;
-  private producer: ReturnType<InstanceType<typeof Kafka>['producer']>;
+  // Nullable — only set if Kafka broker is reachable at startup.
+  private consumer: Consumer | null = null;
+  private producer: Producer | null = null;
 
   constructor(
     @InjectPinoLogger(OrdersConsumer.name)
     private readonly logger: PinoLogger,
     private readonly config: ConfigService,
     private readonly paymentsService: PaymentsService,
-  ) {
+  ) {}
+
+  async onModuleInit() {
+    // Pre-flight TCP check — if the broker port is closed, skip Kafka entirely.
+    // The Kafka constructor + consumer/producer factory calls must happen AFTER this
+    // check because KafkaJS starts background BrokerPool network activity at
+    // construction time, which throws an uncatchable error after 5 retries when the
+    // broker is permanently unreachable (e.g. local dev with Kafka disabled).
+    const brokerReachable = await this.isBrokerReachable();
+    if (!brokerReachable) {
+      this.logger.warn(
+        'Kafka broker unreachable at startup — consumer will not run (acceptable in local dev with Kafka disabled)',
+      );
+      return;
+    }
+
     const brokers = this.config.getOrThrow<string>('KAFKA_BROKERS').split(',');
     const kafka = new Kafka({
       clientId: 'payment-service',
       brokers,
+      connectionTimeout: 3000,
+      requestTimeout: 5000,
+      retry: { retries: 3, initialRetryTime: 1000 },
     });
-    this.consumer = kafka.consumer({ groupId: 'payment-service' });
-    this.producer = kafka.producer({ idempotent: true });
-  }
 
-  async onModuleInit() {
-    await this.producer.connect();
-    await this.consumer.connect();
+    this.consumer = kafka.consumer({ groupId: 'payment-service' });
+    this.producer = kafka.producer();
+
+    try {
+      await this.producer.connect();
+      await this.consumer.connect();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        { err: msg },
+        'Kafka broker unreachable at startup — consumer will not run (acceptable in local dev with Kafka disabled)',
+      );
+      return;
+    }
 
     // On a cold-start Kafka the topic may not yet exist. Retry subscription with
     // exponential back-off (max 10 attempts, ~30 s total) rather than crashing.
@@ -71,8 +99,31 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
-    await this.consumer.disconnect();
-    await this.producer.disconnect();
+    try { await this.consumer?.disconnect(); } catch { /* ignore if never connected */ }
+    try { await this.producer?.disconnect(); } catch { /* ignore if never connected */ }
+  }
+
+  /**
+   * Attempt a TCP connection to the first Kafka broker. Returns true if reachable,
+   * false if the connection is refused or times out within 1 second.
+   *
+   * This MUST be called before constructing any Kafka/Consumer/Producer objects,
+   * because KafkaJS starts background BrokerPool network activity at construction
+   * time and throws an uncatchable error after retry exhaustion.
+   */
+  private isBrokerReachable(): Promise<boolean> {
+    const brokers = this.config.getOrThrow<string>('KAFKA_BROKERS').split(',');
+    const [host, portStr] = brokers[0].split(':');
+    const port = parseInt(portStr ?? '9092', 10);
+    return new Promise((resolve) => {
+      const socket = new net.Socket();
+      const done = (result: boolean) => { socket.destroy(); resolve(result); };
+      socket.setTimeout(1000);
+      socket.once('connect', () => done(true));
+      socket.once('error', () => done(false));
+      socket.once('timeout', () => done(false));
+      socket.connect(port, host);
+    });
   }
 
   private async handleMessage({ message }: EachMessagePayload): Promise<void> {
@@ -124,6 +175,7 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
   }
 
   private async sendToDlq(message: KafkaMessage, reason: string): Promise<void> {
+    if (!this.producer) return; // never connected — nothing to do
     try {
       await this.producer.send({
         topic: DLQ_TOPIC,

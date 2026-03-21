@@ -6,6 +6,7 @@ export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
   retries: 0,
+  workers: 2,  // minikube is resource-constrained; cap concurrency to avoid OOMKill
   use: {
     baseURL,
     trace: "on-first-retry",

@@ -1,15 +1,17 @@
 package com.ticketing.orders.config;
 
-import org.apache.kafka.clients.admin.NewTopic;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.kafka.annotation.EnableKafka;
-import org.springframework.kafka.config.TopicBuilder;
+import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.CommonErrorHandler;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.util.backoff.ExponentialBackOff;
+
+import java.util.Map;
 
 /**
  * Kafka consumer error handling and dead-letter topic configuration.
@@ -18,26 +20,32 @@ import org.springframework.util.backoff.ExponentialBackOff;
  * - On processing failure: retry with exponential back-off (max 3 attempts).
  * - After retries exhausted: route to Dead Letter Topic (<original-topic>.dlq).
  * - Never silently discard a message.
+ *
+ * Note: NewTopic @Beans are intentionally omitted — they trigger KafkaAdmin
+ * initialisation which blocks at startup when the broker is unreachable (local dev
+ * with Kafka disabled). Topics are created on first use by the broker.
  */
 @Configuration
 @EnableKafka
 public class KafkaConfig {
 
-    // ── Dead-letter topics ────────────────────────────────────────────────────
-
+    /**
+     * Override the auto-configured KafkaAdmin with one that never blocks at startup.
+     * {@code autoCreate = false} means it will not attempt to create topics on
+     * application startup. This prevents the context refresh from blocking/timing out
+     * when the Kafka broker is unavailable (e.g. local dev with Kafka disabled).
+     */
     @Bean
-    public NewTopic ticketsDlq() {
-        return TopicBuilder.name("tickets.ticket.created.dlq").partitions(1).replicas(1).build();
-    }
-
-    @Bean
-    public NewTopic expirationDlq() {
-        return TopicBuilder.name("expiration.order.expiration_complete.dlq").partitions(1).replicas(1).build();
-    }
-
-    @Bean
-    public NewTopic paymentDlq() {
-        return TopicBuilder.name("payments.payment.captured.dlq").partitions(1).replicas(1).build();
+    @Primary
+    public KafkaAdmin kafkaAdmin() {
+        KafkaAdmin admin = new KafkaAdmin(Map.of(
+                "bootstrap.servers", "localhost:9092",
+                "request.timeout.ms", "1000",
+                "default.api.timeout.ms", "1000"
+        ));
+        admin.setAutoCreate(false);
+        admin.setFatalIfBrokerNotAvailable(false);
+        return admin;
     }
 
     // ── Error handler with DLQ ────────────────────────────────────────────────

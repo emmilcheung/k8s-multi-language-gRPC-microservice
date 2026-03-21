@@ -1,0 +1,18 @@
+# infra/terraform/environments/dev/backend.hcl.example
+#
+# Copy this file to backend.hcl and fill in the real values.
+# backend.hcl is gitignored — never commit it (it contains your AWS account ID).
+#
+# The S3 bucket and DynamoDB table must be bootstrapped once per account before
+# any environment can run `terraform init`. See infra/scripts/bootstrap-state.sh
+#
+# Usage:
+#   cp backend.hcl.example backend.hcl
+#   # edit backend.hcl with real values
+#   terraform init -backend-config=backend.hcl
+
+bucket         = "ticketing-tf-state-<your-account-id>"
+key            = "prod/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "ticketing-tf-lock"
+encrypt        = true

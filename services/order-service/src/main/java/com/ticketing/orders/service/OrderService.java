@@ -14,6 +14,7 @@ import com.ticketing.orders.exception.BadRequestException;
 import com.ticketing.orders.exception.ForbiddenException;
 import com.ticketing.orders.exception.NotFoundException;
 import com.ticketing.orders.grpc.TicketServiceClient;
+import com.ticketing.orders.grpc.ValidateTicketResponse;
 import com.ticketing.orders.repository.OrderRepository;
 import com.ticketing.orders.repository.OrderTicketRepository;
 import com.ticketing.orders.repository.OutboxRepository;
@@ -82,14 +83,17 @@ public class OrderService {
     public OrderResponse createOrder(UUID userId, CreateOrderRequest request) {
         UUID ticketId = request.getTicketId();
 
-        // Validate ticket via gRPC BEFORE opening a DB transaction
-        ticketServiceClient.validateAvailability(ticketId.toString());
+        // Validate ticket via gRPC BEFORE opening a DB transaction.
+        // The response carries title + price so we can upsert the local replica
+        // without depending on a Kafka-delivered copy (handles Kafka-disabled local dev
+        // and serves as a safe fallback in production if Kafka delivery was delayed).
+        ValidateTicketResponse grpcTicket = ticketServiceClient.validateAvailability(ticketId.toString());
 
-        return createOrderTransactional(userId, ticketId);
+        return createOrderTransactional(userId, ticketId, grpcTicket);
     }
 
     @Transactional
-    protected OrderResponse createOrderTransactional(UUID userId, UUID ticketId) {
+    protected OrderResponse createOrderTransactional(UUID userId, UUID ticketId, ValidateTicketResponse grpcTicket) {
         // Guard: reject if an active order already exists for this ticket
         boolean alreadyReserved = orderRepository
                 .findActiveByTicketId(ticketId, List.of(OrderStatus.CANCELLED, OrderStatus.COMPLETE))
@@ -98,9 +102,16 @@ public class OrderService {
             throw new BadRequestException("Ticket is already reserved by another order");
         }
 
-        // Fetch the local ticket replica (populated by TicketEventConsumer)
-        OrderTicket ticket = orderTicketRepository.findById(ticketId)
-                .orElseThrow(() -> new NotFoundException("Ticket not found: " + ticketId));
+        // Upsert the local ticket replica from the authoritative gRPC response.
+        // In normal production flow this row already exists (written by TicketEventConsumer
+        // via Kafka). In local dev (Kafka disabled) or on first purchase after a cold start,
+        // we create it here from the gRPC data so the order can proceed.
+        OrderTicket ticket = orderTicketRepository.findById(ticketId).orElseGet(() -> {
+            log.info("Local ticket replica not found; creating from gRPC response ticketId={}", ticketId);
+            return orderTicketRepository.save(
+                    new OrderTicket(ticketId, grpcTicket.getTitle(), new java.math.BigDecimal(String.valueOf(grpcTicket.getPrice())))
+            );
+        });
 
         OffsetDateTime expiresAt = OffsetDateTime.now().plusMinutes(expirationMinutes);
         Order order = new Order(userId, OrderStatus.CREATED, expiresAt, ticket);

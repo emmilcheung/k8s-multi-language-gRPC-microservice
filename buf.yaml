@@ -1,0 +1,24 @@
+version: v2
+# buf.yaml — Buf CLI workspace configuration
+# Docs: https://buf.build/docs/configuration/v2/buf-yaml
+modules:
+  - path: proto
+    name: buf.build/acme/ticketing
+lint:
+  use:
+    - DEFAULT
+  except:
+    # Allow java_outer_classname option (used by order-service Java codegen)
+    - PACKAGE_VERSION_SUFFIX
+  ignore_only:
+    # google/ well-known types are externally managed; suppress path warnings
+    IMPORT_NOT_USED:
+      - google/protobuf/timestamp.proto
+breaking:
+  use:
+    - FILE
+  except:
+    # Field presence changes are acceptable during development phase
+    - FIELD_SAME_DEFAULT
+deps:
+  - buf.build/googleapis/googleapis

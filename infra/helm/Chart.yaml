@@ -1,0 +1,66 @@
+apiVersion: v2
+name: ticketing-platform
+description: >
+  Umbrella Helm chart for the ticketing microservices platform.
+  Deploys all application services and their backing infrastructure
+  (PostgreSQL, MongoDB, Redis, Kafka, Kong) via sub-charts and dependencies.
+  Targets minikube for local development; see values-local.yaml.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  # ── Application services (local sub-charts) ───────────────────────────────
+  - name: auth-service
+    version: "0.1.0"
+    repository: "file://charts/auth-service"
+  - name: ticket-service
+    version: "0.1.0"
+    repository: "file://charts/ticket-service"
+  - name: order-service
+    version: "0.1.0"
+    repository: "file://charts/order-service"
+  - name: payment-service
+    version: "0.1.0"
+    repository: "file://charts/payment-service"
+  - name: expiration-service
+    version: "0.1.0"
+    repository: "file://charts/expiration-service"
+  - name: client
+    version: "0.1.0"
+    repository: "file://charts/client"
+
+  # ── Backing infrastructure (Bitnami community charts) ─────────────────────
+  - name: postgresql
+    alias: postgres-auth
+    version: "16.7.5"
+    repository: "oci://registry-1.docker.io/bitnamicharts"
+  - name: postgresql
+    alias: postgres-orders
+    version: "16.7.5"
+    repository: "oci://registry-1.docker.io/bitnamicharts"
+  - name: postgresql
+    alias: postgres-payments
+    version: "16.7.5"
+    repository: "oci://registry-1.docker.io/bitnamicharts"
+  - name: mongodb
+    version: "16.5.10"
+    repository: "oci://registry-1.docker.io/bitnamicharts"
+  - name: redis
+    version: "20.11.3"
+    repository: "oci://registry-1.docker.io/bitnamicharts"
+  - name: kafka
+    version: "32.3.4"
+    repository: "oci://registry-1.docker.io/bitnamicharts"
+    condition: kafka.enabled
+  # cp-kafka: local sub-chart using confluentinc/cp-kafka (mirrors docker-compose).
+  # Replaces the broken bitnami/kafka dependency (no Docker Hub tags available).
+  - name: cp-kafka
+    version: "0.1.0"
+    repository: "file://charts/cp-kafka"
+    condition: cp-kafka.enabled
+
+  # ── API Gateway ───────────────────────────────────────────────────────────
+  - name: kong
+    version: "2.48.0"
+    repository: "https://charts.konghq.com"

@@ -588,6 +588,91 @@ The agent must **not** perform the following without explicit user confirmation 
 - Each service has a `.env.example` file — committed; `.env` — gitignored
 - Sensitive vars (passwords, keys) always have placeholder values in `.env.example`, never real values
 
+### 16.11 Local Kubernetes Dev Environment (minikube + kubectl + helm)
+
+> Added 2026-03-21. Revised 2026-03-21: Terraform removed from local path — local env uses `kubectl` + `helm` directly.
+
+#### Overview
+
+**Terraform is for cloud (EKS) only.** Local minikube uses plain `kubectl` + `helm` — no Terraform involvement.
+
+| Concern | Tool | Notes |
+|---|---|---|
+| Cluster | **minikube** | `minikube start --cpus=4 --memory=7168 --driver=docker` |
+| LoadBalancer | **minikube tunnel** | Exposes Kong's `LoadBalancer` on `localhost:8000` |
+| Namespace + K8s Secrets | **kubectl** | Created directly by `setup.sh` — no Terraform |
+| Workloads (Bitnami pods + app services) | **helm upgrade --install** | Umbrella chart `infra/helm` with `values-local.yaml` |
+| Kafka | **disabled locally** | `bitnami/kafka` has no Docker Hub image; `kafka.enabled: false` in `values-local.yaml` |
+| Redis mock | Bitnami Redis (standalone, no auth) | In-cluster pod |
+| PostgreSQL mocks | Bitnami PostgreSQL ×3 | One instance per service (auth, orders, payments) |
+| MongoDB | Bitnami MongoDB | In-cluster pod |
+| Kong | Kong Helm chart (DB-less) | Same declarative config as production |
+
+#### Important constraints (minikube on Docker Desktop)
+
+- **Memory cap**: Docker Desktop allows ~7851 MB → use `--memory=7168` (not 8192).
+- **Image loading**: host Docker client v1.43 is too old for `eval $(minikube docker-env)`. Use `minikube image load <image>` instead.
+- **Bitnami images**: only `:latest` tags exist on Docker Hub (pinned tags return `manifest unknown`). Pull `:latest`, retag to the version the Helm chart expects, then load into minikube.
+- **Kafka**: `bitnami/kafka` has zero Docker Hub tags — disabled locally. Services log broker connection errors on startup; acceptable for local dev.
+
+#### First-time setup
+
+```bash
+# 1. Install tools (no terraform needed for local dev)
+#    minikube, helm, kubectl, docker
+
+# 2. Generate an RSA key pair for local dev
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 \
+  -out infra/local/rsa_local.pem
+# Convert PEM to single-line format for secrets.env:
+awk 'NF {printf "%s\\n", $0}' infra/local/rsa_local.pem
+
+# 3. Create and fill in secrets.env
+cp infra/local/secrets.env.example infra/local/secrets.env
+# Edit secrets.env: paste RSA_PRIVATE_KEY (single-line \n format) and STRIPE_SECRET_KEY
+
+# 4. Run the bootstrap script from the repo root
+./infra/local/setup.sh
+```
+
+#### Day-to-day workflow (after initial setup)
+
+```bash
+# Rebuild all images + reconcile full stack
+./infra/local/setup.sh
+
+# Incremental update after a single service code change
+docker build -t auth-service:local services/auth-service/
+minikube image load auth-service:local
+kubectl rollout restart deployment/ticketing-auth-service -n ticketing
+
+# Tear down everything
+helm uninstall ticketing -n ticketing
+kubectl delete namespace ticketing
+minikube stop
+```
+
+#### In-cluster service DNS hostnames (minikube, namespace: ticketing)
+
+| Service | Hostname |
+|---|---|
+| PostgreSQL (auth) | `ticketing-postgres-auth:5432` |
+| PostgreSQL (orders) | `ticketing-postgres-orders:5432` |
+| PostgreSQL (payments) | `ticketing-postgres-payments:5432` |
+| MongoDB | `ticketing-mongodb:27017` |
+| Redis | `ticketing-redis-master:6379` |
+| Kafka | `ticketing-kafka:9092` (disabled locally) |
+| Kong proxy | `localhost:8000` via `minikube tunnel` |
+
+#### Files
+
+- `infra/local/setup.sh` — idempotent 7-step bootstrap (tools check → minikube → build+load images → namespace → secrets → helm install → tunnel)
+- `infra/local/secrets.env.example` — template; copy to `secrets.env` (gitignored) and fill in `RSA_PRIVATE_KEY` + `STRIPE_SECRET_KEY`
+- `infra/helm/values-local.yaml` — minikube overrides: 1 replica, small resources, inline Bitnami passwords, `kafka.enabled: false`, `redis.auth.enabled: false`
+- `infra/helm/Chart.yaml` — umbrella chart; kafka dependency has `condition: kafka.enabled`
+
+---
+
 ### 16.10 Merge Workflow (confirmed 2026-03-20)
 
 - **Never auto-merge a feature branch into `main`** during or after a development loop.
@@ -598,3 +683,258 @@ The agent must **not** perform the following without explicit user confirmation 
   4. **Stop and explicitly request the owner's approval** before touching `main`.
   5. Only after the owner reviews the branch content and gives the go-ahead does the merge happen.
 - This rule overrides any prior behaviour of automatically squash-merging after a service is complete.
+
+---
+
+## 17. Session Progress Log
+
+> Append a new entry each session. Newest entry at the top.
+
+---
+
+### Session: 2026-03-22 — setup.sh hardening complete ✅ COMPLETE
+
+**Branch:** uncommitted working changes — per merge workflow, awaiting owner approval before touching `main`.
+
+#### What was done
+
+All four pending `setup.sh` fixes from the previous session were applied:
+
+1. **`TICKET_SERVICE_GRPC_PORT` corrected** (line 198): `"9090"` → `"50051"`. order-service was connecting to the wrong gRPC port on ticket-service.
+
+2. **Linkerd namespace annotation added** (step 4.5, lines 139–148): After namespace creation, `kubectl annotate namespace ticketing config.linkerd.io/skip-outbound-ports="9092" --overwrite` is now applied. This ensures Linkerd does not intercept outbound Kafka binary-protocol connections from app service pods. Without this, Linkerd attempts a TLS handshake on a raw TCP stream and drops idle connections on reconnect.
+
+3. **`--set "mongodb.auth.existingSecret="` added to `helm upgrade`** (line 225): Required to prevent Helm from regenerating a random MongoDB password on every upgrade (which would break the in-cluster connection string).
+
+4. **Completion banner updated** to include `Kafka external: localhost:9093 (E2E test producer)`, matching the two LoadBalancer services now exposed by `minikube tunnel`.
+
+5. **Script header comments updated**: step list now documents step 4.5 and the Kafka external endpoint; "After the script completes" section lists all three endpoints.
+
+#### Current state
+
+- `infra/local/setup.sh` is now the definitive single-command local dev bootstrap.
+- Running `./infra/local/setup.sh` from the repo root on a fresh machine (with `secrets.env` filled in) should produce a fully working minikube cluster with 18/18 E2E tests passing.
+- No Terraform involvement for local dev.
+- Changes not yet committed to a feature branch.
+
+#### Known issues / future work
+
+- RSA private key still in `docker-compose.yml` — should move to a gitignored `.env` backed by `.env.example`.
+- No CI/CD pipeline yet (`.github/workflows/` is empty).
+- `infra/scripts/bootstrap-state.sh` (S3 + DynamoDB state bootstrap for EKS) not yet written.
+
+---
+
+### Session: 2026-03-21 — Simplified local K8s setup (kubectl + helm, no Terraform) ✅ COMPLETE
+
+**Branch:** uncommitted working changes — per merge workflow, awaiting owner approval before touching `main`.
+
+#### What was done
+
+1. **`infra/terraform/environments/local/`** — **deleted entirely**. Terraform is now EKS-only; local minikube uses `kubectl` + `helm` directly.
+
+2. **`infra/local/setup.sh`** — fully rewritten. 7-step idempotent bootstrap:
+   - Step 1: verify tools (minikube, helm, kubectl, docker — no terraform)
+   - Step 2: `minikube start --cpus=4 --memory=7168` (skips if already running)
+   - Step 3: `docker build` all 6 services + `minikube image load` (host Docker client too old for `minikube docker-env`)
+   - Step 4: `kubectl create namespace ticketing` (idempotent via `--dry-run=client | apply`)
+   - Step 5: `kubectl create secret generic` for each service (delete+recreate pattern for idempotency); secrets sourced from `infra/local/secrets.env`
+   - Step 6: `helm upgrade --install ticketing infra/helm -f values-local.yaml` with `--set secretRef` per service
+   - Step 7: `minikube tunnel` — Kong's LoadBalancer exposed on `localhost:8000`
+
+3. **`infra/local/secrets.env.example`** — new file. Only two values needed from the user: `RSA_PRIVATE_KEY` and `STRIPE_SECRET_KEY`. All DB passwords are fixed local-only values baked into `values-local.yaml`.
+
+4. **`.gitignore`** — added `infra/local/secrets.env` pattern.
+
+5. **`AGENTS.md §16.11`** — updated to document the simplified approach.
+
+#### Known issues / next steps
+
+- Images not yet loaded into running minikube cluster — `setup.sh` must be run after creating `secrets.env`.
+- Bitnami backing store images need to be pre-pulled and retagged; documented in §16.11 constraints.
+- Helm release not yet verified end-to-end; pending first full `setup.sh` run.
+
+---
+
+### Session: 2026-03-21 — Local Kubernetes dev environment (minikube + Terraform) ✅ COMPLETE
+
+**Branch:** uncommitted working changes — per merge workflow, awaiting owner approval before touching `main`.
+
+#### What was done
+
+1. **`infra/terraform/environments/local/`** — new Terraform workspace (4 files)
+   - `main.tf` — `kubernetes` + `helm` providers targeting minikube context; creates `ticketing` + `infra` namespaces; creates 9 `kubernetes_secret` resources (DB passwords, RSA key, Stripe key, all per-service env vars with in-cluster K8s DNS hostnames); one `helm_release` for the umbrella chart with `values-local.yaml`
+   - `variables.tf` — all secrets as `sensitive = true` Terraform variables; no secret ever touches shell env or files
+   - `outputs.tf` — `kong_proxy_url`, `helm_release_status`, `next_steps` (human-readable instructions)
+   - `terraform.tfvars.example` — template with placeholders; real file gitignored
+
+2. **`infra/local/setup.sh`** — rewritten as 7-step idempotent orchestrator
+   - Step 1: verify tools (minikube, terraform, helm, kubectl, docker)
+   - Step 2: `minikube start` (skips if already running)
+   - Step 3: `eval $(minikube docker-env)` — images built directly into cluster
+   - Step 4: `docker build` all 6 services with tag `:local`
+   - Step 5: `helm dependency update` — fetches Bitnami + Kong charts
+   - Step 6: `terraform init && terraform apply` — Terraform manages everything from here
+   - Step 7: `minikube tunnel` — Kong's LoadBalancer becomes `localhost:8000`
+
+3. **`AGENTS.md §16.11`** — documented the full local K8s dev environment conventions
+
+#### Architecture summary
+
+```
+minikube cluster
+└── ticketing namespace (Terraform-managed)
+    ├── K8s Secrets (Terraform) — DB passwords, RSA key, Stripe key, per-service env
+    └── Helm release: ticketing (umbrella chart)
+        ├── auth-service        ← :local image from minikube's Docker daemon
+        ├── ticket-service      ← :local image
+        ├── order-service       ← :local image
+        ├── payment-service     ← :local image
+        ├── expiration-service  ← :local image
+        ├── client              ← :local image
+        ├── postgres-auth       ← Bitnami PostgreSQL (mocks RDS)
+        ├── postgres-orders     ← Bitnami PostgreSQL (mocks RDS)
+        ├── postgres-payments   ← Bitnami PostgreSQL (mocks RDS)
+        ├── mongodb             ← Bitnami MongoDB
+        ├── redis               ← Bitnami Redis (mocks ElastiCache)
+        ├── kafka               ← Bitnami Kafka KRaft (mocks MSK)
+        └── kong                ← Kong Helm chart, DB-less, minikube tunnel → localhost:8000
+```
+
+#### Day-to-day workflow
+
+```bash
+# First time
+cp infra/terraform/environments/local/terraform.tfvars.example \
+   infra/terraform/environments/local/terraform.tfvars
+# fill in RSA key + passwords
+./infra/local/setup.sh
+
+# Incremental (after code change)
+eval $(minikube docker-env)
+docker build -t auth-service:local services/auth-service/
+terraform -chdir=infra/terraform/environments/local apply
+
+# Tear down
+terraform -chdir=infra/terraform/environments/local destroy
+minikube stop
+```
+
+#### Known issues / future work
+
+- The umbrella `values-local.yaml` uses image tag `latest` — should be changed to `local` to match the build tag used by `setup.sh`. (Minor — minikube's `imagePullPolicy: IfNotPresent` will use the local image regardless.)
+- No Playwright E2E run against the minikube stack yet — all E2E tests currently run against Docker Compose.
+- `infra/scripts/bootstrap-state.sh` (S3 + DynamoDB remote state bootstrap for EKS envs) not yet written.
+
+---
+
+### Session: 2026-03-21 — Terraform scaffolding complete (Kong module + all environments) ✅ COMPLETE
+
+**Branch:** none yet — uncommitted working changes on `main`.
+
+#### What was done
+
+1. **`infra/terraform/modules/kong/`** — new module (3 files: `main.tf`, `variables.tf`, `outputs.tf`)
+   - Deploys Kong in DB-less mode to EKS using the official Kong Helm chart (`kong/kong` v2.38.0).
+   - Helm `set {}` blocks configure: DB-less mode, ConfigMap mount, NLB proxy service, admin API toggle, replicas, resources, probes, PDB, topology spread constraints, Prometheus `serviceMonitor`.
+   - `kubernetes_namespace.infra` resource creates the `infra` namespace if absent.
+   - `data.kubernetes_service.kong_proxy` reads back the NLB hostname post-deploy for the `proxy_url` output.
+   - Outputs: `proxy_url`, `proxy_service_name`, `namespace`, `helm_release_status`.
+
+2. **`infra/terraform/environments/dev/main.tf`** updated
+   - Added `kubernetes` and `helm` provider declarations (using `aws eks get-token` exec plugin for auth).
+   - Added `module "kong"` block: 1 replica, admin enabled, dev-sized resources (`100m`/`128Mi` req, `250m`/`256Mi` limit).
+   - Two-step apply note documented in comments: target vpc+eks first, then full apply.
+
+3. **`infra/terraform/environments/staging/`** — new environment (`main.tf` + `variables.tf`)
+   - All 6 modules: vpc (`10.1.0.0/16`), eks (`t3.large`, 2–8 nodes), rds (`db.t3.small`), elasticache (`cache.t3.small`), msk (`kafka.m5.large`), kong (2 replicas, admin disabled).
+
+4. **`infra/terraform/environments/prod/`** — new environment (`main.tf` + `variables.tf`)
+   - All 6 modules: vpc (`10.2.0.0/16`), eks (`m5.large`, 3–20 nodes, 6 desired), rds (`db.r6g.large`), elasticache (`cache.r6g.large`), msk (`kafka.m5.large`), kong (3 replicas, admin disabled, full resources).
+
+5. **`backend.hcl.example`** — created in all 3 environment directories with environment-specific state keys (`dev/`, `staging/`, `prod/`).
+
+6. **`.gitignore`** updated — added `infra/terraform/environments/**/backend.hcl` and `infra/terraform/environments/**/*.tfvars`.
+
+#### LSP false positives (safe to ignore)
+
+All Terraform LSP errors in this session are false positives:
+- `"No declaration found for var.X"` in environment `main.tf` files — LSP analyses files individually and doesn't cross-reference sibling `variables.tf`.
+- `"Unexpected block: kubernetes"` in `helm` provider blocks — LSP doesn't have the Helm provider schema; `kubernetes {}` nested block is fully valid per HashiCorp Helm provider docs.
+- `"Unexpected block: set"` in `helm_release` resources — same cause; `set {}` blocks are a core feature of the `helm_release` resource.
+
+#### Current state
+
+- Task 5 (Terraform scaffolding) is now complete. All modules exist: vpc, eks, rds, elasticache, msk, kong.
+- All 3 environments wired: dev, staging, prod.
+- No `terraform init` or `apply` has been run — scaffolding only, as agreed (no real AWS resources).
+- Changes not yet committed to a feature branch.
+
+#### Known issues / future work
+
+- RSA private key still in `docker-compose.yml` (carried forward from previous session).
+- `infra/scripts/bootstrap-state.sh` (S3 + DynamoDB state bootstrap) not yet written.
+- No CI/CD pipeline for the Terraform environments yet.
+
+---
+
+### Session: 2026-03-21 — Kong JWT forwarding, startup migrations, E2E suite ✅ MERGED
+
+**Branch:** `feat/kong-jwt-sub-forwarding` → squash-merged into `main` (`f43e2a6`) with owner approval.
+
+#### What was done
+
+1. **Kong JWT sub forwarding** (`77b4364` on feature branch)
+   - Kong post-function plugin extracts the `sub` claim from the validated JWT and injects it as `X-User-Id` on every upstream request.
+   - All services receive the caller's identity without re-validating the token.
+
+2. **Valid RSA key pair for dev** (`df4824f`)
+   - The placeholder keys in `docker-compose.yml` (auth-service `RSA_PRIVATE_KEY`) and `infra/kong/kong.yml` (Kong JWT plugin `rsa_public_key`) were malformed, causing `secretOrPrivateKey must be an asymmetric key when using RS256` on every auth call.
+   - Replaced with a real PKCS#8 / SPKI RS256 key pair (dev-only, committed for convenience — known security trade-off accepted by owner).
+
+3. **Startup migrations — Option B** (`d5b8531`)
+   - auth-service and payment-service previously relied on `drizzle-kit migrate` (a dev dependency pruned from the runtime image), so the DB schema was never applied on a fresh Docker Desktop restart.
+   - Added `src/migrate.ts` to both services: a standalone script using `drizzle-orm/node-postgres/migrator` (prod dependency) that applies all pending SQL migrations programmatically.
+   - Added `migrations/meta/_journal.json` to both services (required by the drizzle-orm migrator).
+   - `Dockerfile CMD` changed from `node dist/main` to `sh -c "node dist/migrate && node dist/main"`. Container exits with code 1 if migrations fail — service never starts with a broken schema.
+
+4. **Full Playwright E2E suite — 18/18 passing** (`1c06760`, `d5b8531`)
+   - Rewrote the E2E test file from scratch covering: auth (signup, signout, wrong password, auth guards), tickets (create, update, validation, owner vs buyer view), and orders (purchase, payment via Kafka, cancel, list, already-reserved, unauthenticated).
+   - Fixed `ticket shows 'Already Reserved'` flakiness: the page is server-rendered and reads `ticket.orderId` from ticket-service, which updates via a Kafka `orders.order.created` event. Replaced single `page.goto + toBeVisible(10s)` with `expect.poll` that reloads the page until the state is reflected (30s budget, 2/3/5s intervals).
+   - Payment flow bypasses Stripe by publishing a `payments.payment.captured` CloudEvent directly to Kafka (`localhost:9093` EXTERNAL listener) from within the test.
+
+5. **Supporting fixes**
+   - `OrderStatus` enum and `Order` entity corrected in order-service.
+   - ticket-service Kafka consumer (`internal/kafka/consumer.go`) implemented to handle `orders.order.created` and `orders.order.cancelled` events, calling `ReserveTicket` / `ReleaseTicket` on the MongoDB repository.
+   - `.gitignore` files added for Playwright `test-results/` and order-service `bin/`.
+
+#### Current state of `main`
+
+- All 6 services build and run via `docker-compose up --build`.
+- 18/18 Playwright E2E tests pass consistently (run from `services/client/` with `pnpm exec playwright test`).
+- Next.js dev server must be started manually before running tests: `pnpm dev --port 4000` in `services/client/`.
+- No pending uncommitted changes.
+
+#### Known issues / future work
+
+- RSA private key is hardcoded in `docker-compose.yml` — should move to a gitignored `.env` file backed by `.env.example` with a placeholder. Low risk in dev; must not reach production.
+- expiration-service is not yet implemented (not blocking anything currently).
+- No CI/CD pipeline exists yet (`.github/workflows/` is empty).
+- No Kubernetes / Helm manifests yet — local Docker Compose only.
+
+#### Running containers (ports)
+
+| Container | Port |
+|---|---|
+| auth-service | 3000 |
+| ticket-service | 3001 |
+| payment-service | 3002 |
+| order-service | 8082 |
+| kong (proxy) | 8000 |
+| kafka | 9092 (internal) / 9093 (external/host) |
+| mongodb | 27017 |
+| postgres-auth | 5432 |
+| postgres-orders | 5433 |
+| postgres-payments | 5434 |
+| redis | 6379 |
+| schema-registry | 8081 |
