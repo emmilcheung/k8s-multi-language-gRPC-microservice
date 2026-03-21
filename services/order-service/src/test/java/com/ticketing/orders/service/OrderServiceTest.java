@@ -10,6 +10,7 @@ import com.ticketing.orders.exception.BadRequestException;
 import com.ticketing.orders.exception.ForbiddenException;
 import com.ticketing.orders.exception.NotFoundException;
 import com.ticketing.orders.grpc.TicketServiceClient;
+import com.ticketing.orders.grpc.ValidateTicketResponse;
 import com.ticketing.orders.repository.OrderRepository;
 import com.ticketing.orders.repository.OrderTicketRepository;
 import com.ticketing.orders.repository.OutboxRepository;
@@ -91,7 +92,8 @@ class OrderServiceTest {
         when(orderRepository.findActiveByTicketId(eq(ticketId), anyList()))
                 .thenReturn(Optional.of(existing));
 
-        assertThatThrownBy(() -> orderService.createOrderTransactional(userId, ticketId))
+        // grpcTicket is null because the "already reserved" guard throws before it is used
+        assertThatThrownBy(() -> orderService.createOrderTransactional(userId, ticketId, null))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("already reserved");
 
@@ -99,17 +101,28 @@ class OrderServiceTest {
     }
 
     @Test
-    void createOrder_should_throw_NotFoundException_when_ticket_replica_missing() {
-        CreateOrderRequest req = new CreateOrderRequest();
-        req.setTicketId(ticketId.toString());
-
+    void createOrder_should_upsert_ticket_replica_from_grpc_when_local_replica_missing() {
+        // When Kafka is disabled (local dev) or delivery is delayed, the local replica may
+        // not exist yet. The service should upsert it from the authoritative gRPC response.
         when(orderRepository.findActiveByTicketId(eq(ticketId), anyList()))
                 .thenReturn(Optional.empty());
         when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.empty());
+        when(orderTicketRepository.save(any(OrderTicket.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        assertThatThrownBy(() -> orderService.createOrderTransactional(userId, ticketId))
-                .isInstanceOf(NotFoundException.class)
-                .hasMessageContaining("Ticket not found");
+        // Build a minimal ValidateTicketResponse stub using the protobuf builder
+        ValidateTicketResponse grpcTicket = ValidateTicketResponse.newBuilder()
+                .setAvailable(true)
+                .setTicketId(ticketId.toString())
+                .setTitle("Concert Ticket")
+                .setPrice(49.99f)
+                .build();
+
+        OrderResponse response = orderService.createOrderTransactional(userId, ticketId, grpcTicket);
+
+        verify(orderTicketRepository).save(any(OrderTicket.class));
+        verify(orderRepository).save(any(Order.class));
+        assertThat(response.getStatus()).isEqualTo(OrderStatus.CREATED);
     }
 
     // ── getOrder ──────────────────────────────────────────────────────────────

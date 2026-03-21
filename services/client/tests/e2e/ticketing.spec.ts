@@ -68,9 +68,12 @@ async function removeNativeValidation(page: Page, selector: string) {
  * order-service transitions the order to COMPLETE without needing real Stripe credentials.
  */
 async function publishPaymentCaptured(orderId: string) {
+  // KAFKA_EXTERNAL_BROKER defaults to localhost:9093 — reachable via `minikube tunnel`
+  // (same mechanism as Kong on localhost:8000). Override via env var if needed.
+  const broker = process.env.KAFKA_EXTERNAL_BROKER ?? "localhost:9093";
   const kafka = new Kafka({
     clientId: "e2e-test",
-    brokers: ["localhost:9093"], // EXTERNAL listener — reachable from the host (tests run on host)
+    brokers: [broker], // EXTERNAL listener — reachable from the host via minikube tunnel
     // Suppress noisy kafkajs logs in test output
     logLevel: 0,
   });
@@ -169,7 +172,7 @@ test.describe("tickets", () => {
 
     // Ticket detail page reflects the data
     await expect(page.getByRole("heading", { level: 1 })).toContainText(title);
-    await expect(page.getByText("$75.00")).toBeVisible();
+    await expect(page.getByText("$75.00").first()).toBeVisible();
 
     // Ticket card appears on home page
     await page.goto("/");
@@ -315,9 +318,19 @@ test.describe("orders", () => {
     // Order-service consumes this and transitions the order to COMPLETE
     await publishPaymentCaptured(orderId);
 
-    // Poll the order detail page until the status flips to complete (up to 20 s)
-    await page.reload();
-    await expect(page.getByText(/payment received/i)).toBeVisible({ timeout: 20000 });
+    // Poll the order detail page until the status flips to complete.
+    // The page is server-rendered and reads the order status from order-service;
+    // Kafka consumption has variable latency so we reload until the state is reflected.
+    await expect
+      .poll(
+        async () => {
+          await page.goto(page.url());
+          return page.getByText(/payment received/i).isVisible();
+        },
+        { timeout: 30000, intervals: [2000, 3000, 5000] }
+      )
+      .toBe(true);
+
     await expect(page.getByRole("button", { name: /pay now/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /cancel order/i })).toHaveCount(0);
   });

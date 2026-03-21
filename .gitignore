@@ -34,11 +34,18 @@ go.sum.local
 coverage.out
 *.cover
 
+# Local Kubernetes secret env files (contain real passwords — never commit)
+infra/local/secrets/*.env
+infra/local/secrets.env
+
 # Terraform
 .terraform/
 *.tfstate
 *.tfstate.*
 .terraformrc
+# Per-environment backend config and var files contain account IDs — never commit
+infra/terraform/environments/**/backend.hcl
+infra/terraform/environments/**/*.tfvars
 
 # Docker
 docker-compose.override.yml.local

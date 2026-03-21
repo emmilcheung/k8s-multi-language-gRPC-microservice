@@ -208,40 +208,15 @@ services:
       context: ./services/auth-service
       dockerfile: Dockerfile
     restart: unless-stopped
+    # RSA_PRIVATE_KEY is loaded from the root .env file (gitignored).
+    # Copy .env.example → .env and populate RSA_PRIVATE_KEY before first run.
+    env_file:
+      - .env
     environment:
       NODE_ENV: development
       PORT: 3000
       DATABASE_URL: postgresql://auth_user:auth_pass@postgres-auth:5432/auth_db
       JWT_SECRET: "dev-jwt-secret-change-in-production"
-      RSA_PRIVATE_KEY: |
-        -----BEGIN PRIVATE KEY-----
-        MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC3y4x9sAK/Pk+6
-        SAYa8TgKlTbTHObT5kCYTRIjCNtWXdYqmD1H3RvmOO4D2E05deOZ5aTugnoJ5sBK
-        5Kgah2oHv1Fi0B/6CT/JT0aW/4K1oI8RHZyvq5CEovbfN4XQBu5pLyyON85OERw/
-        LhAG1fD1Xynq4T7lcBT/Bc7fe94KG8s24CjbQv4UM0ldNHp9cdLekmJozs3OAUCc
-        Ii5hCwwOUEqjxRqrPFeKDXIUKn3bis8Clniv82cY0GJTnEcPcLP5GkJpflh98owk
-        3fU/it1wwhlJ2615bESFZdsP/2KVFkpt1W6BXQxRw80bvTmGf+dnHLY8NyDgvkE4
-        qmVh2WKHAgMBAAECggEAEu7N3xilf8vMbLUEo/vbOQPb7O1aPdPHLakqyB8ecQwj
-        hqm+DkwRlqqgohbDBbtGIdFNJyCbr69seYqKYok2e+vSV2p3EMupHXSkIePaNBmB
-        A1NYk6QJtBARfDb8+svr/TvVzCSlhNcwYLW/AuVA+BXAfKiNURc1onuXrt/UpJfB
-        VddnJWXQc0ruXQzQF2FRRSQadxtT1HyT48HECQn5l6enMkCD45VIdOEtYHCMu3Dp
-        ny5Y5OWS0Lz6Rg39/+0/yL8gMSDCydP5C0pZfA3dsh0D/OYHQlj4bABvdptgs7tU
-        63DWR4KZdn263cU7HDGhuRpa00aL+cbR2CTjGht+6QKBgQD1K8ettuj4ezrswA9p
-        7xG+YPY6/Ci3Azvl6+SF5i6k62uwCKO1gzsL/1fiR+rk+/OrqCg2uIkMuCaM+ztx
-        cVzGmivATExH9Ylc1iz6biKtYYk95wzRFogo5nSA5Ut0rivnLPryq+v3Eo4w8aWG
-        IRDmTOGw+RcHrSexqQd6uFTwIwKBgQC/6cYK8YCESQUKSiFrQRQGcVj5YZV7ekAp
-        8rpsf1XMvSS7mamZe4l3JN6BhDPfjqTc5M2WI+qI2ydjFxHEvvu1BXsoMgP+nLUR
-        dEFjieBAvsQiaflwfR+JqqpivDWHeaDCetfDmo5bxna+WX1BgWQCtIZ8FJ74Y2Af
-        IPUK7ry4TQKBgF8HGxxP+zjkutAtGUxcJ6p89rOiLT3SeRMDPc5Qi9/MiC7xClM+
-        jFJ4JF5GtdsPdUEhqoSbPjO55OdcMYwk/mrUMwUUDbUOjLF5KnHe4n4FgiaGOceJ
-        TjlcKegT+A0/vTCblKEe1hUsEgUShK/afSxmvEvWIIEPMoWAGLAOZo21AoGAKQ+V
-        heXh/2u4Hll6CP6lkDNUPBc66m5fqBn89RXRf7rATzszZFlgMhO7X66vgpd8gp6Z
-        thP9LEbniHX5IUVTiYmgrhr1a9aPjyp2ixuG1ZN7V3mhGwZKZyQSzIlEUrYdRT8P
-        RxScfNpbsaJoAEn04fdKBuZKlQ5+FGrywuINkskCgYB+lczASXFo15OHiK3c8Z4O
-        4hq+O2MKenawC8erZa2bawJGl3KUL8KW9KDT/JGXYwdT/DQlE3S8eIzdp9/2A+ex
-        oH7ZiKQ6YEVmpNWjwlZyuCxQAu+jHYBjEc5NisHogJ8jhWAOVk05Ko2t7Nr3KVxi
-        WZYyjZ/Kvfkf6XHFx+RoLA==
-        -----END PRIVATE KEY-----
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
     depends_on:
@@ -359,6 +334,35 @@ services:
     mem_limit: 512m
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3002/healthz/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - microservices-net
+
+  # ── expiration-service: Go / asynq / Redis + Kafka ──────────────────────────
+  expiration-service:
+    build:
+      context: ./services/expiration-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: development
+      PORT: 8083
+      LOG_LEVEL: info
+      REDIS_ADDR: redis:6379
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8083/healthz/live"]
       interval: 10s
       timeout: 5s
       retries: 5

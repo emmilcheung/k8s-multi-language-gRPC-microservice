@@ -59,7 +59,10 @@ func NewProducer(brokers []string, log *zap.Logger) (*Producer, error) {
 		"enable.idempotence": true,
 		"retries":            3,
 		"retry.backoff.ms":   200,
-		"message.timeout.ms": 10000,
+		// Keep well below Kong's 10 s upstream read timeout so that a broker
+		// outage (e.g. Kafka disabled in local dev) causes a fast delivery
+		// failure rather than a gateway timeout visible to the caller.
+		"message.timeout.ms": 3000,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create kafka producer: %w", err)

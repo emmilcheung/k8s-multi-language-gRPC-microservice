@@ -1,0 +1,278 @@
+# ── Global defaults ───────────────────────────────────────────────────────────
+# Overridden per-environment in values-local.yaml (minikube) and values-prod.yaml (EKS).
+
+global:
+  # Image registry prefix — set to minikube's local registry or GHCR
+  imageRegistry: "ghcr.io/your-org"
+  # Image pull policy: Always in production, IfNotPresent in local
+  imagePullPolicy: IfNotPresent
+  # Namespace all resources land in
+  namespace: ticketing
+
+# ── auth-service ──────────────────────────────────────────────────────────────
+auth-service:
+  replicaCount: 2
+  image:
+    repository: auth-service
+    tag: latest
+  service:
+    port: 3000
+  env:
+    NODE_ENV: production
+    PORT: "3000"
+  # Secrets are injected from Kubernetes Secrets — never hardcoded here
+  secretRef: auth-service-secrets
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── ticket-service ────────────────────────────────────────────────────────────
+ticket-service:
+  replicaCount: 2
+  image:
+    repository: ticket-service
+    tag: latest
+  service:
+    httpPort: 3001
+    grpcPort: 50051
+  env:
+    APP_ENV: production
+    PORT: "3001"
+    GRPC_PORT: "50051"
+    LOG_LEVEL: info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# ── order-service ─────────────────────────────────────────────────────────────
+order-service:
+  replicaCount: 2
+  image:
+    repository: order-service
+    tag: latest
+  service:
+    port: 8082
+  env:
+    SPRING_ENVIRONMENT: production
+    SERVER_PORT: "8082"
+    SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+    SPRING_JPA_SHOW_SQL: "false"
+    TICKET_SERVICE_GRPC_HOST: ticket-service
+    TICKET_SERVICE_GRPC_PORT: "50051"
+    TICKET_SERVICE_GRPC_DEADLINE_MS: "5000"
+  secretRef: order-service-secrets
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+# ── payment-service ───────────────────────────────────────────────────────────
+payment-service:
+  replicaCount: 2
+  image:
+    repository: payment-service
+    tag: latest
+  service:
+    port: 3002
+  env:
+    NODE_ENV: production
+    PORT: "3002"
+    ORDER_SERVICE_URL: "http://order-service:8082"
+  secretRef: payment-service-secrets
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── expiration-service ────────────────────────────────────────────────────────
+expiration-service:
+  replicaCount: 1
+  image:
+    repository: expiration-service
+    tag: latest
+  service:
+    port: 8083
+  env:
+    APP_ENV: production
+    PORT: "8083"
+    LOG_LEVEL: info
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ── client (Next.js) ──────────────────────────────────────────────────────────
+client:
+  replicaCount: 2
+  image:
+    repository: client
+    tag: latest
+  service:
+    port: 4000
+  env:
+    NODE_ENV: production
+    PORT: "4000"
+    NEXT_PUBLIC_API_URL: "http://kong-proxy"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── postgres-auth (Bitnami PostgreSQL) ────────────────────────────────────────
+postgres-auth:
+  auth:
+    database: auth_db
+    username: auth_user
+    existingSecret: postgres-auth-secret
+    secretKeys:
+      userPasswordKey: password
+  primary:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  metrics:
+    enabled: true
+
+# ── postgres-orders (Bitnami PostgreSQL) ──────────────────────────────────────
+postgres-orders:
+  auth:
+    database: orders_db
+    username: orders_user
+    existingSecret: postgres-orders-secret
+    secretKeys:
+      userPasswordKey: password
+  primary:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  metrics:
+    enabled: true
+
+# ── postgres-payments (Bitnami PostgreSQL) ────────────────────────────────────
+postgres-payments:
+  auth:
+    database: payments_db
+    username: payments_user
+    existingSecret: postgres-payments-secret
+    secretKeys:
+      userPasswordKey: password
+  primary:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  metrics:
+    enabled: true
+
+# ── mongodb (Bitnami MongoDB) ─────────────────────────────────────────────────
+mongodb:
+  auth:
+    enabled: true
+    database: tickets_db
+    username: mongo_user
+    existingSecret: mongodb-secret
+    existingSecretPasswordKey: password
+    rootPasswordKey: root-password
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  metrics:
+    enabled: true
+
+# ── redis (Bitnami Redis) ─────────────────────────────────────────────────────
+redis:
+  auth:
+    enabled: false
+  architecture: standalone
+  master:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+  metrics:
+    enabled: true
+
+# ── kafka (Bitnami Kafka — KRaft mode) ────────────────────────────────────────
+kafka:
+  kraft:
+    enabled: true
+  controller:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+  broker:
+    replicaCount: 1
+  listeners:
+    client:
+      protocol: PLAINTEXT
+    interbroker:
+      protocol: PLAINTEXT
+    controller:
+      protocol: PLAINTEXT
+  metrics:
+    kafka:
+      enabled: true
+    jmx:
+      enabled: true
+
+# ── Kong API Gateway ──────────────────────────────────────────────────────────
+kong:
+  env:
+    database: "off"
+    proxy_access_log: /dev/stdout
+    admin_access_log: /dev/stdout
+    proxy_error_log: /dev/stderr
+    admin_error_log: /dev/stderr
+    log_level: info
+  ingressController:
+    enabled: false
+  proxy:
+    type: LoadBalancer
+  admin:
+    enabled: true
+    type: ClusterIP
+  dblessConfig:
+    configMap: kong-config

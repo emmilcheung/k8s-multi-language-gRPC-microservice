@@ -1,0 +1,273 @@
+# values-local.yaml — minikube overrides
+#
+# Apply with:
+#   helm upgrade --install ticketing ./infra/helm \
+#     -f infra/helm/values-local.yaml \
+#     --namespace ticketing --create-namespace
+#
+# Prerequisites:
+#   minikube start --cpus=4 --memory=8192
+#   eval $(minikube docker-env)          # build images into minikube's Docker
+#   minikube tunnel &                    # makes LoadBalancer services reachable on localhost
+#   helm dependency update ./infra/helm  # fetch all chart dependencies
+
+global:
+  # Use images built directly into minikube's Docker daemon
+  imageRegistry: ""
+  imagePullPolicy: IfNotPresent
+  namespace: ticketing
+
+# ── Application services — single replica, smaller resources for local dev ───
+
+auth-service:
+  replicaCount: 1
+  image:
+    repository: auth-service
+    tag: latest
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      cpu: 400m
+      memory: 512Mi   # argon2 hashing is memory-intensive under concurrent E2E test load
+  autoscaling:
+    enabled: false
+
+ticket-service:
+  replicaCount: 1
+  image:
+    repository: ticket-service
+    tag: latest
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 300m
+      memory: 128Mi
+  autoscaling:
+    enabled: false
+
+order-service:
+  replicaCount: 1
+  image:
+    repository: order-service
+    tag: latest
+  env:
+    # Override the default short name with the FQDN for the minikube release.
+    # The release name is 'ticketing' and the namespace is 'ticketing'.
+    TICKET_SERVICE_GRPC_HOST: ticketing-ticket-service.ticketing.svc.cluster.local
+    TICKET_SERVICE_GRPC_PORT: "50051"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+  # Spring Boot takes ~60s to start when KafkaAdmin blocks (broker unreachable).
+  # Increase initial delays so the probe doesn't fire before the app is up.
+  livenessProbe:
+    httpGet:
+      path: /actuator/health/liveness
+      port: http
+    initialDelaySeconds: 120
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /actuator/health/readiness
+      port: http
+    initialDelaySeconds: 90
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+payment-service:
+  replicaCount: 1
+  image:
+    repository: payment-service
+    tag: latest
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+  autoscaling:
+    enabled: false
+
+expiration-service:
+  replicaCount: 1
+  image:
+    repository: expiration-service
+    tag: latest
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+  autoscaling:
+    enabled: false
+
+client:
+  replicaCount: 1
+  image:
+    repository: client
+    tag: latest
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+  autoscaling:
+    enabled: false
+  livenessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 20
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 15
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# ── Backing infrastructure — minimal footprint for minikube ──────────────────
+
+postgres-auth:
+  auth:
+    existingSecret: ""
+    postgresPassword: "auth-local-secret"
+    username: "auth_user"
+    password: "auth-local-secret"
+    database: "auth_db"
+  primary:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  metrics:
+    enabled: false
+
+postgres-orders:
+  auth:
+    existingSecret: ""
+    postgresPassword: "orders-local-secret"
+    username: "orders_user"
+    password: "orders-local-secret"
+    database: "orders_db"
+  primary:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  metrics:
+    enabled: false
+
+postgres-payments:
+  auth:
+    existingSecret: ""
+    postgresPassword: "payments-local-secret"
+    username: "payments_user"
+    password: "payments-local-secret"
+    database: "payments_db"
+  primary:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  metrics:
+    enabled: false
+
+mongodb:
+  auth:
+    existingSecret: ""
+    rootPassword: "mongo-root-local-secret"
+    # Clear the deprecated singular fields from values.yaml to prevent duplicate users
+    username: ""
+    password: ""
+    database: ""
+    usernames:
+      - "mongo_user"
+    passwords:
+      - "mongo-local-secret"
+    databases:
+      - "tickets"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi
+  metrics:
+    enabled: false
+
+redis:
+  auth:
+    enabled: false
+  master:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+  metrics:
+    enabled: false
+
+kafka:
+  enabled: false   # bitnami/kafka image not on Docker Hub — use cp-kafka instead
+
+# Confluent cp-kafka — single-node KRaft broker matching docker-compose config
+cp-kafka:
+  enabled: true
+  external:
+    enabled: true
+    nodePort: 30093        # unused for LoadBalancer but kept for schema completeness
+    advertisedHost: "127.0.0.1"  # minikube tunnel exposes LoadBalancer on localhost
+
+kong:
+  # Prefer A records over SRV to avoid CoreDNS NXDOMAIN on ClusterIP services.
+  # Without this, Kong 3.x tries SRV (type 33) first; CoreDNS returns NXDOMAIN
+  # for ClusterIP services, causing upstream resolution failures.
+  env:
+    dns_order: "LAST,A,SRV,CNAME"
+  proxy:
+    # minikube tunnel exposes LoadBalancer on localhost
+    # Ports set to 8000/8443 to avoid macOS sudo requirement for ports <1024.
+    type: LoadBalancer
+    http:
+      enabled: true
+      servicePort: 8000
+      containerPort: 8000
+    tls:
+      enabled: true
+      servicePort: 8443
+      containerPort: 8443

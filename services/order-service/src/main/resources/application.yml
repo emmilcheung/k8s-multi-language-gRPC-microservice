@@ -30,6 +30,9 @@ spring:
 
   kafka:
     bootstrap-servers: ${KAFKA_BROKERS}
+    admin:
+      fail-fast: false        # do not crash context if broker is unreachable at startup
+      auto-create: false      # do not attempt to create topics (KafkaAdmin blocks on broker connect)
     consumer:
       group-id: order-service
       auto-offset-reset: earliest
@@ -50,6 +53,7 @@ spring:
         max.in.flight.requests.per.connection: 1
     listener:
       ack-mode: MANUAL_IMMEDIATE
+      missing-topics-fatal: false   # do not crash if a subscribed topic doesn't exist yet
 
   jackson:
     serialization:

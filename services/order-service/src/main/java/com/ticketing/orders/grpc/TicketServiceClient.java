@@ -28,8 +28,13 @@ public class TicketServiceClient {
             ValidateTicketRequest request = ValidateTicketRequest.newBuilder()
                     .setTicketId(ticketId)
                     .build();
-            return stub.withDeadlineAfter(READ_DEADLINE_SECONDS, TimeUnit.SECONDS)
+            ValidateTicketResponse response = stub.withDeadlineAfter(READ_DEADLINE_SECONDS, TimeUnit.SECONDS)
                     .validateTicketAvailability(request);
+            if (!response.getAvailable()) {
+                throw new com.ticketing.orders.exception.BadRequestException(
+                        "Ticket is not available: " + ticketId);
+            }
+            return response;
         } catch (StatusRuntimeException e) {
             log.error("gRPC call to ticket-service failed: status={} ticketId={}", e.getStatus(), ticketId, e);
             throw new com.ticketing.orders.exception.BadRequestException(

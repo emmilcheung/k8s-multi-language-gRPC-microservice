@@ -1,0 +1,45 @@
+dependencies:
+- name: auth-service
+  repository: file://charts/auth-service
+  version: 0.1.0
+- name: ticket-service
+  repository: file://charts/ticket-service
+  version: 0.1.0
+- name: order-service
+  repository: file://charts/order-service
+  version: 0.1.0
+- name: payment-service
+  repository: file://charts/payment-service
+  version: 0.1.0
+- name: expiration-service
+  repository: file://charts/expiration-service
+  version: 0.1.0
+- name: client
+  repository: file://charts/client
+  version: 0.1.0
+- name: postgresql
+  repository: oci://registry-1.docker.io/bitnamicharts
+  version: 16.7.5
+- name: postgresql
+  repository: oci://registry-1.docker.io/bitnamicharts
+  version: 16.7.5
+- name: postgresql
+  repository: oci://registry-1.docker.io/bitnamicharts
+  version: 16.7.5
+- name: mongodb
+  repository: oci://registry-1.docker.io/bitnamicharts
+  version: 16.5.10
+- name: redis
+  repository: oci://registry-1.docker.io/bitnamicharts
+  version: 20.11.3
+- name: kafka
+  repository: oci://registry-1.docker.io/bitnamicharts
+  version: 32.3.4
+- name: cp-kafka
+  repository: file://charts/cp-kafka
+  version: 0.1.0
+- name: kong
+  repository: https://charts.konghq.com
+  version: 2.48.0
+digest: sha256:9fb237295ea6638a2985b780835f747164a740420e1067f1bbf4c11ffaa4f87c
+generated: "2026-03-22T00:15:49.757857+08:00"

@@ -1,0 +1,174 @@
+# CI pipeline for payment-service (TypeScript / NestJS / pnpm / Vitest)
+#
+# Stages: lint → unit test → integration test → build image → scan image → push (main only)
+# Integration tests use Testcontainers (real PostgreSQL + Kafka via Docker-in-Docker).
+
+name: ci-payment-service
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "services/payment-service/**"
+      - ".github/workflows/ci-payment-service.yml"
+  pull_request:
+    paths:
+      - "services/payment-service/**"
+      - ".github/workflows/ci-payment-service.yml"
+
+env:
+  SERVICE: payment-service
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/payment-service
+
+defaults:
+  run:
+    working-directory: services/payment-service
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: services/payment-service/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --silent
+
+      - name: Run ESLint
+        run: pnpm lint
+
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: services/payment-service/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --silent
+
+      - name: Run unit tests
+        run: pnpm test
+        env:
+          STRIPE_SECRET_KEY: sk_test_mock
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: services/payment-service/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --silent
+
+      - name: Run integration tests (Testcontainers)
+        run: pnpm test:integration
+        env:
+          STRIPE_SECRET_KEY: sk_test_mock
+          TESTCONTAINERS_RYUK_DISABLED: "false"
+
+  build:
+    name: Build & Scan Image
+    runs-on: ubuntu-24.04
+    needs: [lint, test-unit, test-integration]
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/payment-service
+          file: services/payment-service/Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/payment-service.tar
+
+      - name: Load image for scanning
+        run: docker load --input /tmp/payment-service.tar
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+  push:
+    name: Push Image
+    runs-on: ubuntu-24.04
+    needs: [build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/payment-service
+          file: services/payment-service/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
