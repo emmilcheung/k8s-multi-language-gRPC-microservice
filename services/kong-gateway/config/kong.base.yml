@@ -1,0 +1,261 @@
+# Kong declarative configuration — BASE TEMPLATE
+# ─────────────────────────────────────────────
+# Do NOT use this file directly.  build.sh merges this template with a
+# per-environment values file (values/<env>.yml) to produce a rendered kong.yml.
+#
+# Placeholder syntax:  {{VARIABLE_NAME}}
+# All placeholders are defined (with safe defaults) in values/_defaults.yml and
+# overridden per environment in values/<env>.yml.
+#
+# Route layout (mirrors AGENTS.md §2.1):
+#   POST /api/users/signup|signin|signout  → auth-service   (public)
+#   GET  /api/users/currentuser            → auth-service   (JWT required)
+#   GET  /.well-known/jwks.json            → auth-service   (public)
+#   GET  /api/tickets/*                    → ticket-service (public)
+#   *    /api/tickets/*                    → ticket-service (JWT required)
+#   *    /api/orders/*                     → order-service  (JWT required)
+#   *    /api/payments/*                   → payment-service (JWT required)
+#   /*                                     → client         (catch-all, no JWT)
+#
+# Auth strategy:
+#   jwt plugin validates RS256 token from the {{JWT_COOKIE_NAME}} cookie.
+#   post-function (plugins/jwt-sub.lua) extracts sub → X-User-Id header.
+#   Public routes bypass the jwt plugin entirely.
+
+_format_version: "3.0"
+_transform: true
+
+# ── Consumer ──────────────────────────────────────────────────────────────────
+# Kong OSS DB-less jwt plugin requires a consumer + jwt_secret entry.
+# key must match the JWT `iss` claim (auth-service sets iss: "auth-service").
+consumers:
+  - username: auth-service-issuer
+    jwt_secrets:
+      - key: auth-service
+        algorithm: RS256
+        rsa_public_key: |
+          {{RSA_PUBLIC_KEY}}
+
+# ── Upstream services ─────────────────────────────────────────────────────────
+services:
+
+  # ── auth-service ─────────────────────────────────────────────────────────────
+  - name: auth-service
+    url: http://{{HOST_AUTH}}
+    connect_timeout: {{CONNECT_TIMEOUT_MS}}
+    read_timeout: {{READ_TIMEOUT_MS}}
+    write_timeout: {{WRITE_TIMEOUT_MS}}
+    routes:
+      # Public: signup / signin / signout — no JWT required
+      - name: auth-public
+        paths:
+          - /api/users/signup
+          - /api/users/signin
+          - /api/users/signout
+        methods: [POST]
+        strip_path: false
+
+      # Protected: currentuser — validates JWT, injects X-User-Id from sub
+      - name: auth-currentuser
+        paths:
+          - /api/users/currentuser
+        methods: [GET]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      # Public: JWKS endpoint (consumed by Kong itself + tooling)
+      - name: auth-jwks
+        paths:
+          - /.well-known/jwks.json
+        methods: [GET]
+        strip_path: false
+
+  # ── ticket-service ────────────────────────────────────────────────────────────
+  - name: ticket-service
+    url: http://{{HOST_TICKETS}}
+    connect_timeout: {{CONNECT_TIMEOUT_MS}}
+    read_timeout: {{READ_TIMEOUT_MS}}
+    write_timeout: {{WRITE_TIMEOUT_MS}}
+    routes:
+      # Public: read-only ticket access — no JWT required
+      - name: tickets-read
+        paths:
+          - ~/api/tickets$
+          - ~/api/tickets/[^/]+$
+        methods: [GET]
+        strip_path: false
+
+      # Protected: create / update / delete ticket — JWT required
+      - name: tickets-write
+        paths:
+          - ~/api/tickets$
+          - ~/api/tickets/[^/]+$
+        methods: [POST, PUT, PATCH, DELETE]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+  # ── order-service ─────────────────────────────────────────────────────────────
+  - name: order-service
+    url: http://{{HOST_ORDERS}}
+    connect_timeout: {{CONNECT_TIMEOUT_MS}}
+    read_timeout: {{READ_TIMEOUT_MS}}
+    write_timeout: {{WRITE_TIMEOUT_MS}}
+    routes:
+      - name: orders-collection
+        paths:
+          - ~/api/orders$
+        methods: [GET, POST]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      - name: orders-resource
+        paths:
+          - ~/api/orders/[^/]+$
+        methods: [GET, DELETE]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+  # ── payment-service ───────────────────────────────────────────────────────────
+  - name: payment-service
+    url: http://{{HOST_PAYMENTS}}
+    connect_timeout: {{CONNECT_TIMEOUT_MS}}
+    read_timeout: {{READ_TIMEOUT_MS}}
+    write_timeout: {{WRITE_TIMEOUT_MS}}
+    routes:
+      - name: payments-collection
+        paths:
+          - ~/api/payments$
+        methods: [GET, POST]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      - name: payments-resource
+        paths:
+          - ~/api/payments/[^/]+$
+        methods: [GET]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+  # ── client (Next.js SSR) — catch-all, must be last ────────────────────────────
+  # Kong matches routes by longest-prefix first; all /api/* routes above always
+  # win.  The client route has a higher read/write timeout to accommodate SSR.
+  - name: client-service
+    url: http://{{HOST_CLIENT}}
+    connect_timeout: {{CONNECT_TIMEOUT_MS}}
+    read_timeout: {{CLIENT_READ_TIMEOUT_MS}}
+    write_timeout: {{CLIENT_WRITE_TIMEOUT_MS}}
+    routes:
+      - name: client-catchall
+        paths:
+          - /
+        strip_path: false
+        # No jwt plugin — Next.js manages session display via the cookie set by
+        # auth-service.  Kong must not block unauthenticated page loads.
+        plugins:
+          # Next.js 15+ Server Actions CSRF protection compares the `origin` header
+          # against `x-forwarded-host` (preferred) or `host`.  By default Kong
+          # rewrites the Host header to the upstream hostname
+          # (ticketing-client.ticketing.svc.cluster.local), so the check fails and
+          # every Server Action returns 500 "Invalid Server Actions request."
+          # Fix: inject X-Forwarded-Host with the value of the Host header Kong
+          # received from the browser, so Next.js sees origin == x-forwarded-host.
+          - name: post-function
+            config:
+              access:
+                - |
+                  -- Next.js 15+ CSRF check: compares new URL(origin).host against
+                  -- x-forwarded-host (or host).  Kong rewrites the Host header to
+                  -- the upstream hostname, breaking the comparison.
+                  --
+                  -- Kong's nginx template unconditionally overwrites X-Forwarded-Host
+                  -- from the $upstream_x_forwarded_host nginx variable (set in
+                  -- runloop/handler.lua from the parsed `host` var, which strips the
+                  -- port).  kong.service.request.set_header() is overwritten too.
+                  --
+                  -- Fix: overwrite the nginx variable $upstream_x_forwarded_host
+                  -- directly via ngx.var, so Kong's proxy_set_header directive uses
+                  -- our corrected value.  get_header("host") returns the raw Host
+                  -- header including port (e.g. "localhost:8000"), which is exactly
+                  -- what new URL(origin).host produces in Next.js's CSRF check.
+                  local raw_host = kong.request.get_header("host")
+                  if raw_host then
+                    ngx.var.upstream_x_forwarded_host = raw_host
+                  end
+
+# ── Global plugins ─────────────────────────────────────────────────────────────
+plugins:
+  # Inject a correlation ID on every request for distributed tracing
+  - name: correlation-id
+    config:
+      header_name: X-Request-ID
+      generator: uuid#counter
+      echo_downstream: true
+
+  # Rate limiting — backed by Redis in production; local counter in dev
+  # Limits: anonymous by IP, authenticated by consumer
+  - name: rate-limiting
+    config:
+      minute: {{RATE_LIMIT_ANONYMOUS_PER_MINUTE}}
+      policy: {{RATE_LIMIT_POLICY}}
+      fault_tolerant: true
+      hide_client_headers: false

@@ -1,8 +1,8 @@
 # Ticketing Platform — Revamp Plan
 
-> **Status:** Planning
+> **Status:** Services complete — Local K8s running — CI/CD and EKS deploy pending
 > **Region:** ap-southeast-1 (Singapore)
-> **Last Updated:** 2026-03-20 (revised 2026-03-20)
+> **Last Updated:** 2026-03-22 (revised 2026-03-22)
 > **Reference Legacy:** `legacy/ticketing/`
 
 This document is the single source of truth for the revamp.
@@ -215,7 +215,7 @@ CREATE TABLE users (
 | Tracing | OpenTelemetry Go SDK + `otelecho` |
 | gRPC | Server (defined in `proto/tickets/v1/tickets.proto`) |
 | Kafka | Producer + Consumer (`segmentio/kafka-go`) |
-| Ports | 8080 (HTTP/REST), 9090 (gRPC) |
+| Ports | 8080 (HTTP/REST), **50051** (gRPC) |
 | Test framework | `testify` + `testcontainers-go` (MongoDB + Kafka) |
 
 **Responsibilities:**
@@ -268,7 +268,7 @@ CREATE TABLE users (
 - `MONGODB_URI`
 - `KAFKA_BROKERS` (comma-separated MSK broker endpoints)
 - `SCHEMA_REGISTRY_URL`
-- `GRPC_PORT` (default: 9090)
+- `GRPC_PORT` (default: **50051**)
 - `PORT` (default: 8080)
 
 ---
@@ -678,52 +678,72 @@ Every service chart provides:
 
 ### 5.7 Local Kubernetes Development Environment
 
-**Tool:** `kind` (Kubernetes in Docker) — chosen over minikube (simpler multi-node config) and k3d (better CNI compatibility for NetworkPolicy testing).
+**Tool:** `minikube` (docker driver) — replaced `kind` (see D-26 [SUPERSEDED] → D-29).
 
 **Purpose:** Develop and test all services locally before pushing to EKS dev. Mirrors the EKS namespace + Helm chart structure as closely as possible.
 
-**Cluster configuration (`infra/local/kind-config.yaml`):**
+**Cluster configuration:**
 
-```yaml
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-  - role: control-plane
-  - role: worker
-  - role: worker
+```bash
+minikube start --cpus=4 --memory=7168 --disk-size=30g --driver=docker
 ```
 
-**What runs locally (via Helm / local manifests in `infra/local/`):**
+**What runs locally (via Helm umbrella chart `infra/helm/` with `values-local.yaml`):**
 
 | Component | Local equivalent | Notes |
 |---|---|---|
-| Kafka | Strimzi (same as EKS dev) | Single-broker Kafka CR for speed |
-| MongoDB | MongoDB StatefulSet (1 replica) | No replica set init needed locally |
-| PostgreSQL (×3) | `bitnami/postgresql` Helm chart ×3 | One per service namespace |
-| Redis | `bitnami/redis` Helm chart (standalone mode) | No cluster mode needed locally |
-| Schema Registry | Confluent Schema Registry Helm chart | Same as EKS |
-| Kong | `kong/kong` Helm chart | Same CRDs / plugin config as EKS |
+| Kafka | `infra/helm/charts/cp-kafka/` — Confluent `cp-kafka:7.7.1` | Custom sub-chart; INTERNAL (9092 in-cluster) + EXTERNAL LoadBalancer (9093 via `minikube tunnel`). `bitnami/kafka` has no Docker Hub tags. |
+| MongoDB | Bitnami MongoDB (1 replica) | In-cluster pod |
+| PostgreSQL (×3) | Bitnami PostgreSQL ×3 | One per service (auth, orders, payments) |
+| Redis | Bitnami Redis (standalone, no auth) | In-cluster pod |
+| Schema Registry | — | Not deployed locally; services tolerate absence |
+| Kong | Kong Helm chart (DB-less) | Same declarative config as production; exposed on `localhost:8000` via `minikube tunnel` |
+
+**Service mesh:** Linkerd installed in cluster. Namespace annotated `config.linkerd.io/skip-outbound-ports: "9092"` to prevent Linkerd intercepting outbound Kafka binary-protocol connections.
+
+**Important constraints (minikube on Docker Desktop):**
+- Memory cap: Docker Desktop allows ~7851 MB → use `--memory=7168`
+- Image loading: host Docker client is too old for `eval $(minikube docker-env)`. Use `minikube image load <image>` instead.
+- Bitnami images: only `:latest` tags exist on Docker Hub. Pull `:latest`, retag to the version the Helm chart expects, then load into minikube.
 
 **Not run locally:**
+- AWS ALB (`minikube tunnel` exposes Kong's LoadBalancer directly on `localhost:8000`)
+- AWS Managed Prometheus / Grafana / X-Ray (deferred to Milestone 7)
+- External Secrets Operator (plain K8s `Secret` manifests created by `setup.sh`)
 
-- AWS ALB (use `kubectl port-forward` or `NodePort` for Kong)
-- AWS Managed Prometheus / Grafana / X-Ray (use Prometheus + Grafana Community charts locally)
-- External Secrets Operator (use plain K8s `Secret` manifests with dummy values for local dev)
-
-**Setup script:** `infra/local/setup.sh` — creates the kind cluster, applies namespaces, and installs all dependencies via Helm in the correct order.
-
-**Image loading:** Service images built locally (`docker build`) and loaded into kind with `kind load docker-image <image>:<tag>` — no registry required for local dev.
+**Setup script:** `infra/local/setup.sh` — idempotent 7-step bootstrap (tools check → minikube → build+load images → namespace → Linkerd annotation → secrets → helm install → tunnel).
 
 **Developer workflow:**
 
+```bash
+# First time
+cp infra/local/secrets.env.example infra/local/secrets.env
+# Fill in RSA_PRIVATE_KEY and STRIPE_SECRET_KEY in secrets.env
+./infra/local/setup.sh
+
+# Incremental update after a code change to one service
+docker build -t auth-service:local services/auth-service/
+minikube image load auth-service:local
+kubectl rollout restart deployment/ticketing-auth-service -n ticketing
+
+# Tear down
+helm uninstall ticketing -n ticketing
+kubectl delete namespace ticketing
+minikube stop
 ```
-1. infra/local/setup.sh       # one-time cluster bootstrap
-2. make build-<service>       # build Docker image locally
-3. make load-<service>        # kind load docker-image ...
-4. make deploy-local-<service> # helm upgrade --install with values-local.yaml
-5. kubectl port-forward svc/kong-proxy 8080:80 -n infra
-6. curl http://localhost:8080/api/...
-```
+
+**In-cluster service DNS (namespace: ticketing):**
+
+| Service | Hostname |
+|---|---|
+| PostgreSQL (auth) | `ticketing-postgres-auth:5432` |
+| PostgreSQL (orders) | `ticketing-postgres-orders:5432` |
+| PostgreSQL (payments) | `ticketing-postgres-payments:5432` |
+| MongoDB | `ticketing-mongodb:27017` |
+| Redis | `ticketing-redis-master:6379` |
+| Kafka | `ticketing-cp-kafka.ticketing.svc.cluster.local:9092` |
+| Kong proxy | `localhost:8000` via `minikube tunnel` |
+| Kafka external (E2E) | `localhost:9093` via `minikube tunnel` |
 
 ---
 
@@ -1093,17 +1113,19 @@ Triggered on change under `infra/terraform/`:
 
 ## 12. Milestones
 
-### Milestone 0 — Local Development Environment
+### Milestone 0 — Local Development Environment ✅ COMPLETE
 
-**Goal:** Every developer can run the full platform locally in `kind` before any EKS infrastructure exists.
+**Goal:** Every developer can run the full platform locally before any EKS infrastructure exists.
 
-- [ ] `kind` cluster config (`infra/local/kind-config.yaml`) — 1 control-plane + 2 workers
-- [ ] `infra/local/setup.sh` — installs namespaces, Strimzi operator, Kong, Schema Registry, MongoDB, PostgreSQL ×3, Redis via Helm
-- [ ] `infra/local/values/` — `values-local.yaml` for each service (smaller resource limits, plain K8s Secrets instead of ESO, NodePort Kong)
-- [ ] `Makefile` targets: `make local-up`, `make build-<service>`, `make load-<service>`, `make deploy-local-<service>`
-- [ ] Verified: Kong proxy reachable via `kubectl port-forward`, all dependency pods healthy
+- [x] `infra/local/setup.sh` — idempotent 7-step bootstrap: tools check → minikube start → build+load images → namespace → Linkerd annotation → K8s secrets → helm upgrade --install → minikube tunnel
+- [x] `infra/helm/` — umbrella Helm chart with Bitnami sub-charts (PostgreSQL ×3, MongoDB, Redis) + custom `cp-kafka` sub-chart (Confluent cp-kafka:7.7.1)
+- [x] `infra/helm/values-local.yaml` — minikube overrides: 1 replica, small resources, inline passwords
+- [x] `infra/local/secrets.env.example` — template; user fills in `RSA_PRIVATE_KEY` + `STRIPE_SECRET_KEY`
+- [x] Kong proxy reachable on `localhost:8000` via `minikube tunnel`
+- [x] All dependency pods healthy (PostgreSQL ×3, MongoDB, Redis, cp-kafka)
+- [x] 18/18 Playwright E2E tests passing against minikube cluster
 
-**Deliverable:** `make local-up && make deploy-local-<all services>` gives a fully running local environment.
+**Deliverable:** `./infra/local/setup.sh` (with `secrets.env` filled in) gives a fully running local environment with 18/18 E2E tests passing.
 
 ---
 
@@ -1167,7 +1189,7 @@ Triggered on change under `infra/terraform/`:
 - [ ] Kafka topics created on MSK; CloudEvents envelope validated via Schema Registry
 - [ ] Deploy to EKS dev — smoke test passes
 
-**Deliverable:** Full ticket CRUD through Kong. Events flowing on Kafka. gRPC server responding on port 9090.
+**Deliverable:** Full ticket CRUD through Kong. Events flowing on Kafka. gRPC server responding on port **50051**.
 
 ---
 
@@ -1315,6 +1337,7 @@ Triggered on change under `infra/terraform/`:
 | D-01 | [SUPERSEDED by D-24 for Phase 1] Messaging layer: Apache Kafka (AWS MSK) | Phase 1 uses Strimzi in-cluster. | 2026-03-20 |
 | D-24 | Phase 1 Kafka: **Strimzi in-cluster Kafka on EKS** (MSK deferred to Phase 2) | Avoids MSK costs and Terraform complexity during initial build-out. Strimzi mirrors MSK Kafka 3.7 config (replication factor, min ISR, acks) so migration is a broker endpoint swap. | 2026-03-20 |
 | D-25 | EKS node groups: **dev/prod instance size split** | Dev: `m6i.large` general / `m6i.medium` spot. Prod: `m6i.xlarge` general / `m6i.large` spot. Reduces cloud costs during development. | 2026-03-20 |
-| D-26 | Local development: **`kind` (Kubernetes in Docker)** | Mirrors EKS namespace/Helm structure locally. Simpler multi-node config than minikube. Better CNI support than k3d for NetworkPolicy testing. No cloud costs. | 2026-03-20 |
+| D-26 | [SUPERSEDED by D-29] Local development: **`kind` (Kubernetes in Docker)** | — | 2026-03-20 |
 | D-27 | OQ-1 resolved: **Repository name `modern-ticketing`** (temporary) | Placeholder until a permanent GitHub org/repo name is chosen. | 2026-03-20 |
 | D-28 | OQ-8 resolved: **Single currency USD; globally accessible payments** | Phase 2 Stripe Payment Intents charges in USD only. Multi-currency is a future consideration beyond Phase 2 scope. | 2026-03-20 |
+| D-29 | Local development: **`minikube`** (docker driver) replaces `kind` | `kind` multi-node config added complexity with no benefit for single-developer local dev. `minikube tunnel` provides a cleaner LoadBalancer experience (Kong on `localhost:8000`, Kafka EXTERNAL on `localhost:9093`) without NodePort hacks. | 2026-03-21 |

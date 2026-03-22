@@ -129,7 +129,12 @@ client:
   env:
     NODE_ENV: production
     PORT: "4000"
+    # Browser-facing: Kong proxy reachable from the end-user's browser
     NEXT_PUBLIC_API_URL: "http://kong-proxy"
+    # Server-side: Next.js Server Actions / Server Components call Kong via
+    # the in-cluster ClusterIP DNS name — never via the public LoadBalancer.
+    # This is the same Kong proxy; the difference is the network path taken.
+    INTERNAL_API_URL: "http://ticketing-kong-proxy.ticketing.svc.cluster.local:8000"
   resources:
     requests:
       cpu: 100m
@@ -275,4 +280,8 @@ kong:
     enabled: true
     type: ClusterIP
   dblessConfig:
-    configMap: kong-config
+    # Kong config is rendered by services/kong-gateway/scripts/build.sh and
+    # passed to helm via --set-file kong.dblessConfig.config=<rendered-kong.yml>
+    # in infra/local/setup.sh (minikube) or in the CI/CD pipeline (EKS).
+    # Do not set configMap here — the rendered config is passed inline.
+    configMap: ""

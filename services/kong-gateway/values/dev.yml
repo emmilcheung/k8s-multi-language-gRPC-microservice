@@ -1,0 +1,13 @@
+# Kong gateway — EKS dev environment overrides
+# ──────────────────────────────────────────────
+# Namespace: ticketing-dev
+# Helm release: ticketing
+
+HOST_AUTH: ticketing-auth-service.ticketing-dev.svc.cluster.local:3000
+HOST_TICKETS: ticketing-ticket-service.ticketing-dev.svc.cluster.local:3001
+HOST_ORDERS: ticketing-order-service.ticketing-dev.svc.cluster.local:8082
+HOST_PAYMENTS: ticketing-payment-service.ticketing-dev.svc.cluster.local:3002
+HOST_CLIENT: ticketing-client.ticketing-dev.svc.cluster.local:4000
+
+RATE_LIMIT_ANONYMOUS_PER_MINUTE: 100
+RATE_LIMIT_POLICY: local
