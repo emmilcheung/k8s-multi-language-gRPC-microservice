@@ -1,8 +1,12 @@
-# Ticketing Platform
+# E-Commerce app
+
+> **Project inspiration:** This project rebuilds the concept and domain from the Udemy course
+> [Microservices with Node JS and React](https://www.udemy.com/course/microservices-with-node-js-and-react/),
+> but with a completely redesigned architecture, polyglot stack, and production-grade infrastructure.
 
 > **Work in progress — practice project.**
 >
-> This is a deliberately over-engineered ticketing system built as a hands-on study of
+> This is a deliberately over-engineered E-Commerce app built as a hands-on study of
 > **polyglot microservices**, **multi-language inter-process communication**, and
 > **production-grade infrastructure patterns** — not as a production system.
 > The goal is to experience the real friction of operating multiple languages and runtimes
@@ -60,27 +64,27 @@ Each architectural decision was chosen to mirror a real-world challenge:
 ## 2. Architecture
 
 ```
-                         ┌───────────────────────────────────────────────────┐
-                         │              AWS EKS  (ap-southeast-1)            │
-                         │                                                   │
-  HTTPS ──► ALB ──► Kong (JWT verify · rate-limit · correlation-ID)          │
-                         │                   │                               │
-               ┌─────────┼──────────--┬──────┴──────────┐                    │
-               │         │            │                 │                    │
-          auth-service  ticket-  order-service    payment-service            │
-          (NestJS/TS)   service   (Java/SB4)      (NestJS/TS)                │
-                        (Go/Echo)     │                 │                    │
-                          │      gRPC │                 │                    │
-                          └─--───────-┘                 │                    │
-                                │                       │                    │
-                         Apache Kafka (MSK / Strimzi) ──┘                    │
-                                │                                            │
-                        expiration-service (Go worker)                       │
-                                                                             │
-  Datastores:  RDS PostgreSQL ×3      MongoDB             ElastiCache Redis  │
-               (auth · orders ·       (ticket-service)    (expiration +      │
-                payments)                                  Kong rate-limit)  │
-└────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────┐
+│                       │              AWS EKS  (ap-southeast-1)            │
+│                       │                                                   │
+HTTPS ──► ALB ──► Kong (JWT verify · rate-limit · correlation-ID)           │
+│                       │                   │                               │
+│             ┌─────────┼────────────┬──────┴──────────┐                    │
+│             │         │            │                 │                    │
+│        auth-service  ticket-  order-service    payment-service            │
+│        (NestJS/TS)   service   (Java/SB4)      (NestJS/TS)                │
+│                      (Go/Echo)     │                 │                    │
+│                        │      gRPC │                 │                    │
+│                        └──────────-┘                 │                    │
+│                              │                       │                    │
+│                       Apache Kafka (MSK / Strimzi) ──┘                    │
+│                              │                                            │
+│                      expiration-service (Go worker)                       │
+│                                                                           │
+│Datastores:  RDS PostgreSQL ×3      MongoDB             ElastiCache Redis  │
+│             (auth · orders ·       (ticket-service)    (expiration +      │
+│              payments)                                  Kong rate-limit)  │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Request flow:**
