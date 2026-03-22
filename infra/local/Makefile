@@ -112,11 +112,11 @@ build-order:
 	@echo "  Building order-service (context: repo root)..."
 	@docker build \
 		--file $(REPO_ROOT)/services/order-service/Dockerfile \
-		--tag order-service:local \
+		--tag order-service:latest \
 		--quiet \
 		$(REPO_ROOT)
-	@minikube image load order-service:local
-	@echo "  Loaded order-service:local"
+	@minikube image load order-service:latest
+	@echo "  Loaded order-service:latest"
 
 # All other services use their own directory as the build context
 build-services:
@@ -124,11 +124,11 @@ build-services:
 		echo "  Building $$svc..."; \
 		docker build \
 			--file $(REPO_ROOT)/services/$$svc/Dockerfile \
-			--tag $$svc:local \
+			--tag $$svc:latest \
 			--quiet \
 			$(REPO_ROOT)/services/$$svc; \
-		minikube image load $$svc:local; \
-		echo "  Loaded $$svc:local"; \
+		minikube image load $$svc:latest; \
+		echo "  Loaded $$svc:latest"; \
 	done
 
 # ─────────────────────────────────────────────────────────────────────────────
