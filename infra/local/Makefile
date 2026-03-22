@@ -38,8 +38,18 @@ CYAN  := \033[0;36m
 GREEN := \033[0;32m
 RESET := \033[0m
 
+# ── Infra image versions (must match what the Helm chart requests) ────────────
+# Bitnami only publishes :latest on Docker Hub — pinned tags don't exist there.
+# We pull :latest, retag to the exact version the chart expects, then load into
+# minikube so kubelet finds them locally (imagePullPolicy: IfNotPresent).
+POSTGRESQL_IMG := docker.io/bitnami/postgresql:17.5.0-debian-12-r6
+MONGODB_IMG    := docker.io/bitnami/mongodb:8.0.9-debian-12-r1
+REDIS_IMG      := docker.io/bitnami/redis:7.4.2-debian-12-r4
+CP_KAFKA_IMG   := confluentinc/cp-kafka:7.7.1
+KONG_IMG       := kong:3.9
+
 # ── Phony targets ─────────────────────────────────────────────────────────────
-.PHONY: help up deploy build build-order build-services \
+.PHONY: help up deploy build build-order build-services load-infra-images \
         secrets kong-config helm-upgrade \
         tunnel status logs restart \
         down stop clean
@@ -51,19 +61,20 @@ help:
 	@echo ""
 	@echo "  Ticketing platform — local Kubernetes deployment"
 	@echo ""
-	@printf "  $(CYAN)%-20s$(RESET) %s\n" "up"           "Full bootstrap (minikube + images + deploy)"
-	@printf "  $(CYAN)%-20s$(RESET) %s\n" "deploy"       "Re-deploy without rebuilding images"
-	@printf "  $(CYAN)%-20s$(RESET) %s\n" "build"        "Build + load all service images into minikube"
-	@printf "  $(CYAN)%-20s$(RESET) %s\n" "helm-upgrade" "Run helm upgrade only (fastest re-deploy)"
-	@printf "  $(CYAN)%-20s$(RESET) %s\n" "kong-config"  "Re-render Kong config from template"
-	@printf "  $(CYAN)%-20s$(RESET) %s\n" "secrets"      "Re-create all Kubernetes secrets"
-	@printf "  $(CYAN)%-20s$(RESET) %s\n" "tunnel"       "Start minikube tunnel (sudo required)"
-	@printf "  $(CYAN)%-20s$(RESET) %s\n" "status"       "Show all pods in the ticketing namespace"
-	@printf "  $(CYAN)%-20s$(RESET) %s\n" "logs"         "Tail logs  — make logs SVC=auth-service"
-	@printf "  $(CYAN)%-20s$(RESET) %s\n" "restart"      "Rolling restart — make restart SVC=client"
-	@printf "  $(CYAN)%-20s$(RESET) %s\n" "down"         "Uninstall Helm release + delete namespace"
-	@printf "  $(CYAN)%-20s$(RESET) %s\n" "stop"         "Stop minikube"
-	@printf "  $(CYAN)%-20s$(RESET) %s\n" "clean"        "down + stop (full teardown)"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "up"                "Full bootstrap (minikube + images + deploy)"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "deploy"            "Re-deploy without rebuilding images"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "build"             "Build + load all service images into minikube"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "load-infra-images" "Pull + load Bitnami/Kong/Kafka images into minikube"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "helm-upgrade"      "Run helm upgrade only (fastest re-deploy)"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "kong-config"       "Re-render Kong config from template"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "secrets"           "Re-create all Kubernetes secrets"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "tunnel"            "Start minikube tunnel (sudo required)"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "status"            "Show all pods in the ticketing namespace"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "logs"              "Tail logs  — make logs SVC=auth-service"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "restart"           "Rolling restart — make restart SVC=client"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "down"              "Uninstall Helm release + delete namespace"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "stop"              "Stop minikube"
+	@printf "  $(CYAN)%-20s$(RESET) %s\n" "clean"             "down + stop (full teardown)"
 	@echo ""
 	@echo "  Endpoints after 'make tunnel':"
 	@echo "    Kong / Next.js app : http://localhost:8000"
@@ -73,7 +84,7 @@ help:
 # ─────────────────────────────────────────────────────────────────────────────
 ## up : Full bootstrap — start minikube, build images, create secrets, deploy
 # ─────────────────────────────────────────────────────────────────────────────
-up: _check-secrets _check-tools _minikube-start build secrets kong-config helm-upgrade
+up: _check-secrets _check-tools _minikube-start load-infra-images build secrets kong-config helm-upgrade
 	@echo ""
 	@printf "$(GREEN)╔══════════════════════════════════════════════════════════╗$(RESET)\n"
 	@printf "$(GREEN)║         Local Kubernetes stack is ready!                 ║$(RESET)\n"
@@ -119,6 +130,48 @@ build-services:
 		minikube image load $$svc:local; \
 		echo "  Loaded $$svc:local"; \
 	done
+
+# ─────────────────────────────────────────────────────────────────────────────
+## load-infra-images : Pull backing-service images and load them into minikube
+##
+## Bitnami only publishes :latest on Docker Hub — pinned tags return "manifest
+## unknown". We pull :latest, retag to the exact version the Helm chart
+## requests, then 'minikube image load' so kubelet finds them locally.
+## Skips each image if it is already present in minikube's image cache.
+# ─────────────────────────────────────────────────────────────────────────────
+load-infra-images:
+	@echo "Loading infrastructure images into minikube..."
+	@_load_bitnami() { \
+		full_tag="$$1"; \
+		src_tag="$$2"; \
+		img_name=$$(echo "$$full_tag" | cut -d: -f1); \
+		if minikube image ls 2>/dev/null | grep -qF "$$full_tag"; then \
+			echo "  Already loaded: $$full_tag"; \
+		else \
+			echo "  Pulling $$src_tag → retag → $$full_tag"; \
+			docker pull --quiet "$$src_tag"; \
+			docker tag "$$src_tag" "$$full_tag"; \
+			minikube image load "$$full_tag"; \
+			echo "  Loaded $$full_tag"; \
+		fi; \
+	}; \
+	_load_direct() { \
+		full_tag="$$1"; \
+		if minikube image ls 2>/dev/null | grep -qF "$$full_tag"; then \
+			echo "  Already loaded: $$full_tag"; \
+		else \
+			echo "  Pulling $$full_tag"; \
+			docker pull --quiet "$$full_tag"; \
+			minikube image load "$$full_tag"; \
+			echo "  Loaded $$full_tag"; \
+		fi; \
+	}; \
+	_load_bitnami "$(POSTGRESQL_IMG)" "docker.io/bitnami/postgresql:latest"; \
+	_load_bitnami "$(MONGODB_IMG)"    "docker.io/bitnami/mongodb:latest"; \
+	_load_bitnami "$(REDIS_IMG)"      "docker.io/bitnami/redis:latest"; \
+	_load_direct  "$(CP_KAFKA_IMG)"; \
+	_load_direct  "$(KONG_IMG)"
+	@echo "All infrastructure images loaded."
 
 # ─────────────────────────────────────────────────────────────────────────────
 ## secrets : Create (or recreate) all Kubernetes secrets from secrets.env
