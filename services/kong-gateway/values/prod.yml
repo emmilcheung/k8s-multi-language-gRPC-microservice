@@ -1,0 +1,20 @@
+# Kong gateway — EKS production environment overrides
+# ──────────────────────────────────────────────────────
+# Namespace: ticketing-prod
+# Helm release: ticketing
+# Rate limiting uses Redis (shared across Kong nodes).
+# Tighter rate limits and longer SSR timeouts for real traffic.
+
+HOST_AUTH: ticketing-auth-service.ticketing-prod.svc.cluster.local:3000
+HOST_TICKETS: ticketing-ticket-service.ticketing-prod.svc.cluster.local:3001
+HOST_ORDERS: ticketing-order-service.ticketing-prod.svc.cluster.local:8082
+HOST_PAYMENTS: ticketing-payment-service.ticketing-prod.svc.cluster.local:3002
+HOST_CLIENT: ticketing-client.ticketing-prod.svc.cluster.local:4000
+
+READ_TIMEOUT_MS: 30000
+WRITE_TIMEOUT_MS: 30000
+CLIENT_READ_TIMEOUT_MS: 60000
+CLIENT_WRITE_TIMEOUT_MS: 60000
+
+RATE_LIMIT_ANONYMOUS_PER_MINUTE: 60
+RATE_LIMIT_POLICY: redis

@@ -692,6 +692,50 @@ minikube stop
 
 ---
 
+### Session: 2026-03-22 — Next.js Server Actions CSRF fix via Kong ⏳ AWAITING REVIEW
+
+**Branch:** `feat/kong-gateway-restructure` — changes committed, awaiting owner approval before merge to `main`.
+
+#### What was done
+
+Fixed Next.js 15+ Server Actions failing with "Invalid Server Actions request." (500) when the app runs behind Kong on minikube.
+
+**Root cause 1 — `INTERNAL_API_URL` missing** (`infra/helm/values.yaml`):
+- The client pod had no `INTERNAL_API_URL` env var, so Next.js Server Components/Actions fell back to `http://localhost:8080` (unreachable inside the pod).
+- Fixed by adding `INTERNAL_API_URL: "http://ticketing-kong-proxy.ticketing.svc.cluster.local:8000"` to the `client.env` section.
+
+**Root cause 2 — Next.js CSRF check broken by Kong** (`services/kong-gateway/config/kong.base.yml`):
+- Next.js 15+ Server Actions CSRF protection compares `new URL(origin).host` against the `X-Forwarded-Host` header (preferred over `Host`).
+- Kong rewrites the `Host` header to the upstream service hostname (`ticketing-client.ticketing.svc.cluster.local`). Its nginx template sets `X-Forwarded-Host` from the `$upstream_x_forwarded_host` nginx variable, which is computed in `runloop/handler.lua` from the parsed `host` var — **stripping the port** (e.g. `localhost:8000` → `localhost`).
+- `kong.service.request.set_header("X-Forwarded-Host", ...)` was tried first but is also overwritten by the same nginx variable after the post-function plugin runs.
+- **Fix**: use `ngx.var.upstream_x_forwarded_host = raw_host` in the `post-function` Lua plugin on the `client-catchall` route. This overwrites the nginx variable directly, before `proxy_set_header` uses it. `kong.request.get_header("host")` returns the raw Host header from the browser including the port (e.g. `localhost:18000`), which matches `new URL("http://localhost:18000").host`.
+
+#### Debugging path (for future reference)
+
+Attempts that did NOT work:
+1. `kong.service.request.set_header("X-Forwarded-Host", kong.request.get_host() .. ":" .. port)` — `get_host()` returns `localhost` (port stripped); also overwritten by nginx template.
+2. `kong.service.request.set_header("X-Forwarded-Host", kong.request.get_header("host"))` — `get_header("host")` returns `localhost:18000` ✅, but still overwritten by nginx.
+3. `ngx.var.upstream_x_forwarded_host = kong.request.get_header("host")` — **works** ✅. Confirmed via `kong.log.notice` debug: Kong receives `localhost:18000`, sets `$upstream_x_forwarded_host = "localhost:18000"`, nginx proxies `X-Forwarded-Host: localhost:18000` to Next.js.
+
+#### Verification
+
+- Client logs: no "does not match" CSRF errors after revision 36 deployed.
+- Test: POST to `/auth/signup` with `Next-Action` header and `Origin: http://localhost:18000` returns a non-CSRF error (RSC decode error for invalid body), confirming the CSRF check passed.
+- CSRF errors confirmed to be from earlier revisions (timestamps `11:33` and `11:35`), before the fix deployed at `11:36:20`.
+
+#### Files changed
+
+- `infra/helm/values.yaml` — added `INTERNAL_API_URL` to `client.env`
+- `services/kong-gateway/config/kong.base.yml` — added `post-function` plugin on `client-catchall` route with `ngx.var.upstream_x_forwarded_host` fix
+
+#### Known issues / next steps
+
+- E2E Playwright tests not yet run against minikube (require `sudo minikube tunnel` in a separate terminal).
+- The `multipart` Server Action path ("Connection closed" error) was investigated but is unrelated to CSRF — it's a React RSC decode error when curl sends raw form fields instead of RSC-encoded arguments. A real browser using `useActionState` sends RSC-encoded fetch actions (text/plain body), which work correctly.
+- PLAN.md and STATUS.md have uncommitted changes (unrelated to this fix) — excluded from this commit.
+
+---
+
 ### Session: 2026-03-22 — setup.sh hardening complete ✅ COMPLETE
 
 **Branch:** uncommitted working changes — per merge workflow, awaiting owner approval before touching `main`.

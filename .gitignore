@@ -47,6 +47,9 @@ infra/local/secrets.env
 infra/terraform/environments/**/backend.hcl
 infra/terraform/environments/**/*.tfvars
 
+# Kong gateway — rendered output (build artifact, never commit)
+services/kong-gateway/kong.yml
+
 # Docker
 docker-compose.override.yml.local
 

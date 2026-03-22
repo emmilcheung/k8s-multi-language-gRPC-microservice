@@ -1,0 +1,14 @@
+# Kong gateway — minikube (local Kubernetes) overrides
+# ──────────────────────────────────────────────────────
+# Service names resolve via Kubernetes DNS inside the `ticketing` namespace.
+# Helm release name is `ticketing`, so sub-chart services are named
+# `ticketing-<service-name>`.
+
+HOST_AUTH: ticketing-auth-service.ticketing.svc.cluster.local:3000
+HOST_TICKETS: ticketing-ticket-service.ticketing.svc.cluster.local:3001
+HOST_ORDERS: ticketing-order-service.ticketing.svc.cluster.local:8082
+HOST_PAYMENTS: ticketing-payment-service.ticketing.svc.cluster.local:3002
+HOST_CLIENT: ticketing-client.ticketing.svc.cluster.local:4000
+
+RATE_LIMIT_ANONYMOUS_PER_MINUTE: 300
+RATE_LIMIT_POLICY: local

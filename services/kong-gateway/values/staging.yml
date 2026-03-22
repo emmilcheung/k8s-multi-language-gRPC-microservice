@@ -1,0 +1,19 @@
+# Kong gateway — EKS staging environment overrides
+# ───────────────────────────────────────────────────
+# Namespace: ticketing-staging
+# Helm release: ticketing
+# Rate limiting uses Redis (shared across Kong nodes).
+
+HOST_AUTH: ticketing-auth-service.ticketing-staging.svc.cluster.local:3000
+HOST_TICKETS: ticketing-ticket-service.ticketing-staging.svc.cluster.local:3001
+HOST_ORDERS: ticketing-order-service.ticketing-staging.svc.cluster.local:8082
+HOST_PAYMENTS: ticketing-payment-service.ticketing-staging.svc.cluster.local:3002
+HOST_CLIENT: ticketing-client.ticketing-staging.svc.cluster.local:4000
+
+READ_TIMEOUT_MS: 30000
+WRITE_TIMEOUT_MS: 30000
+CLIENT_READ_TIMEOUT_MS: 60000
+CLIENT_WRITE_TIMEOUT_MS: 60000
+
+RATE_LIMIT_ANONYMOUS_PER_MINUTE: 60
+RATE_LIMIT_POLICY: redis

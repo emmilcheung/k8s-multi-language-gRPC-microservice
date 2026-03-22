@@ -1,0 +1,32 @@
+# Kong gateway — default values
+# ─────────────────────────────
+# These are the safe defaults shared across all environments.
+# Per-environment files (local.yml, minikube.yml, dev.yml, staging.yml, prod.yml)
+# override only the keys that differ.
+#
+# RSA_PUBLIC_KEY is NOT defined here — it must always come from the environment
+# variable KONG_RSA_PUBLIC_KEY passed to build.sh at render time.
+
+# ── Service upstream hostnames (host:port) ─────────────────────────────────────
+HOST_AUTH: auth-service:3000
+HOST_TICKETS: ticket-service:3001
+HOST_ORDERS: order-service:8082
+HOST_PAYMENTS: payment-service:3002
+HOST_CLIENT: client:4000
+
+# ── Timeouts (milliseconds) ────────────────────────────────────────────────────
+CONNECT_TIMEOUT_MS: 5000
+READ_TIMEOUT_MS: 10000
+WRITE_TIMEOUT_MS: 10000
+# Next.js SSR pages can be slow; give the client-service more headroom.
+CLIENT_READ_TIMEOUT_MS: 30000
+CLIENT_WRITE_TIMEOUT_MS: 30000
+
+# ── JWT ────────────────────────────────────────────────────────────────────────
+JWT_COOKIE_NAME: token
+
+# ── Rate limiting ──────────────────────────────────────────────────────────────
+# policy: local  — in-process counter per Kong node (suitable for dev/local)
+# policy: redis  — shared counter across all Kong nodes (required in production)
+RATE_LIMIT_ANONYMOUS_PER_MINUTE: 300
+RATE_LIMIT_POLICY: local

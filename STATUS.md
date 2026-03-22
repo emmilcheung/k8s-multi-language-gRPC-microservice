@@ -1,9 +1,9 @@
 # Platform Build Status Log
 
-> **Last Updated:** 2026-03-21 UTC  
-> **Current Phase:** Integration & Manual Testing  
-> **Overall Progress:** 95% (all 5 backend services + client complete; Kong wired)  
-> **Git Status:** All changes on `feat/order-service` — awaiting owner approval to merge
+> **Last Updated:** 2026-03-22 UTC  
+> **Current Phase:** Local Kubernetes Environment Complete — CI/CD and EKS Infrastructure Pending  
+> **Overall Progress:** ~70% of full plan (all services built and E2E tested; EKS infra not yet applied)  
+> **Git Status:** `main` is clean at `3135626` (ops/local-deployment merged). Uncommitted `setup.sh` hardening changes on working tree — awaiting owner approval before committing.
 
 ---
 
@@ -11,28 +11,22 @@
 
 | Concern | Status | Details |
 |---|---|---|
-| **Docker Infrastructure** | ✅ Running | All 7 infra containers + 5 service containers healthy. Kong added. |
 | **Project Setup** | ✅ Complete | PLAN.md, AGENTS.md, docker-compose, workflow tools |
-| **auth-service** | ✅ Complete | TypeScript/NestJS, Drizzle ORM, RS256 JWT, 28 tests (all passing) |
-| **ticket-service** | ✅ Complete | Go/Echo, MongoDB, Kafka producer, 29 tests (16 unit + 13 integration) |
-| **payment-service** | ✅ Complete | TypeScript/NestJS, Drizzle ORM, Stripe, Kafka consumer, 25 tests (all passing) |
-| **order-service** | ✅ Complete | Java 21 / Spring Boot, JPA, Flyway, Kafka, gRPC client |
+| **auth-service** | ✅ Complete | TypeScript/NestJS, Drizzle ORM, RS256 JWT, 28 tests passing |
+| **ticket-service** | ✅ Complete | Go/Echo, MongoDB, gRPC server (port 50051), Kafka producer + consumer, 29 tests passing |
+| **order-service** | ✅ Complete | Java 21/Spring Boot 4, JPA, Flyway, Kafka, gRPC client |
+| **payment-service** | ✅ Complete | TypeScript/NestJS, Drizzle ORM, Kafka consumer/producer, 25 tests passing |
 | **expiration-service** | ✅ Complete | Go, asynq, Redis, Kafka |
-| **client** | ✅ Complete | Next.js, shadcn/ui, all pages, Server Actions — build clean |
-| **Kong API Gateway** | ✅ Wired | DB-less declarative config; JWT plugin (RS256 cookie); request-transformer → X-User-Id |
-| **E2E curl flow** | ✅ Verified | register → create ticket → create order (gRPC validate) → cancel order |
-| **E2E browser flow** | ⏳ Not yet tested | Ready to run: `docker compose up kong` then `pnpm dev` in services/client |
-| **CI/CD** | ⏭️ Pending | GitHub Actions pipelines deferred |
-| **Kubernetes Local** | ⏭️ Pending | kind cluster and Helm charts deferred |
-
-### TODO — E2E Tests (client)
-Add Playwright E2E tests for the client app covering:
-- User registration and login
-- Creating a ticket
-- Browsing tickets on the homepage
-- Creating an order for a ticket
-- Cancelling an order
-- My orders page listing
+| **client** | ✅ Complete | Next.js 15 App Router, shadcn/ui, all pages, Server Actions |
+| **Kong API Gateway** | ✅ Complete | DB-less declarative config; JWT plugin (RS256); post-function sub→X-User-Id forwarding; startup migrations |
+| **E2E Playwright tests** | ✅ 18/18 passing | Auth, ticket CRUD, order lifecycle, payment via Kafka — against both Docker Compose and minikube |
+| **Docker Compose** | ✅ Running | `docker compose up --build` starts all services + infra |
+| **Local Kubernetes (minikube)** | ✅ Complete | `infra/local/setup.sh` — idempotent 7-step bootstrap; 18/18 E2E pass against minikube cluster |
+| **Helm umbrella chart** | ✅ Complete | `infra/helm/` with `values-local.yaml`; cp-kafka sub-chart (Confluent); Linkerd mTLS integration |
+| **Terraform modules** | ✅ Scaffolded | vpc, eks, rds, elasticache, msk, kong modules + dev/staging/prod environments written; **not applied against real AWS** |
+| **CI/CD** | ⏭️ Pending | `.github/workflows/` is empty; pipelines not yet written |
+| **EKS deploy** | ⏭️ Pending | Terraform apply against real AWS deferred; local minikube is the active dev environment |
+| **Observability stack** | ⏭️ Pending | OTel, AMP, AMG, X-Ray — deferred to Milestone 7 |
 
 ---
 
@@ -45,298 +39,224 @@ Add Playwright E2E tests for the client app covering:
 **Deliverables:**
 - ✅ PLAN.md — architecture, tech choices, service specs, deployment strategy
 - ✅ AGENTS.md — engineering standards (§0–15) + implementation conventions (§16)
-- ✅ docker-compose.yml — all 7 dev containers (PostgreSQL ×3, MongoDB, Redis, Kafka KRaft, Schema Registry)
-- ✅ STATUS.md — comprehensive project status tracking
-- ✅ workflow.sh — CLI tool for pause/resume/decision checkpoints
-- ✅ WORKFLOW.md — detailed workflow system guide
+- ✅ docker-compose.yml — all infra containers (PostgreSQL ×3, MongoDB, Redis, Kafka KRaft, Schema Registry) + all service containers
+- ✅ STATUS.md — project status tracking
+- ✅ workflow.sh + WORKFLOW.md — CLI workflow tools
 - ✅ .gitignore — excludes /legacy, .env, build artifacts
 
 **Key Decisions:**
-- Monorepo structure: `/services/<service-name>`, `/infra`, `/proto`
-- Tech stack: TypeScript (Node.js 24 LTS, pnpm, Vitest), Go 1.23+, Java 21
-- Testing: Real databases via Testcontainers, no mocks
-- Messaging: Kafka KRaft (no ZooKeeper) for dev simplicity
-- ORM: Drizzle (Node.js), Spring Data JPA (Java), raw queries (Go)
+- Monorepo: `/services/<service-name>`, `/infra`, `/proto`
+- Stack: TypeScript (Node.js 24 LTS, pnpm, Vitest), Go 1.23+, Java 21, Next.js 15
+- Testing: real databases via Testcontainers, no mocks
+- Messaging: Kafka KRaft for dev (no ZooKeeper)
+- ORM: Drizzle (Node.js), Spring Data JPA (Java)
 
 ---
 
-### Milestone 2: auth-service Implementation
+### Milestone 2: auth-service
 
 **Branch:** `feat/auth-service` (merged to main)
 
-**Repository:** `services/auth-service/`  
 **Stack:** TypeScript, Node.js 24 LTS, NestJS 10, Drizzle ORM, PostgreSQL 16, pnpm, Vitest
 
-**Deliverables:**
-- ✅ Project structure: NestJS modules (auth, health, metrics, users)
-- ✅ Config validation: Joi schema, fail-loud startup
-- ✅ Database: Drizzle ORM schema, migrations, users table with UUID PK
-- ✅ Authentication: Signup, signin, signout endpoints
-- ✅ JWT: RS256 asymmetric signing, JWKS endpoint at `/.well-known/jwks.json`
-- ✅ Password hashing: argon2id with constant-time verification
-- ✅ Health checks: `/healthz/live` (liveness), `/healthz/ready` (readiness with DB check)
-- ✅ Metrics: Prometheus endpoint at `/metrics`
-- ✅ Logging: nestjs-pino structured JSON output
-- ✅ Docker: Multi-stage, pinned base image, non-root user
-- ✅ Tests: 28 total (14 unit + 14 integration)
-  - Unit: business logic, JWT creation, config validation (349ms)
-  - Integration: real PostgreSQL via Testcontainers, full HTTP requests via Supertest (2.51s)
-- ✅ Documentation: Comprehensive README with API, env vars, health checks
-
-**Test Verification:**
-```
-npm test:               14/14 PASS (349ms)
-npm run test:integration: 14/14 PASS (2.51s)
-npm run build:          ✅ CLEAN (no warnings/errors)
-```
+- ✅ NestJS modules: auth, health, metrics, users
+- ✅ Config validation (Joi), fail-loud startup
+- ✅ Drizzle ORM schema + migrations; users table with UUID PK
+- ✅ Signup, signin, signout endpoints
+- ✅ RS256 JWT signing; JWKS endpoint at `/.well-known/jwks.json`
+- ✅ argon2id password hashing
+- ✅ `/healthz/live`, `/healthz/ready`, `/metrics`
+- ✅ nestjs-pino structured JSON logging
+- ✅ Multi-stage Dockerfile, non-root user
+- ✅ 28 tests (14 unit + 14 integration via Testcontainers PostgreSQL)
+- ✅ Startup migration: `src/migrate.ts` runs drizzle-orm migrator before `main` (fixes fresh-cluster schema issue)
 
 ---
 
-### Milestone 3: ticket-service Implementation
+### Milestone 3: ticket-service
 
 **Branch:** `feat/ticket-service` (merged to main)
 
-**Repository:** `services/ticket-service/`  
-**Stack:** Go 1.23+, Echo v4, MongoDB 7, Kafka (producer), testify, Testcontainers
+**Stack:** Go 1.23+, Echo v4, MongoDB 7, segmentio/kafka-go, testify, testcontainers-go
 
-**Deliverables:**
-- ✅ Project structure: `/cmd/server`, `/internal/{config,handler,service,repository,kafka,middleware}`, `/pkg/logger`
-- ✅ Config validation: Environment variable parsing, fail-loud startup
-- ✅ Logging: zap structured logger, JSON output
-- ✅ MongoDB integration: 
-  - Connection pooling with health checks
-  - JSON schema validation enforced on collection
-  - Indexes on `userId` and `orderId` fields
-  - Optimistic concurrency control (OCC) via `version` field
-- ✅ Kafka producer: 
-  - CloudEvents v1.0 envelope for all events
-  - Topics: `tickets.ticket.created`, `tickets.ticket.updated`
-  - Idempotent producer, `acks=all`, delivery tracking
-- ✅ HTTP API:
-  - `POST /api/tickets` — create ticket (requires X-User-Id header)
-  - `GET /api/tickets` — list all tickets
-  - `GET /api/tickets/:id` — fetch single ticket
-  - `PUT /api/tickets/:id` — update ticket (ownership + reservation checks)
-- ✅ Health checks: `/healthz/live`, `/healthz/ready` (pings MongoDB)
-- ✅ Metrics: Prometheus endpoint at `/metrics`
-- ✅ Error handling: Standardised error response body (code, message, details)
-- ✅ Docker: Multi-stage, CGO-enabled for librdkafka, pinned digest, non-root user
-- ✅ Tests: 29 total (16 unit + 13 integration)
-  - Unit: config validation, service business logic with mocks (testify)
-  - Integration: real MongoDB 7 via Testcontainers, full HTTP + database flows (httptest)
-- ✅ Documentation: Comprehensive README with API, Kafka events, health checks, local setup
+- ✅ `/cmd/server`, `/internal/{config,handler,service,repository,kafka,middleware}`, `/pkg/logger`
+- ✅ zap structured JSON logger
+- ✅ MongoDB: connection pooling, JSON schema validator, indexes, OCC via `version` field
+- ✅ Kafka producer: `tickets.ticket.created`, `tickets.ticket.updated` (CloudEvents v1.0, `acks=all`)
+- ✅ Kafka consumer: `orders.order.created`, `orders.order.cancelled` → `ReserveTicket`/`ReleaseTicket`
+- ✅ gRPC server on port **50051**: `GetTicket`, `ValidateTicketAvailability`
+- ✅ HTTP REST API on port 8080: CRUD for tickets
+- ✅ `/healthz/live`, `/healthz/ready`, `/metrics`
+- ✅ Multi-stage Dockerfile, non-root user
+- ✅ 29 tests (16 unit + 13 integration via Testcontainers MongoDB)
 
-**Test Verification:**
-```
-go test ./internal/...:  16/16 PASS (config + service)
-go test ./test/...:      13/13 PASS (real MongoDB via Testcontainers, 17.8s)
-go build ./...:          ✅ CLEAN (harmless ld pthread warning)
-```
+> **Note:** gRPC port is **50051** (not 9090 as written in earlier PLAN.md spec).
 
 ---
 
-### Milestone 4: payment-service Implementation
+### Milestone 4: order-service
+
+**Branch:** `feat/order-service` (merged to main)
+
+**Stack:** Java 21, Spring Boot 4, Spring Data JPA, Flyway, Spring Kafka, gRPC client
+
+- ✅ Order CRUD: create, list, get, cancel
+- ✅ gRPC client → ticket-service `ValidateTicketAvailability` (deadline 5 s)
+- ✅ Flyway migrations: `orders`, `order_tickets`, `outbox` tables
+- ✅ Transactional outbox pattern for Kafka publishing
+- ✅ Kafka: produces `orders.order.created`, `orders.order.cancelled`; consumes `tickets.ticket.created`, `tickets.ticket.updated`, `payments.payment.captured`, `expiration.order.expiration_complete`
+- ✅ Multi-stage Dockerfile (Maven → eclipse-temurin:21-jre-alpine); build context is repo root (copies `/proto`)
+- ✅ Spring Boot Actuator: `/actuator/health/liveness`, `/actuator/health/readiness`, `/actuator/prometheus`
+
+---
+
+### Milestone 5a: payment-service
 
 **Branch:** `feat/payment-service` (merged to main)
 
-**Repository:** `services/payment-service/`  
-**Stack:** TypeScript, Node.js 24 LTS, NestJS 11, Drizzle ORM, PostgreSQL 16, Stripe, KafkaJS, pnpm, Vitest
+**Stack:** TypeScript, Node.js 24 LTS, NestJS 10, Drizzle ORM, PostgreSQL 16, pnpm, Vitest
 
-**Deliverables:**
-- ✅ Project structure: NestJS modules (payments, health, metrics) + Kafka consumer at AppModule level
-- ✅ Config validation: Joi schema, fail-loud startup
-- ✅ Database: Drizzle ORM schema, migrations, `payments` table with UUID PK
-- ✅ Payment processing: `POST /api/payments` — idempotent Stripe PaymentIntent creation
-- ✅ Idempotency: one payment per `orderId`; duplicate requests return `409 Conflict`
-- ✅ Kafka consumer: `orders.order.created` → pre-create `pending` payment record
-- ✅ Resilience: 3-attempt exponential back-off, DLQ routing to `orders.order.created.dlq`
-- ✅ Test isolation: `OrdersConsumer` lives in `AppModule`, not `PaymentsModule` — integration tests bootstrap `PaymentsModule` without Kafka
-- ✅ Test mock fast-path: `STRIPE_SECRET_KEY=test_mock` bypasses real Stripe calls
-- ✅ Health checks: `/healthz/live`, `/healthz/ready`
-- ✅ Metrics: Prometheus endpoint at `/metrics`
-- ✅ Logging: nestjs-pino structured JSON output
-- ✅ Docker: Multi-stage Dockerfile, Node 24 LTS, pnpm, pinned digest, non-root user
-- ✅ Tests: 25 total (14 unit + 11 integration)
-  - Unit: service idempotency, Stripe mock, controller validation (fast)
-  - Integration: real PostgreSQL via Testcontainers, full HTTP requests via Supertest
-- ✅ Documentation: README with API docs, env vars, Kafka topics, local setup
-
-**Key Architecture Decision:**
-- `OrdersConsumer` must NOT be in `PaymentsModule` — isolate it at `AppModule` level so integration tests can bootstrap the payments module without triggering Kafka connections. This is the canonical pattern for testing Kafka-consuming NestJS services.
-
-**Test Verification:**
-```
-pnpm test:              14/14 PASS
-pnpm test:integration:  11/11 PASS (real PostgreSQL via Testcontainers)
-pnpm build:             ✅ CLEAN
-```
-
-**Fixes included:**
-- `fix(auth-service)`: updated Dockerfile to pnpm/Node 24 LTS; added `@types/ms` (was missing, caused `nest build` failure)
-- Both `auth-service` and `payment-service` builds now pass cleanly
+- ✅ NestJS modules: payments, health, metrics
+- ✅ `POST /api/payments` — idempotent payment creation; mock guard (`STRIPE_SECRET_KEY=test_mock`)
+- ✅ Produces `payments.payment.captured` (CloudEvents v1.0) to Kafka
+- ✅ Consumes `orders.order.created`, `orders.order.cancelled` — maintains local `payment_orders` replica
+- ✅ Startup migration: `src/migrate.ts` (same pattern as auth-service)
+- ✅ 25 tests (14 unit + 11 integration via Testcontainers PostgreSQL)
 
 ---
 
-## Remaining Services
+### Milestone 5b: expiration-service
 
-### payment-service
-- **Stack:** TypeScript, Node.js 24 LTS, NestJS
-- **Status:** ✅ Complete (merged to main)
-- **Key Feature:** Stripe PaymentIntents, Kafka consumer for order events, DLQ routing
-- See Milestone 4 below for details.
+**Branch:** `feat/expiration-service` (merged to main)
 
-### order-service
-- **Stack:** Java 21, Spring Boot 4, Spring Data JPA, PostgreSQL
-- **Status:** Depends on ticket-service gRPC proto
-- **Est. Time:** 3–4 hours
-- **Key Feature:** Order lifecycle state machine, transactional outbox pattern
+**Stack:** Go 1.23+, Echo v4 (health/metrics only), asynq, Redis, segmentio/kafka-go
 
-### expiration-service
-- **Stack:** Go 1.23+, asynq (job queue), Redis, Kafka
-- **Status:** Ready to start
-- **Est. Time:** 2–3 hours
-- **Key Feature:** Order expiration jobs, Redis-backed queue
-
-### client
-- **Stack:** TypeScript, Next.js 15, pnpm
-- **Status:** Can start anytime (no backend dependencies)
-- **Est. Time:** 3–4 hours
-- **Key Feature:** Frontend app, Kong API Gateway routes
+- ✅ Consumes `orders.order.created` → schedules asynq delayed job at `expiresAt`
+- ✅ When job fires → publishes `expiration.order.expiration_complete`
+- ✅ `/healthz/live`, `/healthz/ready`, `/metrics`
+- ✅ Multi-stage Dockerfile, non-root user
 
 ---
 
-## Docker Infrastructure Status
+### Milestone 6: client (Next.js 15)
 
-All 7 containers running and healthy:
+**Branch:** `feat/client` (merged to main)
+
+**Stack:** TypeScript, Next.js 15 App Router, shadcn/ui, Tailwind CSS, pnpm
+
+- ✅ Pages: `/` (ticket list), `/auth/signup`, `/auth/signin`, `/tickets/new`, `/tickets/[ticketId]`, `/orders`, `/orders/[orderId]`
+- ✅ httpOnly cookie auth; reads `X-User-Id` from Kong-forwarded header
+- ✅ Multi-stage Dockerfile (`next build --standalone`)
+- ✅ Playwright E2E test suite: 18 tests covering auth, tickets, orders, payment
+
+---
+
+### Kong API Gateway Integration
+
+**Branch:** `feature/e2e-api-gateway` → `feat/kong-jwt-sub-forwarding` (merged to main at `f43e2a6`)
+
+- ✅ DB-less declarative config (`infra/kong/kong.yml`)
+- ✅ JWT plugin: RS256, JWKS from auth-service `/.well-known/jwks.json`, cookie token extraction
+- ✅ Post-function plugin: extracts `sub` from validated JWT → injects `X-User-Id` header upstream
+- ✅ `request-transformer` plugin: strips spoofed `X-User-Id` from incoming client requests
+- ✅ Routes: `/api/users/*`, `/.well-known/jwks.json`, `/api/tickets/*`, `/api/orders/*`, `/api/payments/*`, `/*` (Next.js catch-all)
+- ✅ Real RS256 key pair in `docker-compose.yml` (dev-only; known security trade-off accepted)
+
+---
+
+### Local Kubernetes Environment (minikube)
+
+**Branch:** `ops/local-deployment` (merged to main at `3135626`)
+
+- ✅ `infra/local/setup.sh` — idempotent 7-step bootstrap (tools check → minikube → build+load images → namespace → Linkerd annotation → secrets → helm install → tunnel)
+- ✅ `infra/helm/` — umbrella Helm chart with Bitnami sub-charts (PostgreSQL ×3, MongoDB, Redis) + custom `cp-kafka` sub-chart
+- ✅ `infra/helm/charts/cp-kafka/` — Confluent cp-kafka:7.7.1; INTERNAL listener (9092 in-cluster) + EXTERNAL LoadBalancer (9093 via `minikube tunnel`) for E2E test producer
+- ✅ `infra/helm/values-local.yaml` — minikube overrides: 1 replica, small resources, inline passwords, `kafka.enabled: false` (Bitnami), `cp-kafka.enabled: true`
+- ✅ `infra/local/secrets.env.example` — template; user fills in `RSA_PRIVATE_KEY` + `STRIPE_SECRET_KEY`
+- ✅ Linkerd mTLS: `config.linkerd.io/skip-outbound-ports: "9092"` on `ticketing` namespace (prevents Linkerd intercepting Kafka binary protocol); `skip-inbound-ports/skip-outbound-ports: "9093"` on cp-kafka pod template
+- ✅ Terraform modules scaffolded: vpc, eks, rds, elasticache, msk, kong — dev/staging/prod environments written (**not applied against real AWS**)
+- ✅ 18/18 Playwright E2E tests passing against minikube cluster
+
+---
+
+## Pending Milestones
+
+### Milestone 7: Observability + Hardening
+
+- [ ] Fluent Bit DaemonSet → CloudWatch Logs
+- [ ] OTel Collector → AMP (metrics) + X-Ray (traces)
+- [ ] Amazon Managed Grafana dashboards (RED metrics, Kafka consumer lag)
+- [ ] DLQ handlers fully wired in all consumers
+- [ ] HPA + PDB for all services
+- [ ] NetworkPolicy enforcement
+- [ ] `trivy` image scan in CI
+- [ ] Resource requests/limits reviewed and tuned
+
+### Milestone 8: CI/CD Pipelines
+
+- [ ] `.github/workflows/ci-auth.yaml`, `ci-ticket.yaml`, `ci-order.yaml`, `ci-payment.yaml`, `ci-expiration.yaml`, `ci-client.yaml`
+- [ ] `ci-proto.yaml` (buf lint + breaking check + stub regeneration)
+- [ ] `ci-terraform.yaml` (fmt + validate + plan on PR, apply on merge)
+- [ ] GitHub OIDC → IAM role assumption (no long-lived AWS keys)
+- [ ] Image tag = Git SHA; push to ECR
+
+### Milestone 9: EKS Deploy + Staging
+
+- [ ] `infra/scripts/bootstrap-state.sh` — S3 + DynamoDB state backend
+- [ ] `terraform apply` for dev environment (VPC, EKS, RDS ×3, ElastiCache, Strimzi Kafka, Kong, Schema Registry)
+- [ ] All services deployed to EKS dev via Helm
+- [ ] E2E tests run against EKS dev (same Playwright suite)
+- [ ] Staging environment provisioned + smoke tested
+- [ ] Runbook: prod deploy gate, rollback procedure, secret rotation
+
+---
+
+## Known Issues / Technical Debt
+
+| Item | Severity | Notes |
+|---|---|---|
+| RSA private key in `docker-compose.yml` | Medium | Dev-only; real key committed for convenience. Must move to gitignored `.env` before any shared/CI use. |
+| Bitnami kafka disabled locally | Low | `bitnami/kafka` has no Docker Hub tags. Replaced by custom `cp-kafka` sub-chart using `confluentinc/cp-kafka:7.7.1`. |
+| Helm SSA field manager conflicts | Low | cp-kafka StatefulSet annotations/env patched manually in live cluster; on fresh `helm upgrade --install` from scratch, Helm templates apply correctly. |
+| `setup.sh` changes uncommitted | Low | Four hardening fixes applied this session (GRPC port, Linkerd annotation, MongoDB existingSecret, banner). Awaiting owner approval before committing. |
+
+---
+
+## Docker Compose Infrastructure (local dev without K8s)
 
 ```bash
-$ docker ps --format "table {{.Names}}\t{{.Status}}"
-NAME                      STATUS
-microservices-postgres1   Up 2 hours (healthy)
-microservices-postgres2   Up 2 hours (healthy)
-microservices-postgres3   Up 2 hours (healthy)
-microservices-mongodb     Up 2 hours (healthy)
-microservices-redis       Up 2 hours (healthy)
-microservices-kafka       Up 2 hours (healthy)
-microservices-schema-registry Up 2 hours (healthy)
+docker compose up --build
 ```
+
+| Container | Port | Purpose |
+|---|---|---|
+| postgres-auth | 5432 | auth-service database |
+| postgres-orders | 5433 | order-service database |
+| postgres-payments | 5434 | payment-service database |
+| mongodb | 27017 | ticket-service database |
+| redis | 6379 | expiration-service job queue |
+| kafka | 9092 (internal) / 9093 (host) | Event streaming |
+| schema-registry | 8081 | Confluent Schema Registry |
+| auth-service | 3000 | — |
+| ticket-service | 3001 | — |
+| payment-service | 3002 | — |
+| order-service | 8082 | — |
+| kong (proxy) | 8000 | API Gateway |
 
 ---
 
-## Code Metrics
+## Git Workflow
 
-| Metric | auth-service | ticket-service | payment-service | Combined |
-|---|---|---|---|---|
-| Source Files | 25 | 20 | 22 | 67 |
-| Lines of Code | ~2,500 | ~2,000 | ~1,800 | ~6,300 |
-| Test Files | 7 | 4 | 3 | 14 |
-| Total Tests | 28 | 29 | 25 | 82 |
-| Coverage (est.) | 85%+ | 80%+ | 85%+ | 83%+ |
-| Build Time | 4s | 8s (Go linker) | 5s | — |
-| Test Time | 2.9s | 17.8s (Docker startup) | ~8s (Docker startup) | — |
-
----
-
-## Git Workflow & Commit Standards
-
-### Setup
-- **Repository:** Initialized with `git init` (now local)
-- **Default Branch:** `main`
-- **Remote:** TBD (GitHub when ready)
-- **Config:** Conventional commits, feature branches, squash merges to main
-
-### Branch Naming Convention
-```
-<type>/<short-description>
-
-Examples:
-- setup/project-infrastructure
-- feat/auth-service
-- feat/ticket-service
-- feat/payment-service
-```
-
-### Commit Message Format (Conventional Commits)
-```
-<type>(<scope>): <description>
-
-<optional body explaining why>
-
-<optional footer with issue/milestone reference>
-```
-
-**Types:** `feat`, `fix`, `refactor`, `docs`, `chore`, `ci`, `test`, `perf`  
-**Scope:** Service name or area (e.g., `auth-service`, `ticket-service`, `infra`)
-
-**Examples:**
-```
-feat(auth-service): implement JWT authentication with RS256 signing
-
-- Add signup/signin endpoints
-- Implement argon2id password hashing
-- Set up JWKS endpoint at /.well-known/jwks.json
-- Add 28 unit and integration tests
-
-Closes #1
-```
-
-```
-feat(ticket-service): implement ticket CRUD and Kafka producer
-
-- Add MongoDB integration with OCC via version field
-- Implement ticket creation, listing, updating endpoints
-- Add Kafka CloudEvents producer for ticket lifecycle events
-- Add 29 unit and integration tests with real containers
-
-Closes #2
-```
-
-### Merge Strategy
-- **Feature branches** → **main** via squash merge (keeps history linear and clean)
-- **All branches** must pass CI before merge
-- **Require peer review** before squash merge (documented in CONTRIBUTING.md)
-
-### Commit Workflow Example
-```bash
-# 1. Create feature branch
-git checkout -b feat/auth-service
-
-# 2. Work on feature (multiple commits okay on branch)
-git add .
-git commit -m "feat(auth-service): scaffold NestJS project"
-git commit -m "feat(auth-service): add Drizzle ORM setup"
-git commit -m "feat(auth-service): implement signup endpoint"
-...
-
-# 3. Squash merge to main
-git checkout main
-git pull origin main
-git merge --squash feat/auth-service
-git commit -m "feat(auth-service): implement JWT authentication with RS256 signing
-
-...full body..."
-
-# 4. Delete feature branch
-git branch -d feat/auth-service
-```
-
----
-
-## Next Steps
-
-1. **Browser testing** — `docker compose up` (includes Kong) then `pnpm dev` in `services/client`; manually exercise all flows
-2. **Owner approval** — review `feat/order-service` branch and approve merge to `main`
-3. **E2E tests** — add Playwright tests for client app (see TODO above)
-4. **CI/CD** — GitHub Actions pipelines (deferred until all services ready)
-5. **Kubernetes** — `kind` cluster and Helm charts (deferred until all services ready)
+- **Strategy:** Trunk-based development; short-lived feature branches off `main`, squash-merged
+- **Branch naming:** `feat/<service>`, `fix/<desc>`, `chore/<desc>`, `ops/<desc>`
+- **Commit format:** Conventional Commits (`feat`, `fix`, `chore`, `ci`, `docs`, `test`, `perf`, `refactor`)
+- **Merge rule (AGENTS.md §16.10):** Never auto-merge. Owner must explicitly approve before anything touches `main`.
+- **Current `main`:** `3135626` — clean working tree
 
 ---
 
 ## Project Checkpoint
 
 **Blockers:** None  
-**Risk:** None  
-**Ready to proceed:** ✅ Yes — awaiting owner approval to merge `feat/order-service` → `main`
-
-**Completed services:** auth-service, ticket-service, payment-service, order-service, expiration-service, client (all complete)  
-**Remaining:** owner review + merge; E2E Playwright tests; CI/CD; Kubernetes Helm charts
+**Risk:** Low — all services built and E2E verified  
+**Next action awaiting owner:** Approve uncommitted `setup.sh` hardening changes, then decide whether to proceed with CI/CD (Milestone 8) or EKS infrastructure (Milestone 9) first

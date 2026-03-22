@@ -41,6 +41,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HELM_CHART="${REPO_ROOT}/infra/helm"
 SECRETS_FILE="${REPO_ROOT}/infra/local/secrets.env"
+GATEWAY_DIR="${REPO_ROOT}/services/kong-gateway"
 NAMESPACE="ticketing"
 
 # ── colour helpers ────────────────────────────────────────────────────────────
@@ -75,9 +76,10 @@ _read_secret() {
 
 RSA_PRIVATE_KEY="$(_read_secret RSA_PRIVATE_KEY)"
 STRIPE_SECRET_KEY="$(_read_secret STRIPE_SECRET_KEY)"
+KONG_RSA_PUBLIC_KEY="$(_read_secret KONG_RSA_PUBLIC_KEY)"
 
 # Validate required secrets are present and non-empty
-for var in RSA_PRIVATE_KEY STRIPE_SECRET_KEY; do
+for var in RSA_PRIVATE_KEY STRIPE_SECRET_KEY KONG_RSA_PUBLIC_KEY; do
   val="${!var}"
   if [[ -z "${val}" || "${val}" == "REPLACE_ME"* ]]; then
     error "${var} is not set in infra/local/secrets.env. Please fill in the real value."
@@ -110,21 +112,24 @@ docker build \
 minikube image load order-service:local
 info "  Loaded order-service:local"
 
-declare -A SERVICE_DIRS=(
-  ["auth-service"]="${REPO_ROOT}/services/auth-service"
-  ["ticket-service"]="${REPO_ROOT}/services/ticket-service"
-  ["payment-service"]="${REPO_ROOT}/services/payment-service"
-  ["expiration-service"]="${REPO_ROOT}/services/expiration-service"
-  ["client"]="${REPO_ROOT}/services/client"
-)
-
-for SERVICE in "${!SERVICE_DIRS[@]}"; do
+# Build and load remaining services (parallel-safe: sequential for simplicity)
+# Using a space-separated "name:dir" list to avoid Bash 4 associative arrays
+# (macOS ships Bash 3.2 which lacks declare -A).
+for SERVICE_ENTRY in \
+  "auth-service:${REPO_ROOT}/services/auth-service" \
+  "ticket-service:${REPO_ROOT}/services/ticket-service" \
+  "payment-service:${REPO_ROOT}/services/payment-service" \
+  "expiration-service:${REPO_ROOT}/services/expiration-service" \
+  "client:${REPO_ROOT}/services/client" \
+; do
+  SERVICE="${SERVICE_ENTRY%%:*}"
+  SERVICE_DIR="${SERVICE_ENTRY#*:}"
   info "  Building ${SERVICE}..."
   docker build \
-    --file "${SERVICE_DIRS[$SERVICE]}/Dockerfile" \
+    --file "${SERVICE_DIR}/Dockerfile" \
     --tag "${SERVICE}:local" \
     --quiet \
-    "${SERVICE_DIRS[$SERVICE]}"
+    "${SERVICE_DIR}"
   minikube image load "${SERVICE}:local"
   info "  Loaded ${SERVICE}:local"
 done
@@ -211,6 +216,15 @@ apply_secret expiration-service-secrets \
 
 info "All secrets created."
 
+# ── 5.5 Render Kong config ────────────────────────────────────────────────────
+# Build the declarative kong.yml from the base template + minikube values.
+# The rendered file is passed to helm via --set-file so no ConfigMap is needed.
+step "5.5/7  Rendering Kong config for minikube..."
+RENDERED_KONG_YML="${REPO_ROOT}/services/kong-gateway/kong.yml"
+KONG_RSA_PUBLIC_KEY="${KONG_RSA_PUBLIC_KEY}" \
+  bash "${GATEWAY_DIR}/scripts/build.sh" minikube "${RENDERED_KONG_YML}"
+info "Kong config rendered: ${RENDERED_KONG_YML}"
+
 # ── 6. Helm install/upgrade ───────────────────────────────────────────────────
 step "6/7  Running helm upgrade --install..."
 
@@ -222,6 +236,7 @@ helm upgrade --install ticketing "${HELM_CHART}" \
   --namespace "${NAMESPACE}" \
   --create-namespace \
   --values "${HELM_CHART}/values-local.yaml" \
+  --set-file "kong.dblessConfig.config=${RENDERED_KONG_YML}" \
   --set "mongodb.auth.existingSecret=" \
   --set "auth-service.secretRef=auth-service-secrets" \
   --set "ticket-service.secretRef=ticket-service-secrets" \

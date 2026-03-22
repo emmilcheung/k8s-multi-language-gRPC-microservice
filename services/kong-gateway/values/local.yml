@@ -1,0 +1,13 @@
+# Kong gateway — Docker Compose (local dev) overrides
+# ─────────────────────────────────────────────────────
+# Service names resolve via Docker Compose's internal DNS (container names).
+# All defaults from _defaults.yml apply unless overridden here.
+
+HOST_AUTH: auth-service:3000
+HOST_TICKETS: ticket-service:3001
+HOST_ORDERS: order-service:8082
+HOST_PAYMENTS: payment-service:3002
+HOST_CLIENT: client:4000
+
+RATE_LIMIT_ANONYMOUS_PER_MINUTE: 300
+RATE_LIMIT_POLICY: local
