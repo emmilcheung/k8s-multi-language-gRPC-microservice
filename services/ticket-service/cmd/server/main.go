@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/acme/ticket-service/internal/cache"
 	"github.com/acme/ticket-service/internal/config"
 	grpcserver "github.com/acme/ticket-service/internal/grpc"
 	"github.com/acme/ticket-service/internal/handler"
@@ -20,6 +21,7 @@ import (
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -42,11 +44,28 @@ func main() {
 	log.Info("starting ticket-service", zap.String("env", cfg.Env), zap.Int("port", cfg.Port), zap.Int("grpcPort", cfg.GrpcPort))
 
 	// MongoDB repository
-	repo, err := repository.NewMongoTicketRepository(context.Background(), cfg.MongoURI, cfg.MongoDB)
+	mongoRepo, err := repository.NewMongoTicketRepository(context.Background(), cfg.MongoURI, cfg.MongoDB)
 	if err != nil {
 		log.Fatal("failed to connect to MongoDB", zap.Error(err))
 	}
-	defer repo.Close(context.Background()) //nolint:errcheck
+	defer mongoRepo.Close(context.Background()) //nolint:errcheck
+
+	var ticketRepo repository.TicketRepository = mongoRepo
+	if cfg.RedisURL != "" {
+		redisOptions, err := redis.ParseURL(cfg.RedisURL)
+		if err != nil {
+			log.Fatal("invalid REDIS_URL", zap.Error(err))
+		}
+		redisClient := redis.NewClient(redisOptions)
+		defer redisClient.Close() //nolint:errcheck
+
+		ticketCache := cache.NewRedisCache(redisClient)
+		ticketRepo = repository.NewCachingTicketRepository(mongoRepo, ticketCache, log)
+		log.Info("ticket cache enabled", zap.String("redisAddr", redisOptions.Addr))
+	} else {
+		ticketRepo = repository.NewCachingTicketRepository(mongoRepo, cache.NewNoopCache(), log)
+		log.Info("REDIS_URL not set, ticket cache disabled")
+	}
 
 	// Kafka producer
 	producer, err := kafka.NewProducer(cfg.KafkaBrokers, log)
@@ -56,7 +75,7 @@ func main() {
 	defer producer.Close()
 
 	// Kafka consumer — listens to order events and keeps ticket reservation state in sync
-	orderConsumer, err := kafka.NewOrderConsumer(cfg.KafkaBrokers, "ticket-service", repo, log)
+	orderConsumer, err := kafka.NewOrderConsumer(cfg.KafkaBrokers, "ticket-service", ticketRepo, log)
 	if err != nil {
 		log.Fatal("failed to create Kafka order consumer", zap.Error(err))
 	}
@@ -65,13 +84,13 @@ func main() {
 	go orderConsumer.Start(consumerCtx)
 
 	// Business logic service
-	svc := service.NewTicketService(repo, producer, log)
+	svc := service.NewTicketService(ticketRepo, producer, log)
 
 	// gRPC server — runs alongside HTTP in a separate goroutine
 	grpcCtx, grpcCancel := context.WithCancel(context.Background())
 	defer grpcCancel()
 	grpcAddr := fmt.Sprintf(":%d", cfg.GrpcPort)
-	grpcSrv := grpcserver.NewTicketGrpcServer(repo, log)
+	grpcSrv := grpcserver.NewTicketGrpcServer(ticketRepo, log)
 	go func() {
 		if err := grpcserver.Start(grpcCtx, grpcAddr, grpcSrv, log); err != nil {
 			log.Fatal("gRPC server error", zap.Error(err))
@@ -93,7 +112,7 @@ func main() {
 	e.GET("/metrics", echoprometheus.NewHandler())
 
 	// Health checks
-	healthHandler := handler.NewHealthHandler(repo, log)
+	healthHandler := handler.NewHealthHandler(ticketRepo, log)
 	e.GET("/healthz/live", healthHandler.Live)
 	e.GET("/healthz/ready", healthHandler.Ready)
 

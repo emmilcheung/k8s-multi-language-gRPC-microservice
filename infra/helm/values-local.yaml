@@ -39,6 +39,8 @@ ticket-service:
   image:
     repository: ticket-service
     tag: latest
+  env:
+    REDIS_URL: redis://ticketing-redis-master.ticketing.svc.cluster.local:6379
   resources:
     requests:
       cpu: 50m
@@ -55,6 +57,7 @@ order-service:
     repository: order-service
     tag: latest
   env:
+    REDIS_URL: redis://ticketing-redis-master.ticketing.svc.cluster.local:6379
     # Override the default short name with the FQDN for the minikube release.
     # The release name is 'ticketing' and the namespace is 'ticketing'.
     TICKET_SERVICE_GRPC_HOST: ticketing-ticket-service.ticketing.svc.cluster.local

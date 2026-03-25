@@ -11,6 +11,7 @@ import com.ticketing.orders.entity.OutboxMessage;
 import com.ticketing.orders.event.OrderCancelledEvent;
 import com.ticketing.orders.event.OrderCreatedEvent;
 import com.ticketing.orders.exception.BadRequestException;
+import com.ticketing.orders.exception.ConflictException;
 import com.ticketing.orders.exception.ForbiddenException;
 import com.ticketing.orders.exception.NotFoundException;
 import com.ticketing.orders.grpc.TicketServiceClient;
@@ -18,6 +19,8 @@ import com.ticketing.orders.grpc.ValidateTicketResponse;
 import com.ticketing.orders.repository.OrderRepository;
 import com.ticketing.orders.repository.OrderTicketRepository;
 import com.ticketing.orders.repository.OutboxRepository;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Core business logic for order lifecycle.
@@ -53,6 +57,7 @@ public class OrderService {
     private final OutboxRepository outboxRepository;
     private final TicketServiceClient ticketServiceClient;
     private final ObjectMapper objectMapper;
+    private final RedissonClient redissonClient;
 
     @Value("${order.expiration.minutes:15}")
     private int expirationMinutes;
@@ -62,12 +67,14 @@ public class OrderService {
             OrderTicketRepository orderTicketRepository,
             OutboxRepository outboxRepository,
             TicketServiceClient ticketServiceClient,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            RedissonClient redissonClient) {
         this.orderRepository = orderRepository;
         this.orderTicketRepository = orderTicketRepository;
         this.outboxRepository = outboxRepository;
         this.ticketServiceClient = ticketServiceClient;
         this.objectMapper = objectMapper;
+        this.redissonClient = redissonClient;
     }
 
     // ── Create ────────────────────────────────────────────────────────────────
@@ -82,14 +89,32 @@ public class OrderService {
      */
     public OrderResponse createOrder(UUID userId, CreateOrderRequest request) {
         UUID ticketId = request.getTicketId();
+        String lockKey = "order-service:lock:ticket:" + ticketId;
+        RLock lock = redissonClient.getLock(lockKey);
 
-        // Validate ticket via gRPC BEFORE opening a DB transaction.
-        // The response carries title + price so we can upsert the local replica
-        // without depending on a Kafka-delivered copy (handles Kafka-disabled local dev
-        // and serves as a safe fallback in production if Kafka delivery was delayed).
-        ValidateTicketResponse grpcTicket = ticketServiceClient.validateAvailability(ticketId.toString());
+        boolean acquired = false;
+        try {
+            acquired = lock.tryLock(0, 5, TimeUnit.SECONDS);
+            if (!acquired) {
+                throw new ConflictException(
+                        "Another order for ticket " + ticketId + " is being processed. Please retry.");
+            }
 
-        return createOrderTransactional(userId, ticketId, grpcTicket);
+            // Validate ticket via gRPC BEFORE opening a DB transaction.
+            // The response carries title + price so we can upsert the local replica
+            // without depending on a Kafka-delivered copy (handles Kafka-disabled local dev
+            // and serves as a safe fallback in production if Kafka delivery was delayed).
+            ValidateTicketResponse grpcTicket = ticketServiceClient.validateAvailability(ticketId.toString());
+
+            return createOrderTransactional(userId, ticketId, grpcTicket);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ConflictException("Order creation interrupted for ticket " + ticketId);
+        } finally {
+            if (acquired && lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        }
     }
 
     @Transactional
