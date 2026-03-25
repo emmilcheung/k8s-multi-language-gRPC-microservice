@@ -18,6 +18,7 @@ type Config struct {
 	MongoURI     string
 	MongoDB      string
 	KafkaBrokers []string
+	RedisURL     string
 }
 
 // Load reads configuration from environment variables and validates all required fields.
@@ -46,6 +47,7 @@ func Load() (*Config, error) {
 	}
 
 	mongoDB := getEnv("MONGO_DB", "tickets")
+	redisURL := getEnv("REDIS_URL", "")
 
 	kafkaBrokersStr := os.Getenv("KAFKA_BROKERS")
 	if kafkaBrokersStr == "" {
@@ -65,6 +67,7 @@ func Load() (*Config, error) {
 		MongoURI:     mongoURI,
 		MongoDB:      mongoDB,
 		KafkaBrokers: kafkaBrokers,
+		RedisURL:     redisURL,
 	}, nil
 }
 

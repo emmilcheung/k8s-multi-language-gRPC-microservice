@@ -54,6 +54,16 @@ services:
           - /api/users/signout
         methods: [POST]
         strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: {{RATE_LIMIT_AUTH_ENDPOINTS_PER_MINUTE}}
+              limit_by: ip
+              policy: {{RATE_LIMIT_POLICY}}
+              redis_host: {{RATE_LIMIT_REDIS_HOST}}
+              redis_port: {{RATE_LIMIT_REDIS_PORT}}
+              fault_tolerant: true
+              hide_client_headers: false
 
       # Protected: currentuser — validates JWT, injects X-User-Id from sub
       - name: auth-currentuser
@@ -256,6 +266,20 @@ plugins:
   - name: rate-limiting
     config:
       minute: {{RATE_LIMIT_ANONYMOUS_PER_MINUTE}}
+      limit_by: ip
       policy: {{RATE_LIMIT_POLICY}}
+      redis_host: {{RATE_LIMIT_REDIS_HOST}}
+      redis_port: {{RATE_LIMIT_REDIS_PORT}}
+      fault_tolerant: true
+      hide_client_headers: false
+
+  - name: rate-limiting
+    consumer: auth-service-issuer
+    config:
+      minute: {{RATE_LIMIT_AUTHENTICATED_PER_MINUTE}}
+      limit_by: consumer
+      policy: {{RATE_LIMIT_POLICY}}
+      redis_host: {{RATE_LIMIT_REDIS_HOST}}
+      redis_port: {{RATE_LIMIT_REDIS_PORT}}
       fault_tolerant: true
       hide_client_headers: false

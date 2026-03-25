@@ -20,6 +20,7 @@ func TestLoad_ValidConfig(t *testing.T) {
 	assert.Equal(t, 3001, cfg.Port)
 	assert.Equal(t, "mongodb://localhost:27017", cfg.MongoURI)
 	assert.Equal(t, []string{"localhost:9092"}, cfg.KafkaBrokers)
+	assert.Equal(t, "", cfg.RedisURL)
 }
 
 func TestLoad_MissingMongoURI(t *testing.T) {
@@ -70,4 +71,15 @@ func TestLoad_Defaults(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3001, cfg.Port)
 	assert.Equal(t, "development", cfg.Env)
+	assert.Equal(t, "", cfg.RedisURL)
+}
+
+func TestLoad_RedisURLOptional(t *testing.T) {
+	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "redis://localhost:6379", cfg.RedisURL)
 }

@@ -90,6 +90,9 @@ grpc:
     host: ${TICKET_SERVICE_GRPC_HOST:localhost}
     port: ${TICKET_SERVICE_GRPC_PORT:9090}
 
+redis:
+  url: ${REDIS_URL:redis://localhost:6379}
+
 order:
   expiration:
     minutes: ${ORDER_EXPIRATION_MINUTES:15}

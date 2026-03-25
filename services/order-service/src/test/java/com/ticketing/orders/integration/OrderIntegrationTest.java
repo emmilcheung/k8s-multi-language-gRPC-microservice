@@ -29,12 +29,21 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -66,6 +75,10 @@ class OrderIntegrationTest {
     static KafkaContainer kafka = new KafkaContainer(
             DockerImageName.parse("confluentinc/cp-kafka:7.6.1"));
 
+    @Container
+    static GenericContainer<?> redis = new GenericContainer<>(
+            DockerImageName.parse("redis:7-alpine")).withExposedPorts(6379);
+
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
@@ -73,6 +86,7 @@ class OrderIntegrationTest {
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
+        registry.add("redis.url", () -> "redis://" + redis.getHost() + ":" + redis.getMappedPort(6379));
     }
 
     // ── In-process gRPC stub for ticket-service ───────────────────────────────
@@ -152,7 +166,7 @@ class OrderIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("CREATED"))
+                .andExpect(jsonPath("$.status").value("created"))
                 .andExpect(jsonPath("$.ticket.id").value(ticketId.toString()))
                 .andReturn();
 
@@ -180,6 +194,52 @@ class OrderIntegrationTest {
                         .content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void createOrder_returns_409_or_400_when_concurrent_requests_for_same_ticket() throws Exception {
+        String body = """
+                { "ticketId": "%s" }
+                """.formatted(ticketId);
+
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        List<Integer> statuses = Collections.synchronizedList(new ArrayList<>());
+
+        Runnable createOrderCall = () -> {
+            try {
+                ready.countDown();
+                start.await(5, TimeUnit.SECONDS);
+                int status = mockMvc.perform(post("/api/orders")
+                                .header("X-User-Id", UUID.randomUUID())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body))
+                        .andReturn()
+                        .getResponse()
+                        .getStatus();
+                statuses.add(status);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        };
+
+        CompletableFuture<Void> f1 = CompletableFuture.runAsync(createOrderCall, executor);
+        CompletableFuture<Void> f2 = CompletableFuture.runAsync(createOrderCall, executor);
+
+        assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+
+        f1.get(10, TimeUnit.SECONDS);
+        f2.get(10, TimeUnit.SECONDS);
+        executor.shutdownNow();
+
+        long createdCount = statuses.stream().filter(s -> s == 201).count();
+        long conflictOrBadRequest = statuses.stream().filter(s -> s == 409 || s == 400).count();
+
+        assertThat(statuses).hasSize(2);
+        assertThat(createdCount).isEqualTo(1);
+        assertThat(conflictOrBadRequest).isEqualTo(1);
     }
 
     @Test
@@ -272,7 +332,7 @@ class OrderIntegrationTest {
         mockMvc.perform(delete("/api/orders/" + orderId)
                         .header("X-User-Id", userId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("CANCELLED"));
+                .andExpect(jsonPath("$.status").value("cancelled"));
     }
 
     @Test

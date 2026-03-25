@@ -1,6 +1,7 @@
 package com.ticketing.orders.exception;
 
 import jakarta.validation.ConstraintViolationException;
+import org.redisson.client.RedisException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -31,6 +32,20 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<Map<String, Object>> handleForbidden(ForbiddenException ex) {
         return error(HttpStatus.FORBIDDEN, "FORBIDDEN", ex.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleConflict(ConflictException ex) {
+        return error(HttpStatus.CONFLICT, "CONFLICT", ex.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(RedisException.class)
+    public ResponseEntity<Map<String, Object>> handleRedisException(RedisException ex) {
+        log.error("Redis unavailable during lock acquisition", ex);
+        return error(HttpStatus.SERVICE_UNAVAILABLE,
+                "SERVICE_UNAVAILABLE",
+                "Order service temporarily unavailable. Please retry.",
+                List.of());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

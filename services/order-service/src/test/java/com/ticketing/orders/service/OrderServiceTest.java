@@ -7,6 +7,7 @@ import com.ticketing.orders.entity.Order;
 import com.ticketing.orders.entity.OrderStatus;
 import com.ticketing.orders.entity.OrderTicket;
 import com.ticketing.orders.exception.BadRequestException;
+import com.ticketing.orders.exception.ConflictException;
 import com.ticketing.orders.exception.ForbiddenException;
 import com.ticketing.orders.exception.NotFoundException;
 import com.ticketing.orders.grpc.TicketServiceClient;
@@ -14,6 +15,8 @@ import com.ticketing.orders.grpc.ValidateTicketResponse;
 import com.ticketing.orders.repository.OrderRepository;
 import com.ticketing.orders.repository.OrderTicketRepository;
 import com.ticketing.orders.repository.OutboxRepository;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,6 +31,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -40,6 +44,8 @@ class OrderServiceTest {
     @Mock OrderTicketRepository orderTicketRepository;
     @Mock OutboxRepository outboxRepository;
     @Mock TicketServiceClient ticketServiceClient;
+    @Mock RedissonClient redissonClient;
+    @Mock RLock mockLock;
 
     @InjectMocks OrderService orderService;
 
@@ -60,10 +66,18 @@ class OrderServiceTest {
         ticket = new OrderTicket(ticketId, "Concert Ticket", new BigDecimal("49.99"));
     }
 
+    private void stubLockAcquired() throws InterruptedException {
+        when(redissonClient.getLock(anyString())).thenReturn(mockLock);
+        when(mockLock.tryLock(eq(0L), eq(5L), eq(TimeUnit.SECONDS))).thenReturn(true);
+        when(mockLock.isHeldByCurrentThread()).thenReturn(true);
+    }
+
     // ── createOrder ───────────────────────────────────────────────────────────
 
     @Test
-    void createOrder_should_save_order_and_outbox_when_ticket_available() {
+    void createOrder_should_save_order_and_outbox_when_ticket_available() throws InterruptedException {
+        stubLockAcquired();
+
         CreateOrderRequest req = new CreateOrderRequest();
         req.setTicketId(ticketId.toString());
 
@@ -123,6 +137,87 @@ class OrderServiceTest {
         verify(orderTicketRepository).save(any(OrderTicket.class));
         verify(orderRepository).save(any(Order.class));
         assertThat(response.getStatus()).isEqualTo(OrderStatus.CREATED);
+    }
+
+    @Test
+    void createOrder_should_return_409_when_lock_not_acquired() throws InterruptedException {
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+        when(redissonClient.getLock(anyString())).thenReturn(mockLock);
+        when(mockLock.tryLock(eq(0L), eq(5L), eq(TimeUnit.SECONDS))).thenReturn(false);
+
+        assertThatThrownBy(() -> orderService.createOrder(userId, req))
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("being processed");
+
+        verify(ticketServiceClient, never()).validateAvailability(anyString());
+        verify(orderRepository, never()).save(any(Order.class));
+        verify(mockLock, never()).unlock();
+    }
+
+    @Test
+    void createOrder_should_release_lock_when_grpc_throws() throws InterruptedException {
+        stubLockAcquired();
+
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+        when(ticketServiceClient.validateAvailability(ticketId.toString()))
+                .thenThrow(new RuntimeException("grpc down"));
+
+        assertThatThrownBy(() -> orderService.createOrder(userId, req))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("grpc down");
+
+        verify(mockLock, times(1)).unlock();
+    }
+
+    @Test
+    void createOrder_should_release_lock_when_db_write_fails() throws InterruptedException {
+        stubLockAcquired();
+
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+
+        when(ticketServiceClient.validateAvailability(ticketId.toString()))
+                .thenReturn(ValidateTicketResponse.newBuilder()
+                        .setAvailable(true)
+                        .setTicketId(ticketId.toString())
+                        .setTitle(ticket.getTitle())
+                        .setPrice(ticket.getPrice().floatValue())
+                        .build());
+        when(orderRepository.findActiveByTicketId(eq(ticketId), anyList())).thenReturn(Optional.empty());
+        when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
+        when(orderRepository.save(any(Order.class))).thenThrow(new RuntimeException("db write failed"));
+
+        assertThatThrownBy(() -> orderService.createOrder(userId, req))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("db write failed");
+
+        verify(mockLock, times(1)).unlock();
+    }
+
+    @Test
+    void createOrder_should_release_lock_on_success() throws InterruptedException {
+        stubLockAcquired();
+
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+
+        when(ticketServiceClient.validateAvailability(ticketId.toString()))
+                .thenReturn(ValidateTicketResponse.newBuilder()
+                        .setAvailable(true)
+                        .setTicketId(ticketId.toString())
+                        .setTitle(ticket.getTitle())
+                        .setPrice(ticket.getPrice().floatValue())
+                        .build());
+        when(orderRepository.findActiveByTicketId(eq(ticketId), anyList())).thenReturn(Optional.empty());
+        when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
+        when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        OrderResponse response = orderService.createOrder(userId, req);
+
+        assertThat(response.getStatus()).isEqualTo(OrderStatus.CREATED);
+        verify(mockLock, times(1)).unlock();
     }
 
     // ── getOrder ──────────────────────────────────────────────────────────────
