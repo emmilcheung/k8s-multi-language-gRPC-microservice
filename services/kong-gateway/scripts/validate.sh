@@ -37,12 +37,14 @@ fi
 echo "[validate.sh] Validating: ${KONG_YML}"
 echo "[validate.sh] Using image: ${KONG_IMAGE}"
 
-# Run as the current host user so the container process owns the mounted file.
-# This avoids permission denied when the kong uid inside the image differs
-# from the runner uid that created the file.
+# Run as root inside the throwaway validation container.
+# This is a parse-only step — no production Kong is started.
+# Root is needed because:
+#   1. Kong creates /usr/local/kong/logs at startup (requires write access)
+#   2. The mounted file may be owned by the CI runner uid (root can read any file)
 docker run --rm \
   --env KONG_DATABASE=off \
-  --user "$(id -u):$(id -g)" \
+  --user root \
   --volume "${KONG_YML}:/tmp/kong.yml:ro" \
   "${KONG_IMAGE}" \
   kong config parse /tmp/kong.yml
