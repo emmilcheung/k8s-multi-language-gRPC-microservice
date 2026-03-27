@@ -1,16 +1,16 @@
 # E2E test workflow (Playwright against Docker Compose stack)
 #
 # Runs the full 18-test Playwright suite after spinning up all services
-# via docker-compose. Only runs on pushes to main and on PRs targeting main.
+# via docker-compose. Only runs on PRs targeting main — not on pushes to main
+# since there is no deployment pipeline to validate against.
 #
 # Required secrets:
-#   RSA_PRIVATE_KEY — the dev RSA private key (same value as in local .env)
+#   RSA_PRIVATE_KEY    — the dev RSA private key (same value as in local .env)
+#   STRIPE_SECRET_KEY  — Stripe key; use "test_mock" to activate mock mode
 
 name: e2e
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 
@@ -23,12 +23,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Write the .env file so auth-service picks up RSA_PRIVATE_KEY via env_file
+      # Write the .env file consumed by docker-compose via env_file directives.
+      # auth-service reads RSA_PRIVATE_KEY; payment-service reads STRIPE_SECRET_KEY.
+      # Both were removed from docker-compose.yml hardcoded values in M2.
       - name: Write root .env
         run: |
-          cat > .env <<'ENVEOF'
-          RSA_PRIVATE_KEY="${{ secrets.RSA_PRIVATE_KEY }}"
-          ENVEOF
+          printf 'RSA_PRIVATE_KEY=%s\n' "$RSA_PRIVATE_KEY" > .env
+          printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY" >> .env
+          printf 'KONG_RSA_PUBLIC_KEY=%s\n' "$KONG_RSA_PUBLIC_KEY" >> .env
+        env:
+          RSA_PRIVATE_KEY: ${{ secrets.RSA_PRIVATE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          KONG_RSA_PUBLIC_KEY: ${{ secrets.KONG_RSA_PUBLIC_KEY }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

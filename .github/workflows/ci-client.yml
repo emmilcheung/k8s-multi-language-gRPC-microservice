@@ -1,8 +1,9 @@
 # CI pipeline for client (Next.js 16 / TypeScript / pnpm / Vitest / Playwright)
 #
 # Playwright E2E tests require the full stack running — they are NOT run in CI here.
-# They should be triggered separately in a dedicated e2e workflow against staging.
-# Stages: lint → unit test → build → scan image → push (main only)
+# They are triggered separately in e2e.yml against a full Docker Compose stack on PRs to main.
+# Stages: lint → unit test → build image → scan
+# Image push is intentionally absent — no registry or deployment target exists yet.
 
 name: ci-client
 
@@ -114,35 +115,3 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
-  push:
-    name: Push Image
-    runs-on: ubuntu-24.04
-    needs: [build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push image
-        uses: docker/build-push-action@v6
-        with:
-          context: services/client
-          file: services/client/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.IMAGE_NAME }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
