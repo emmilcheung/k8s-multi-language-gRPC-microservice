@@ -37,10 +37,12 @@ fi
 echo "[validate.sh] Validating: ${KONG_YML}"
 echo "[validate.sh] Using image: ${KONG_IMAGE}"
 
-docker run --rm \
+# Pipe the config via stdin to avoid volume-mount permission issues.
+# The runner's file may not be readable by the kong user inside the container.
+# `kong config parse /dev/stdin` is supported in Kong 3.x and avoids --volume entirely.
+docker run --rm -i \
   --env KONG_DATABASE=off \
-  --volume "${KONG_YML}:/tmp/kong.yml:ro" \
   "${KONG_IMAGE}" \
-  kong config parse /tmp/kong.yml
+  kong config parse /dev/stdin < "${KONG_YML}"
 
 echo "[validate.sh] Validation passed."
