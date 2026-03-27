@@ -10,6 +10,10 @@
 #   payment          — lint → unit → integration → build+scan
 #   proto            — buf lint [+ buf breaking on PRs]
 #   ticket           — vet/lint → unit → integration → build+scan
+#   kong             — build.sh (renders kong.yml) → validate.sh (kong config parse via Docker)
+#   deploy-dev       — helm upgrade to dev namespace (only on main; requires AWS_DEPLOY_ROLE_ARN)
+#   deploy-staging   — helm upgrade to staging namespace (manual approval gate)
+#   deploy-prod      — helm upgrade to prod namespace (manual approval gate)
 #   ci               — summary gate: required branch-protection status check
 #
 # All service jobs run in parallel with each other.
@@ -18,6 +22,11 @@
 #
 # Kafka and Redis integration tests use Testcontainers (Docker-in-Docker on ubuntu-24.04).
 # No images are pushed — no registry credentials needed.
+#
+# Deploy stages (I-11):
+#   - Conditional on secrets.AWS_DEPLOY_ROLE_ARN being set.
+#   - Won't run on forks or in environments without real EKS infrastructure.
+#   - staging and prod gates require manual approval (configure in repo Settings → Environments).
 
 name: ci
 
@@ -42,6 +51,7 @@ jobs:
       auth:       ${{ steps.filter.outputs.auth }}
       client:     ${{ steps.filter.outputs.client }}
       expiration: ${{ steps.filter.outputs.expiration }}
+      kong:       ${{ steps.filter.outputs.kong }}
       order:      ${{ steps.filter.outputs.order }}
       payment:    ${{ steps.filter.outputs.payment }}
       proto:      ${{ steps.filter.outputs.proto }}
@@ -61,6 +71,9 @@ jobs:
               - '.github/workflows/ci.yml'
             expiration:
               - 'services/expiration-service/**'
+              - '.github/workflows/ci.yml'
+            kong:
+              - 'services/kong-gateway/**'
               - '.github/workflows/ci.yml'
             order:
               - 'services/order-service/**'
@@ -476,6 +489,28 @@ jobs:
           breaking: true
           breaking_against: "https://github.com/${{ github.repository }}.git#branch=main,subdir=proto"
 
+  # ── kong-gateway (build.sh → validate.sh) (I-15) ───────────────────────────
+  kong:
+    name: kong-gateway
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.kong == 'true'
+    defaults:
+      run:
+        working-directory: services/kong-gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render kong.yml (build.sh local)
+        run: bash scripts/build.sh local kong.yml
+        env:
+          # KONG_RSA_PUBLIC_KEY must be set in repo secrets.
+          # The job is skipped on forks where the secret is unavailable.
+          KONG_RSA_PUBLIC_KEY: ${{ secrets.KONG_RSA_PUBLIC_KEY }}
+
+      - name: Validate kong.yml (kong config parse via Docker)
+        run: bash scripts/validate.sh kong.yml
+
   # ── ticket-service (Go 1.25 / Echo v4 / confluent-kafka-go CGO) ────────────
   ticket:
     name: ticket-service
@@ -553,15 +588,232 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
+  # ── deploy-dev (I-11) ────────────────────────────────────────────────────────
+  # Deploys the umbrella Helm chart to the dev EKS namespace.
+  # Conditional on:
+  #   - Running on the main branch (not PRs)
+  #   - secrets.AWS_DEPLOY_ROLE_ARN being set (skip silently on forks / no-infra)
+  # Image tag = git SHA (no :latest — I-12 already satisfied).
+  # Uses OIDC → AWS IAM role assumption (no long-lived AWS credentials).
+  deploy-dev:
+    name: Deploy → dev
+    runs-on: ubuntu-24.04
+    needs: [changes, auth, client, expiration, order, payment, proto, ticket, kong]
+    # Deploy only on main, only when all CI jobs passed or were skipped, and only
+    # when AWS credentials are available (skip gracefully on forks / no EKS infra).
+    # secrets.* is not available in `if` expressions; use the env trick below instead.
+    if: |
+      always() &&
+      github.ref == 'refs/heads/main' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
+    environment: dev
+    env:
+      AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+    steps:
+      - name: Skip if no AWS credentials configured
+        if: env.AWS_DEPLOY_ROLE_ARN == ''
+        run: |
+          echo "AWS_DEPLOY_ROLE_ARN secret is not set — skipping deploy-dev."
+          echo "To enable deployments, set the AWS_DEPLOY_ROLE_ARN secret in repo Settings → Secrets."
+          exit 0
+
+      - uses: actions/checkout@v4
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+
+      - name: Configure AWS credentials (OIDC)
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+
+      - name: Update kubeconfig
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ vars.EKS_CLUSTER_DEV || 'ticketing-dev' }}" \
+            --region "${{ vars.AWS_REGION || 'ap-southeast-1' }}"
+
+      - name: Helm dependency update
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        run: helm dependency update infra/helm
+
+      - name: Deploy umbrella chart to dev
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        run: |
+          helm upgrade --install ticketing infra/helm \
+            --namespace ticketing-dev \
+            --create-namespace \
+            --set "global.image.tag=${{ github.sha }}" \
+            --wait \
+            --timeout=10m
+
+      - name: Smoke test — Kong proxy liveness
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        run: |
+          KONG_URL="${{ vars.KONG_DEV_URL || 'http://kong-proxy.ticketing-dev.svc.cluster.local:8000' }}"
+          for i in $(seq 1 10); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${KONG_URL}/healthz/live" || echo "000")
+            if [ "${STATUS}" = "200" ]; then
+              echo "Smoke test passed (attempt ${i})"
+              exit 0
+            fi
+            echo "Attempt ${i}: status ${STATUS} — retrying in 10s..."
+            sleep 10
+          done
+          echo "Smoke test failed after 10 attempts"
+          exit 1
+
+  # ── deploy-staging (I-11) ─────────────────────────────────────────────────────
+  # Manual approval gate: configure "staging" Environment in repo Settings →
+  # Environments → staging → Required reviewers.
+  deploy-staging:
+    name: Deploy → staging
+    runs-on: ubuntu-24.04
+    needs: deploy-dev
+    if: |
+      always() &&
+      github.ref == 'refs/heads/main' &&
+      needs.deploy-dev.result == 'success'
+    environment: staging
+    env:
+      AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+    steps:
+      - name: Skip if no AWS credentials configured
+        if: env.AWS_DEPLOY_ROLE_ARN == ''
+        run: echo "AWS_DEPLOY_ROLE_ARN not set — skipping deploy-staging." && exit 0
+
+      - uses: actions/checkout@v4
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+
+      - name: Configure AWS credentials (OIDC)
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+
+      - name: Update kubeconfig
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ vars.EKS_CLUSTER_STAGING || 'ticketing-staging' }}" \
+            --region "${{ vars.AWS_REGION || 'ap-southeast-1' }}"
+
+      - name: Helm dependency update
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        run: helm dependency update infra/helm
+
+      - name: Deploy umbrella chart to staging
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        run: |
+          helm upgrade --install ticketing infra/helm \
+            --namespace ticketing-staging \
+            --create-namespace \
+            --set "global.image.tag=${{ github.sha }}" \
+            --wait \
+            --timeout=10m
+
+      - name: Smoke test — Kong proxy liveness
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        run: |
+          KONG_URL="${{ vars.KONG_STAGING_URL || 'http://kong-proxy.ticketing-staging.svc.cluster.local:8000' }}"
+          for i in $(seq 1 10); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${KONG_URL}/healthz/live" || echo "000")
+            if [ "${STATUS}" = "200" ]; then
+              echo "Smoke test passed (attempt ${i})"
+              exit 0
+            fi
+            echo "Attempt ${i}: status ${STATUS} — retrying in 10s..."
+            sleep 10
+          done
+          echo "Smoke test failed after 10 attempts"
+          exit 1
+
+  # ── deploy-prod (I-11) ────────────────────────────────────────────────────────
+  # Manual approval gate: configure "production" Environment in repo Settings →
+  # Environments → production → Required reviewers.
+  # This gate is separate from staging — prod reviewers should be a strict subset
+  # of engineering leads with authority to approve production changes.
+  deploy-prod:
+    name: Deploy → prod
+    runs-on: ubuntu-24.04
+    needs: deploy-staging
+    if: |
+      always() &&
+      github.ref == 'refs/heads/main' &&
+      needs.deploy-staging.result == 'success'
+    environment: production
+    env:
+      AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+    steps:
+      - name: Skip if no AWS credentials configured
+        if: env.AWS_DEPLOY_ROLE_ARN == ''
+        run: echo "AWS_DEPLOY_ROLE_ARN not set — skipping deploy-prod." && exit 0
+
+      - uses: actions/checkout@v4
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+
+      - name: Configure AWS credentials (OIDC)
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+
+      - name: Update kubeconfig
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ vars.EKS_CLUSTER_PROD || 'ticketing-prod' }}" \
+            --region "${{ vars.AWS_REGION || 'ap-southeast-1' }}"
+
+      - name: Helm dependency update
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        run: helm dependency update infra/helm
+
+      - name: Deploy umbrella chart to prod
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        run: |
+          helm upgrade --install ticketing infra/helm \
+            --namespace ticketing-prod \
+            --create-namespace \
+            --set "global.image.tag=${{ github.sha }}" \
+            --wait \
+            --timeout=15m
+
+      - name: Smoke test — Kong proxy liveness
+        if: env.AWS_DEPLOY_ROLE_ARN != ''
+        run: |
+          KONG_URL="${{ vars.KONG_PROD_URL }}"
+          if [[ -z "${KONG_URL}" ]]; then
+            echo "KONG_PROD_URL not set — skipping smoke test"
+            exit 0
+          fi
+          for i in $(seq 1 10); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${KONG_URL}/healthz/live" || echo "000")
+            if [ "${STATUS}" = "200" ]; then
+              echo "Smoke test passed (attempt ${i})"
+              exit 0
+            fi
+            echo "Attempt ${i}: status ${STATUS} — retrying in 10s..."
+            sleep 10
+          done
+          echo "Smoke test failed after 10 attempts"
+          exit 1
+
   # ── summary gate (the single required branch-protection status check) ────────
   # Succeeds when every triggered job succeeded or was skipped.
   # Fails when any triggered job failed or was cancelled.
   # Configure branch protection to require: "ci / CI"
+  # Note: deploy-* jobs are NOT included here — they run after the gate and are
+  # optional (conditional on AWS_DEPLOY_ROLE_ARN). Only service CI jobs are gated.
   ci:
     name: CI
     runs-on: ubuntu-24.04
     if: always()
-    needs: [changes, auth, client, expiration, order, payment, proto, ticket]
+    needs: [changes, auth, client, expiration, kong, order, payment, proto, ticket]
     steps:
       - name: Check all jobs passed
         run: |
