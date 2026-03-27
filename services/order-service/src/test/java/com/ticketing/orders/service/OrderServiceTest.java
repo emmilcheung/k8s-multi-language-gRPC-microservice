@@ -20,8 +20,6 @@ import org.redisson.api.RedissonClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -37,6 +35,14 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+/**
+ * Unit tests for {@link OrderService} and {@link OrderTransactionService}.
+ *
+ * After audit finding C-01 fix: OrderService delegates the @Transactional creation
+ * to OrderTransactionService. Tests that previously called
+ * orderService.createOrderTransactional() now call orderTransactionService directly,
+ * or use orderService.createOrder() which chains through the real transaction service.
+ */
 @ExtendWith(MockitoExtension.class)
 class OrderServiceTest {
 
@@ -47,7 +53,9 @@ class OrderServiceTest {
     @Mock RedissonClient redissonClient;
     @Mock RLock mockLock;
 
-    @InjectMocks OrderService orderService;
+    // The two collaborating services — constructed manually so we can wire them together
+    private OrderTransactionService orderTransactionService;
+    private OrderService orderService;
 
     private final UUID userId   = UUID.randomUUID();
     private final UUID ticketId = UUID.randomUUID();
@@ -57,11 +65,15 @@ class OrderServiceTest {
 
     @BeforeEach
     void setUp() {
-        // Inject real ObjectMapper so serialisation works in unit tests
-        ReflectionTestUtils.setField(orderService, "objectMapper", new ObjectMapper()
-                .findAndRegisterModules());
-        // Set expiration to 15 minutes
-        ReflectionTestUtils.setField(orderService, "expirationMinutes", 15);
+        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+
+        orderTransactionService = new OrderTransactionService(
+                orderRepository, orderTicketRepository, outboxRepository, objectMapper);
+        ReflectionTestUtils.setField(orderTransactionService, "expirationMinutes", 15);
+
+        orderService = new OrderService(
+                orderRepository, outboxRepository, ticketServiceClient,
+                objectMapper, redissonClient, orderTransactionService);
 
         ticket = new OrderTicket(ticketId, "Concert Ticket", new BigDecimal("49.99"));
     }
@@ -72,7 +84,7 @@ class OrderServiceTest {
         when(mockLock.isHeldByCurrentThread()).thenReturn(true);
     }
 
-    // ── createOrder ───────────────────────────────────────────────────────────
+    // ── createOrder (full flow through OrderService + OrderTransactionService) ─
 
     @Test
     void createOrder_should_save_order_and_outbox_when_ticket_available() throws InterruptedException {
@@ -81,7 +93,13 @@ class OrderServiceTest {
         CreateOrderRequest req = new CreateOrderRequest();
         req.setTicketId(ticketId.toString());
 
-        // No active order for this ticket
+        when(ticketServiceClient.validateAvailability(ticketId.toString()))
+                .thenReturn(ValidateTicketResponse.newBuilder()
+                        .setAvailable(true)
+                        .setTicketId(ticketId.toString())
+                        .setTitle(ticket.getTitle())
+                        .setPrice(ticket.getPrice().floatValue())
+                        .build());
         when(orderRepository.findActiveByTicketId(eq(ticketId), anyList()))
                 .thenReturn(Optional.empty());
         when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
@@ -98,16 +116,14 @@ class OrderServiceTest {
 
     @Test
     void createOrder_should_throw_BadRequestException_when_ticket_already_reserved() {
-        CreateOrderRequest req = new CreateOrderRequest();
-        req.setTicketId(ticketId.toString());
-
+        // Test the transactional service directly — this exercises the guard logic.
         Order existing = new Order(UUID.randomUUID(), OrderStatus.CREATED,
                 OffsetDateTime.now().plusMinutes(15), ticket);
         when(orderRepository.findActiveByTicketId(eq(ticketId), anyList()))
                 .thenReturn(Optional.of(existing));
 
         // grpcTicket is null because the "already reserved" guard throws before it is used
-        assertThatThrownBy(() -> orderService.createOrderTransactional(userId, ticketId, null))
+        assertThatThrownBy(() -> orderTransactionService.createOrderTransactional(userId, ticketId, null))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("already reserved");
 
@@ -124,7 +140,6 @@ class OrderServiceTest {
         when(orderTicketRepository.save(any(OrderTicket.class))).thenAnswer(inv -> inv.getArgument(0));
         when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        // Build a minimal ValidateTicketResponse stub using the protobuf builder
         ValidateTicketResponse grpcTicket = ValidateTicketResponse.newBuilder()
                 .setAvailable(true)
                 .setTicketId(ticketId.toString())
@@ -132,7 +147,7 @@ class OrderServiceTest {
                 .setPrice(49.99f)
                 .build();
 
-        OrderResponse response = orderService.createOrderTransactional(userId, ticketId, grpcTicket);
+        OrderResponse response = orderTransactionService.createOrderTransactional(userId, ticketId, grpcTicket);
 
         verify(orderTicketRepository).save(any(OrderTicket.class));
         verify(orderRepository).save(any(Order.class));

@@ -6,10 +6,8 @@ import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
 import com.ticketing.orders.entity.Order;
 import com.ticketing.orders.entity.OrderStatus;
-import com.ticketing.orders.entity.OrderTicket;
 import com.ticketing.orders.entity.OutboxMessage;
 import com.ticketing.orders.event.OrderCancelledEvent;
-import com.ticketing.orders.event.OrderCreatedEvent;
 import com.ticketing.orders.exception.BadRequestException;
 import com.ticketing.orders.exception.ConflictException;
 import com.ticketing.orders.exception.ForbiddenException;
@@ -17,20 +15,21 @@ import com.ticketing.orders.exception.NotFoundException;
 import com.ticketing.orders.grpc.TicketServiceClient;
 import com.ticketing.orders.grpc.ValidateTicketResponse;
 import com.ticketing.orders.repository.OrderRepository;
-import com.ticketing.orders.repository.OrderTicketRepository;
 import com.ticketing.orders.repository.OutboxRepository;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+
+// Audit C-01 fix: transactional order creation is delegated to OrderTransactionService
+// so that Spring's AOP proxy intercepts the @Transactional boundary correctly.
+// Direct self-invocation (this.createOrderTransactional()) bypasses the proxy.
 
 /**
  * Core business logic for order lifecycle.
@@ -41,40 +40,34 @@ import java.util.concurrent.TimeUnit;
  * - gRPC ticket validation happens outside the transaction (network I/O should not
  *   hold a DB connection). The ticket local-replica is fetched from the DB inside.
  * - Authorisation (ownership check) happens before any write.
+ * - The transactional order creation is delegated to {@link OrderTransactionService}
+ *   to avoid the Spring AOP self-invocation proxy bypass (audit finding C-01).
  */
 @Service
 public class OrderService {
 
     private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
-    private static final List<OrderStatus> NON_TERMINAL_STATUSES = List.of(
-            OrderStatus.CREATED,
-            OrderStatus.AWAITING_PAYMENT
-    );
-
     private final OrderRepository orderRepository;
-    private final OrderTicketRepository orderTicketRepository;
     private final OutboxRepository outboxRepository;
     private final TicketServiceClient ticketServiceClient;
     private final ObjectMapper objectMapper;
     private final RedissonClient redissonClient;
-
-    @Value("${order.expiration.minutes:15}")
-    private int expirationMinutes;
+    private final OrderTransactionService orderTransactionService;
 
     public OrderService(
             OrderRepository orderRepository,
-            OrderTicketRepository orderTicketRepository,
             OutboxRepository outboxRepository,
             TicketServiceClient ticketServiceClient,
             ObjectMapper objectMapper,
-            RedissonClient redissonClient) {
+            RedissonClient redissonClient,
+            OrderTransactionService orderTransactionService) {
         this.orderRepository = orderRepository;
-        this.orderTicketRepository = orderTicketRepository;
         this.outboxRepository = outboxRepository;
         this.ticketServiceClient = ticketServiceClient;
         this.objectMapper = objectMapper;
         this.redissonClient = redissonClient;
+        this.orderTransactionService = orderTransactionService;
     }
 
     // ── Create ────────────────────────────────────────────────────────────────
@@ -84,8 +77,9 @@ public class OrderService {
      *
      * Steps:
      * 1. Call gRPC ticket-service to validate ticket exists and is available (outside TX).
-     * 2. In a single transaction: check no active order already exists for the ticket,
-     *    fetch/create the local ticket replica, create the order, write outbox message.
+     * 2. Delegate to OrderTransactionService which atomically: checks no active order
+     *    already exists, upserts the local ticket replica, creates the order, and writes
+     *    the outbox message — all within a single @Transactional boundary.
      */
     public OrderResponse createOrder(UUID userId, CreateOrderRequest request) {
         UUID ticketId = request.getTicketId();
@@ -101,12 +95,11 @@ public class OrderService {
             }
 
             // Validate ticket via gRPC BEFORE opening a DB transaction.
-            // The response carries title + price so we can upsert the local replica
-            // without depending on a Kafka-delivered copy (handles Kafka-disabled local dev
-            // and serves as a safe fallback in production if Kafka delivery was delayed).
             ValidateTicketResponse grpcTicket = ticketServiceClient.validateAvailability(ticketId.toString());
 
-            return createOrderTransactional(userId, ticketId, grpcTicket);
+            // Delegate to the separate service bean so Spring's AOP proxy applies
+            // @Transactional correctly (fixes audit finding C-01: self-invocation bypass).
+            return orderTransactionService.createOrderTransactional(userId, ticketId, grpcTicket);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ConflictException("Order creation interrupted for ticket " + ticketId);
@@ -115,47 +108,6 @@ public class OrderService {
                 lock.unlock();
             }
         }
-    }
-
-    @Transactional
-    protected OrderResponse createOrderTransactional(UUID userId, UUID ticketId, ValidateTicketResponse grpcTicket) {
-        // Guard: reject if an active order already exists for this ticket
-        boolean alreadyReserved = orderRepository
-                .findActiveByTicketId(ticketId, List.of(OrderStatus.CANCELLED, OrderStatus.COMPLETE))
-                .isPresent();
-        if (alreadyReserved) {
-            throw new BadRequestException("Ticket is already reserved by another order");
-        }
-
-        // Upsert the local ticket replica from the authoritative gRPC response.
-        // In normal production flow this row already exists (written by TicketEventConsumer
-        // via Kafka). In local dev (Kafka disabled) or on first purchase after a cold start,
-        // we create it here from the gRPC data so the order can proceed.
-        OrderTicket ticket = orderTicketRepository.findById(ticketId).orElseGet(() -> {
-            log.info("Local ticket replica not found; creating from gRPC response ticketId={}", ticketId);
-            return orderTicketRepository.save(
-                    new OrderTicket(ticketId, grpcTicket.getTitle(), new java.math.BigDecimal(String.valueOf(grpcTicket.getPrice())))
-            );
-        });
-
-        OffsetDateTime expiresAt = OffsetDateTime.now().plusMinutes(expirationMinutes);
-        Order order = new Order(userId, OrderStatus.CREATED, expiresAt, ticket);
-        orderRepository.save(order);
-
-        // Write outbox message in the same transaction
-        writeOutbox("orders.order.created", order.getId().toString(),
-                new OrderCreatedEvent(
-                        order.getId().toString(),
-                        userId.toString(),
-                        ticketId.toString(),
-                        ticket.getTitle(),
-                        ticket.getPrice(),
-                        order.getExpiresAt().toString(),
-                        order.getVersion()
-                ));
-
-        log.info("Order created orderId={} userId={} ticketId={}", order.getId(), userId, ticketId);
-        return OrderResponse.from(order);
     }
 
     // ── Read ──────────────────────────────────────────────────────────────────
