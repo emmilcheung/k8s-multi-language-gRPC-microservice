@@ -1,12 +1,12 @@
 /**
  * Integration tests for the auth-service HTTP API.
  *
- * Spins up a real PostgreSQL container via Testcontainers, applies the SQL
- * migration, bootstraps the full NestJS application, and exercises the
- * endpoints over real HTTP using supertest.
+ * Spins up a real PostgreSQL container and a real Redis container via
+ * Testcontainers, applies the SQL migration, bootstraps the full NestJS
+ * application, and exercises the endpoints over real HTTP using supertest.
  *
- * Each test runs inside a transaction that is rolled back on completion so
- * tests are fully isolated without needing separate schemas or data wipes.
+ * Each test runs against isolated data (unique emails per test) so tests are
+ * independent without needing transactions or schema wipes.
  */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -20,6 +20,7 @@ import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
+import { GenericContainer, type StartedTestContainer } from 'testcontainers';
 import * as fs from 'fs';
 import * as path from 'path';
 import supertest from 'supertest';
@@ -62,6 +63,7 @@ iMbpvI5mi11tnbw8iU3T0jJycMgHw7EIiCNy2czPt2BRYcwIK9Gb
 // ── Suite setup / teardown ────────────────────────────────────────────────────
 
 let pgContainer: StartedPostgreSqlContainer;
+let redisContainer: StartedTestContainer;
 let app: INestApplication;
 let pool: Pool;
 let request: ReturnType<typeof supertest>;
@@ -74,13 +76,23 @@ beforeAll(async () => {
     .withPassword('auth_pass')
     .start();
 
+  // 2. Start Redis container
+  redisContainer = await new GenericContainer('redis:7-alpine')
+    .withExposedPorts(6379)
+    .start();
+
+  const redisHost = redisContainer.getHost();
+  const redisPort = redisContainer.getMappedPort(6379);
+  const redisUrl = `redis://${redisHost}:${redisPort}`;
   const databaseUrl = pgContainer.getConnectionUri();
+
   process.env['DATABASE_URL'] = databaseUrl;
+  process.env['REDIS_URL'] = redisUrl;
   process.env['RSA_PRIVATE_KEY'] = TEST_RSA_PEM;
   process.env['JWT_EXPIRY'] = '15m';
   process.env['NODE_ENV'] = 'test';
 
-  // 2. Apply migration using raw SQL
+  // 3. Apply migration using raw SQL
   pool = new Pool({ connectionString: databaseUrl });
   const migrationSql = fs.readFileSync(
     path.join(__dirname, '../migrations/001_init_users.sql'),
@@ -88,13 +100,14 @@ beforeAll(async () => {
   );
   await pool.query(migrationSql);
 
-  // 3. Bootstrap NestJS app (without pino/metrics to keep tests simple)
+  // 4. Bootstrap NestJS app (without pino/metrics to keep tests simple)
   const moduleRef = await Test.createTestingModule({
     imports: [
       ConfigModule.forRoot({
         isGlobal: true,
         validationSchema: Joi.object({
           DATABASE_URL: Joi.string().required(),
+          REDIS_URL: Joi.string().required(),
           RSA_PRIVATE_KEY: Joi.string().required(),
           JWT_EXPIRY: Joi.string().default('15m'),
           NODE_ENV: Joi.string().default('test'),
@@ -122,28 +135,65 @@ beforeAll(async () => {
 
   await app.init();
   request = supertest(app.getHttpServer());
-}, 60_000);
+}, 90_000);
 
 afterAll(async () => {
   await app?.close();
   await pool?.end();
   await pgContainer?.stop();
+  await redisContainer?.stop();
 });
+
+// ── Helper ────────────────────────────────────────────────────────────────────
+
+/** Extract a named cookie value from a Set-Cookie header array. */
+function getCookieValue(
+  setCookieHeaders: string | string[] | undefined,
+  name: string,
+): string | undefined {
+  const headers = Array.isArray(setCookieHeaders)
+    ? setCookieHeaders
+    : setCookieHeaders
+      ? [setCookieHeaders]
+      : [];
+  for (const header of headers) {
+    const match = header.match(new RegExp(`(?:^|,\\s*)${name}=([^;]+)`));
+    if (match) return match[1];
+  }
+  return undefined;
+}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('POST /api/users/signup returns 201 Created given valid credentials', () => {
-  it('should set an httpOnly cookie and return the current user email', async () => {
+  it('should set an httpOnly token cookie and return the current user email', async () => {
     const res = await request
       .post('/api/users/signup')
       .send({ email: 'signup@example.com', password: 'password123' });
 
     expect(res.status).toBe(201);
     expect(res.body.currentUser.email).toBe('signup@example.com');
-    expect(res.headers['set-cookie']).toBeDefined();
-    const cookie = (res.headers['set-cookie'] as string[])[0];
-    expect(cookie).toMatch(/token=/);
-    expect(cookie).toMatch(/HttpOnly/i);
+    const setCookieHeaders = res.headers['set-cookie'] as string[] | undefined;
+    expect(setCookieHeaders).toBeDefined();
+    const tokenCookie = setCookieHeaders!.find((c) => c.startsWith('token='));
+    expect(tokenCookie).toBeDefined();
+    expect(tokenCookie).toMatch(/HttpOnly/i);
+  });
+
+  it('should also set an httpOnly refreshToken cookie scoped to /api/auth/refresh', async () => {
+    const res = await request
+      .post('/api/users/signup')
+      .send({ email: 'signup-refresh@example.com', password: 'password123' });
+
+    expect(res.status).toBe(201);
+    const setCookieHeaders = res.headers['set-cookie'] as string[] | undefined;
+    expect(setCookieHeaders).toBeDefined();
+    const refreshCookie = setCookieHeaders!.find((c) =>
+      c.startsWith('refreshToken='),
+    );
+    expect(refreshCookie).toBeDefined();
+    expect(refreshCookie).toMatch(/HttpOnly/i);
+    expect(refreshCookie).toMatch(/Path=\/api\/auth\/refresh/i);
   });
 });
 
@@ -195,7 +245,7 @@ describe('POST /api/users/signup returns 400 Bad Request given invalid input', (
 });
 
 describe('POST /api/users/signin returns 200 OK given valid credentials', () => {
-  it('should set a token cookie when credentials are correct', async () => {
+  it('should set token and refreshToken cookies when credentials are correct', async () => {
     const email = 'signin@example.com';
     const password = 'password123';
 
@@ -205,8 +255,14 @@ describe('POST /api/users/signin returns 200 OK given valid credentials', () => 
       .send({ email, password });
 
     expect(res.status).toBe(200);
-    const cookie = (res.headers['set-cookie'] as string[])[0];
-    expect(cookie).toMatch(/token=/);
+    const setCookieHeaders = res.headers['set-cookie'] as string[] | undefined;
+    expect(setCookieHeaders).toBeDefined();
+    const tokenCookie = setCookieHeaders!.find((c) => c.startsWith('token='));
+    const refreshCookie = setCookieHeaders!.find((c) =>
+      c.startsWith('refreshToken='),
+    );
+    expect(tokenCookie).toBeDefined();
+    expect(refreshCookie).toBeDefined();
   });
 });
 
@@ -234,6 +290,73 @@ describe('POST /api/users/signin returns 401 Unauthorized given wrong credential
   });
 });
 
+describe('POST /api/auth/refresh rotates refresh token', () => {
+  it('should return 401 when no refreshToken cookie is present', async () => {
+    const res = await request.post('/api/auth/refresh');
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('MISSING_REFRESH_TOKEN');
+  });
+
+  it('should return 401 for an invalid refresh token', async () => {
+    const res = await request
+      .post('/api/auth/refresh')
+      .set('Cookie', 'refreshToken=not-a-real-token');
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('INVALID_REFRESH_TOKEN');
+  });
+
+  it('should issue new token cookies and rotate the refresh token', async () => {
+    // Sign up to get a refresh token
+    const signupRes = await request
+      .post('/api/users/signup')
+      .send({ email: 'refresh-rotate@example.com', password: 'password123' });
+    expect(signupRes.status).toBe(201);
+
+    const signupCookies = signupRes.headers['set-cookie'] as string[];
+    const oldRefreshTokenValue = getCookieValue(signupCookies, 'refreshToken');
+    expect(oldRefreshTokenValue).toBeDefined();
+
+    // Use the refresh token to get a new access token
+    const refreshRes = await request
+      .post('/api/auth/refresh')
+      .set('Cookie', `refreshToken=${oldRefreshTokenValue!}`);
+
+    expect(refreshRes.status).toBe(200);
+    const refreshCookies = refreshRes.headers['set-cookie'] as string[];
+    const newTokenValue = getCookieValue(refreshCookies, 'token');
+    const newRefreshTokenValue = getCookieValue(refreshCookies, 'refreshToken');
+    expect(newTokenValue).toBeDefined();
+    expect(newRefreshTokenValue).toBeDefined();
+    // Refresh token should be rotated (different value)
+    expect(newRefreshTokenValue).not.toBe(oldRefreshTokenValue);
+  });
+
+  it('should reject a refresh token after it has been rotated (replay prevention)', async () => {
+    // Sign up and get initial refresh token
+    const signupRes = await request
+      .post('/api/users/signup')
+      .send({ email: 'refresh-replay@example.com', password: 'password123' });
+    expect(signupRes.status).toBe(201);
+
+    const signupCookies = signupRes.headers['set-cookie'] as string[];
+    const originalRefreshToken = getCookieValue(signupCookies, 'refreshToken');
+    expect(originalRefreshToken).toBeDefined();
+
+    // First rotation — should succeed
+    const firstRefreshRes = await request
+      .post('/api/auth/refresh')
+      .set('Cookie', `refreshToken=${originalRefreshToken!}`);
+    expect(firstRefreshRes.status).toBe(200);
+
+    // Replay with the old token — should now be rejected
+    const replayRes = await request
+      .post('/api/auth/refresh')
+      .set('Cookie', `refreshToken=${originalRefreshToken!}`);
+    expect(replayRes.status).toBe(401);
+    expect(replayRes.body.error.code).toBe('INVALID_REFRESH_TOKEN');
+  });
+});
+
 describe('POST /api/users/signout returns 204 No Content', () => {
   it('should clear the token cookie', async () => {
     const res = await request.post('/api/users/signout');
@@ -243,6 +366,34 @@ describe('POST /api/users/signout returns 204 No Content', () => {
     const cookie =
       ((res.headers['set-cookie'] as string[] | undefined) ?? [])[0] ?? '';
     expect(cookie).toMatch(/token=/);
+  });
+
+  it('should revoke the refresh token so it cannot be used after signout', async () => {
+    // Sign up to get a refresh token
+    const signupRes = await request
+      .post('/api/users/signup')
+      .send({
+        email: 'signout-revoke@example.com',
+        password: 'password123',
+      });
+    expect(signupRes.status).toBe(201);
+
+    const signupCookies = signupRes.headers['set-cookie'] as string[];
+    const refreshTokenValue = getCookieValue(signupCookies, 'refreshToken');
+    expect(refreshTokenValue).toBeDefined();
+
+    // Sign out while sending the refresh token cookie
+    const signoutRes = await request
+      .post('/api/users/signout')
+      .set('Cookie', `refreshToken=${refreshTokenValue!}`);
+    expect(signoutRes.status).toBe(204);
+
+    // Attempting to use the revoked refresh token should now fail
+    const refreshRes = await request
+      .post('/api/auth/refresh')
+      .set('Cookie', `refreshToken=${refreshTokenValue!}`);
+    expect(refreshRes.status).toBe(401);
+    expect(refreshRes.body.error.code).toBe('INVALID_REFRESH_TOKEN');
   });
 });
 

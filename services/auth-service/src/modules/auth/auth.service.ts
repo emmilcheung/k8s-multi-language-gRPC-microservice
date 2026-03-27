@@ -10,6 +10,7 @@ import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 import * as argon2 from 'argon2';
 import { createPublicKey } from 'crypto';
 import { UsersRepository } from '../users/users.repository';
+import { RefreshTokenService } from './refresh-token.service';
 
 export interface JwtPayload {
   sub: string;
@@ -23,6 +24,11 @@ export interface CurrentUser {
   email: string;
 }
 
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+}
+
 @Injectable()
 export class AuthService {
   private readonly rsaPrivateKey: string;
@@ -33,6 +39,7 @@ export class AuthService {
     private readonly usersRepo: UsersRepository,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly refreshTokenService: RefreshTokenService,
   ) {
     // Load and validate RSA private key at construction time (fail loudly)
     const raw = this.config.getOrThrow<string>('RSA_PRIVATE_KEY');
@@ -42,7 +49,7 @@ export class AuthService {
       : Buffer.from(raw, 'base64').toString('utf-8');
   }
 
-  async signup(email: string, password: string): Promise<string> {
+  async signup(email: string, password: string): Promise<AuthTokens> {
     const existing = await this.usersRepo.findByEmail(email);
     if (existing) {
       throw new ConflictException({
@@ -63,10 +70,12 @@ export class AuthService {
     const user = await this.usersRepo.create(email, passwordHash);
     this.logger.info({ userId: user.id }, 'User created');
 
-    return this.issueToken({ sub: user.id, email: user.email });
+    const accessToken = this.issueToken({ sub: user.id, email: user.email });
+    const refreshToken = await this.refreshTokenService.issue(user.id);
+    return { accessToken, refreshToken };
   }
 
-  async signin(email: string, password: string): Promise<string> {
+  async signin(email: string, password: string): Promise<AuthTokens> {
     const user = await this.usersRepo.findByEmail(email);
     if (!user) {
       // Constant-time failure to prevent user enumeration
@@ -90,6 +99,22 @@ export class AuthService {
     }
 
     this.logger.info({ userId: user.id }, 'User signed in');
+    const accessToken = this.issueToken({ sub: user.id, email: user.email });
+    const refreshToken = await this.refreshTokenService.issue(user.id);
+    return { accessToken, refreshToken };
+  }
+
+  /**
+   * Issue a new access token for a userId (used during refresh token rotation).
+   * Looks up the user by ID to include the email claim.
+   */
+  async issueAccessTokenForUser(userId: string): Promise<string> {
+    const user = await this.usersRepo.findById(userId);
+    if (!user) {
+      throw new UnauthorizedException({
+        error: { code: 'USER_NOT_FOUND', message: 'User not found' },
+      });
+    }
     return this.issueToken({ sub: user.id, email: user.email });
   }
 

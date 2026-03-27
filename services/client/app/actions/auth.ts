@@ -3,6 +3,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { parse } from "set-cookie-parser";
 import { ApiError } from "@/lib/api";
 
 const base = () =>
@@ -38,17 +39,21 @@ export async function signup(
       return { error: body?.error?.message ?? "Signup failed." };
     }
 
-    const setCookie = res.headers.get("set-cookie");
-    if (setCookie) {
+    // Forward the httpOnly token cookie from auth-service to the browser.
+    // Use set-cookie-parser for robust parsing (S-08) and set maxAge to match
+    // the 15-minute JWT lifetime (S-07).
+    const setCookieHeader = res.headers.get("set-cookie");
+    if (setCookieHeader) {
       const cookieStore = await cookies();
-      // Forward the httpOnly token cookie from auth-service to the browser.
-      const match = setCookie.match(/token=([^;]+)/);
-      if (match) {
-        cookieStore.set("token", match[1], {
+      const parsed = parse(setCookieHeader, { map: true });
+      const tokenEntry = parsed["token"];
+      if (tokenEntry?.value) {
+        cookieStore.set("token", tokenEntry.value, {
           httpOnly: true,
           path: "/",
-          sameSite: "lax",
+          sameSite: "strict",
           secure: process.env.NODE_ENV === "production",
+          maxAge: 900, // 15 minutes — matches JWT expiry (S-07)
         });
       }
     }
@@ -85,16 +90,21 @@ export async function signin(
       return { error: body?.error?.message ?? "Signin failed." };
     }
 
-    const setCookie = res.headers.get("set-cookie");
-    if (setCookie) {
+    // Forward the httpOnly token cookie from auth-service to the browser.
+    // Use set-cookie-parser for robust parsing (S-08) and set maxAge to match
+    // the 15-minute JWT lifetime (S-07).
+    const setCookieHeader = res.headers.get("set-cookie");
+    if (setCookieHeader) {
       const cookieStore = await cookies();
-      const match = setCookie.match(/token=([^;]+)/);
-      if (match) {
-        cookieStore.set("token", match[1], {
+      const parsed = parse(setCookieHeader, { map: true });
+      const tokenEntry = parsed["token"];
+      if (tokenEntry?.value) {
+        cookieStore.set("token", tokenEntry.value, {
           httpOnly: true,
           path: "/",
-          sameSite: "lax",
+          sameSite: "strict",
           secure: process.env.NODE_ENV === "production",
+          maxAge: 900, // 15 minutes — matches JWT expiry (S-07)
         });
       }
     }

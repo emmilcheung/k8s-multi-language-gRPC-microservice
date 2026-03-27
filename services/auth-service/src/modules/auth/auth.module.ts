@@ -5,9 +5,16 @@ import type { StringValue } from 'ms';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
+import { RefreshTokenService } from './refresh-token.service';
+import { RedisModule } from '../redis/redis.module';
 
 @Module({
   imports: [
+    // RedisModule must be imported here (not just relied on as @Global from AppModule)
+    // so that AuthModule is self-contained when loaded in integration tests without
+    // AppModule. NestJS deduplicates module instances, so only one Redis client
+    // is created regardless of how many modules import RedisModule.
+    RedisModule,
     UsersModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
@@ -27,7 +34,7 @@ import { UsersModule } from '../users/users.module';
       },
     }),
   ],
-  providers: [AuthService],
+  providers: [AuthService, RefreshTokenService],
   controllers: [AuthController],
 })
 export class AuthModule {}

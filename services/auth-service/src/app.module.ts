@@ -7,6 +7,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { DatabaseModule } from './database/database.module';
+import { RedisModule } from './modules/redis/redis.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { DatabaseModule } from './database/database.module';
         RSA_PRIVATE_KEY: Joi.string().required(),
         JWT_EXPIRY: Joi.string().default('15m'),
         COOKIE_DOMAIN: Joi.string().default('localhost'),
+        REDIS_URL: Joi.string().required(),
       }),
       validationOptions: { abortEarly: false },
     }),
@@ -50,6 +52,7 @@ import { DatabaseModule } from './database/database.module';
 
     // ── Feature modules ──────────────────────────────────────────────────────
     DatabaseModule,
+    RedisModule,
     UsersModule,
     AuthModule,
     HealthModule,

@@ -5,6 +5,7 @@ import type { UsersRepository } from '../users/users.repository';
 import type { JwtService } from '@nestjs/jwt';
 import type { ConfigService } from '@nestjs/config';
 import type { PinoLogger } from 'nestjs-pino';
+import type { RefreshTokenService } from './refresh-token.service';
 import * as argon2 from 'argon2';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -87,38 +88,61 @@ function makeConfigService(rsaKey = TEST_RSA_PEM): ConfigService {
   } as unknown as ConfigService;
 }
 
+function makeRefreshTokenService(
+  overrides: Partial<RefreshTokenService> = {},
+): RefreshTokenService {
+  return {
+    issue: vi.fn().mockResolvedValue('opaque-refresh-token'),
+    validate: vi.fn().mockResolvedValue('uuid-1'),
+    revoke: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  } as unknown as RefreshTokenService;
+}
+
 function makeAuthService(
   overrides: {
     usersRepo?: Partial<UsersRepository>;
     jwtService?: Partial<JwtService>;
     configService?: ConfigService;
+    refreshTokenService?: Partial<RefreshTokenService>;
   } = {},
 ): {
   service: AuthService;
   usersRepo: UsersRepository;
   jwtService: JwtService;
+  refreshTokenService: RefreshTokenService;
 } {
   const usersRepo = makeUsersRepo(overrides.usersRepo);
   const jwtService = makeJwtService(overrides.jwtService);
   const configService = overrides.configService ?? makeConfigService();
+  const refreshTokenService = makeRefreshTokenService(
+    overrides.refreshTokenService,
+  );
   const logger = makeLogger();
-  const service = new AuthService(logger, usersRepo, jwtService, configService);
-  return { service, usersRepo, jwtService };
+  const service = new AuthService(
+    logger,
+    usersRepo,
+    jwtService,
+    configService,
+    refreshTokenService,
+  );
+  return { service, usersRepo, jwtService, refreshTokenService };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('AuthService', () => {
   describe('signup', () => {
-    it('should return a signed JWT when email is not already in use', async () => {
-      const { service, usersRepo, jwtService } = makeAuthService({
-        usersRepo: {
-          findByEmail: vi.fn().mockResolvedValue(null),
-          create: vi.fn().mockResolvedValue(makeUser()),
-        },
-      });
+    it('should return accessToken and refreshToken when email is not already in use', async () => {
+      const { service, usersRepo, jwtService, refreshTokenService } =
+        makeAuthService({
+          usersRepo: {
+            findByEmail: vi.fn().mockResolvedValue(null),
+            create: vi.fn().mockResolvedValue(makeUser()),
+          },
+        });
 
-      const token = await service.signup('user@example.com', 'password123');
+      const result = await service.signup('user@example.com', 'password123');
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(usersRepo.findByEmail).toHaveBeenCalledWith('user@example.com');
@@ -126,7 +150,10 @@ describe('AuthService', () => {
       expect(usersRepo.create).toHaveBeenCalledOnce();
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
-      expect(token).toBe('signed.jwt.token');
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1');
+      expect(result.accessToken).toBe('signed.jwt.token');
+      expect(result.refreshToken).toBe('opaque-refresh-token');
     });
 
     it('should throw ConflictException when email is already in use', async () => {
@@ -157,21 +184,27 @@ describe('AuthService', () => {
   });
 
   describe('signin', () => {
-    it('should return a signed JWT when credentials are valid', async () => {
+    it('should return accessToken and refreshToken when credentials are valid', async () => {
       const passwordHash = await argon2.hash('correctPassword', {
         type: argon2.argon2id,
       });
-      const { service, jwtService } = makeAuthService({
+      const { service, jwtService, refreshTokenService } = makeAuthService({
         usersRepo: {
           findByEmail: vi.fn().mockResolvedValue(makeUser({ passwordHash })),
         },
       });
 
-      const token = await service.signin('user@example.com', 'correctPassword');
+      const result = await service.signin(
+        'user@example.com',
+        'correctPassword',
+      );
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
-      expect(token).toBe('signed.jwt.token');
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1');
+      expect(result.accessToken).toBe('signed.jwt.token');
+      expect(result.refreshToken).toBe('opaque-refresh-token');
     });
 
     it('should throw UnauthorizedException when user does not exist', async () => {
@@ -231,6 +264,31 @@ describe('AuthService', () => {
         errWrongPass!.getResponse() as { error: { code: string } }
       ).error.code;
       expect(codeNoUser).toBe(codeWrongPass);
+    });
+  });
+
+  describe('issueAccessTokenForUser', () => {
+    it('should issue an access token when the user exists', async () => {
+      const user = makeUser();
+      const { service, jwtService } = makeAuthService({
+        usersRepo: { findById: vi.fn().mockResolvedValue(user) },
+      });
+
+      const token = await service.issueAccessTokenForUser('uuid-1');
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(jwtService.sign).toHaveBeenCalledOnce();
+      expect(token).toBe('signed.jwt.token');
+    });
+
+    it('should throw UnauthorizedException when the user does not exist', async () => {
+      const { service } = makeAuthService({
+        usersRepo: { findById: vi.fn().mockResolvedValue(null) },
+      });
+
+      await expect(service.issueAccessTokenForUser('bad-id')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
   });
 

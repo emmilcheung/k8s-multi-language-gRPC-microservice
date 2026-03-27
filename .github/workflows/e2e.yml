@@ -1,18 +1,31 @@
 # E2E test workflow (Playwright against Docker Compose stack)
 #
-# Runs the full 18-test Playwright suite after spinning up all services
-# via docker-compose. Only runs on PRs targeting main — not on pushes to main
-# since there is no deployment pipeline to validate against.
+# Runs AFTER the ci workflow completes successfully — not in parallel.
+# This is achieved via the `workflow_run` trigger, which waits for the named
+# workflow to finish before starting.
+#
+# Trigger conditions (enforced in the job `if`):
+#   - The ci workflow completed with conclusion == 'success'
+#   - The ci workflow was itself triggered by a pull_request event
+#     (prevents E2E running on direct pushes to main)
+#
+# Because `workflow_run` runs in the context of the default branch, the
+# checkout step must explicitly use the head SHA from the triggering run.
 #
 # Required secrets:
 #   RSA_PRIVATE_KEY    — the dev RSA private key (same value as in local .env)
 #   STRIPE_SECRET_KEY  — Stripe key; use "test_mock" to activate mock mode
+#   KONG_RSA_PUBLIC_KEY — the dev RSA public key
 
 name: e2e
 
 on:
-  pull_request:
-    branches: [main]
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   e2e:
@@ -20,8 +33,19 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
+    # Only run when:
+    #   - The triggering ci workflow succeeded (all service jobs passed)
+    #   - The ci workflow was triggered by a pull_request (not a push)
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+
     steps:
+      # Check out the exact commit that triggered the ci workflow, not the
+      # default branch. This is required for workflow_run checkouts.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       # Write the .env file consumed by docker-compose via env_file directives.
       # auth-service reads RSA_PRIVATE_KEY; payment-service reads STRIPE_SECRET_KEY.
