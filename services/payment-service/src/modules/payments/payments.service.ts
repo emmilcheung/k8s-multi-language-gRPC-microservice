@@ -54,7 +54,10 @@ export class PaymentsService {
     // Idempotency check — Kafka may redeliver the same event
     const existing = await this.paymentsRepo.findByOrderId(dto.orderId);
     if (existing) {
-      this.logger.info({ orderId: dto.orderId, paymentId: existing.id }, 'Payment already exists — skipping duplicate');
+      this.logger.info(
+        { orderId: dto.orderId, paymentId: existing.id },
+        'Payment already exists — skipping duplicate',
+      );
       return existing;
     }
 
@@ -88,7 +91,14 @@ export class PaymentsService {
       );
 
       // Mark complete and write outbox in the same transaction
-      return this.completePaymentWithOutbox(payment.id, dto.orderId, dto.userId, dto.amount, dto.currency ?? 'usd', intent.id);
+      return this.completePaymentWithOutbox(
+        payment.id,
+        dto.orderId,
+        dto.userId,
+        dto.amount,
+        dto.currency ?? 'usd',
+        intent.id,
+      );
     } catch (err) {
       // Mark payment as failed — never leave it in pending state
       await this.paymentsRepo.updateStatus(payment.id, PAYMENT_STATUS.FAILED);
@@ -232,7 +242,10 @@ export class PaymentsService {
       );
     });
 
-    this.logger.info({ paymentId: payment!.id, orderId }, 'Payment completed (mock) — outbox entry written');
+    this.logger.info(
+      { paymentId: payment!.id, orderId },
+      'Payment completed (mock) — outbox entry written',
+    );
     return payment!;
   }
 
@@ -293,20 +306,22 @@ export class PaymentsService {
       );
 
       await this.paymentsRepo.updateStatus(payment.id, PAYMENT_STATUS.PENDING, intent.id);
-      this.logger.info({ paymentId: payment.id, intentId: intent.id }, 'Stripe PaymentIntent created');
+      this.logger.info(
+        { paymentId: payment.id, intentId: intent.id },
+        'Stripe PaymentIntent created',
+      );
     } catch (err) {
       await this.paymentsRepo.updateStatus(payment.id, PAYMENT_STATUS.FAILED);
       const msg = err instanceof Error ? err.message : 'Unknown';
-      this.logger.error({ paymentId: payment.id, err: msg }, 'Stripe PaymentIntent creation failed');
+      this.logger.error(
+        { paymentId: payment.id, err: msg },
+        'Stripe PaymentIntent creation failed',
+      );
       // Do not re-throw — the payment is now FAILED; the consumer should not retry
     }
   }
 
-  private buildOutboxRow(
-    topic: string,
-    partitionKey: string,
-    data: Record<string, unknown>,
-  ) {
+  private buildOutboxRow(topic: string, partitionKey: string, data: Record<string, unknown>) {
     return {
       topic,
       partitionKey,

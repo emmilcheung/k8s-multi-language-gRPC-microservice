@@ -6,11 +6,15 @@
  * not set the SDK starts in no-op mode (no traces exported), which keeps the
  * service functional in environments without an OTel Collector.
  */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-otlp-grpc';
 import { Resource } from '@opentelemetry/resources';
-import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
+import {
+  SEMRESATTRS_SERVICE_NAME,
+  SEMRESATTRS_SERVICE_VERSION,
+} from '@opentelemetry/semantic-conventions';
 
 const serviceName = process.env.OTEL_SERVICE_NAME ?? 'payment-service';
 const collectorUrl = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
@@ -35,7 +39,5 @@ sdk.start();
 
 // Flush and shutdown traces on process exit
 process.on('SIGTERM', () => {
-  sdk
-    .shutdown()
-    .catch((err: unknown) => console.error('OTel shutdown error', err));
+  sdk.shutdown().catch((err: unknown) => console.error('OTel shutdown error', err));
 });

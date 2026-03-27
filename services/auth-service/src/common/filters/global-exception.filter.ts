@@ -57,7 +57,10 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
 
     // Programmer error — return generic 500, never leak internals
-    this.logger.error({ err: exception }, '[GlobalExceptionFilter] Unhandled error');
+    this.logger.error(
+      { err: exception },
+      '[GlobalExceptionFilter] Unhandled error',
+    );
     return response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       error: {
         code: 'INTERNAL_ERROR',

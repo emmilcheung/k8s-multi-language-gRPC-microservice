@@ -26,10 +26,7 @@ export class PaymentsController {
    */
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async charge(
-    @Headers('x-user-id') userId: string | undefined,
-    @Body() dto: ChargeDto,
-  ) {
+  async charge(@Headers('x-user-id') userId: string | undefined, @Body() dto: ChargeDto) {
     if (!userId) {
       throw new BadRequestException({
         error: { code: 'MISSING_USER_ID', message: 'X-User-Id header is required' },
@@ -53,10 +50,7 @@ export class PaymentsController {
    * Requires X-User-Id header; returns 403 if the requesting user does not own the payment.
    */
   @Get(':id')
-  async findOne(
-    @Param('id') id: string,
-    @Headers('x-user-id') userId: string | undefined,
-  ) {
+  async findOne(@Param('id') id: string, @Headers('x-user-id') userId: string | undefined) {
     if (!userId) {
       throw new UnauthorizedException({
         error: { code: 'UNAUTHENTICATED', message: 'Authentication required' },

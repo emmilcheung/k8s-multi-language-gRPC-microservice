@@ -370,12 +370,10 @@ describe('POST /api/users/signout returns 204 No Content', () => {
 
   it('should revoke the refresh token so it cannot be used after signout', async () => {
     // Sign up to get a refresh token
-    const signupRes = await request
-      .post('/api/users/signup')
-      .send({
-        email: 'signout-revoke@example.com',
-        password: 'password123',
-      });
+    const signupRes = await request.post('/api/users/signup').send({
+      email: 'signout-revoke@example.com',
+      password: 'password123',
+    });
     expect(signupRes.status).toBe(201);
 
     const signupCookies = signupRes.headers['set-cookie'] as string[];

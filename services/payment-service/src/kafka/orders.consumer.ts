@@ -85,11 +85,17 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (attempt === 10) {
-          this.logger.error({ err: msg, topic: TOPIC }, 'Kafka subscribe failed after 10 attempts — giving up');
+          this.logger.error(
+            { err: msg, topic: TOPIC },
+            'Kafka subscribe failed after 10 attempts — giving up',
+          );
           throw err;
         }
         const delay = Math.min(1000 * 2 ** (attempt - 1), 8000);
-        this.logger.warn({ attempt, topic: TOPIC, err: msg }, `Kafka subscribe failed — retrying in ${delay}ms`);
+        this.logger.warn(
+          { attempt, topic: TOPIC, err: msg },
+          `Kafka subscribe failed — retrying in ${delay}ms`,
+        );
         await sleep(delay);
       }
     }
@@ -99,8 +105,16 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
-    try { await this.consumer?.disconnect(); } catch { /* ignore if never connected */ }
-    try { await this.producer?.disconnect(); } catch { /* ignore if never connected */ }
+    try {
+      await this.consumer?.disconnect();
+    } catch {
+      /* ignore if never connected */
+    }
+    try {
+      await this.producer?.disconnect();
+    } catch {
+      /* ignore if never connected */
+    }
   }
 
   /**
@@ -117,7 +131,10 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
     const port = parseInt(portStr ?? '9092', 10);
     return new Promise((resolve) => {
       const socket = new net.Socket();
-      const done = (result: boolean) => { socket.destroy(); resolve(result); };
+      const done = (result: boolean) => {
+        socket.destroy();
+        resolve(result);
+      };
       socket.setTimeout(1000);
       socket.once('connect', () => done(true));
       socket.once('error', () => done(false));
@@ -167,10 +184,7 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
     }
 
     // All retries exhausted → DLQ
-    this.logger.error(
-      { orderId: event.data.orderId },
-      'All retries exhausted — routing to DLQ',
-    );
+    this.logger.error({ orderId: event.data.orderId }, 'All retries exhausted — routing to DLQ');
     await this.sendToDlq(message, 'MAX_RETRIES_EXCEEDED');
   }
 

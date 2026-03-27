@@ -68,7 +68,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
-    try { await this.producer?.disconnect(); } catch { /* ignore */ }
+    try {
+      await this.producer?.disconnect();
+    } catch {
+      /* ignore */
+    }
   }
 
   /**
@@ -80,7 +84,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   async relay() {
     if (!this.kafkaAvailable || !this.producer) return;
 
-    let rows: typeof outbox.$inferSelect[];
+    let rows: (typeof outbox.$inferSelect)[];
     try {
       rows = await this.db
         .select()
@@ -106,10 +110,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           ],
         });
 
-        await this.db
-          .update(outbox)
-          .set({ published: true })
-          .where(eq(outbox.id, row.id));
+        await this.db.update(outbox).set({ published: true }).where(eq(outbox.id, row.id));
 
         this.logger.info(
           { outboxId: row.id, topic: row.topic, partitionKey: row.partitionKey },
@@ -132,7 +133,10 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     const port = parseInt(portStr ?? '9092', 10);
     return new Promise((resolve) => {
       const socket = new net.Socket();
-      const done = (result: boolean) => { socket.destroy(); resolve(result); };
+      const done = (result: boolean) => {
+        socket.destroy();
+        resolve(result);
+      };
       socket.setTimeout(1000);
       socket.once('connect', () => done(true));
       socket.once('error', () => done(false));

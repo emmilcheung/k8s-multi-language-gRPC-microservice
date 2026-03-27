@@ -37,12 +37,21 @@ let request: ReturnType<typeof supertest>;
 /** Minimal Stripe mock — no real network calls in tests. */
 const mockStripe = {
   paymentIntents: {
-    create: ({ amount, currency, metadata }: { amount: number; currency: string; metadata: Record<string, string> }) => Promise.resolve({
-      id: `mock_pi_${metadata.orderId ?? 'unknown'}`,
+    create: ({
       amount,
       currency,
-      status: 'succeeded',
-    }),
+      metadata,
+    }: {
+      amount: number;
+      currency: string;
+      metadata: Record<string, string>;
+    }) =>
+      Promise.resolve({
+        id: `mock_pi_${metadata.orderId ?? 'unknown'}`,
+        amount,
+        currency,
+        status: 'succeeded',
+      }),
   },
 };
 
@@ -124,15 +133,12 @@ describe('POST /api/payments returns 201 Created given valid input and X-User-Id
   beforeAll(cleanPayments);
 
   it('should create a payment and return it', async () => {
-    const res = await request
-      .post('/api/payments')
-      .set('X-User-Id', 'user-integration-1')
-      .send({
-        orderId: '6e65651c-0424-475c-b491-82bc26e7818a',
-        amount: 2000,
-        currency: 'usd',
-        token: 'pm_test_ok',
-      });
+    const res = await request.post('/api/payments').set('X-User-Id', 'user-integration-1').send({
+      orderId: '6e65651c-0424-475c-b491-82bc26e7818a',
+      amount: 2000,
+      currency: 'usd',
+      token: 'pm_test_ok',
+    });
 
     expect(res.status).toBe(201);
     expect(res.body.payment.orderId).toBe('6e65651c-0424-475c-b491-82bc26e7818a');
@@ -192,15 +198,12 @@ describe('POST /api/payments returns 400 given invalid body', () => {
   });
 
   it('should reject unknown extra fields', async () => {
-    const res = await request
-      .post('/api/payments')
-      .set('X-User-Id', 'user-1')
-      .send({
-        orderId: '0a6a4658-acf6-42a9-936e-5ee155f96418',
-        amount: 500,
-        token: 'pm_x',
-        admin: true,
-      });
+    const res = await request.post('/api/payments').set('X-User-Id', 'user-1').send({
+      orderId: '0a6a4658-acf6-42a9-936e-5ee155f96418',
+      amount: 500,
+      token: 'pm_x',
+      admin: true,
+    });
 
     expect(res.status).toBe(400);
   });
@@ -228,9 +231,7 @@ describe('GET /api/payments/:id returns 200 OK given valid payment id', () => {
   });
 
   it('should return the payment', async () => {
-    const res = await request
-      .get(`/api/payments/${paymentId}`)
-      .set('X-User-Id', 'user-get-1');
+    const res = await request.get(`/api/payments/${paymentId}`).set('X-User-Id', 'user-get-1');
 
     expect(res.status).toBe(200);
     expect(res.body.payment.id).toBe(paymentId);
