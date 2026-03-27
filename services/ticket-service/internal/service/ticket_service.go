@@ -68,8 +68,11 @@ func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInpu
 		UserID:  ticket.UserID,
 		Version: ticket.Version,
 	}); err != nil {
-		// Log but don't fail the request — the outbox pattern would handle this in production
+		// Propagate the error — silently swallowing it would leave downstream services
+		// (order-service) without the ticket.created event, causing silent data divergence.
+		// The caller will receive a 500 and can retry the entire operation.
 		s.log.Error("failed to publish ticket.created event", zap.Error(err), zap.String("ticketId", ticket.ID))
+		return nil, fmt.Errorf("publish ticket.created event: %w", err)
 	}
 
 	return ticket, nil
@@ -127,6 +130,7 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 		Version: ticket.Version,
 	}); err != nil {
 		s.log.Error("failed to publish ticket.updated event", zap.Error(err), zap.String("ticketId", ticket.ID))
+		return nil, fmt.Errorf("publish ticket.updated event: %w", err)
 	}
 
 	return ticket, nil

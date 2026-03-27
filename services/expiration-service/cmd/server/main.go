@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/acme/expiration-service/internal/config"
+	"github.com/acme/expiration-service/internal/health"
 	appkafka "github.com/acme/expiration-service/internal/kafka"
 	"github.com/acme/expiration-service/internal/scheduler"
 	"github.com/acme/expiration-service/internal/server"
@@ -62,8 +63,14 @@ func main() {
 	}
 	defer consumer.Close()
 
+	// Dependency health checkers — wired into the readiness probe.
+	redisChecker := health.NewRedisChecker(cfg.RedisAddr)
+	defer redisChecker.Close() //nolint:errcheck
+
+	kafkaChecker := health.NewKafkaChecker(cfg.KafkaBrokers)
+
 	// Echo HTTP server — /healthz/live, /healthz/ready, /metrics.
-	httpServer := server.New(nil, nil, log)
+	httpServer := server.New(redisChecker, kafkaChecker, log)
 
 	// Start asynq worker in background.
 	go func() {

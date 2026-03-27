@@ -1,5 +1,6 @@
 package com.ticketing.orders.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -29,17 +30,24 @@ import java.util.Map;
 @EnableKafka
 public class KafkaConfig {
 
+    /** Injected from {@code spring.kafka.bootstrap-servers} / {@code KAFKA_BROKERS} env var. */
+    @Value("${spring.kafka.bootstrap-servers}")
+    private String bootstrapServers;
+
     /**
      * Override the auto-configured KafkaAdmin with one that never blocks at startup.
      * {@code autoCreate = false} means it will not attempt to create topics on
      * application startup. This prevents the context refresh from blocking/timing out
      * when the Kafka broker is unavailable (e.g. local dev with Kafka disabled).
+     *
+     * Previously hardcoded to "localhost:9092" — now reads from spring.kafka.bootstrap-servers
+     * so it works in all environments (fixes audit finding R-15).
      */
     @Bean
     @Primary
     public KafkaAdmin kafkaAdmin() {
         KafkaAdmin admin = new KafkaAdmin(Map.of(
-                "bootstrap.servers", "localhost:9092",
+                "bootstrap.servers", bootstrapServers,
                 "request.timeout.ms", "1000",
                 "default.api.timeout.ms", "1000"
         ));

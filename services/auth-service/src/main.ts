@@ -23,8 +23,9 @@ async function bootstrap() {
     }),
   );
 
-  // Global exception filter — enforces standard error response shape
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  // Global exception filter — enforces standard error response shape.
+  // Resolved via DI so the filter can inject PinoLogger for structured error logging.
+  app.useGlobalFilters(new GlobalExceptionFilter(app.get(Logger)));
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port);

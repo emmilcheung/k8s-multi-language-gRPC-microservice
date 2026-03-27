@@ -96,3 +96,24 @@ redis:
 order:
   expiration:
     minutes: ${ORDER_EXPIRATION_MINUTES:15}
+
+# ── Resilience4j — circuit breaker on gRPC client (R-01) ─────────────────────
+resilience4j:
+  circuitbreaker:
+    instances:
+      ticketService:
+        # Open when 50 % of the last 10 calls fail
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        # Wait 30 s in OPEN state before switching to HALF_OPEN
+        waitDurationInOpenState: 30s
+        # Allow 3 trial calls in HALF_OPEN before deciding
+        permittedNumberOfCallsInHalfOpenState: 3
+        # Throw CallNotPermittedException when OPEN (caught by fallback)
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        # Record gRPC StatusRuntimeException and all its subtypes as failures
+        recordExceptions:
+          - io.grpc.StatusRuntimeException
+          - java.util.concurrent.TimeoutException
+          - java.io.IOException

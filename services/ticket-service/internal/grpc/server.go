@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime/debug"
+	"time"
 
 	"github.com/acme/ticket-service/internal/grpc/tickets/v1"
 	"github.com/acme/ticket-service/internal/repository"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -87,13 +90,77 @@ func (s *TicketGrpcServer) ValidateTicketAvailability(ctx context.Context, req *
 
 // Start binds and starts the gRPC server on the given address. It blocks until
 // the context is cancelled, then performs a graceful stop.
+//
+// Interceptors applied (R-08):
+//   - recovery: catches panics in handlers, logs a stack trace, returns INTERNAL to client.
+//   - logging:  emits a structured JSON log line per RPC (method, duration, status code).
+//   - deadline: logs a warning when the client deadline has already expired before the
+//     handler runs, allowing early-exit with DEADLINE_EXCEEDED.
 func Start(ctx context.Context, addr string, srv *TicketGrpcServer, log *zap.Logger) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("grpc listen %s: %w", addr, err)
 	}
 
-	grpcServer := grpc.NewServer()
+	// ── Recovery interceptor ──────────────────────────────────────────────────
+	// Catches any panic inside a handler, logs the stack trace, and returns
+	// INTERNAL to the client instead of crashing the process.
+	recoveryHandler := func(p any) error {
+		log.Error("gRPC handler panic",
+			zap.Any("panic", p),
+			zap.String("stack", string(debug.Stack())),
+		)
+		return status.Errorf(codes.Internal, "internal server error")
+	}
+	recoveryOpt := recovery.WithRecoveryHandler(recoveryHandler)
+
+	// ── Logging interceptor ───────────────────────────────────────────────────
+	// Emits one structured log line per RPC with method, duration, and status code.
+	loggingInterceptor := func(
+		ctx context.Context,
+		req any,
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (any, error) {
+		start := time.Now()
+
+		// Enforce deadline: if the client deadline has already passed before we
+		// even start handling, return DEADLINE_EXCEEDED immediately.
+		if dl, ok := ctx.Deadline(); ok && time.Now().After(dl) {
+			log.Warn("gRPC request arrived with expired deadline",
+				zap.String("method", info.FullMethod),
+			)
+			return nil, status.Errorf(codes.DeadlineExceeded, "deadline exceeded before handler started")
+		}
+
+		resp, err := handler(ctx, req)
+		duration := time.Since(start)
+
+		code := codes.OK
+		if err != nil {
+			code = status.Code(err)
+		}
+
+		logFn := log.Info
+		if err != nil {
+			logFn = log.Error
+		}
+		logFn("gRPC request",
+			zap.String("method", info.FullMethod),
+			zap.Duration("duration", duration),
+			zap.String("code", code.String()),
+			zap.Error(err),
+		)
+		return resp, err
+	}
+
+	grpcServer := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(
+			// Logging first so we always capture timing even if recovery fires
+			loggingInterceptor,
+			recovery.UnaryServerInterceptor(recoveryOpt),
+		),
+	)
 	v1.RegisterTicketServiceServer(grpcServer, srv)
 
 	log.Info("gRPC server listening", zap.String("addr", addr))

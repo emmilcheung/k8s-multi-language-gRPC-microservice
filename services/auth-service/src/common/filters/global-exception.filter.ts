@@ -4,11 +4,16 @@ import {
   ArgumentsHost,
   HttpException,
   HttpStatus,
+  Injectable,
 } from '@nestjs/common';
+import { Logger } from 'nestjs-pino';
 import { Response } from 'express';
 
+@Injectable()
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
+  constructor(private readonly logger: Logger) {}
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -52,7 +57,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
 
     // Programmer error — return generic 500, never leak internals
-    console.error('[GlobalExceptionFilter] Unhandled error:', exception);
+    this.logger.error({ err: exception }, '[GlobalExceptionFilter] Unhandled error');
     return response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       error: {
         code: 'INTERNAL_ERROR',
