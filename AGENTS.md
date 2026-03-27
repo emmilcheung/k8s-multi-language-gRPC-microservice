@@ -686,6 +686,27 @@ minikube stop
 
 ---
 
+### 16.12 Push & CI Discipline (confirmed 2026-03-28)
+
+CI runs (unit + integration + Trivy + e2e Playwright) are expensive in both time and cost. Minimise unnecessary triggers:
+
+#### When to push
+- **Push once per logical unit of work** — not after every micro-commit.
+- Batch all related fixes for a task into a single push. Squash WIP commits locally before pushing if needed (`git rebase -i` on the local branch before the first push of that batch).
+- **Do not push intermediate "attempt" commits** (e.g. "try fix 1", "try fix 2"). Reason through the root cause locally first; push only when you are confident the fix is correct.
+- Exception: if CI output is the only way to diagnose a problem (e.g. environment-specific failure not reproducible locally), iterative pushes are acceptable — but keep the number of attempts to a minimum and explain each one.
+
+#### Branch lifecycle
+- Open the PR as soon as the branch is first pushed (use `gh pr create`). This makes CI feedback visible and links commits to the PR context.
+- Continue committing and pushing on the same branch; each push re-runs CI on the existing PR automatically.
+- Do not open a new PR for each push iteration.
+
+#### Commit hygiene before merge
+- Before requesting owner review, `git log origin/main..HEAD` to confirm the branch history is clean and readable.
+- Each commit should represent one coherent change; squash trivial fixups before the final push if the history is noisy.
+
+---
+
 ## 17. Session Progress Log
 
 > Append a new entry each session. Newest entry at the top.
