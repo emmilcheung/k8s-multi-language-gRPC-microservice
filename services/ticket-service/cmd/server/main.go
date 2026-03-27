@@ -74,8 +74,9 @@ func main() {
 	}
 	defer producer.Close()
 
-	// Kafka consumer — listens to order events and keeps ticket reservation state in sync
-	orderConsumer, err := kafka.NewOrderConsumer(cfg.KafkaBrokers, "ticket-service", ticketRepo, log)
+	// Kafka consumer — listens to order events and keeps ticket reservation state in sync.
+	// The producer is passed so the consumer can route failed messages to the DLQ.
+	orderConsumer, err := kafka.NewOrderConsumer(cfg.KafkaBrokers, "ticket-service", ticketRepo, producer, log)
 	if err != nil {
 		log.Fatal("failed to create Kafka order consumer", zap.Error(err))
 	}

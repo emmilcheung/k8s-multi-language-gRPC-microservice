@@ -55,7 +55,8 @@ func main() {
 	workerServer := worker.NewServer(cfg.RedisAddr, taskHandler, log)
 
 	// Kafka consumer — subscribes to orders.order.created and schedules expiration tasks.
-	consumer, err := appkafka.NewConsumer(cfg.KafkaBrokers, "expiration-service", log)
+	// The producer is passed so the consumer can route failed messages to the DLQ.
+	consumer, err := appkafka.NewConsumer(cfg.KafkaBrokers, "expiration-service", producer, log)
 	if err != nil {
 		log.Fatal("failed to create kafka consumer", zap.Error(err))
 	}
