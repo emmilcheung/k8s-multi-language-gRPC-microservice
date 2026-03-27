@@ -465,6 +465,8 @@ jobs:
         with:
           version: "1.54.0"
           lint: true
+          push: false
+          format: false
 
       - name: buf breaking (vs main)
         if: github.event_name == 'pull_request'
