@@ -194,6 +194,11 @@ services:
       - "8000:8000"   # public proxy — client → Kong
       - "8001:8001"   # admin API (localhost only)
     mem_limit: 256m
+    # In CI, Next.js runs as a host process (not a Docker service).
+    # host-gateway lets the kong container resolve "client" → Docker host IP,
+    # so Kong can proxy / requests to http://client:4000 on the host.
+    extra_hosts:
+      - "client:host-gateway"
     depends_on:
       schema-registry:
         condition: service_healthy
