@@ -139,6 +139,44 @@ func (p *Producer) PublishExpirationComplete(ctx context.Context, orderID string
 	}
 }
 
+// PublishToDLQ routes a failed raw Kafka message to the dead-letter topic.
+// Headers carry the source topic and the error that caused the failure for observability.
+func (p *Producer) PublishToDLQ(ctx context.Context, sourceTopic string, key, payload []byte, processingErr error) error {
+	dlqTopic := TopicExpirationCompleteDLQ
+
+	p.log.Error("routing message to DLQ",
+		zap.String("sourceTopic", sourceTopic),
+		zap.String("dlqTopic", dlqTopic),
+		zap.String("key", string(key)),
+		zap.Error(processingErr),
+	)
+
+	deliveryChan := make(chan confluent.Event, 1)
+	err := p.p.Produce(&confluent.Message{
+		TopicPartition: confluent.TopicPartition{Topic: &dlqTopic, Partition: confluent.PartitionAny},
+		Key:            key,
+		Value:          payload,
+		Headers: []confluent.Header{
+			{Key: "x-dlq-source-topic", Value: []byte(sourceTopic)},
+			{Key: "x-dlq-error", Value: []byte(processingErr.Error())},
+		},
+	}, deliveryChan)
+	if err != nil {
+		return fmt.Errorf("produce to DLQ topic %s: %w", dlqTopic, err)
+	}
+
+	select {
+	case e := <-deliveryChan:
+		msg := e.(*confluent.Message)
+		if msg.TopicPartition.Error != nil {
+			return fmt.Errorf("DLQ delivery error: %w", msg.TopicPartition.Error)
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("DLQ produce cancelled: %w", ctx.Err())
+	}
+}
+
 // Close flushes pending messages and closes the producer.
 func (p *Producer) Close() {
 	remaining := p.p.Flush(10 * 1000) // 10 seconds
