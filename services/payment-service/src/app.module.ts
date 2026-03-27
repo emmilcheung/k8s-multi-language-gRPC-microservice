@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { LoggerModule } from 'nestjs-pino';
 import * as Joi from 'joi';
 import { DatabaseModule } from './database/database.module';
@@ -48,6 +49,7 @@ import { OrdersConsumer } from './kafka/orders.consumer';
 
     // ── Feature modules ──────────────────────────────────────────────────────
     DatabaseModule,
+    ScheduleModule.forRoot(),
     PaymentsModule,
     HealthModule,
     MetricsModule,
