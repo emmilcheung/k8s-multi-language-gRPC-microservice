@@ -12,7 +12,6 @@ import { RedisModule } from './modules/redis/redis.module';
 
 /** Inject the active OTel traceId and spanId into every pino log line (O-02). */
 function otelMixin(): Record<string, string> {
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   const span = trace.getActiveSpan();
   if (!span) return {};
 
