@@ -15,6 +15,13 @@ COPY services/order-service/pom.xml .
 # Download dependencies offline (layer cache friendly)
 RUN mvn dependency:go-offline -q
 
+# Download OpenTelemetry Java agent — zero-code auto-instrumentation (O-01).
+# Pinned to v2.13.3. curl -fL follows GitHub's CDN redirect and fails loudly
+# on non-2xx responses, unlike Docker ADD which silently writes empty files.
+ARG OTEL_AGENT_VERSION=2.13.3
+RUN curl -fL -o /build/otel-agent.jar \
+    "https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v${OTEL_AGENT_VERSION}/opentelemetry-javaagent.jar"
+
 # Copy source and build — skip tests (run separately in CI)
 COPY services/order-service/src/ src/
 RUN mvn package -DskipTests -q
@@ -27,9 +34,7 @@ RUN addgroup -S app && adduser -S app -G app
 
 WORKDIR /app
 
-# OpenTelemetry Java agent — zero-code auto-instrumentation (O-01).
-# Pinned to v2.13.3; verify digest matches https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases
-ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.13.3/opentelemetry-javaagent.jar /app/otel-agent.jar
+COPY --from=builder /build/otel-agent.jar /app/otel-agent.jar
 
 COPY --from=builder /build/target/order-service-*.jar app.jar
 
