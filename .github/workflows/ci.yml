@@ -1,0 +1,574 @@
+# Unified CI pipeline for all services and proto definitions.
+#
+# Structure
+# ─────────
+#   changes          — detect which paths were touched (dorny/paths-filter)
+#   auth             — lint → unit → integration → build+scan  (runs if auth-service changed)
+#   client           — lint → unit → build+scan                (runs if client changed)
+#   expiration       — vet/lint → unit → integration → build+scan
+#   order            — checkstyle/compile → unit → integration → build+scan
+#   payment          — lint → unit → integration → build+scan
+#   proto            — buf lint [+ buf breaking on PRs]
+#   ticket           — vet/lint → unit → integration → build+scan
+#   ci               — summary gate: required branch-protection status check
+#
+# All service jobs run in parallel with each other.
+# The final `ci` job is the single required status check configured in branch protection.
+# It succeeds only when every triggered service job succeeded (or was skipped).
+#
+# Kafka and Redis integration tests use Testcontainers (Docker-in-Docker on ubuntu-24.04).
+# No images are pushed — no registry credentials needed.
+
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── path filter ─────────────────────────────────────────────────────────────
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-24.04
+    outputs:
+      auth:       ${{ steps.filter.outputs.auth }}
+      client:     ${{ steps.filter.outputs.client }}
+      expiration: ${{ steps.filter.outputs.expiration }}
+      order:      ${{ steps.filter.outputs.order }}
+      payment:    ${{ steps.filter.outputs.payment }}
+      proto:      ${{ steps.filter.outputs.proto }}
+      ticket:     ${{ steps.filter.outputs.ticket }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            auth:
+              - 'services/auth-service/**'
+              - '.github/workflows/ci.yml'
+            client:
+              - 'services/client/**'
+              - '.github/workflows/ci.yml'
+            expiration:
+              - 'services/expiration-service/**'
+              - '.github/workflows/ci.yml'
+            order:
+              - 'services/order-service/**'
+              - 'proto/**'
+              - '.github/workflows/ci.yml'
+            payment:
+              - 'services/payment-service/**'
+              - '.github/workflows/ci.yml'
+            proto:
+              - 'proto/**'
+              - 'buf.yaml'
+              - 'buf.gen.yaml'
+              - '.github/workflows/ci.yml'
+            ticket:
+              - 'services/ticket-service/**'
+              - 'proto/**'
+              - '.github/workflows/ci.yml'
+
+  # ── auth-service (TypeScript / NestJS / pnpm / Vitest) ─────────────────────
+  auth:
+    name: auth-service
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.auth == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: services/auth-service
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/auth-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: services/auth-service/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --silent
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Integration tests (Testcontainers — PostgreSQL)
+        run: pnpm test:integration
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "false"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/auth-service
+          file: services/auth-service/Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/auth-service.tar
+
+      - name: Load image for scanning
+        run: docker load --input /tmp/auth-service.tar
+        working-directory: .
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ── client (Next.js 15 / TypeScript / pnpm / Vitest) ───────────────────────
+  client:
+    name: client
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.client == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: services/client
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: services/client/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --silent
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Unit tests
+        run: pnpm test
+
+      # No integration tests for client — Playwright E2E is in e2e.yml
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/client
+          file: services/client/Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/client.tar
+
+      - name: Load image for scanning
+        run: docker load --input /tmp/client.tar
+        working-directory: .
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ── expiration-service (Go 1.25 / asynq / confluent-kafka-go CGO) ──────────
+  expiration:
+    name: expiration-service
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.expiration == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: services/expiration-service
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/expiration-service
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install librdkafka build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc libc6-dev librdkafka-dev
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: services/expiration-service/go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+          working-directory: services/expiration-service
+
+      - name: Unit tests
+        run: go test -v -count=1 -run "^Test" ./internal/...
+
+      - name: Integration tests (Testcontainers — Redis + Kafka)
+        run: go test -v -count=1 -timeout 5m ./test/...
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "false"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/expiration-service
+          file: services/expiration-service/Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/expiration-service.tar
+
+      - name: Load image for scanning
+        run: docker load --input /tmp/expiration-service.tar
+        working-directory: .
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ── order-service (Java 21 / Spring Boot / Maven) ──────────────────────────
+  # Build context is the REPO ROOT — Dockerfile reads ../../proto/ for protobuf codegen.
+  order:
+    name: order-service
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.order == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/order-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+
+      - name: Compile (validates proto generation + all sources)
+        run: mvn --no-transfer-progress compile -DskipTests
+        working-directory: services/order-service
+
+      - name: Unit tests
+        run: mvn --no-transfer-progress test -Dgroups="!integration" -DskipITs
+        working-directory: services/order-service
+
+      - name: Integration tests (Testcontainers — PostgreSQL + Kafka)
+        run: mvn --no-transfer-progress verify -Dgroups="integration" -DfailIfNoTests=false
+        working-directory: services/order-service
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "false"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build context is repo root — Dockerfile is in the service subdirectory
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/order-service/Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/order-service.tar
+
+      - name: Load image for scanning
+        run: docker load --input /tmp/order-service.tar
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ── payment-service (TypeScript / NestJS / pnpm / Vitest) ──────────────────
+  payment:
+    name: payment-service
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.payment == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: services/payment-service
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/payment-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: services/payment-service/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --silent
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Unit tests
+        run: pnpm test
+        env:
+          STRIPE_SECRET_KEY: sk_test_mock
+
+      - name: Integration tests (Testcontainers — PostgreSQL + Kafka)
+        run: pnpm test:integration
+        env:
+          STRIPE_SECRET_KEY: sk_test_mock
+          TESTCONTAINERS_RYUK_DISABLED: "false"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/payment-service
+          file: services/payment-service/Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/payment-service.tar
+
+      - name: Load image for scanning
+        run: docker load --input /tmp/payment-service.tar
+        working-directory: .
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ── proto (buf lint + breaking change detection) ────────────────────────────
+  proto:
+    name: proto
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.proto == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: buf lint
+        uses: bufbuild/buf-action@v1
+        with:
+          version: "1.54.0"
+          lint: true
+
+      - name: buf breaking (vs main)
+        if: github.event_name == 'pull_request'
+        uses: bufbuild/buf-action@v1
+        with:
+          version: "1.54.0"
+          breaking: true
+          breaking_against: "https://github.com/${{ github.repository }}.git#branch=main,subdir=proto"
+
+  # ── ticket-service (Go 1.25 / Echo v4 / confluent-kafka-go CGO) ────────────
+  ticket:
+    name: ticket-service
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.ticket == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: services/ticket-service
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/ticket-service
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install librdkafka build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc libc6-dev librdkafka-dev
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: services/ticket-service/go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+          working-directory: services/ticket-service
+
+      - name: Unit tests
+        run: go test -v -count=1 -run "^Test" ./internal/...
+
+      - name: Integration tests (Testcontainers — MongoDB + Kafka)
+        run: go test -v -count=1 -timeout 5m ./test/...
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "false"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/ticket-service
+          file: services/ticket-service/Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/ticket-service.tar
+
+      - name: Load image for scanning
+        run: docker load --input /tmp/ticket-service.tar
+        working-directory: .
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ── summary gate (the single required branch-protection status check) ────────
+  # Succeeds when every triggered job succeeded or was skipped.
+  # Fails when any triggered job failed or was cancelled.
+  # Configure branch protection to require: "ci / CI"
+  ci:
+    name: CI
+    runs-on: ubuntu-24.04
+    if: always()
+    needs: [changes, auth, client, expiration, order, payment, proto, ticket]
+    steps:
+      - name: Check all jobs passed
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results" | python3 -c "
+          import sys, json
+          needs = json.load(sys.stdin)
+          failed = [
+            name for name, job in needs.items()
+            if job['result'] not in ('success', 'skipped')
+          ]
+          if failed:
+            print('Failed or cancelled jobs:', ', '.join(failed))
+            sys.exit(1)
+          print('All jobs passed or were skipped.')
+          "
