@@ -31,9 +31,10 @@
 name: ci
 
 on:
-  pull_request:
+  push:
     branches: ["**"]
-
+  pull_request:
+    types: [opened, synchronize, reopened]
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
