@@ -3,11 +3,20 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { LoggerModule } from 'nestjs-pino';
 import * as Joi from 'joi';
+import * as otelApi from '@opentelemetry/api';
 import { DatabaseModule } from './database/database.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { OrdersConsumer } from './kafka/orders.consumer';
+
+/** Inject the active OTel traceId and spanId into every pino log line (O-02). */
+function otelMixin(): Record<string, string> {
+  const span = otelApi.trace.getActiveSpan();
+  if (!span) return {};
+  const { traceId, spanId } = span.spanContext();
+  return { traceId, spanId };
+}
 
 @Module({
   imports: [
@@ -37,6 +46,8 @@ import { OrdersConsumer } from './kafka/orders.consumer';
             config.get('NODE_ENV') !== 'production'
               ? { target: 'pino-pretty', options: { colorize: true } }
               : undefined,
+          // Inject OTel traceId + spanId into every log line (O-02)
+          mixin: otelMixin,
           redact: ['req.headers.authorization', 'req.headers.cookie'],
           serializers: {
             req(req: { method: string; url: string }) {

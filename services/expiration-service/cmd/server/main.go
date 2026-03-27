@@ -15,6 +15,7 @@ import (
 	appkafka "github.com/acme/expiration-service/internal/kafka"
 	"github.com/acme/expiration-service/internal/scheduler"
 	"github.com/acme/expiration-service/internal/server"
+	"github.com/acme/expiration-service/internal/tracing"
 	"github.com/acme/expiration-service/internal/worker"
 	"github.com/acme/expiration-service/pkg/logger"
 )
@@ -39,6 +40,10 @@ func main() {
 		zap.String("env", cfg.Env),
 		zap.Int("port", cfg.Port),
 	)
+
+	// Initialise OpenTelemetry — must happen before any network I/O
+	shutdownTracing := tracing.Init(context.Background(), "expiration-service", log)
+	defer shutdownTracing(context.Background())
 
 	// Kafka producer — publishes expiration.order.expiration_complete events.
 	producer, err := appkafka.NewProducer(cfg.KafkaBrokers, log)

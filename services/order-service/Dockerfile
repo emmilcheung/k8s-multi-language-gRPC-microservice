@@ -27,6 +27,10 @@ RUN addgroup -S app && adduser -S app -G app
 
 WORKDIR /app
 
+# OpenTelemetry Java agent — zero-code auto-instrumentation (O-01).
+# Pinned to v2.13.3; verify digest matches https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases
+ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.13.3/opentelemetry-javaagent.jar /app/otel-agent.jar
+
 COPY --from=builder /build/target/order-service-*.jar app.jar
 
 USER app
@@ -36,6 +40,9 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
   CMD wget -qO- http://localhost:8080/actuator/health/liveness || exit 1
 
+# OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_SERVICE_NAME are injected as env vars at runtime.
+# When OTEL_EXPORTER_OTLP_ENDPOINT is unset the agent runs in no-op mode.
 ENTRYPOINT ["java", \
   "-Djava.security.egd=file:/dev/./urandom", \
+  "-javaagent:/app/otel-agent.jar", \
   "-jar", "app.jar"]
