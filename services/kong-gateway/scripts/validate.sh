@@ -36,6 +36,7 @@ echo "[validate.sh] Validating: ${KONG_YML}"
 echo "[validate.sh] Using image: ${KONG_IMAGE}"
 
 docker run --rm \
+  --env KONG_DATABASE=off \
   --volume "${KONG_YML}:/tmp/kong.yml:ro" \
   "${KONG_IMAGE}" \
   kong config parse /tmp/kong.yml
