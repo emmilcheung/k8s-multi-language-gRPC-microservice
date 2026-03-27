@@ -44,14 +44,20 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       }
 
       return response.status(status).json({
-        error: { code: 'HTTP_ERROR', message: typeof body === 'string' ? body : JSON.stringify(body) },
+        error: {
+          code: 'HTTP_ERROR',
+          message: typeof body === 'string' ? body : JSON.stringify(body),
+        },
       });
     }
 
     // Programmer error — return generic 500, never leak internals
     console.error('[GlobalExceptionFilter] Unhandled error:', exception);
     return response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
-      error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' },
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'An unexpected error occurred',
+      },
     });
   }
 }

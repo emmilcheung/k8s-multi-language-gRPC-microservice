@@ -42,7 +42,10 @@ describe('GlobalExceptionFilter', () => {
       const jsonFn = vi.fn();
       const host = makeHost(jsonFn);
       const exception = new BadRequestException({
-        message: ['email must be an email', 'password must be longer than 8 characters'],
+        message: [
+          'email must be an email',
+          'password must be longer than 8 characters',
+        ],
         error: 'Bad Request',
         statusCode: 400,
       });
@@ -68,7 +71,10 @@ describe('GlobalExceptionFilter', () => {
       filter.catch(new Error('some unexpected crash'), host);
 
       expect(jsonFn).toHaveBeenCalledWith({
-        error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' },
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'An unexpected error occurred',
+        },
       });
     });
 
