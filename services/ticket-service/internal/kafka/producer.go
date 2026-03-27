@@ -17,6 +17,12 @@ const TopicTicketCreated = "tickets.ticket.created"
 // TopicTicketUpdated is the Kafka topic for ticket update events.
 const TopicTicketUpdated = "tickets.ticket.updated"
 
+// TopicOrderCreatedDLQ is the dead-letter topic for failed orders.order.created messages.
+const TopicOrderCreatedDLQ = "orders.order.created.dlq"
+
+// TopicOrderCancelledDLQ is the dead-letter topic for failed orders.order.cancelled messages.
+const TopicOrderCancelledDLQ = "orders.order.cancelled.dlq"
+
 // CloudEvent is the CloudEvents v1.0 envelope used for all Kafka events.
 type CloudEvent struct {
 	SpecVersion     string      `json:"specversion"`
@@ -99,6 +105,45 @@ func (p *Producer) PublishTicketCreated(ctx context.Context, data TicketEventDat
 // PublishTicketUpdated publishes a ticket.updated CloudEvent.
 func (p *Producer) PublishTicketUpdated(ctx context.Context, data TicketEventData) error {
 	return p.publish(ctx, TopicTicketUpdated, data.ID, TopicTicketUpdated, data)
+}
+
+// PublishToDLQ routes a failed raw Kafka message to the appropriate dead-letter topic.
+// The DLQ topic name is derived by appending ".dlq" to the source topic.
+// The raw message bytes are forwarded unchanged so the DLQ consumer can inspect the original payload.
+func (p *Producer) PublishToDLQ(ctx context.Context, sourceTopic string, key, payload []byte, processingErr error) error {
+	dlqTopic := sourceTopic + ".dlq"
+
+	p.log.Error("routing message to DLQ",
+		zap.String("sourceTopic", sourceTopic),
+		zap.String("dlqTopic", dlqTopic),
+		zap.String("key", string(key)),
+		zap.Error(processingErr),
+	)
+
+	deliveryChan := make(chan kafka.Event, 1)
+	err := p.p.Produce(&kafka.Message{
+		TopicPartition: kafka.TopicPartition{Topic: &dlqTopic, Partition: kafka.PartitionAny},
+		Key:            key,
+		Value:          payload,
+		Headers: []kafka.Header{
+			{Key: "x-dlq-source-topic", Value: []byte(sourceTopic)},
+			{Key: "x-dlq-error", Value: []byte(processingErr.Error())},
+		},
+	}, deliveryChan)
+	if err != nil {
+		return fmt.Errorf("produce to DLQ topic %s: %w", dlqTopic, err)
+	}
+
+	select {
+	case e := <-deliveryChan:
+		msg := e.(*kafka.Message)
+		if msg.TopicPartition.Error != nil {
+			return fmt.Errorf("DLQ delivery error: %w", msg.TopicPartition.Error)
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("DLQ produce cancelled: %w", ctx.Err())
+	}
 }
 
 func (p *Producer) publish(ctx context.Context, topic, partitionKey, eventType string, data interface{}) error {
