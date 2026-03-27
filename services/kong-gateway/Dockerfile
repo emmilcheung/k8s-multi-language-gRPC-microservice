@@ -34,12 +34,16 @@ RUN chmod +x /kong-gateway/scripts/build.sh /kong-gateway/scripts/validate.sh
 
 # Entrypoint: render kong.yml from env vars, then hand off to the stock Kong entrypoint.
 # KONG_ENV defaults to "local" for Docker Compose convenience.
-# The stock Kong image sets its own entrypoint; we prepend our render step via CMD.
 COPY scripts/docker-entrypoint.sh /docker-entrypoint-kong-gw.sh
 RUN chmod +x /docker-entrypoint-kong-gw.sh
 
-# Run as root is required for Kong itself (upstream image expectation).
-# The render script writes to /etc/kong/ which is owned by root.
-USER root
+# Pre-create /etc/kong with kong:kong ownership so the entrypoint render script
+# can write the rendered config without running as root at runtime.
+# The kong user/group are provided by the upstream kong:3.7-ubuntu base image.
+RUN mkdir -p /etc/kong && chown kong:kong /etc/kong
+
+# Switch to the non-root kong user before the entrypoint runs.
+# AGENTS.md §10.1: "Never run as root."
+USER kong
 
 ENTRYPOINT ["/docker-entrypoint-kong-gw.sh"]
