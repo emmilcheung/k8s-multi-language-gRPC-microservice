@@ -160,8 +160,9 @@ func TestCreateTicket_ShouldReturnErrorWhenRepoFails(t *testing.T) {
 	assert.Empty(t, pub.createdEvents)
 }
 
-func TestCreateTicket_ShouldSucceedEvenWhenKafkaFails(t *testing.T) {
-	// Kafka publish failure should not fail the request (log only — outbox pattern handles retry)
+func TestCreateTicket_ShouldReturnErrorWhenKafkaFails(t *testing.T) {
+	// Kafka publish failure must propagate — swallowing it would leave order-service without
+	// the ticket.created event, causing silent data divergence (R-05).
 	repo := newMockRepo()
 	pub := &mockPublisher{err: errors.New("kafka unavailable")}
 	svc := newSvc(repo, pub)
@@ -172,8 +173,9 @@ func TestCreateTicket_ShouldSucceedEvenWhenKafkaFails(t *testing.T) {
 		UserID: "user-1",
 	})
 
-	require.NoError(t, err)
-	assert.NotEmpty(t, ticket.ID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "publish ticket.created event")
+	assert.Nil(t, ticket)
 }
 
 func TestGetTicketByID_ShouldReturnTicketWhenExists(t *testing.T) {
