@@ -18,7 +18,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATEWAY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-KONG_YML="${1:-${GATEWAY_DIR}/kong.yml}"
+# Resolve to absolute path — docker --volume does not support relative paths on Linux.
+_raw="${1:-${GATEWAY_DIR}/kong.yml}"
+KONG_YML="$(cd "$(dirname "${_raw}")" && pwd)/$(basename "${_raw}")"
 KONG_IMAGE="kong:3.7-ubuntu"
 
 if [[ ! -f "${KONG_YML}" ]]; then
