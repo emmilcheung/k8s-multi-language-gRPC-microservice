@@ -14,7 +14,7 @@
 # The rendered kong.yml is written to /etc/kong/kong.yml inside the container,
 # which matches the KONG_DECLARATIVE_CONFIG path set in docker-compose.yml.
 
-FROM kong:3.7-ubuntu
+FROM kong:3.7-ubuntu@sha256:5d46b1fcb0c29a1e5739499ca8d7af9ce6a6531ab37d9ae42f49478103a4c4dc
 
 # Install Python3 (used by build.sh for template rendering).
 # kong:3.7-ubuntu is Debian-based; python3 is not included by default.
