@@ -50,7 +50,7 @@ func main() {
 	}
 	defer mongoRepo.Close(context.Background()) //nolint:errcheck
 
-	var ticketRepo repository.TicketRepository = mongoRepo
+	var ticketRepo repository.TicketRepository
 	if cfg.RedisURL != "" {
 		redisOptions, err := redis.ParseURL(cfg.RedisURL)
 		if err != nil {

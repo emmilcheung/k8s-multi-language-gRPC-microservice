@@ -110,6 +110,8 @@ export class AuthService {
   }
 
   private issueToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
-    return this.jwtService.sign(payload) as string;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const token: unknown = this.jwtService.sign(payload);
+    return token as string;
   }
 }

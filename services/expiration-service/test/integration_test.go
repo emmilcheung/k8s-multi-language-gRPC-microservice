@@ -116,7 +116,7 @@ func TestHealthLive_ShouldReturn200(t *testing.T) {
 
 	resp, err := http.Get(ts.URL + "/healthz/live")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
@@ -126,7 +126,7 @@ func TestHealthReady_ShouldReturn200WhenNoDepsConfigured(t *testing.T) {
 
 	resp, err := http.Get(ts.URL + "/healthz/ready")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 

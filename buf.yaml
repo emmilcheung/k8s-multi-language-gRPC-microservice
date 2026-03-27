@@ -10,9 +10,6 @@ lint:
   except:
     # Allow java_outer_classname option (used by order-service Java codegen)
     - PACKAGE_VERSION_SUFFIX
-    # Proto file lives at proto/tickets/v1/ but package is acme.tickets.v1;
-    # the directory layout predates this lint rule and renaming would break all consumers.
-    - PACKAGE_DIRECTORY_NAME
     # ValidateTicketRequest/Response names predate the standard RPC naming convention;
     # renaming them is a breaking proto change — suppressed until a v2 is cut.
     - RPC_REQUEST_STANDARD_NAME
