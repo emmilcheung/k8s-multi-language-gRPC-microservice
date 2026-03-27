@@ -110,8 +110,10 @@ export class AuthService {
   }
 
   private issueToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
-    // jwtService.sign has return type `any` — double-cast avoids no-unsafe-return/assignment
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-    return this.jwtService.sign(payload) as string;
+    // JwtService.sign return type is `any` in @nestjs/jwt typings.
+    // We call it via an intermediate `unknown` cast to satisfy strict-any rules.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    const token: unknown = (this.jwtService.sign as (p: unknown) => unknown)(payload);
+    return token as string;
   }
 }
