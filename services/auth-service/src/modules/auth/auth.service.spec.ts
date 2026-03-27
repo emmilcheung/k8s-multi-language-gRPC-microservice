@@ -110,14 +110,16 @@ describe('AuthService', () => {
 
       const token = await service.signup('user@example.com', 'password123');
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(usersRepo.findByEmail).toHaveBeenCalledWith('user@example.com');
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(usersRepo.create).toHaveBeenCalledOnce();
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
       expect(token).toBe('signed.jwt.token');
     });
 
-    it('should throw ConflictException when email is already in use', async () => {
-      const { service } = makeAuthService({
+    it('should throw ConflictException when email is already in use', async () => {      const { service } = makeAuthService({
         usersRepo: { findByEmail: vi.fn().mockResolvedValue(makeUser()) },
       });
 
@@ -136,7 +138,7 @@ describe('AuthService', () => {
 
       await service.signup('user@example.com', 'my-secret-password');
 
-      const [, passwordHashArg] = (usersRepo.create as ReturnType<typeof vi.fn>).mock.calls[0];
+      const [, passwordHashArg] = (usersRepo.create as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string];
       expect(passwordHashArg).not.toBe('my-secret-password');
       expect(passwordHashArg).toMatch(/^\$argon2id\$/);
     });
@@ -153,6 +155,7 @@ describe('AuthService', () => {
 
       const token = await service.signin('user@example.com', 'correctPassword');
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
       expect(token).toBe('signed.jwt.token');
     });

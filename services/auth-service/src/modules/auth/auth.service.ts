@@ -110,6 +110,6 @@ export class AuthService {
   }
 
   private issueToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
-    return this.jwtService.sign(payload);
+    return this.jwtService.sign(payload) as string;
   }
 }
