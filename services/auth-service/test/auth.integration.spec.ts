@@ -107,6 +107,7 @@ beforeAll(async () => {
 
   app = moduleRef.createNestApplication();
   app.use(cookieParser());
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
   );
