@@ -3,7 +3,7 @@
 #   1. Maven is pre-installed — no apk-triggered java-common conflict that hangs builds.
 #   2. glibc is present — protobuf-maven-plugin downloads glibc-linked protoc binaries
 #      that cannot execute on Alpine's musl libc, causing MojoFailureException.
-FROM maven:3.9.9-eclipse-temurin-21 AS builder
+FROM maven:3.9.9-eclipse-temurin-21@sha256:3a4ab3276a087bf276f79cae96b1af04f53731bec53fb2e651aca79e4b10211e AS builder
 
 WORKDIR /build
 
@@ -20,7 +20,7 @@ COPY services/order-service/src/ src/
 RUN mvn package -DskipTests -q
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM eclipse-temurin:21-jre-alpine AS runtime
+FROM eclipse-temurin:21-jre-alpine@sha256:6ad8ed080d9be96b61438ec3ce99388e294af216ed57356000c06070e85c5d5d AS runtime
 
 # Non-root user (AGENTS.md §10.1)
 RUN addgroup -S app && adduser -S app -G app

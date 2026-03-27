@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ── Stage 1: build ────────────────────────────────────────────────────────────
-FROM node:24-alpine@sha256:7fddd9ddeae8196abf4a3ef2de34e11f7b1a722119f91f28ddf1e99dcafdf114 AS builder
+FROM node:24-alpine@sha256:01743339035a5c3c11a373cd7c83aeab6ed1457b55da6a69e014a95ac4e4700b AS builder
 
 WORKDIR /app
 
@@ -22,7 +22,7 @@ RUN pnpm build
 RUN pnpm prune --prod --silent
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM node:24-alpine@sha256:7fddd9ddeae8196abf4a3ef2de34e11f7b1a722119f91f28ddf1e99dcafdf114 AS runtime
+FROM node:24-alpine@sha256:01743339035a5c3c11a373cd7c83aeab6ed1457b55da6a69e014a95ac4e4700b AS runtime
 
 # Create non-root user
 RUN addgroup -S app && adduser -S app -G app

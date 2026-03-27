@@ -254,6 +254,19 @@ services:
 
 # ── Global plugins ─────────────────────────────────────────────────────────────
 plugins:
+  # Strip identity headers on every inbound request before any route plugin runs.
+  # Prevents external clients from forging X-User-Id / X-User-Roles on public
+  # routes that do not run the JWT plugin.  The jwt post-function then sets these
+  # headers authoritatively on protected routes after token validation.
+  # Plugin execution order: global → service → route → consumer, so this always
+  # runs first regardless of route-level plugins.  (Fixes audit finding S-02.)
+  - name: request-transformer
+    config:
+      remove:
+        headers:
+          - X-User-Id
+          - X-User-Roles
+
   # Inject a correlation ID on every request for distributed tracing
   - name: correlation-id
     config:

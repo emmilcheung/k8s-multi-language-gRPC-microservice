@@ -322,11 +322,15 @@ services:
       context: ./services/payment-service
       dockerfile: Dockerfile
     restart: unless-stopped
+    # STRIPE_SECRET_KEY is loaded from the root .env file (gitignored).
+    # Copy .env.example → .env and set STRIPE_SECRET_KEY before first run.
+    env_file:
+      - .env
     environment:
       NODE_ENV: development
       PORT: 3002
       DATABASE_URL: postgresql://payments_user:payments_pass@postgres-payments:5432/payments_db
-      STRIPE_SECRET_KEY: "sk_test_4eC39HqLyjWDarhtT1ZdV7xY"
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY}"
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
       ORDER_SERVICE_URL: http://order-service:8082
