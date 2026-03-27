@@ -18,7 +18,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATEWAY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-KONG_YML="${1:-${GATEWAY_DIR}/kong.yml}"
+# Resolve to absolute path — docker --volume does not support relative paths on Linux.
+_raw="${1:-${GATEWAY_DIR}/kong.yml}"
+KONG_YML="$(cd "$(dirname "${_raw}")" && pwd)/$(basename "${_raw}")"
 KONG_IMAGE="kong:3.7-ubuntu"
 
 if [[ ! -f "${KONG_YML}" ]]; then
@@ -35,7 +37,14 @@ fi
 echo "[validate.sh] Validating: ${KONG_YML}"
 echo "[validate.sh] Using image: ${KONG_IMAGE}"
 
+# Run as root inside the throwaway validation container.
+# This is a parse-only step — no production Kong is started.
+# Root is needed because:
+#   1. Kong creates /usr/local/kong/logs at startup (requires write access)
+#   2. The mounted file may be owned by the CI runner uid (root can read any file)
 docker run --rm \
+  --env KONG_DATABASE=off \
+  --user root \
   --volume "${KONG_YML}:/tmp/kong.yml:ro" \
   "${KONG_IMAGE}" \
   kong config parse /tmp/kong.yml
