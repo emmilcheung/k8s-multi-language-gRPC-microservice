@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uuid, integer, boolean, jsonb } from 'drizzle-orm/pg-core';
 
 /**
  * payments table — owned exclusively by payment-service.
@@ -33,3 +33,25 @@ export const PAYMENT_STATUS = {
 } as const;
 
 export type PaymentStatus = (typeof PAYMENT_STATUS)[keyof typeof PAYMENT_STATUS];
+
+/**
+ * outbox table — transactional outbox for reliable Kafka event publishing.
+ *
+ * Rows are written atomically with the payment status update (same DB transaction).
+ * The OutboxRelayService cron reads unpublished rows and publishes them to Kafka,
+ * then marks them published. This guarantees at-least-once delivery even if the
+ * process crashes between the DB write and the Kafka send.
+ */
+export const outbox = pgTable('outbox', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  topic: text('topic').notNull(),
+  /** CloudEvents envelope as JSONB. */
+  payload: jsonb('payload').notNull(),
+  /** Kafka partition key — typically the orderId for per-order ordering. */
+  partitionKey: text('partition_key').notNull(),
+  published: boolean('published').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type OutboxRow = typeof outbox.$inferSelect;
+export type NewOutboxRow = typeof outbox.$inferInsert;

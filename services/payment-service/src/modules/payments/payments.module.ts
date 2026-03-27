@@ -5,6 +5,7 @@ import Stripe from 'stripe';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 import { PaymentsRepository } from './payments.repository';
+import { OutboxRelayService } from './outbox-relay.service';
 import { STRIPE_CLIENT } from './stripe.constants';
 
 @Module({
@@ -13,6 +14,7 @@ import { STRIPE_CLIENT } from './stripe.constants';
   providers: [
     PaymentsService,
     PaymentsRepository,
+    OutboxRelayService,
     {
       provide: STRIPE_CLIENT,
       inject: [ConfigService],
