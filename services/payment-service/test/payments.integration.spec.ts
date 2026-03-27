@@ -8,6 +8,7 @@
  * Each describe block cleans up its own data via DELETE statements so tests
  * remain isolated without needing separate schemas.
  */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
@@ -36,7 +37,7 @@ let request: ReturnType<typeof supertest>;
 /** Minimal Stripe mock — no real network calls in tests. */
 const mockStripe = {
   paymentIntents: {
-    create: async ({ amount, currency, metadata }: { amount: number; currency: string; metadata: Record<string, string> }) => ({
+    create: ({ amount, currency, metadata }: { amount: number; currency: string; metadata: Record<string, string> }) => Promise.resolve({
       id: `mock_pi_${metadata.orderId ?? 'unknown'}`,
       amount,
       currency,
@@ -58,13 +59,18 @@ beforeAll(async () => {
   process.env['KAFKA_BROKERS'] = 'localhost:9092';
   process.env['NODE_ENV'] = 'test';
 
-  // Apply migration
+  // Apply migrations
   pool = new Pool({ connectionString: databaseUrl });
-  const migrationSql = fs.readFileSync(
+  const migration1Sql = fs.readFileSync(
     path.join(__dirname, '../migrations/001_init_payments.sql'),
     'utf-8',
   );
-  await pool.query(migrationSql);
+  const migration2Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/002_add_outbox.sql'),
+    'utf-8',
+  );
+  await pool.query(migration1Sql);
+  await pool.query(migration2Sql);
 
   // Bootstrap NestJS without pino pretty and with mocked Stripe + Kafka consumer
   const moduleRef = await Test.createTestingModule({
@@ -108,6 +114,7 @@ afterAll(async () => {
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 async function cleanPayments() {
+  await pool.query('DELETE FROM outbox');
   await pool.query('DELETE FROM payments');
 }
 
@@ -221,7 +228,9 @@ describe('GET /api/payments/:id returns 200 OK given valid payment id', () => {
   });
 
   it('should return the payment', async () => {
-    const res = await request.get(`/api/payments/${paymentId}`);
+    const res = await request
+      .get(`/api/payments/${paymentId}`)
+      .set('X-User-Id', 'user-get-1');
 
     expect(res.status).toBe(200);
     expect(res.body.payment.id).toBe(paymentId);
@@ -231,7 +240,9 @@ describe('GET /api/payments/:id returns 200 OK given valid payment id', () => {
 
 describe('GET /api/payments/:id returns 404 Not Found given unknown id', () => {
   it('should return 404 for a non-existent payment', async () => {
-    const res = await request.get('/api/payments/26088992-98b5-403f-8d75-3af190c8265c');
+    const res = await request
+      .get('/api/payments/26088992-98b5-403f-8d75-3af190c8265c')
+      .set('X-User-Id', 'some-user');
 
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('PAYMENT_NOT_FOUND');

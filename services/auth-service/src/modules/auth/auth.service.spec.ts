@@ -9,7 +9,9 @@ import * as argon2 from 'argon2';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeUser(overrides: Partial<{ id: string; email: string; passwordHash: string }> = {}) {
+function makeUser(
+  overrides: Partial<{ id: string; email: string; passwordHash: string }> = {},
+) {
   return {
     id: 'uuid-1',
     email: 'user@example.com',
@@ -60,7 +62,9 @@ function makeLogger(): PinoLogger {
   } as unknown as PinoLogger;
 }
 
-function makeUsersRepo(overrides: Partial<UsersRepository> = {}): UsersRepository {
+function makeUsersRepo(
+  overrides: Partial<UsersRepository> = {},
+): UsersRepository {
   return {
     findByEmail: vi.fn().mockResolvedValue(null),
     findById: vi.fn().mockResolvedValue(null),
@@ -83,11 +87,17 @@ function makeConfigService(rsaKey = TEST_RSA_PEM): ConfigService {
   } as unknown as ConfigService;
 }
 
-function makeAuthService(overrides: {
-  usersRepo?: Partial<UsersRepository>;
-  jwtService?: Partial<JwtService>;
-  configService?: ConfigService;
-} = {}): { service: AuthService; usersRepo: UsersRepository; jwtService: JwtService } {
+function makeAuthService(
+  overrides: {
+    usersRepo?: Partial<UsersRepository>;
+    jwtService?: Partial<JwtService>;
+    configService?: ConfigService;
+  } = {},
+): {
+  service: AuthService;
+  usersRepo: UsersRepository;
+  jwtService: JwtService;
+} {
   const usersRepo = makeUsersRepo(overrides.usersRepo);
   const jwtService = makeJwtService(overrides.jwtService);
   const configService = overrides.configService ?? makeConfigService();
@@ -110,8 +120,11 @@ describe('AuthService', () => {
 
       const token = await service.signup('user@example.com', 'password123');
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(usersRepo.findByEmail).toHaveBeenCalledWith('user@example.com');
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(usersRepo.create).toHaveBeenCalledOnce();
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
       expect(token).toBe('signed.jwt.token');
     });
@@ -121,9 +134,9 @@ describe('AuthService', () => {
         usersRepo: { findByEmail: vi.fn().mockResolvedValue(makeUser()) },
       });
 
-      await expect(service.signup('user@example.com', 'password123')).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        service.signup('user@example.com', 'password123'),
+      ).rejects.toThrow(ConflictException);
     });
 
     it('should not store the plaintext password', async () => {
@@ -136,7 +149,8 @@ describe('AuthService', () => {
 
       await service.signup('user@example.com', 'my-secret-password');
 
-      const [, passwordHashArg] = (usersRepo.create as ReturnType<typeof vi.fn>).mock.calls[0];
+      const [, passwordHashArg] = (usersRepo.create as ReturnType<typeof vi.fn>)
+        .mock.calls[0] as [string, string];
       expect(passwordHashArg).not.toBe('my-secret-password');
       expect(passwordHashArg).toMatch(/^\$argon2id\$/);
     });
@@ -144,7 +158,9 @@ describe('AuthService', () => {
 
   describe('signin', () => {
     it('should return a signed JWT when credentials are valid', async () => {
-      const passwordHash = await argon2.hash('correctPassword', { type: argon2.argon2id });
+      const passwordHash = await argon2.hash('correctPassword', {
+        type: argon2.argon2id,
+      });
       const { service, jwtService } = makeAuthService({
         usersRepo: {
           findByEmail: vi.fn().mockResolvedValue(makeUser({ passwordHash })),
@@ -153,6 +169,7 @@ describe('AuthService', () => {
 
       const token = await service.signin('user@example.com', 'correctPassword');
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
       expect(token).toBe('signed.jwt.token');
     });
@@ -162,22 +179,24 @@ describe('AuthService', () => {
         usersRepo: { findByEmail: vi.fn().mockResolvedValue(null) },
       });
 
-      await expect(service.signin('nobody@example.com', 'password')).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        service.signin('nobody@example.com', 'password'),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('should throw UnauthorizedException when password is wrong', async () => {
-      const passwordHash = await argon2.hash('correctPassword', { type: argon2.argon2id });
+      const passwordHash = await argon2.hash('correctPassword', {
+        type: argon2.argon2id,
+      });
       const { service } = makeAuthService({
         usersRepo: {
           findByEmail: vi.fn().mockResolvedValue(makeUser({ passwordHash })),
         },
       });
 
-      await expect(service.signin('user@example.com', 'wrongPassword')).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        service.signin('user@example.com', 'wrongPassword'),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('should not reveal whether the email exists in the error response', async () => {
@@ -194,11 +213,23 @@ describe('AuthService', () => {
       let errNoUser: UnauthorizedException | undefined;
       let errWrongPass: UnauthorizedException | undefined;
 
-      try { await serviceNoUser.signin('x@example.com', 'pass'); } catch (e) { errNoUser = e as UnauthorizedException; }
-      try { await serviceWrongPass.signin('x@example.com', 'wrong'); } catch (e) { errWrongPass = e as UnauthorizedException; }
+      try {
+        await serviceNoUser.signin('x@example.com', 'pass');
+      } catch (e) {
+        errNoUser = e as UnauthorizedException;
+      }
+      try {
+        await serviceWrongPass.signin('x@example.com', 'wrong');
+      } catch (e) {
+        errWrongPass = e as UnauthorizedException;
+      }
 
-      const codeNoUser = (errNoUser!.getResponse() as { error: { code: string } }).error.code;
-      const codeWrongPass = (errWrongPass!.getResponse() as { error: { code: string } }).error.code;
+      const codeNoUser = (
+        errNoUser!.getResponse() as { error: { code: string } }
+      ).error.code;
+      const codeWrongPass = (
+        errWrongPass!.getResponse() as { error: { code: string } }
+      ).error.code;
       expect(codeNoUser).toBe(codeWrongPass);
     });
   });
@@ -207,7 +238,9 @@ describe('AuthService', () => {
     it('should return a JWKS object with one RS256 key', () => {
       const { service } = makeAuthService();
 
-      const jwks = service.getJwks() as { keys: Array<{ alg: string; use: string; kid: string }> };
+      const jwks = service.getJwks() as {
+        keys: Array<{ alg: string; use: string; kid: string }>;
+      };
 
       expect(jwks.keys).toHaveLength(1);
       expect(jwks.keys[0].alg).toBe('RS256');

@@ -8,6 +8,7 @@
  * Each test runs inside a transaction that is rolled back on completion so
  * tests are fully isolated without needing separate schemas or data wipes.
  */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
@@ -15,14 +16,17 @@ import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import * as Joi from 'joi';
 import { Pool } from 'pg';
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import {
+  PostgreSqlContainer,
+  type StartedPostgreSqlContainer,
+} from '@testcontainers/postgresql';
 import * as fs from 'fs';
 import * as path from 'path';
 import supertest from 'supertest';
 import cookieParser from 'cookie-parser';
 
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
-import { DatabaseModule, PG_POOL } from '../src/database/database.module';
+import { DatabaseModule } from '../src/database/database.module';
 import { AuthModule } from '../src/modules/auth/auth.module';
 import { HealthModule } from '../src/modules/health/health.module';
 
@@ -106,8 +110,13 @@ beforeAll(async () => {
 
   app = moduleRef.createNestApplication();
   app.use(cookieParser());
+
   app.useGlobalPipes(
-    new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
   );
   app.useGlobalFilters(new GlobalExceptionFilter());
 
@@ -175,9 +184,11 @@ describe('POST /api/users/signup returns 400 Bad Request given invalid input', (
   });
 
   it('should reject unknown extra fields', async () => {
-    const res = await request
-      .post('/api/users/signup')
-      .send({ email: 'extra@example.com', password: 'password123', admin: true });
+    const res = await request.post('/api/users/signup').send({
+      email: 'extra@example.com',
+      password: 'password123',
+      admin: true,
+    });
 
     expect(res.status).toBe(400);
   });
@@ -189,7 +200,9 @@ describe('POST /api/users/signin returns 200 OK given valid credentials', () => 
     const password = 'password123';
 
     await request.post('/api/users/signup').send({ email, password });
-    const res = await request.post('/api/users/signin').send({ email, password });
+    const res = await request
+      .post('/api/users/signin')
+      .send({ email, password });
 
     expect(res.status).toBe(200);
     const cookie = (res.headers['set-cookie'] as string[])[0];
@@ -227,7 +240,8 @@ describe('POST /api/users/signout returns 204 No Content', () => {
 
     expect(res.status).toBe(204);
     // Cookie header should contain an expired/empty token cookie
-    const cookie = ((res.headers['set-cookie'] as string[] | undefined) ?? [])[0] ?? '';
+    const cookie =
+      ((res.headers['set-cookie'] as string[] | undefined) ?? [])[0] ?? '';
     expect(cookie).toMatch(/token=/);
   });
 });

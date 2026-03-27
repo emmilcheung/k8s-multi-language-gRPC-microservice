@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { Inject } from '@nestjs/common';
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, asc } from 'drizzle-orm';
 import { Kafka, Producer } from 'kafkajs';
 import * as net from 'net';
 import { DRIZZLE_DB, type DrizzleDB } from '../../database/database.module';

@@ -109,7 +109,7 @@ func TestCreateTicket_ShouldReturn201WithTicketBody(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
 
@@ -132,7 +132,7 @@ func TestCreateTicket_ShouldReturn401WhenNoUserHeader(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
@@ -148,7 +148,7 @@ func TestCreateTicket_ShouldReturn400WhenTitleIsEmpty(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
@@ -164,7 +164,7 @@ func TestCreateTicket_ShouldReturn400WhenPriceIsNegative(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
@@ -180,7 +180,7 @@ func TestGetTicketByID_ShouldReturn200ForExistingTicket(t *testing.T) {
 	createReq.Header.Set("X-User-Id", "user-1")
 	createResp, err := http.DefaultClient.Do(createReq)
 	require.NoError(t, err)
-	defer createResp.Body.Close()
+	defer createResp.Body.Close() //nolint:errcheck
 	require.Equal(t, http.StatusCreated, createResp.StatusCode)
 
 	var created map[string]interface{}
@@ -191,7 +191,7 @@ func TestGetTicketByID_ShouldReturn200ForExistingTicket(t *testing.T) {
 	getReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/tickets/"+ticketID, nil)
 	getResp, err := http.DefaultClient.Do(getReq)
 	require.NoError(t, err)
-	defer getResp.Body.Close()
+	defer getResp.Body.Close() //nolint:errcheck
 
 	assert.Equal(t, http.StatusOK, getResp.StatusCode)
 	var ticket map[string]interface{}
@@ -207,7 +207,7 @@ func TestGetTicketByID_ShouldReturn404ForNonExistentTicket(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/tickets/non-existent-id", nil)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
@@ -219,7 +219,7 @@ func TestListTickets_ShouldReturnEmptyArrayWhenNoTickets(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/tickets", nil)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	var result []interface{}
@@ -239,14 +239,14 @@ func TestListTickets_ShouldReturnAllCreatedTickets(t *testing.T) {
 		req.Header.Set("X-User-Id", "user-1")
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
-		resp.Body.Close()
+		resp.Body.Close() //nolint:errcheck
 		require.Equal(t, http.StatusCreated, resp.StatusCode)
 	}
 
 	listReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/tickets", nil)
 	listResp, err := http.DefaultClient.Do(listReq)
 	require.NoError(t, err)
-	defer listResp.Body.Close()
+	defer listResp.Body.Close() //nolint:errcheck
 
 	assert.Equal(t, http.StatusOK, listResp.StatusCode)
 	var tickets []interface{}
@@ -265,7 +265,7 @@ func TestUpdateTicket_ShouldReturn200WhenOwnerUpdates(t *testing.T) {
 	createReq.Header.Set("X-User-Id", "owner-user")
 	createResp, err := http.DefaultClient.Do(createReq)
 	require.NoError(t, err)
-	defer createResp.Body.Close()
+	defer createResp.Body.Close() //nolint:errcheck
 	require.Equal(t, http.StatusCreated, createResp.StatusCode)
 
 	var created map[string]interface{}
@@ -279,7 +279,7 @@ func TestUpdateTicket_ShouldReturn200WhenOwnerUpdates(t *testing.T) {
 	updateReq.Header.Set("X-User-Id", "owner-user")
 	updateResp, err := http.DefaultClient.Do(updateReq)
 	require.NoError(t, err)
-	defer updateResp.Body.Close()
+	defer updateResp.Body.Close() //nolint:errcheck
 
 	assert.Equal(t, http.StatusOK, updateResp.StatusCode)
 	var updated map[string]interface{}
@@ -299,7 +299,7 @@ func TestUpdateTicket_ShouldReturn403WhenNonOwnerUpdates(t *testing.T) {
 	createReq.Header.Set("X-User-Id", "owner-user")
 	createResp, err := http.DefaultClient.Do(createReq)
 	require.NoError(t, err)
-	defer createResp.Body.Close()
+	defer createResp.Body.Close() //nolint:errcheck
 
 	var created map[string]interface{}
 	require.NoError(t, json.NewDecoder(createResp.Body).Decode(&created))
@@ -312,7 +312,7 @@ func TestUpdateTicket_ShouldReturn403WhenNonOwnerUpdates(t *testing.T) {
 	updateReq.Header.Set("X-User-Id", "attacker-user")
 	updateResp, err := http.DefaultClient.Do(updateReq)
 	require.NoError(t, err)
-	defer updateResp.Body.Close()
+	defer updateResp.Body.Close() //nolint:errcheck
 
 	assert.Equal(t, http.StatusForbidden, updateResp.StatusCode)
 }
@@ -327,7 +327,7 @@ func TestUpdateTicket_ShouldReturn404ForNonExistentTicket(t *testing.T) {
 	req.Header.Set("X-User-Id", "user-1")
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
@@ -338,7 +338,7 @@ func TestHealthLive_ShouldReturn200(t *testing.T) {
 
 	resp, err := http.Get(ts.URL + "/healthz/live")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
@@ -348,6 +348,6 @@ func TestHealthReady_ShouldReturn200WhenMongoIsUp(t *testing.T) {
 
 	resp, err := http.Get(ts.URL + "/healthz/ready")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }

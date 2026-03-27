@@ -39,7 +39,8 @@ export class DatabaseModule implements OnModuleDestroy {
 
   async onModuleDestroy() {
     // Access the underlying pool via the Drizzle session and close it
-    const pool = (this.db as unknown as { session: { client: Pool } }).session?.client;
+    const pool = (this.db as unknown as { session: { client: Pool } }).session
+      ?.client;
     if (pool && typeof pool.end === 'function') {
       await pool.end();
     }

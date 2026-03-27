@@ -26,11 +26,18 @@ jobs:
       # Write the .env file consumed by docker-compose via env_file directives.
       # auth-service reads RSA_PRIVATE_KEY; payment-service reads STRIPE_SECRET_KEY.
       # Both were removed from docker-compose.yml hardcoded values in M2.
+      #
+      # RSA_PRIVATE_KEY and KONG_RSA_PUBLIC_KEY are stored in GitHub secrets as
+      # single-line \n-escaped PEM strings. Docker Compose env_file requires real
+      # newlines in multi-line values, so we use printf '%b' to expand \n → newline
+      # and wrap the value in double quotes so Compose parses it as one value.
       - name: Write root .env
         run: |
-          printf 'RSA_PRIVATE_KEY=%s\n' "$RSA_PRIVATE_KEY" > .env
-          printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY" >> .env
-          printf 'KONG_RSA_PUBLIC_KEY=%s\n' "$KONG_RSA_PUBLIC_KEY" >> .env
+          {
+            printf 'RSA_PRIVATE_KEY="%b"\n' "$RSA_PRIVATE_KEY"
+            printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY"
+            printf 'KONG_RSA_PUBLIC_KEY="%b"\n' "$KONG_RSA_PUBLIC_KEY"
+          } > .env
         env:
           RSA_PRIVATE_KEY: ${{ secrets.RSA_PRIVATE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
@@ -47,15 +54,20 @@ jobs:
           docker compose up -d \
             postgres-auth postgres-orders postgres-payments \
             mongodb redis kafka schema-registry
-          # Give Kafka time to elect a controller in KRaft mode
-          sleep 20
+          # Give Kafka KRaft mode time to elect a controller before healthcheck polling begins
+          sleep 30
 
       - name: Wait for infrastructure to be healthy
         run: |
           docker compose ps
           for service in postgres-auth postgres-orders postgres-payments mongodb redis kafka schema-registry; do
-            echo "Waiting for $service..."
-            timeout 60 bash -c "until docker compose exec -T $service sh -c 'exit 0' 2>/dev/null; do sleep 2; done"
+            echo "Waiting for $service to be healthy..."
+            timeout 120 bash -c "
+              until [ \"\$(docker inspect \$(docker compose ps -q $service) --format='{{.State.Health.Status}}' 2>/dev/null)\" = 'healthy' ]; do
+                sleep 5
+              done
+            "
+            echo "$service is healthy"
           done
 
       - name: Start Kong and all application services
@@ -63,17 +75,27 @@ jobs:
 
       - name: Wait for services to pass health checks
         run: |
-          for service in auth-service ticket-service payment-service expiration-service; do
-            echo "Waiting for $service..."
-            timeout 90 bash -c "until docker compose exec -T $service wget -qO- http://localhost:$(docker compose port $service 80 2>/dev/null || echo '8080')/healthz/live 2>/dev/null; do sleep 3; done" || true
-          done
-          # Poll HTTP endpoints directly
-          timeout 90 bash -c "until curl -sf http://localhost:3000/healthz/live; do sleep 3; done"
-          timeout 90 bash -c "until curl -sf http://localhost:3001/healthz/live; do sleep 3; done"
-          timeout 90 bash -c "until curl -sf http://localhost:3002/healthz/live; do sleep 3; done"
-          timeout 90 bash -c "until curl -sf http://localhost:8082/actuator/health/liveness; do sleep 3; done"
-          timeout 90 bash -c "until curl -sf http://localhost:8083/healthz/live; do sleep 3; done"
-          timeout 90 bash -c "until curl -sf http://localhost:8000/; do sleep 3; done" || true
+          # Each app service has a Docker healthcheck — poll until healthy.
+          # order-service (Java/Spring Boot) is the slowest: can take 90-120s to start.
+          # ticket-service must be healthy before order-service starts (depends_on),
+          # so we allow up to 360s total for the entire chain to settle.
+          echo "Waiting for all application services to be healthy..."
+          timeout 360 bash -c "
+            while true; do
+              all_healthy=true
+              for service in auth-service ticket-service order-service payment-service expiration-service; do
+                status=\$(docker inspect \$(docker compose ps -q \$service 2>/dev/null) --format='{{.State.Health.Status}}' 2>/dev/null || echo 'not-started')
+                if [ \"\$status\" != 'healthy' ]; then
+                  all_healthy=false
+                  echo \"  \$service: \$status\"
+                fi
+              done
+              \$all_healthy && echo 'All services healthy!' && break
+              sleep 5
+            done
+          "
+          # Kong is optional for test routing — don't fail if it takes longer
+          timeout 60 bash -c "until curl -sf http://localhost:8000/; do sleep 3; done" || true
 
       - uses: pnpm/action-setup@v4
         with:
@@ -94,10 +116,15 @@ jobs:
         working-directory: services/client
 
       - name: Start Next.js dev server
-        run: pnpm dev --port 4000 &
+        run: pnpm dev --port 4000 --hostname 0.0.0.0 &
         working-directory: services/client
         env:
+          # NEXT_PUBLIC_API_URL: used by browser-side code to reach Kong
           NEXT_PUBLIC_API_URL: http://localhost:8000
+          # INTERNAL_API_URL: used by Next.js Server Actions (server-side fetch)
+          # to reach Kong from the host runner. Without this it falls back to
+          # localhost:8080 which doesn't exist, causing all Server Actions to fail.
+          INTERNAL_API_URL: http://localhost:8000
 
       - name: Wait for Next.js to be ready
         run: timeout 60 bash -c "until curl -sf http://localhost:4000; do sleep 2; done"

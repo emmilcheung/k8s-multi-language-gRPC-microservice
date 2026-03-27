@@ -72,14 +72,20 @@ export class AuthService {
       // Constant-time failure to prevent user enumeration
       await argon2.hash('dummy-constant-time-comparison');
       throw new UnauthorizedException({
-        error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' },
+        error: {
+          code: 'INVALID_CREDENTIALS',
+          message: 'Invalid email or password',
+        },
       });
     }
 
     const valid = await argon2.verify(user.passwordHash, password);
     if (!valid) {
       throw new UnauthorizedException({
-        error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' },
+        error: {
+          code: 'INVALID_CREDENTIALS',
+          message: 'Invalid email or password',
+        },
       });
     }
 
@@ -110,6 +116,12 @@ export class AuthService {
   }
 
   private issueToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
-    return this.jwtService.sign(payload);
+    // JwtService.sign return type is `any` in @nestjs/jwt typings.
+    // We call it via an intermediate `unknown` cast to satisfy strict-any rules.
+
+    const token: unknown = (this.jwtService.sign as (p: unknown) => unknown)(
+      payload,
+    );
+    return token as string;
   }
 }

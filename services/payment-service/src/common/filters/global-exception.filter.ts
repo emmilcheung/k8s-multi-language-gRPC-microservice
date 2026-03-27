@@ -44,7 +44,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       }
 
       return response.status(status).json({
-        error: { code: 'HTTP_ERROR', message: String(body) },
+        error: { code: 'HTTP_ERROR', message: typeof body === 'string' ? body : JSON.stringify(body) },
       });
     }
 

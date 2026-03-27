@@ -23,7 +23,10 @@ export class AuthController {
   // POST /api/users/signup
   @Post('api/users/signup')
   @HttpCode(HttpStatus.CREATED)
-  async signup(@Body() dto: SignupDto, @Res({ passthrough: true }) res: Response) {
+  async signup(
+    @Body() dto: SignupDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const token = await this.authService.signup(dto.email, dto.password);
     this.setTokenCookie(res, token);
     return { currentUser: { email: dto.email } };
@@ -32,7 +35,10 @@ export class AuthController {
   // POST /api/users/signin
   @Post('api/users/signin')
   @HttpCode(HttpStatus.OK)
-  async signin(@Body() dto: SigninDto, @Res({ passthrough: true }) res: Response) {
+  async signin(
+    @Body() dto: SigninDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const token = await this.authService.signin(dto.email, dto.password);
     this.setTokenCookie(res, token);
     return { currentUser: { email: dto.email } };

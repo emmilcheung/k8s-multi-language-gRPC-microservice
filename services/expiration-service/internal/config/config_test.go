@@ -23,7 +23,7 @@ func TestLoad_ValidConfig(t *testing.T) {
 }
 
 func TestLoad_MissingRedisAddr(t *testing.T) {
-	os.Unsetenv("REDIS_ADDR")
+	require.NoError(t, os.Unsetenv("REDIS_ADDR"))
 	t.Setenv("KAFKA_BROKERS", "localhost:9092")
 
 	_, err := Load()
@@ -33,7 +33,7 @@ func TestLoad_MissingRedisAddr(t *testing.T) {
 
 func TestLoad_MissingKafkaBrokers(t *testing.T) {
 	t.Setenv("REDIS_ADDR", "localhost:6379")
-	os.Unsetenv("KAFKA_BROKERS")
+	require.NoError(t, os.Unsetenv("KAFKA_BROKERS"))
 
 	_, err := Load()
 	require.Error(t, err)
@@ -63,8 +63,8 @@ func TestLoad_MultipleBrokers(t *testing.T) {
 func TestLoad_Defaults(t *testing.T) {
 	t.Setenv("REDIS_ADDR", "localhost:6379")
 	t.Setenv("KAFKA_BROKERS", "localhost:9092")
-	os.Unsetenv("PORT")
-	os.Unsetenv("APP_ENV")
+	require.NoError(t, os.Unsetenv("PORT"))
+	require.NoError(t, os.Unsetenv("APP_ENV"))
 
 	cfg, err := Load()
 	require.NoError(t, err)
@@ -73,8 +73,8 @@ func TestLoad_Defaults(t *testing.T) {
 }
 
 func TestLoad_MissingBothRequiredFields(t *testing.T) {
-	os.Unsetenv("REDIS_ADDR")
-	os.Unsetenv("KAFKA_BROKERS")
+	require.NoError(t, os.Unsetenv("REDIS_ADDR"))
+	require.NoError(t, os.Unsetenv("KAFKA_BROKERS"))
 
 	_, err := Load()
 	require.Error(t, err)
