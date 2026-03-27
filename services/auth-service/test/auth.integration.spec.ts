@@ -8,6 +8,7 @@
  * Each test runs inside a transaction that is rolled back on completion so
  * tests are fully isolated without needing separate schemas or data wipes.
  */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
@@ -22,7 +23,7 @@ import supertest from 'supertest';
 import cookieParser from 'cookie-parser';
 
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
-import { DatabaseModule, PG_POOL } from '../src/database/database.module';
+import { DatabaseModule } from '../src/database/database.module';
 import { AuthModule } from '../src/modules/auth/auth.module';
 import { HealthModule } from '../src/modules/health/health.module';
 

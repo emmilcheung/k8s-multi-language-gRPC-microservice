@@ -8,6 +8,7 @@
  * Each describe block cleans up its own data via DELETE statements so tests
  * remain isolated without needing separate schemas.
  */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
@@ -36,7 +37,7 @@ let request: ReturnType<typeof supertest>;
 /** Minimal Stripe mock — no real network calls in tests. */
 const mockStripe = {
   paymentIntents: {
-    create: async ({ amount, currency, metadata }: { amount: number; currency: string; metadata: Record<string, string> }) => ({
+    create: ({ amount, currency, metadata }: { amount: number; currency: string; metadata: Record<string, string> }) => Promise.resolve({
       id: `mock_pi_${metadata.orderId ?? 'unknown'}`,
       amount,
       currency,

@@ -24,7 +24,7 @@ func TestLoad_ValidConfig(t *testing.T) {
 }
 
 func TestLoad_MissingMongoURI(t *testing.T) {
-	os.Unsetenv("MONGO_URI")
+	require.NoError(t, os.Unsetenv("MONGO_URI"))
 	t.Setenv("KAFKA_BROKERS", "localhost:9092")
 
 	_, err := Load()
@@ -34,7 +34,7 @@ func TestLoad_MissingMongoURI(t *testing.T) {
 
 func TestLoad_MissingKafkaBrokers(t *testing.T) {
 	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
-	os.Unsetenv("KAFKA_BROKERS")
+	require.NoError(t, os.Unsetenv("KAFKA_BROKERS"))
 
 	_, err := Load()
 	require.Error(t, err)
@@ -64,8 +64,8 @@ func TestLoad_MultipleBrokers(t *testing.T) {
 func TestLoad_Defaults(t *testing.T) {
 	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
 	t.Setenv("KAFKA_BROKERS", "localhost:9092")
-	os.Unsetenv("PORT")
-	os.Unsetenv("APP_ENV")
+	require.NoError(t, os.Unsetenv("PORT"))
+	require.NoError(t, os.Unsetenv("APP_ENV"))
 
 	cfg, err := Load()
 	require.NoError(t, err)
