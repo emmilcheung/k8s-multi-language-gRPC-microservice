@@ -26,11 +26,18 @@ jobs:
       # Write the .env file consumed by docker-compose via env_file directives.
       # auth-service reads RSA_PRIVATE_KEY; payment-service reads STRIPE_SECRET_KEY.
       # Both were removed from docker-compose.yml hardcoded values in M2.
+      #
+      # RSA_PRIVATE_KEY and KONG_RSA_PUBLIC_KEY are stored in GitHub secrets as
+      # single-line \n-escaped PEM strings. Docker Compose env_file requires real
+      # newlines in multi-line values, so we use printf '%b' to expand \n → newline
+      # and wrap the value in double quotes so Compose parses it as one value.
       - name: Write root .env
         run: |
-          printf 'RSA_PRIVATE_KEY=%s\n' "$RSA_PRIVATE_KEY" > .env
-          printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY" >> .env
-          printf 'KONG_RSA_PUBLIC_KEY=%s\n' "$KONG_RSA_PUBLIC_KEY" >> .env
+          {
+            printf 'RSA_PRIVATE_KEY="%b"\n' "$RSA_PRIVATE_KEY"
+            printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY"
+            printf 'KONG_RSA_PUBLIC_KEY="%b"\n' "$KONG_RSA_PUBLIC_KEY"
+          } > .env
         env:
           RSA_PRIVATE_KEY: ${{ secrets.RSA_PRIVATE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
