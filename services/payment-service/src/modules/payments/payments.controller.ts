@@ -8,6 +8,9 @@ import {
   HttpStatus,
   Headers,
   BadRequestException,
+  UnauthorizedException,
+  NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { ChargeDto } from './payments.dto';
@@ -47,10 +50,33 @@ export class PaymentsController {
   /**
    * GET /api/payments/:id
    * Retrieve a payment by its ID.
+   * Requires X-User-Id header; returns 403 if the requesting user does not own the payment.
    */
   @Get(':id')
-  async findOne(@Param('id') id: string) {
+  async findOne(
+    @Param('id') id: string,
+    @Headers('x-user-id') userId: string | undefined,
+  ) {
+    if (!userId) {
+      throw new UnauthorizedException({
+        error: { code: 'UNAUTHENTICATED', message: 'Authentication required' },
+      });
+    }
+
     const payment = await this.paymentsService.findById(id);
+
+    if (!payment) {
+      throw new NotFoundException({
+        error: { code: 'PAYMENT_NOT_FOUND', message: `Payment ${id} not found` },
+      });
+    }
+
+    if (payment.userId !== userId) {
+      throw new ForbiddenException({
+        error: { code: 'FORBIDDEN', message: 'You do not have access to this payment' },
+      });
+    }
+
     return { payment };
   }
 }

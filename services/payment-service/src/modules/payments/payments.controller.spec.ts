@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { BadRequestException, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  UnauthorizedException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { PaymentsController } from './payments.controller';
 import { PAYMENT_STATUS } from '../../database/schema';
 import type { Payment } from '../../database/schema';
@@ -72,17 +78,33 @@ describe('PaymentsController.findOne', () => {
     controller = new PaymentsController(service as any);
   });
 
-  it('should return payment when found', async () => {
-    const payment = makePayment();
+  it('should return payment when authenticated owner requests it', async () => {
+    const payment = makePayment({ userId: 'user-uuid-1' });
     service.findById.mockResolvedValue(payment);
 
-    const result = await controller.findOne('pay-uuid-1');
+    const result = await controller.findOne('pay-uuid-1', 'user-uuid-1');
     expect(result).toEqual({ payment });
   });
 
-  it('should propagate NotFoundException from service', async () => {
-    service.findById.mockRejectedValue(new NotFoundException('not found'));
+  it('should throw UnauthorizedException when X-User-Id header is missing', async () => {
+    await expect(controller.findOne('pay-uuid-1', undefined)).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(service.findById).not.toHaveBeenCalled();
+  });
 
-    await expect(controller.findOne('bad-id')).rejects.toThrow(NotFoundException);
+  it('should throw NotFoundException when payment does not exist', async () => {
+    service.findById.mockResolvedValue(null);
+
+    await expect(controller.findOne('bad-id', 'user-uuid-1')).rejects.toThrow(NotFoundException);
+  });
+
+  it('should throw ForbiddenException when user does not own the payment', async () => {
+    const payment = makePayment({ userId: 'owner-uuid' });
+    service.findById.mockResolvedValue(payment);
+
+    await expect(controller.findOne('pay-uuid-1', 'attacker-uuid')).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 });
