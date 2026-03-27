@@ -1,6 +1,7 @@
 # CI pipeline for payment-service (TypeScript / NestJS / pnpm / Vitest)
 #
-# Stages: lint → unit test → integration test → build image → scan image → push (main only)
+# Stages: lint → unit test → integration test → build image → scan image
+# Image push is intentionally absent — no registry or deployment target exists yet.
 # Integration tests use Testcontainers (real PostgreSQL + Kafka via Docker-in-Docker).
 
 name: ci-payment-service
@@ -140,35 +141,3 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
-  push:
-    name: Push Image
-    runs-on: ubuntu-24.04
-    needs: [build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push image
-        uses: docker/build-push-action@v6
-        with:
-          context: services/payment-service
-          file: services/payment-service/Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.IMAGE_NAME }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
