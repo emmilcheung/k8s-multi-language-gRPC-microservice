@@ -5,6 +5,7 @@ import type { StringValue } from 'ms';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
+import { RefreshTokenService } from './refresh-token.service';
 
 @Module({
   imports: [
@@ -27,7 +28,7 @@ import { UsersModule } from '../users/users.module';
       },
     }),
   ],
-  providers: [AuthService],
+  providers: [AuthService, RefreshTokenService],
   controllers: [AuthController],
 })
 export class AuthModule {}

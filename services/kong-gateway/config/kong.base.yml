@@ -46,12 +46,16 @@ services:
     read_timeout: {{READ_TIMEOUT_MS}}
     write_timeout: {{WRITE_TIMEOUT_MS}}
     routes:
-      # Public: signup / signin / signout — no JWT required
+      # Public: signup / signin / signout / refresh — no JWT required.
+      # /api/auth/refresh is public because auth-service validates the
+      # refresh token cookie itself (Redis lookup); Kong must not block it
+      # with a JWT check (the access token is already expired when refreshing).
       - name: auth-public
         paths:
           - /api/users/signup
           - /api/users/signin
           - /api/users/signout
+          - /api/auth/refresh
         methods: [POST]
         strip_path: false
         plugins:

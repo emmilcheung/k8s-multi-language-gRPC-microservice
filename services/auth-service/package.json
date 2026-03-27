@@ -32,6 +32,7 @@
     "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",
     "drizzle-orm": "^0.45.1",
+    "ioredis": "^5.10.1",
     "joi": "^18.0.2",
     "jwks-rsa": "^4.0.1",
     "nestjs-pino": "^4.6.1",

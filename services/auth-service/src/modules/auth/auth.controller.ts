@@ -7,16 +7,26 @@ import {
   Req,
   HttpCode,
   HttpStatus,
+  UnauthorizedException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { SignupDto, SigninDto } from './auth.dto';
+import { RefreshTokenService } from './refresh-token.service';
+
+// Cookie names
+const ACCESS_TOKEN_COOKIE = 'token';
+const REFRESH_TOKEN_COOKIE = 'refreshToken';
+
+// Refresh token TTL in ms (7 days — must match Redis TTL in RefreshTokenService)
+const REFRESH_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 @Controller()
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly refreshTokenService: RefreshTokenService,
     private readonly config: ConfigService,
   ) {}
 
@@ -27,8 +37,12 @@ export class AuthController {
     @Body() dto: SignupDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const token = await this.authService.signup(dto.email, dto.password);
-    this.setTokenCookie(res, token);
+    const { accessToken, refreshToken } = await this.authService.signup(
+      dto.email,
+      dto.password,
+    );
+    this.setAccessTokenCookie(res, accessToken);
+    this.setRefreshTokenCookie(res, refreshToken);
     return { currentUser: { email: dto.email } };
   }
 
@@ -39,16 +53,66 @@ export class AuthController {
     @Body() dto: SigninDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const token = await this.authService.signin(dto.email, dto.password);
-    this.setTokenCookie(res, token);
+    const { accessToken, refreshToken } = await this.authService.signin(
+      dto.email,
+      dto.password,
+    );
+    this.setAccessTokenCookie(res, accessToken);
+    this.setRefreshTokenCookie(res, refreshToken);
     return { currentUser: { email: dto.email } };
   }
 
-  // POST /api/users/signout
+  // POST /api/users/signout — clears cookies and revokes the refresh token
   @Post('api/users/signout')
   @HttpCode(HttpStatus.NO_CONTENT)
-  signout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie('token');
+  async signout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const oldRefreshToken = req.cookies[REFRESH_TOKEN_COOKIE] as
+      | string
+      | undefined;
+    if (oldRefreshToken) {
+      // Best-effort revocation — don't throw if the token is already gone
+      await this.refreshTokenService.revoke(oldRefreshToken).catch(() => {});
+    }
+    res.clearCookie(ACCESS_TOKEN_COOKIE);
+    res.clearCookie(REFRESH_TOKEN_COOKIE);
+  }
+
+  // POST /api/auth/refresh — rotate refresh token and issue new access token
+  @Post('api/auth/refresh')
+  @HttpCode(HttpStatus.OK)
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const oldRefreshToken = req.cookies[REFRESH_TOKEN_COOKIE] as
+      | string
+      | undefined;
+    if (!oldRefreshToken) {
+      throw new UnauthorizedException({
+        error: {
+          code: 'MISSING_REFRESH_TOKEN',
+          message: 'Refresh token cookie is required',
+        },
+      });
+    }
+
+    // Validate — throws 401 if missing or expired
+    const userId = await this.refreshTokenService.validate(oldRefreshToken);
+
+    // Rotate: delete old token before issuing the new one
+    await this.refreshTokenService.revoke(oldRefreshToken);
+
+    const [accessToken, refreshToken] = await Promise.all([
+      this.authService.issueAccessTokenForUser(userId),
+      this.refreshTokenService.issue(userId),
+    ]);
+
+    this.setAccessTokenCookie(res, accessToken);
+    this.setRefreshTokenCookie(res, refreshToken);
+    return {};
   }
 
   // GET /api/users/currentuser
@@ -70,12 +134,30 @@ export class AuthController {
     return this.authService.getJwks();
   }
 
-  private setTokenCookie(res: Response, token: string) {
-    res.cookie('token', token, {
+  // ── Private helpers ──────────────────────────────────────────────────────────
+
+  private isProduction(): boolean {
+    return this.config.get('NODE_ENV') === 'production';
+  }
+
+  private setAccessTokenCookie(res: Response, token: string): void {
+    res.cookie(ACCESS_TOKEN_COOKIE, token, {
       httpOnly: true,
-      secure: this.config.get('NODE_ENV') === 'production',
+      secure: this.isProduction(),
       sameSite: 'strict',
       maxAge: 15 * 60 * 1000, // 15 minutes — matches JWT expiry
+    });
+  }
+
+  private setRefreshTokenCookie(res: Response, token: string): void {
+    res.cookie(REFRESH_TOKEN_COOKIE, token, {
+      httpOnly: true,
+      secure: this.isProduction(),
+      sameSite: 'strict',
+      maxAge: REFRESH_COOKIE_MAX_AGE_MS,
+      // Scope refresh cookie to the refresh endpoint only — prevents it being
+      // sent on every API request and limits exposure surface.
+      path: '/api/auth/refresh',
     });
   }
 }
