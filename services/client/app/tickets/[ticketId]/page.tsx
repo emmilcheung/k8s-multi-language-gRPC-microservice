@@ -48,17 +48,17 @@ export default async function TicketDetailPage({ params }: Props) {
   const cookieStore = await cookies();
   const token = cookieStore.get("token")?.value;
 
+  // Extract user ID by decoding the JWT payload — no HTTP roundtrip needed (P-05).
+  // Kong already verified the token's signature; we only need the `sub` claim here
+  // for an owner check, so decoding without verification is safe in this context.
   let currentUserId: string | null = null;
   if (token) {
     try {
-      const base = (process.env.INTERNAL_API_URL ?? "http://localhost:8080").replace(/\/$/, "");
-      const res = await fetch(`${base}/api/users/currentuser`, {
-        headers: { Cookie: `token=${token}` },
-        cache: "no-store",
-      });
-      if (res.ok) {
-        const data = await res.json();
-        currentUserId = data?.currentUser?.id ?? null;
+      const payloadB64 = token.split(".")[1];
+      if (payloadB64) {
+        const json = Buffer.from(payloadB64, "base64url").toString("utf-8");
+        const payload = JSON.parse(json) as { sub?: string };
+        currentUserId = payload.sub ?? null;
       }
     } catch {
       // non-fatal — fall back to purchase-only view
