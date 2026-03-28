@@ -58,15 +58,6 @@ export async function serverApi<T = unknown>(
   return res.json();
 }
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, body?.error?.message ?? res.statusText, body);
-  }
-
-  if (res.status === 204) return undefined as T;
-  return res.json();
-}
-
 // ─── Client-side axios instance (used in Client Components) ──────────────────
 
 export const clientApi = axios.create({
