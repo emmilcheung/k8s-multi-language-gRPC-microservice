@@ -5,17 +5,18 @@
  * Testcontainers, applies the SQL migration, bootstraps the full NestJS
  * application, and exercises the endpoints over real HTTP using supertest.
  *
- * Each test runs against isolated data (unique emails per test) so tests are
- * independent without needing transactions or schema wipes.
+ * Each test runs against a clean database: beforeEach truncates the users
+ * table and flushes Redis so no state leaks between tests (T-10).
  */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import * as Joi from 'joi';
 import { Pool } from 'pg';
+import Redis from 'ioredis';
 import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
@@ -66,6 +67,7 @@ let pgContainer: StartedPostgreSqlContainer;
 let redisContainer: StartedTestContainer;
 let app: INestApplication;
 let pool: Pool;
+let redisClient: Redis;
 let request: ReturnType<typeof supertest>;
 
 beforeAll(async () => {
@@ -92,7 +94,10 @@ beforeAll(async () => {
   process.env['JWT_EXPIRY'] = '15m';
   process.env['NODE_ENV'] = 'test';
 
-  // 3. Apply migration using raw SQL
+  // 3. Connect a direct Redis client for per-test cleanup (FLUSHDB).
+  redisClient = new Redis(redisUrl);
+
+  // 4. Apply migration using raw SQL
   pool = new Pool({ connectionString: databaseUrl });
   const migrationSql = fs.readFileSync(
     path.join(__dirname, '../migrations/001_init_users.sql'),
@@ -100,7 +105,7 @@ beforeAll(async () => {
   );
   await pool.query(migrationSql);
 
-  // 4. Bootstrap NestJS app (without pino/metrics to keep tests simple)
+  // 5. Bootstrap NestJS app (without pino/metrics to keep tests simple)
   const moduleRef = await Test.createTestingModule({
     imports: [
       ConfigModule.forRoot({
@@ -139,9 +144,20 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app?.close();
+  await redisClient?.quit();
   await pool?.end();
   await pgContainer?.stop();
   await redisContainer?.stop();
+});
+
+/**
+ * Per-test isolation (T-10): truncate the users table and flush Redis before
+ * every test. This guarantees tests are fully independent regardless of
+ * execution order — no leftover rows or blacklisted JTIs from prior tests.
+ */
+beforeEach(async () => {
+  await pool.query('TRUNCATE TABLE users RESTART IDENTITY CASCADE');
+  await redisClient.flushdb();
 });
 
 // ── Helper ────────────────────────────────────────────────────────────────────
