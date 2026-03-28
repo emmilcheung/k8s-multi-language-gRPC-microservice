@@ -11,6 +11,7 @@
 > - **Never merge into `main` without explicit owner review and approval** (AGENTS.md §16.10)
 > - Each milestone has a verification gate — do not start the next until the gate passes
 > - When a finding is fixed, check its box and commit the schedule update alongside the last fix commit of that milestone
+> - Changes must be backwards compatitable in terms of audit rules, make sure all fixes don't violute previous passed or fixed rules.
 
 ---
 
@@ -53,9 +54,9 @@
 
 ### Checklist
 
-- [ ] **C-01** — Fix `@Transactional` self-invocation bypass in order-service
-- [ ] **C-05** — Implement `payments.payment.captured` Kafka producer in payment-service
-- [ ] **C-06** — Fix `processOrderCreatedEvent` non-mock path (payments stuck in PENDING)
+- [x] **C-01** — Fix `@Transactional` self-invocation bypass in order-service
+- [x] **C-05** — Implement `payments.payment.captured` Kafka producer in payment-service
+- [x] **C-06** — Fix `processOrderCreatedEvent` non-mock path (payments stuck in PENDING)
 
 ---
 
@@ -1706,7 +1707,7 @@ livenessProbe:
 
 | Milestone | Branch | Status | E2E | PR |
 |-----------|--------|--------|-----|----|
-| M1 — P0 Data Integrity | `fix/audit-m1-data-integrity` | ⬜ Not started | — | — |
+| M1 — P0 Data Integrity | `fix/audit-m1-data-integrity` | 🟡 Awaiting review | 18/18 | — |
 | M2 — P0 Security Critical | `fix/audit-m2-security-critical` | ⬜ Not started | — | — |
 | M3 — P0 DLQ / Resilience | `fix/audit-m3-dlq-resilience` | ⬜ Not started | — | — |
 | M4 — P0 CI Deploy | `fix/audit-m4-ci-deploy` | ⬜ Not started | — | — |

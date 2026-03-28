@@ -16,19 +16,19 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 1.1 Data Integrity
 
-- [ ] **C-01 | P0 | Fix @Transactional self-invocation in order-service**
+- [x] **C-01 | P0 | Fix @Transactional self-invocation in order-service**
   - File: `services/order-service/src/main/java/com/ticketing/orders/service/OrderService.java:109`
   - Problem: `createOrder()` calls `this.createOrderTransactional()` — Spring proxy AOP is bypassed. The outbox pattern is NOT transactional.
   - Fix: Extract `createOrderTransactional` to a new `@Service` bean (e.g., `OrderTransactionService`), inject it into `OrderService`, call through the proxy. Alternatively, use `TransactionTemplate` for programmatic TX control.
   - Verify: Write an integration test that forces a failure after the order insert but before the outbox insert — confirm both roll back.
 
-- [ ] **C-05 | P0 | Implement Kafka producer for payments.payment.captured**
+- [x] **C-05 | P0 | Implement Kafka producer for payments.payment.captured**
   - File: Architecture gap — no producer code exists in `services/payment-service/`
   - Problem: After a successful Stripe charge, no event is published. Downstream services never learn about payments.
   - Fix: Add Kafka producer to payment-service. Use transactional outbox (write to `outbox` table in same DB TX as payment status update). Add relay mechanism.
   - Verify: Integration test with real Kafka (Testcontainers) — create payment, assert `payments.payment.captured` event appears on topic.
 
-- [ ] **C-06 | P0 | Fix processOrderCreatedEvent non-mock path**
+- [x] **C-06 | P0 | Fix processOrderCreatedEvent non-mock path**
   - File: `services/payment-service/src/modules/payments/payments.service.ts:146`
   - Problem: With a real Stripe key, the Kafka consumer creates a `PENDING` record but never initiates a charge. Payments stuck forever.
   - Fix: After creating the pending record, initiate a Stripe PaymentIntent. On success → `COMPLETED` + publish event. On failure → `FAILED`.
