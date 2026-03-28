@@ -5,9 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { parse } from "set-cookie-parser";
 import { ApiError } from "@/lib/api";
-
-const base = () =>
-  (process.env.INTERNAL_API_URL ?? "http://localhost:8080").replace(/\/$/, "");
+import { base } from "@/lib/server-utils";
 
 // ─── Signup ───────────────────────────────────────────────────────────────────
 
