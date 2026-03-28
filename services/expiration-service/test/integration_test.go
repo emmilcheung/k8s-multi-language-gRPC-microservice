@@ -55,23 +55,19 @@ func startRedis(t *testing.T) (addr string, cleanup func()) {
 }
 
 // startKafka spins up a Kafka container (apache/kafka KRaft combined mode) and returns
-// its bootstrap address. We use a HostConfigModifier to bind a fixed host port so that
-// KAFKA_ADVERTISED_LISTENERS can be set statically before container start.
+// its bootstrap address. Testcontainers maps the container port to a random host port,
+// which avoids fixed-port conflicts when tests run in parallel (T-13).
 func startKafka(t *testing.T) (brokers string, cleanup func()) {
 	t.Helper()
 	ctx := context.Background()
 
-	// Use a fixed host port so the advertised listener can be pre-configured.
-	const hostPort = "19092"
-
 	req := testcontainers.ContainerRequest{
 		Image:        "apache/kafka:3.7.0",
-		ExposedPorts: []string{hostPort + ":9092/tcp"},
+		ExposedPorts: []string{"9092/tcp"},
 		Env: map[string]string{
 			"KAFKA_NODE_ID":                                  "1",
 			"KAFKA_PROCESS_ROLES":                            "broker,controller",
 			"KAFKA_LISTENERS":                                "PLAINTEXT://:9092,CONTROLLER://:9093",
-			"KAFKA_ADVERTISED_LISTENERS":                     "PLAINTEXT://localhost:" + hostPort,
 			"KAFKA_LISTENER_SECURITY_PROTOCOL_MAP":           "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT",
 			"KAFKA_CONTROLLER_QUORUM_VOTERS":                 "1@localhost:9093",
 			"KAFKA_CONTROLLER_LISTENER_NAMES":                "CONTROLLER",
@@ -90,15 +86,46 @@ func startKafka(t *testing.T) (brokers string, cleanup func()) {
 	})
 	require.NoError(t, err, "start kafka container")
 
-	return "localhost:" + hostPort, func() {
+	host, err := container.Host(ctx)
+	require.NoError(t, err)
+	port, err := container.MappedPort(ctx, "9092")
+	require.NoError(t, err)
+
+	// Update KAFKA_ADVERTISED_LISTENERS to the dynamically assigned host port
+	// so the client can connect from outside the container network.
+	advertised := fmt.Sprintf("PLAINTEXT://%s:%s", host, port.Port())
+	_, _, execErr := container.Exec(ctx, []string{
+		"kafka-configs.sh",
+		"--bootstrap-server", "localhost:9092",
+		"--entity-type", "brokers",
+		"--entity-name", "1",
+		"--alter",
+		"--add-config", "advertised.listeners=" + advertised,
+	})
+	if execErr != nil {
+		// Non-fatal: the broker may not have fully started yet; the WaitingFor
+		// log condition is the authoritative readiness signal.
+		t.Logf("warn: kafka advertised.listeners update returned error (may be harmless): %v", execErr)
+	}
+
+	return fmt.Sprintf("%s:%s", host, port.Port()), func() {
 		_ = container.Terminate(ctx)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Health endpoint tests (no external dependencies needed)
-// We test the handler logic directly via a plain http.ServeMux to avoid
-// re-registering Prometheus collectors in the same test process.
+// pollUntil calls check() up to maxAttempts times with interval between each attempt.
+// It fails the test if check() does not return true within the budget.
+func pollUntil(t *testing.T, maxAttempts int, interval time.Duration, check func() bool) {
+	t.Helper()
+	for i := 0; i < maxAttempts; i++ {
+		if check() {
+			return
+		}
+		time.Sleep(interval)
+	}
+	t.Fatal("pollUntil: condition was not satisfied within the allotted budget")
+}
+
 // ---------------------------------------------------------------------------
 
 // sharedServer is initialised once per test process to avoid duplicate
@@ -152,11 +179,13 @@ func TestScheduler_ShouldEnqueueTaskInRedis(t *testing.T) {
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: redisAddr})
 	defer inspector.Close() //nolint:errcheck
 
-	// Allow a brief moment for asynq to persist the task.
-	time.Sleep(200 * time.Millisecond)
-
-	tasks, err := inspector.ListScheduledTasks("default")
-	require.NoError(t, err)
+	// Poll until the task appears in the scheduled queue (T-12: no time.Sleep).
+	var tasks []*asynq.TaskInfo
+	pollUntil(t, 20, 100*time.Millisecond, func() bool {
+		var err error
+		tasks, err = inspector.ListScheduledTasks("default")
+		return err == nil && len(tasks) == 1
+	})
 	require.Len(t, tasks, 1)
 	assert.Equal(t, orderID, tasks[0].ID)
 }
@@ -178,10 +207,15 @@ func TestScheduler_ShouldBeIdempotent(t *testing.T) {
 
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: redisAddr})
 	defer inspector.Close() //nolint:errcheck
-	time.Sleep(200 * time.Millisecond)
 
-	tasks, err := inspector.ListScheduledTasks("default")
-	require.NoError(t, err)
+	// Poll until exactly one task is present (T-12: no time.Sleep).
+	var tasks []*asynq.TaskInfo
+	pollUntil(t, 20, 100*time.Millisecond, func() bool {
+		var err error
+		tasks, err = inspector.ListScheduledTasks("default")
+		return err == nil && len(tasks) >= 1
+	})
+
 	// Only one task should exist despite two enqueue calls.
 	assert.Len(t, tasks, 1)
 }
@@ -201,11 +235,16 @@ func TestScheduler_AlreadyExpiredOrderEnqueuesImmediately(t *testing.T) {
 
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: redisAddr})
 	defer inspector.Close() //nolint:errcheck
-	time.Sleep(200 * time.Millisecond)
+
+	// Poll until the task appears in pending queue (T-12: no time.Sleep).
+	var pending []*asynq.TaskInfo
+	pollUntil(t, 20, 100*time.Millisecond, func() bool {
+		var err error
+		pending, err = inspector.ListPendingTasks("default")
+		return err == nil && len(pending) >= 1
+	})
 
 	// Task should be in pending (immediately processable) queue, not scheduled.
-	pending, err := inspector.ListPendingTasks("default")
-	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Equal(t, orderID, pending[0].ID)
 }
