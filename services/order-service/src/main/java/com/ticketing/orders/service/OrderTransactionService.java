@@ -89,7 +89,7 @@ public class OrderTransactionService {
             log.info("Local ticket replica not found; creating from gRPC response ticketId={}", ticketId);
             return orderTicketRepository.save(
                     new OrderTicket(ticketId, grpcTicket.getTitle(),
-                            new java.math.BigDecimal(String.valueOf(grpcTicket.getPrice())))
+                            new java.math.BigDecimal(grpcTicket.getPrice()))
             );
         });
 

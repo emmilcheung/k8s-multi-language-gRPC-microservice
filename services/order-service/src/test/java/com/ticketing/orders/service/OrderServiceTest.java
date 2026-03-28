@@ -98,7 +98,7 @@ class OrderServiceTest {
                         .setAvailable(true)
                         .setTicketId(ticketId.toString())
                         .setTitle(ticket.getTitle())
-                        .setPrice(ticket.getPrice().floatValue())
+                        .setPrice(ticket.getPrice().toPlainString())
                         .build());
         when(orderRepository.findActiveByTicketId(eq(ticketId), anyList()))
                 .thenReturn(Optional.empty());
@@ -144,7 +144,7 @@ class OrderServiceTest {
                 .setAvailable(true)
                 .setTicketId(ticketId.toString())
                 .setTitle("Concert Ticket")
-                .setPrice(49.99f)
+                .setPrice("49.99")
                 .build();
 
         OrderResponse response = orderTransactionService.createOrderTransactional(userId, ticketId, grpcTicket);
@@ -198,7 +198,7 @@ class OrderServiceTest {
                         .setAvailable(true)
                         .setTicketId(ticketId.toString())
                         .setTitle(ticket.getTitle())
-                        .setPrice(ticket.getPrice().floatValue())
+                        .setPrice(ticket.getPrice().toPlainString())
                         .build());
         when(orderRepository.findActiveByTicketId(eq(ticketId), anyList())).thenReturn(Optional.empty());
         when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
@@ -223,7 +223,7 @@ class OrderServiceTest {
                         .setAvailable(true)
                         .setTicketId(ticketId.toString())
                         .setTitle(ticket.getTitle())
-                        .setPrice(ticket.getPrice().floatValue())
+                        .setPrice(ticket.getPrice().toPlainString())
                         .build());
         when(orderRepository.findActiveByTicketId(eq(ticketId), anyList())).thenReturn(Optional.empty());
         when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));

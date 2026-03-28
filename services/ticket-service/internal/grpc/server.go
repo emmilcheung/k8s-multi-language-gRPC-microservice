@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"runtime/debug"
+	"strconv"
 	"time"
 
 	"github.com/acme/ticket-service/internal/grpc/tickets/v1"
@@ -48,7 +49,7 @@ func (s *TicketGrpcServer) GetTicket(ctx context.Context, req *v1.GetTicketReque
 	return &v1.GetTicketResponse{
 		TicketId:  ticket.ID,
 		Title:     ticket.Title,
-		Price:     ticket.Price,
+		Price:     strconv.FormatFloat(ticket.Price, 'f', -1, 64),
 		UserId:    ticket.UserID,
 		OrderId:   ticket.OrderID,
 		Version:   int64(ticket.Version),
@@ -83,7 +84,7 @@ func (s *TicketGrpcServer) ValidateTicketAvailability(ctx context.Context, req *
 	return &v1.ValidateTicketResponse{
 		Available: available,
 		TicketId:  ticket.ID,
-		Price:     ticket.Price,
+		Price:     strconv.FormatFloat(ticket.Price, 'f', -1, 64),
 		Title:     ticket.Title,
 	}, nil
 }

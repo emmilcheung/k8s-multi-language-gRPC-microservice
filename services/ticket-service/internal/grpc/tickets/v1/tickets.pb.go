@@ -70,7 +70,7 @@ type GetTicketResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TicketId      string                 `protobuf:"bytes,1,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"`
 	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
-	Price         float64                `protobuf:"fixed64,3,opt,name=price,proto3" json:"price,omitempty"`
+	Price         string                 `protobuf:"bytes,3,opt,name=price,proto3" json:"price,omitempty"`
 	UserId        string                 `protobuf:"bytes,4,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	OrderId       string                 `protobuf:"bytes,5,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
 	Version       int64                  `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`
@@ -124,11 +124,11 @@ func (x *GetTicketResponse) GetTitle() string {
 	return ""
 }
 
-func (x *GetTicketResponse) GetPrice() float64 {
+func (x *GetTicketResponse) GetPrice() string {
 	if x != nil {
 		return x.Price
 	}
-	return 0
+	return ""
 }
 
 func (x *GetTicketResponse) GetUserId() string {
@@ -214,7 +214,7 @@ type ValidateTicketResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Available     bool                   `protobuf:"varint,1,opt,name=available,proto3" json:"available,omitempty"`
 	TicketId      string                 `protobuf:"bytes,2,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"`
-	Price         float64                `protobuf:"fixed64,3,opt,name=price,proto3" json:"price,omitempty"`
+	Price         string                 `protobuf:"bytes,3,opt,name=price,proto3" json:"price,omitempty"`
 	Title         string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -264,11 +264,11 @@ func (x *ValidateTicketResponse) GetTicketId() string {
 	return ""
 }
 
-func (x *ValidateTicketResponse) GetPrice() float64 {
+func (x *ValidateTicketResponse) GetPrice() string {
 	if x != nil {
 		return x.Price
 	}
-	return 0
+	return ""
 }
 
 func (x *ValidateTicketResponse) GetTitle() string {
