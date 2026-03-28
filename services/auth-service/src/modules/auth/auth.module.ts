@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { RefreshTokenService } from './refresh-token.service';
 import { RedisModule } from '../redis/redis.module';
+import { parseRsaPrivateKey } from './rsa-key.util';
 
 @Module({
   imports: [
@@ -19,10 +20,9 @@ import { RedisModule } from '../redis/redis.module';
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const raw = config.getOrThrow<string>('RSA_PRIVATE_KEY');
-        const privateKey = raw.includes('-----BEGIN')
-          ? raw.replace(/\\n/g, '\n')
-          : Buffer.from(raw, 'base64').toString('utf-8');
+        const privateKey = parseRsaPrivateKey(
+          config.getOrThrow<string>('RSA_PRIVATE_KEY'),
+        );
         return {
           privateKey,
           signOptions: {

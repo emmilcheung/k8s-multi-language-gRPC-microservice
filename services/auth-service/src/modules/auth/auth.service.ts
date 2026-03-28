@@ -15,6 +15,7 @@ import { Inject } from '@nestjs/common';
 import { REDIS_CLIENT } from '../redis/redis.module';
 import { UsersRepository } from '../users/users.repository';
 import { RefreshTokenService } from './refresh-token.service';
+import { parseRsaPrivateKey } from './rsa-key.util';
 
 export interface JwtPayload {
   sub: string;
@@ -48,11 +49,9 @@ export class AuthService {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {
     // Load and validate RSA private key at construction time (fail loudly)
-    const raw = this.config.getOrThrow<string>('RSA_PRIVATE_KEY');
-    // Support both raw PEM and base64-encoded PEM (useful for env var injection)
-    this.rsaPrivateKey = raw.includes('-----BEGIN')
-      ? raw.replace(/\\n/g, '\n')
-      : Buffer.from(raw, 'base64').toString('utf-8');
+    this.rsaPrivateKey = parseRsaPrivateKey(
+      this.config.getOrThrow<string>('RSA_PRIVATE_KEY'),
+    );
   }
 
   async signup(email: string, password: string): Promise<AuthTokens> {
