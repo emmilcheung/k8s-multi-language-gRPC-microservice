@@ -6,6 +6,17 @@
 import axios from "axios";
 import { cookies } from "next/headers";
 
+// Paths whose responses are safe to cache via ISR (non-user-specific, read-only).
+// All other paths use cache:"no-store" to prevent stale user-specific data.
+const CACHEABLE_PATHS = ["/api/tickets"];
+
+// Default ISR revalidation window in seconds for cacheable paths.
+const ISR_REVALIDATE_SECONDS = 10;
+
+function isCacheable(path: string): boolean {
+  return CACHEABLE_PATHS.some((p) => path === p || path.startsWith(p + "?"));
+}
+
 // ─── Server-side client (used in Server Components / Server Actions) ─────────
 
 export async function serverApi<T = unknown>(
@@ -19,14 +30,23 @@ export async function serverApi<T = unknown>(
   const cookieStore = await cookies();
   const token = cookieStore.get("token")?.value ?? "";
 
+  // Use ISR for public ticket listings so the CDN / Next.js cache can serve
+  // them without hitting the upstream on every request (P-03). All user-specific
+  // or mutation paths bypass the cache entirely.
+  const nextCacheOptions: RequestInit = token
+    ? { cache: "no-store" }
+    : isCacheable(path)
+      ? { next: { revalidate: ISR_REVALIDATE_SECONDS } }
+      : { cache: "no-store" };
+
   const res = await fetch(`${base}${path}`, {
+    ...nextCacheOptions,
     ...options,
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Cookie: `token=${token}` } : {}),
       ...(options.headers ?? {}),
     },
-    cache: "no-store",
   });
 
   if (!res.ok) {

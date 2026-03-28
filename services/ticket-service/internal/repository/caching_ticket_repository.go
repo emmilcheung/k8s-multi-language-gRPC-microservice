@@ -58,27 +58,35 @@ func (r *CachingTicketRepository) FindByID(ctx context.Context, id string) (*Tic
 	return ticket, nil
 }
 
-func (r *CachingTicketRepository) FindAll(ctx context.Context) ([]*Ticket, error) {
-	if data, err := r.cache.GetList(ctx); err != nil {
-		r.log.Warn("failed to read tickets list cache", zap.Error(err))
-	} else if data != nil {
-		var cached []*Ticket
-		if err := json.Unmarshal(data, &cached); err != nil {
-			r.log.Warn("failed to decode cached tickets list", zap.Error(err))
-		} else {
-			return cached, nil
+func (r *CachingTicketRepository) FindAll(ctx context.Context, p PaginationParams) ([]*Ticket, error) {
+	// Cache is only used for the default first-page request (no cursor, default limit).
+	// Paginated pages beyond the first are fetched directly from the DB.
+	useCache := p.After == "" && (p.Limit <= 0 || p.Limit == 20)
+
+	if useCache {
+		if data, err := r.cache.GetList(ctx); err != nil {
+			r.log.Warn("failed to read tickets list cache", zap.Error(err))
+		} else if data != nil {
+			var cached []*Ticket
+			if err := json.Unmarshal(data, &cached); err != nil {
+				r.log.Warn("failed to decode cached tickets list", zap.Error(err))
+			} else {
+				return cached, nil
+			}
 		}
 	}
 
-	tickets, err := r.inner.FindAll(ctx)
+	tickets, err := r.inner.FindAll(ctx, p)
 	if err != nil {
 		return nil, err
 	}
 
-	if data, err := json.Marshal(tickets); err != nil {
-		r.log.Warn("failed to encode tickets list for cache", zap.Error(err))
-	} else if err := r.cache.SetList(ctx, data); err != nil {
-		r.log.Warn("failed to write tickets list cache", zap.Error(err))
+	if useCache {
+		if data, err := json.Marshal(tickets); err != nil {
+			r.log.Warn("failed to encode tickets list for cache", zap.Error(err))
+		} else if err := r.cache.SetList(ctx, data); err != nil {
+			r.log.Warn("failed to write tickets list cache", zap.Error(err))
+		}
 	}
 
 	return tickets, nil

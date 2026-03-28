@@ -30,11 +30,21 @@ var ErrTicketNotFound = errors.New("ticket not found")
 // ErrTicketReserved is returned when trying to update a reserved ticket.
 var ErrTicketReserved = errors.New("ticket is reserved")
 
+// PaginationParams controls cursor-based pagination for FindAll.
+// After is an opaque cursor — the _id of the last ticket seen on the previous page.
+// Limit is the maximum number of tickets to return (capped at 100; 0 means 20).
+type PaginationParams struct {
+	After string // exclusive lower bound (cursor); empty = start from beginning
+	Limit int    // max results per page
+}
+
 // TicketRepository defines the storage interface.
 type TicketRepository interface {
 	Create(ctx context.Context, t *Ticket) error
 	FindByID(ctx context.Context, id string) (*Ticket, error)
-	FindAll(ctx context.Context) ([]*Ticket, error)
+	// FindAll returns a page of tickets ordered by _id ascending.
+	// Pass a zero-value PaginationParams for the first page with defaults.
+	FindAll(ctx context.Context, p PaginationParams) ([]*Ticket, error)
 	Update(ctx context.Context, t *Ticket) error
 	// ReserveTicket sets the orderId on a ticket (idempotent).
 	ReserveTicket(ctx context.Context, ticketID, orderID string) error
@@ -120,6 +130,10 @@ func ensureCollectionSchema(ctx context.Context, db *mongo.Database, coll *mongo
 func ensureIndexes(ctx context.Context, coll *mongo.Collection) error {
 	_, err := coll.Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{
+			Keys:    bson.D{{Key: "_id", Value: 1}},
+			Options: options.Index().SetName("idx_id_asc"),
+		},
+		{
 			Keys:    bson.D{{Key: "userId", Value: 1}},
 			Options: options.Index().SetName("idx_userId"),
 		},
@@ -167,12 +181,27 @@ func (r *MongoTicketRepository) FindByID(ctx context.Context, id string) (*Ticke
 	return &t, nil
 }
 
-// FindAll returns all tickets (unordered). In production this would be paginated.
-func (r *MongoTicketRepository) FindAll(ctx context.Context) ([]*Ticket, error) {
+// FindAll returns a page of tickets ordered by _id ascending.
+// p.After is the last _id seen (exclusive cursor); p.Limit caps results (max 100, default 20).
+func (r *MongoTicketRepository) FindAll(ctx context.Context, p PaginationParams) ([]*Ticket, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	cursor, err := r.collection.Find(ctx, bson.M{})
+	limit := p.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	filter := bson.M{}
+	if p.After != "" {
+		filter = bson.M{"_id": bson.M{"$gt": p.After}}
+	}
+
+	opts := options.Find().
+		SetSort(bson.D{{Key: "_id", Value: 1}}).
+		SetLimit(int64(limit))
+
+	cursor, err := r.collection.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, fmt.Errorf("find all tickets: %w", err)
 	}
@@ -228,12 +257,17 @@ func (r *MongoTicketRepository) Close(ctx context.Context) error {
 }
 
 // ReserveTicket atomically sets orderId on a ticket.
-// It is idempotent: if the ticket already has the same orderId the update is a no-op.
+// The filter includes orderId:"" as an OCC guard — if the ticket is already
+// reserved (orderId != ""), the update matches nothing and returns ErrTicketReserved.
 func (r *MongoTicketRepository) ReserveTicket(ctx context.Context, ticketID, orderID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	filter := bson.M{"_id": ticketID}
+	// OCC guard: only match tickets that are not yet reserved (orderId is absent or empty string).
+	filter := bson.M{
+		"_id":     ticketID,
+		"orderId": bson.M{"$in": bson.A{"", nil}},
+	}
 	update := bson.M{
 		"$set": bson.M{
 			"orderId":   orderID,
@@ -247,7 +281,13 @@ func (r *MongoTicketRepository) ReserveTicket(ctx context.Context, ticketID, ord
 		return fmt.Errorf("reserve ticket %s: %w", ticketID, err)
 	}
 	if result.MatchedCount == 0 {
-		return ErrTicketNotFound
+		// Either the ticket doesn't exist, or it's already reserved — distinguish by FindByID.
+		var t Ticket
+		findErr := r.collection.FindOne(ctx, bson.M{"_id": ticketID}).Decode(&t)
+		if errors.Is(findErr, mongo.ErrNoDocuments) {
+			return ErrTicketNotFound
+		}
+		return ErrTicketReserved
 	}
 	return nil
 }

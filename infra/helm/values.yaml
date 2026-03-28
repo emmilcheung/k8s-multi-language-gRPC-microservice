@@ -14,11 +14,7 @@ auth-service:
   replicaCount: 2
   image:
     repository: auth-service
-    tag: latest
-  service:
-    port: 3000
-  env:
-    NODE_ENV: production
+    tag: "SET_BY_CI"  # overridden to git SHA at deploy time; never use latest in any env (I-04)
     PORT: "3000"
   # Secrets are injected from Kubernetes Secrets — never hardcoded here
   secretRef: auth-service-secrets
@@ -35,9 +31,7 @@ ticket-service:
   replicaCount: 2
   image:
     repository: ticket-service
-    tag: latest
-  service:
-    httpPort: 3001
+    tag: "SET_BY_CI"  # overridden to git SHA at deploy time; never use latest in any env (I-04)
     grpcPort: 50051
   env:
     APP_ENV: production
@@ -58,9 +52,7 @@ order-service:
   replicaCount: 2
   image:
     repository: order-service
-    tag: latest
-  service:
-    port: 8082
+    tag: "SET_BY_CI"  # overridden to git SHA at deploy time; never use latest in any env (I-04)
   env:
     SPRING_ENVIRONMENT: production
     SERVER_PORT: "8082"
@@ -84,9 +76,7 @@ payment-service:
   replicaCount: 2
   image:
     repository: payment-service
-    tag: latest
-  service:
-    port: 3002
+    tag: "SET_BY_CI"  # overridden to git SHA at deploy time; never use latest in any env (I-04)
   env:
     NODE_ENV: production
     PORT: "3002"
@@ -105,9 +95,7 @@ expiration-service:
   replicaCount: 1
   image:
     repository: expiration-service
-    tag: latest
-  service:
-    port: 8083
+    tag: "SET_BY_CI"  # overridden to git SHA at deploy time; never use latest in any env (I-04)
   env:
     APP_ENV: production
     PORT: "8083"
@@ -125,9 +113,7 @@ client:
   replicaCount: 2
   image:
     repository: client
-    tag: latest
-  service:
-    port: 4000
+    tag: "SET_BY_CI"  # overridden to git SHA at deploy time; never use latest in any env (I-04)
   env:
     NODE_ENV: production
     PORT: "4000"

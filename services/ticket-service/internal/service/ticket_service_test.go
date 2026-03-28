@@ -48,7 +48,7 @@ func (m *mockRepo) FindByID(ctx context.Context, id string) (*repository.Ticket,
 	return t, nil
 }
 
-func (m *mockRepo) FindAll(ctx context.Context) ([]*repository.Ticket, error) {
+func (m *mockRepo) FindAll(ctx context.Context, _ repository.PaginationParams) ([]*repository.Ticket, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -212,7 +212,7 @@ func TestListTickets_ShouldReturnAllTickets(t *testing.T) {
 	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "A", Price: 1, UserID: "u1"})
 	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t2", Title: "B", Price: 2, UserID: "u1"})
 
-	tickets, err := svc.ListTickets(context.Background())
+	tickets, err := svc.ListTickets(context.Background(), repository.PaginationParams{})
 	require.NoError(t, err)
 	assert.Len(t, tickets, 2)
 }

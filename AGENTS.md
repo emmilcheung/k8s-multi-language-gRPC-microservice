@@ -701,6 +701,20 @@ CI runs (unit + integration + Trivy + e2e Playwright) are expensive in both time
 - Continue committing and pushing on the same branch; each push re-runs CI on the existing PR automatically.
 - Do not open a new PR for each push iteration.
 
+#### Local lint/type-check gate — mandatory before every push
+Run the following checks locally and fix **all errors** (warnings are acceptable) before pushing. CI must not be the first place a lint or type error is discovered.
+
+| Service | Commands |
+|---|---|
+| TypeScript / NestJS (auth-service, payment-service) | `pnpm lint && pnpm tsc --noEmit` |
+| Next.js client | `pnpm lint && pnpm tsc --noEmit` |
+| Go (ticket-service, expiration-service) | `go vet ./...` (requires local Go ≥ go.mod version; skip only if Go version mismatch is the documented constraint) |
+| Java / Spring Boot (order-service) | `mvn -q checkstyle:check` (if checkstyle plugin is configured) |
+
+- Run these commands from the service's directory before every `git push`.
+- A push that causes a lint or type-check CI failure is a process violation — do not rely on CI to catch type errors.
+- Exception: Go services pinned to a Go version higher than the local toolchain — document explicitly and trust CI, but manually verify the changed signatures compile against the interface.
+
 #### Commit hygiene before merge
 - Before requesting owner review, `git log origin/main..HEAD` to confirm the branch history is clean and readable.
 - Each commit should represent one coherent change; squash trivial fixups before the final push if the history is noisy.

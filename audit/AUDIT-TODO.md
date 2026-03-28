@@ -120,11 +120,11 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 2.2 Correctness (P1)
 
-- [ ] **C-02 | P1 | Fix OutboxRelay batch transaction causing duplicate events**
+- [x] **C-02 | P1 | Fix OutboxRelay batch transaction causing duplicate events** *(done — M7)*
   - File: `services/order-service/src/main/java/com/ticketing/orders/outbox/OutboxRelay.java:40-59`
   - Fix: Use per-message transactions. Save each row individually after successful Kafka delivery. Or remove `@Transactional` and handle each message atomically.
 
-- [ ] **C-03 | P1 | Add OCC to ReserveTicket in ticket-service**
+- [x] **C-03 | P1 | Add OCC to ReserveTicket in ticket-service** *(done — M7)*
   - File: `services/ticket-service/internal/repository/mongo_ticket_repository.go:232-253`
   - Fix: Add `"orderId": ""` to the filter (only reserve if not yet reserved), or add version check. Return a conflict error if the filter matches nothing and the ticket still exists.
 
@@ -189,7 +189,7 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 2.5 Performance (P1)
 
-- [ ] **P-01 | P1 | Add pagination to ticket-service FindAll**
+- [x] **P-01 | P1 | Add pagination to ticket-service FindAll** *(done — M7)*
   - File: `services/ticket-service/internal/repository/mongo_ticket_repository.go:171-186`
   - Fix: Implement cursor-based pagination with `limit` and `after` parameters. Update HTTP handler and gRPC service to accept pagination params.
 
@@ -197,7 +197,7 @@ Items are organized into **execution phases** — work through them in order. Ea
   - File: `services/client/app/page.tsx:21`
   - Fix: Add `?limit=20&offset=0` support. Implement pagination UI (numbered pages or infinite scroll).
 
-- [ ] **P-03 | P1 | Replace cache: "no-store" with appropriate caching**
+- [x] **P-03 | P1 | Replace cache: "no-store" with appropriate caching** *(done — M7)*
   - File: `services/client/lib/api.ts:29`
   - Fix: Use `next: { revalidate: 10 }` for read endpoints (tickets list, ticket detail). Keep `cache: "no-store"` only for user-specific data (current user, orders).
 
@@ -215,7 +215,7 @@ Items are organized into **execution phases** — work through them in order. Ea
   - Files: All Helm deployment templates
   - Fix: Add `topologySpreadConstraints` with `topology.kubernetes.io/zone` key. Only apply in production (conditional on values).
 
-- [ ] **I-04 | P1 | Replace image.tag: latest with CI-driven tags**
+- [x] **I-04 | P1 | Replace image.tag: latest with CI-driven tags** *(done — M7)*
   - File: `infra/helm/values.yaml:17,38,60,87,108,128`
   - Fix: Default to `"SET_BY_CI"`. CI pipelines pass `--set <service>.image.tag=$GITHUB_SHA`.
 
@@ -225,13 +225,13 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 2.7 Testing (P1)
 
-- [ ] **T-01 | P1 | Add gRPC integration tests for ticket-service**
+- [x] **T-01 | P1 | Add gRPC integration tests for ticket-service** *(done — M7)*
   - Fix: Test the gRPC server with a real MongoDB (Testcontainers). Cover `GetTicket`, `FindAll`, error cases.
 
-- [ ] **T-02 | P1 | Add Kafka consumer integration tests for ticket-service**
+- [x] **T-02 | P1 | Add Kafka consumer integration tests for ticket-service** *(done — M6, merged `850b975`)*
   - Fix: Test `handleOrderCreated` / `handleOrderCancelled` with real Kafka (Testcontainers). Verify ticket reservation/release.
 
-- [ ] **T-07 | P1 | Fix health endpoint tests in expiration-service (currently no-ops)**
+- [x] **T-07 | P1 | Fix health endpoint tests in expiration-service (currently no-ops)** *(done — M6, merged `850b975`)*
   - File: `services/expiration-service/test/integration_test.go:290-302`
   - Fix: Tests currently construct a hardcoded mux, not the real health server. Rewrite to test the actual `server.New()` implementation with real dependency checkers.
 
@@ -295,11 +295,11 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 3.3 Resilience (P2)
 
-- [ ] **R-02 | P2 | Fix gRPC channel leak on shutdown**
+- [x] **R-02 | P2 | Fix gRPC channel leak on shutdown** *(done — M7)*
   - File: `services/order-service/src/main/java/com/ticketing/orders/grpc/GrpcClientConfig.java:20`
   - Fix: Set `destroyMethod = "shutdown"` or add `@PreDestroy` handler.
 
-- [ ] **R-06 | P2 | Replace log.Fatal in goroutines with controlled error propagation**
+- [x] **R-06 | P2 | Replace log.Fatal in goroutines with controlled error propagation** *(done — verified in M7; no log.Fatal in goroutines found)*
   - Files: `services/ticket-service/cmd/server/main.go:97`, `services/expiration-service/cmd/server/main.go:69-72`
   - Fix: Use errgroup or channel to propagate errors to main goroutine.
 
@@ -307,7 +307,7 @@ Items are organized into **execution phases** — work through them in order. Ea
   - File: `services/order-service/src/main/java/com/ticketing/orders/grpc/TicketServiceClient.java:38-42`
   - Fix: Inspect `e.getStatus().getCode()`. Map `UNAVAILABLE` → 503, `INTERNAL` → 500, `NOT_FOUND` → 404, etc.
 
-- [ ] **R-14 | P2 | Add outbox table cleanup job**
+- [x] **R-14 | P2 | Add outbox table cleanup job** *(done — M7)*
   - File: `services/order-service/`
   - Fix: Add `@Scheduled` method that deletes rows where `published = true AND created_at < NOW() - 7 days`.
 
@@ -369,15 +369,15 @@ Items are organized into **execution phases** — work through them in order. Ea
   - File: Create `.github/workflows/ci-kong-gateway.yml`
   - Fix: Run `build.sh` + `validate.sh` per environment. Verify config rendering.
 
-- [ ] **I-16 | P2 | Add proto stub regeneration check to proto CI**
+- [x] **I-16 | P2 | Add proto stub regeneration check to proto CI** *(done — verified in M7)*
   - File: `.github/workflows/ci-proto.yml`
   - Fix: Add `make proto` step followed by `git diff --exit-code` to detect stale stubs.
 
-- [ ] **I-17 | P2 | Fix .env indentation in E2E workflow**
+- [x] **I-17 | P2 | Fix .env indentation in E2E workflow** *(done — verified in M7)*
   - File: `.github/workflows/e2e.yml:29-31`
   - Fix: Remove leading whitespace from heredoc body lines.
 
-- [ ] **I-18 | P2 | Add KONG_RSA_PUBLIC_KEY to E2E workflow**
+- [x] **I-18 | P2 | Add KONG_RSA_PUBLIC_KEY to E2E workflow** *(done — verified in M7)*
   - File: `.github/workflows/e2e.yml:28-31`
   - Fix: Derive public key from private key and set both env vars.
 
