@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -350,4 +351,76 @@ func TestHealthReady_ShouldReturn200WhenMongoIsUp(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close() //nolint:errcheck
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+// TestUpdateTicket_ConcurrentOCC verifies that optimistic concurrency control (OCC)
+// correctly resolves simultaneous updates to the same ticket: exactly one goroutine
+// succeeds and the other receives ErrVersionConflict (T-08).
+func TestUpdateTicket_ConcurrentOCC(t *testing.T) {
+	ctx := context.Background()
+
+	// Spin up a dedicated MongoDB container for this test.
+	mongoContainer, err := tcmongo.Run(ctx, "mongo:7")
+	require.NoError(t, err, "failed to start MongoDB container")
+	defer mongoContainer.Terminate(ctx) //nolint:errcheck
+
+	mongoURI, err := mongoContainer.ConnectionString(ctx)
+	require.NoError(t, err)
+
+	repo, err := repository.NewMongoTicketRepository(ctx, mongoURI, dbName(t.Name()))
+	require.NoError(t, err)
+	defer repo.Close(ctx) //nolint:errcheck
+
+	// Create a ticket at version 0.
+	original := &repository.Ticket{
+		ID:     "occ-test-ticket-id",
+		Title:  "Original Title",
+		Price:  50.0,
+		UserID: "owner-123",
+	}
+	require.NoError(t, repo.Create(ctx, original))
+
+	// Fetch the stored ticket so both goroutines start from the same version.
+	base, err := repo.FindByID(ctx, original.ID)
+	require.NoError(t, err)
+
+	type result struct {
+		err error
+	}
+	ch := make(chan result, 2)
+
+	// Both goroutines attempt to update the same ticket using the same base version.
+	// One must succeed (MatchedCount == 1) and the other must get ErrVersionConflict.
+	update := func(title string) {
+		t := *base // copy, so each goroutine has its own struct
+		t.Title = title
+		ch <- result{err: repo.Update(ctx, &t)}
+	}
+
+	go update("Goroutine A Update")
+	go update("Goroutine B Update")
+
+	r1 := <-ch
+	r2 := <-ch
+
+	errs := []error{r1.err, r2.err}
+	successes := 0
+	conflicts := 0
+	for _, e := range errs {
+		if e == nil {
+			successes++
+		} else if errors.Is(e, repository.ErrVersionConflict) {
+			conflicts++
+		} else {
+			t.Fatalf("unexpected error from concurrent Update: %v", e)
+		}
+	}
+
+	assert.Equal(t, 1, successes, "exactly one goroutine should succeed")
+	assert.Equal(t, 1, conflicts, "exactly one goroutine should get ErrVersionConflict")
+
+	// The surviving version in the DB should be 1 (incremented once).
+	updated, err := repo.FindByID(ctx, original.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, updated.Version, "version should be 1 after one successful update")
 }
