@@ -30,6 +30,10 @@ var ErrTicketNotFound = errors.New("ticket not found")
 // ErrTicketReserved is returned when trying to update a reserved ticket.
 var ErrTicketReserved = errors.New("ticket is reserved")
 
+// ErrVersionConflict is returned when an OCC version mismatch is detected (ticket exists
+// but was concurrently modified — the caller should retry with fresh data).
+var ErrVersionConflict = errors.New("version conflict: ticket was modified concurrently")
+
 // PaginationParams controls cursor-based pagination for FindAll.
 // After is an opaque cursor — the _id of the last ticket seen on the previous page.
 // Limit is the maximum number of tickets to return (capped at 100; 0 means 20).
@@ -238,8 +242,15 @@ func (r *MongoTicketRepository) Update(ctx context.Context, t *Ticket) error {
 		return fmt.Errorf("update ticket: %w", err)
 	}
 	if result.MatchedCount == 0 {
-		// Either ticket doesn't exist or version mismatch (concurrent update)
-		return ErrTicketNotFound
+		// Distinguish not-found from a concurrent version conflict (C-04):
+		// do a follow-up find to check whether the document exists.
+		var existing Ticket
+		findErr := r.collection.FindOne(ctx, bson.M{"_id": t.ID}).Decode(&existing)
+		if errors.Is(findErr, mongo.ErrNoDocuments) {
+			return ErrTicketNotFound
+		}
+		// Document exists but version did not match — concurrent update detected.
+		return ErrVersionConflict
 	}
 	return nil
 }

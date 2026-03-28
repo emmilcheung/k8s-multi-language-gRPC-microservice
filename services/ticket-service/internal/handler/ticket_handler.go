@@ -184,6 +184,8 @@ func (h *TicketHandler) Update(c echo.Context) error {
 			return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Not authorised to modify this ticket", nil)
 		case errors.Is(err, repository.ErrTicketReserved):
 			return errorResponse(c, http.StatusConflict, "CONFLICT", "Cannot edit a reserved ticket", nil)
+		case errors.Is(err, repository.ErrVersionConflict):
+			return errorResponse(c, http.StatusConflict, "VERSION_CONFLICT", "Ticket was modified concurrently — please retry with fresh data", nil)
 		default:
 			h.log.Error("update ticket failed", zap.Error(err), zap.String("ticketId", id))
 			return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred", nil)
