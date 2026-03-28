@@ -27,6 +27,11 @@ export async function signup(
     return { error: "Email and password are required." };
   }
 
+  // Basic email format validation (S-14)
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { error: "Please enter a valid email address." };
+  }
+
   try {
     const res = await fetch(`${base()}/api/users/signup`, {
       method: "POST",
@@ -76,6 +81,11 @@ export async function signin(
 
   if (!email || !password) {
     return { error: "Email and password are required." };
+  }
+
+  // Basic email format validation (S-14)
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { error: "Please enter a valid email address." };
   }
 
   try {
