@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
+import ms from 'ms';
 import { AuthService } from './auth.service';
 import { SignupDto, SigninDto } from './auth.dto';
 import { RefreshTokenService } from './refresh-token.service';
@@ -76,6 +77,15 @@ export class AuthController {
       // Best-effort revocation — don't throw if the token is already gone
       await this.refreshTokenService.revoke(oldRefreshToken).catch(() => {});
     }
+
+    // Blacklist the access token so it cannot be reused before it naturally
+    // expires. This is a defence-in-depth measure — the primary defence is the
+    // short (15 min) token lifetime (S-04).
+    const accessToken = req.cookies[ACCESS_TOKEN_COOKIE] as string | undefined;
+    if (accessToken) {
+      await this.authService.blacklistAccessToken(accessToken);
+    }
+
     res.clearCookie(ACCESS_TOKEN_COOKIE);
     res.clearCookie(REFRESH_TOKEN_COOKIE);
   }
@@ -141,11 +151,15 @@ export class AuthController {
   }
 
   private setAccessTokenCookie(res: Response, token: string): void {
+    // Derive maxAge from JWT_EXPIRY config so cookie lifetime stays in sync
+    // with the token's actual validity window (S-06).
+    const expiry = this.config.get<string>('JWT_EXPIRY', '15m');
+    const maxAgeMs = ms(expiry as Parameters<typeof ms>[0]) ?? 15 * 60 * 1000;
     res.cookie(ACCESS_TOKEN_COOKIE, token, {
       httpOnly: true,
       secure: this.isProduction(),
       sameSite: 'strict',
-      maxAge: 15 * 60 * 1000, // 15 minutes — matches JWT expiry
+      maxAge: maxAgeMs,
     });
   }
 

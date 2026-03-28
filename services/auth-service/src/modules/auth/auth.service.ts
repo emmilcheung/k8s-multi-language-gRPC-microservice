@@ -9,12 +9,17 @@ import { JwtService } from '@nestjs/jwt';
 import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 import * as argon2 from 'argon2';
 import { createPublicKey } from 'crypto';
+import { randomUUID } from 'crypto';
+import type Redis from 'ioredis';
+import { Inject } from '@nestjs/common';
+import { REDIS_CLIENT } from '../redis/redis.module';
 import { UsersRepository } from '../users/users.repository';
 import { RefreshTokenService } from './refresh-token.service';
 
 export interface JwtPayload {
   sub: string;
   email: string;
+  jti: string;
   iat?: number;
   exp?: number;
 }
@@ -40,6 +45,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly refreshTokenService: RefreshTokenService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {
     // Load and validate RSA private key at construction time (fail loudly)
     const raw = this.config.getOrThrow<string>('RSA_PRIVATE_KEY');
@@ -140,12 +146,51 @@ export class AuthService {
     }
   }
 
-  private issueToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
+  /**
+   * Blacklist a JWT access token by its JTI until it expires (S-04).
+   * Decodes the token without verification (Kong already validated it upstream).
+   * Stores the JTI in Redis with TTL = remaining token lifetime so the key
+   * is automatically cleaned up once the token can no longer be used.
+   * Kong and downstream services should check this blacklist via JWKS validation.
+   *
+   * Note: Kong performs its own JWT verification before forwarding requests.
+   * This blacklist is a defence-in-depth measure for the auth-service's own
+   * token issuance; services that rely solely on Kong JWT verification will
+   * not check this list — they rely on short token lifetimes (15 min) as the
+   * primary defence against stolen tokens post-signout.
+   */
+  async blacklistAccessToken(token: string): Promise<void> {
+    try {
+      // Decode without verification — we only need the JTI and expiry claims
+      const decoded = this.jwtService.decode(token) as JwtPayload | null;
+      if (!decoded?.jti || !decoded?.exp) {
+        // Token is missing required claims — nothing to blacklist
+        return;
+      }
+      const ttlSeconds = decoded.exp - Math.floor(Date.now() / 1000);
+      if (ttlSeconds <= 0) {
+        // Already expired — no need to blacklist
+        return;
+      }
+      await this.redis.set(
+        `auth-service:blacklist:${decoded.jti}`,
+        '1',
+        'EX',
+        ttlSeconds,
+      );
+    } catch {
+      // Best-effort — never throw from a signout path
+      this.logger.warn('Failed to blacklist access token; ignoring');
+    }
+  }
+
+  private issueToken(payload: Omit<JwtPayload, 'jti' | 'iat' | 'exp'>): string {
+    // Embed a unique JTI so the token can be individually revoked on signout (S-04).
+    const tokenPayload = { ...payload, jti: randomUUID() };
     // JwtService.sign return type is `any` in @nestjs/jwt typings.
     // We call it via an intermediate `unknown` cast to satisfy strict-any rules.
-
     const token: unknown = (this.jwtService.sign as (p: unknown) => unknown)(
-      payload,
+      tokenPayload,
     );
     return token as string;
   }
