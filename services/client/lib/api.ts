@@ -1,9 +1,8 @@
 // lib/api.ts
-// Server-side and client-side API helpers.
-// Server Components call serverApi (uses INTERNAL_API_URL — cluster-internal).
-// Client Components call clientApi (uses NEXT_PUBLIC_API_URL — browser-facing).
+// Server-side API helpers for Server Components and Server Actions.
+// Use lib/server-utils.ts for base() / authHeaders() in Server Actions.
+// Client Components should use plain fetch() with relative URLs.
 
-import axios from "axios";
 import { cookies } from "next/headers";
 
 // Paths whose responses are safe to cache via ISR (non-user-specific, read-only).
@@ -57,16 +56,6 @@ export async function serverApi<T = unknown>(
   if (res.status === 204) return undefined as T;
   return res.json();
 }
-
-// ─── Client-side axios instance (used in Client Components) ──────────────────
-
-export const clientApi = axios.create({
-  baseURL:
-    typeof window !== "undefined"
-      ? (process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "")
-      : "",
-  withCredentials: true, // forward httpOnly cookie on same-origin requests
-});
 
 // ─── Shared error type ────────────────────────────────────────────────────────
 
