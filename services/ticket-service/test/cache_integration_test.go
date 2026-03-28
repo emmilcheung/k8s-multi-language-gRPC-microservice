@@ -31,9 +31,9 @@ func (r *countingRepo) FindByID(ctx context.Context, id string) (*repository.Tic
 	return r.repo.FindByID(ctx, id)
 }
 
-func (r *countingRepo) FindAll(ctx context.Context) ([]*repository.Ticket, error) {
+func (r *countingRepo) FindAll(ctx context.Context, p repository.PaginationParams) ([]*repository.Ticket, error) {
 	r.findAllCalls++
-	return r.repo.FindAll(ctx)
+	return r.repo.FindAll(ctx, p)
 }
 
 func (r *countingRepo) Update(ctx context.Context, t *repository.Ticket) error {
@@ -169,7 +169,7 @@ func TestCachingRepo_FindAll_cache_miss_fetches_from_mongo_and_populates_cache(t
 	seedTicket(t, cacheRepo, "t-3", "u-1")
 	seedTicket(t, cacheRepo, "t-4", "u-2")
 
-	got, err := cacheRepo.FindAll(context.Background())
+	got, err := cacheRepo.FindAll(context.Background(), repository.PaginationParams{})
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
 	assert.Equal(t, 1, counting.findAllCalls)
@@ -185,11 +185,11 @@ func TestCachingRepo_FindAll_cache_hit_does_not_call_mongo(t *testing.T) {
 
 	seedTicket(t, cacheRepo, "t-5", "u-1")
 
-	_, err := cacheRepo.FindAll(context.Background())
+	_, err := cacheRepo.FindAll(context.Background(), repository.PaginationParams{})
 	require.NoError(t, err)
 	assert.Equal(t, 1, counting.findAllCalls)
 
-	_, err = cacheRepo.FindAll(context.Background())
+	_, err = cacheRepo.FindAll(context.Background(), repository.PaginationParams{})
 	require.NoError(t, err)
 	assert.Equal(t, 1, counting.findAllCalls)
 }

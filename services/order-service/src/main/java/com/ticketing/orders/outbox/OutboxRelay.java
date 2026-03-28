@@ -7,16 +7,19 @@ import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
 /**
  * Polls the outbox table every 500 ms and publishes unpublished messages to Kafka.
  *
- * Each outbox row is marked published within the same transaction as the Kafka send
- * is acknowledged. If the Kafka send fails the row remains unpublished and will be
- * retried on the next poll — guaranteeing at-least-once delivery.
+ * Each message is published via {@link OutboxMessagePublisher#publishOne}, which runs
+ * in its own Spring-managed transaction. This ensures the mark-published DB update is
+ * committed atomically per message, not per batch (C-02 fix).
+ *
+ * If the Kafka send fails the DB update is never reached, so the row stays unpublished
+ * and will be retried. If the DB commit fails after a successful Kafka send, the message
+ * will be re-sent on the next poll — consumers must be idempotent (AGENTS.md §3.5).
  *
  * The partition key stored in the outbox is used as the Kafka message key so that
  * messages for the same entity (e.g. same orderId) land on the same partition,
@@ -28,16 +31,15 @@ public class OutboxRelay {
     private static final Logger log = LoggerFactory.getLogger(OutboxRelay.class);
 
     private final OutboxRepository outboxRepository;
-    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final OutboxMessagePublisher publisher;
 
     public OutboxRelay(OutboxRepository outboxRepository,
-                       KafkaTemplate<String, String> kafkaTemplate) {
+                       OutboxMessagePublisher publisher) {
         this.outboxRepository = outboxRepository;
-        this.kafkaTemplate = kafkaTemplate;
+        this.publisher = publisher;
     }
 
     @Scheduled(fixedDelay = 500)
-    @Transactional
     public void relay() {
         List<OutboxMessage> pending = outboxRepository.findUnpublished();
         if (pending.isEmpty()) {
@@ -45,17 +47,7 @@ public class OutboxRelay {
         }
 
         for (OutboxMessage msg : pending) {
-            try {
-                // send() is async — get() blocks until broker acknowledges (acks=all)
-                kafkaTemplate.send(msg.getTopic(), msg.getPartitionKey(), msg.getPayload()).get();
-                msg.markPublished();
-                outboxRepository.save(msg);
-                log.debug("Outbox message published id={} topic={}", msg.getId(), msg.getTopic());
-            } catch (Exception e) {
-                // Log and continue — the row stays unpublished and will be retried
-                log.error("Failed to publish outbox message id={} topic={}: {}",
-                        msg.getId(), msg.getTopic(), e.getMessage(), e);
-            }
+            publisher.publishOne(msg);
         }
     }
 }

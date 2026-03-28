@@ -91,9 +91,9 @@ func (s *TicketService) GetTicketByID(ctx context.Context, id string) (*reposito
 	return ticket, nil
 }
 
-// ListTickets returns all tickets.
-func (s *TicketService) ListTickets(ctx context.Context) ([]*repository.Ticket, error) {
-	tickets, err := s.repo.FindAll(ctx)
+// ListTickets returns a page of tickets. Pass a zero-value PaginationParams for page 1 defaults.
+func (s *TicketService) ListTickets(ctx context.Context, p repository.PaginationParams) ([]*repository.Ticket, error) {
+	tickets, err := s.repo.FindAll(ctx, p)
 	if err != nil {
 		return nil, fmt.Errorf("list tickets: %w", err)
 	}

@@ -17,7 +17,7 @@ public class GrpcClientConfig {
     @Value("${grpc.ticket-service.port}")
     private int ticketServicePort;
 
-    @Bean(destroyMethod = "")
+    @Bean(destroyMethod = "shutdown")
     public ManagedChannel ticketServiceChannel() {
         return ManagedChannelBuilder
                 .forAddress(ticketServiceHost, ticketServicePort)

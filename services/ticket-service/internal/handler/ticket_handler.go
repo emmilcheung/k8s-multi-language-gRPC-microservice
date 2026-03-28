@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
@@ -99,8 +100,21 @@ func (h *TicketHandler) Create(c echo.Context) error {
 }
 
 // List handles GET /api/tickets.
+// Query params:
+//   - limit: max results per page (1–100, default 20)
+//   - after: cursor — the id of the last ticket from the previous page
 func (h *TicketHandler) List(c echo.Context) error {
-	tickets, err := h.svc.ListTickets(c.Request().Context())
+	var p repository.PaginationParams
+	p.After = c.QueryParam("after")
+	if rawLimit := c.QueryParam("limit"); rawLimit != "" {
+		n, err := strconv.Atoi(rawLimit)
+		if err != nil || n < 1 || n > 100 {
+			return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "limit must be an integer between 1 and 100", nil)
+		}
+		p.Limit = n
+	}
+
+	tickets, err := h.svc.ListTickets(c.Request().Context(), p)
 	if err != nil {
 		h.log.Error("list tickets failed", zap.Error(err))
 		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred", nil)
