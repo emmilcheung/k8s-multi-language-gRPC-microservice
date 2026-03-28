@@ -1,0 +1,44 @@
+# Default values — all overridable from parent chart or values-local.yaml
+
+image:
+  repository: confluentinc/cp-kafka
+  tag: "7.7.1"
+  pullPolicy: IfNotPresent
+
+# Cluster ID must be a fixed base64url-encoded 16-byte value (same as docker-compose)
+clusterId: "MkU3OEVBNTcwNTJENDM2Qk"
+
+# Internal listener (cluster-internal traffic)
+internalPort: 9092
+# Controller listener (KRaft consensus)
+controllerPort: 9094
+
+# External access — NodePort for host-to-broker connectivity (e.g. E2E tests on the host)
+external:
+  enabled: false
+  nodePort: 30093        # exposed on minikube node IP — reach via $(minikube ip):30093
+  advertisedHost: ""     # set to $(minikube ip) in values-local.yaml
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 384Mi
+  limits:
+    cpu: 500m
+    memory: 640Mi
+
+persistence:
+  size: 1Gi
+  storageClass: ""   # use cluster default
+
+livenessProbe:
+  initialDelaySeconds: 30
+  periodSeconds: 15
+  timeoutSeconds: 10
+  failureThreshold: 5
+
+readinessProbe:
+  initialDelaySeconds: 20
+  periodSeconds: 10
+  timeoutSeconds: 10
+  failureThreshold: 5

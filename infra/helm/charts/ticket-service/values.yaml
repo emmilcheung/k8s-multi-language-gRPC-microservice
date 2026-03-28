@@ -1,0 +1,66 @@
+replicaCount: 2
+
+image:
+  repository: ticket-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  httpPort: 3001
+  grpcPort: 50051
+
+env:
+  APP_ENV: production
+  PORT: "3001"
+  GRPC_PORT: "50051"
+  LOG_LEVEL: info
+  MONGO_DB: tickets
+
+secretRef: ticket-service-secrets  # contains MONGO_URI, KAFKA_BROKERS
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+livenessProbe:
+  httpGet:
+    path: /healthz/live
+    port: http
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /healthz/ready
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+terminationGracePeriodSeconds: 30
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAntiAffinity:
+  enabled: true

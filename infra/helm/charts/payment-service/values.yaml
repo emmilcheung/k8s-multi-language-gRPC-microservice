@@ -1,0 +1,63 @@
+replicaCount: 2
+
+image:
+  repository: payment-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  port: 3002
+
+env:
+  NODE_ENV: production
+  PORT: "3002"
+  ORDER_SERVICE_URL: "http://order-service:8082"
+
+secretRef: payment-service-secrets  # contains DATABASE_URL, STRIPE_SECRET_KEY, KAFKA_BROKERS, REDIS_URL
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+livenessProbe:
+  httpGet:
+    path: /healthz/live
+    port: http
+  initialDelaySeconds: 20
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /healthz/ready
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+terminationGracePeriodSeconds: 30
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAntiAffinity:
+  enabled: true

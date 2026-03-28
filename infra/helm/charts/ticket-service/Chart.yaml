@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ticket-service
+description: Go Echo ticket service — CRUD, gRPC server, Kafka producer/consumer
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

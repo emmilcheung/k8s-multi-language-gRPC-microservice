@@ -1,0 +1,64 @@
+replicaCount: 2
+
+image:
+  repository: auth-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  port: 3000
+
+env:
+  NODE_ENV: production
+  PORT: "3000"
+
+# Name of a Kubernetes Secret containing:
+#   DATABASE_URL, JWT_SECRET, RSA_PRIVATE_KEY, KAFKA_BROKERS, REDIS_URL
+secretRef: auth-service-secrets
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+livenessProbe:
+  httpGet:
+    path: /healthz/live
+    port: http
+  initialDelaySeconds: 20
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /healthz/ready
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+terminationGracePeriodSeconds: 30
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAntiAffinity:
+  enabled: true
