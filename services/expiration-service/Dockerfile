@@ -20,9 +20,9 @@ WORKDIR /app
 COPY --from=builder /expiration-service ./expiration-service
 
 USER app
-EXPOSE 8083
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:8083/healthz/live || exit 1
+  CMD wget -qO- http://localhost:8080/healthz/live || exit 1
 
 CMD ["./expiration-service"]
