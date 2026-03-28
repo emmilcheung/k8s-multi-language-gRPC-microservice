@@ -36,32 +36,32 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 1.2 Security
 
-- [ ] **S-02 | P0 | Strip X-User-Id header on Kong ingress**
+- [x] **S-02 | P0 | Strip X-User-Id header on Kong ingress**
   - File: `services/kong-gateway/config/kong.base.yml` (missing globally)
   - Problem: External clients can forge `X-User-Id` on public (non-JWT) routes. Identity spoofing.
   - Fix: Add a global `pre-function` or `request-transformer` plugin that strips `X-User-Id` (and `X-User-Roles` if applicable) from ALL incoming requests before route-level plugins run. The JWT `post-function` sets it authoritatively afterward.
   - Verify: `curl -H "X-User-Id: spoofed-uuid" http://localhost:8000/api/tickets` — confirm the header is NOT forwarded to the upstream.
 
-- [ ] **S-05 | P0 | Add authorization check to GET /api/payments/:id**
+- [x] **S-05 | P0 | Add authorization check to GET /api/payments/:id**
   - File: `services/payment-service/src/modules/payments/payments.controller.ts:51-55`
   - Problem: Any caller can read any payment by ID. No ownership check, no auth required.
   - Fix: Require `X-User-Id` header. Load payment + associated order, verify `order.userId === X-User-Id`. Return 403 if mismatch, 401 if no header.
   - Verify: Unit test + integration test covering authorized, unauthorized, and unauthenticated cases.
 
-- [ ] **S-15 | P0 | Remove Stripe test key from docker-compose.yml**
+- [x] **S-15 | P0 | Remove Stripe test key from docker-compose.yml**
   - File: `docker-compose.yml:329`
   - Problem: `STRIPE_SECRET_KEY: "sk_test_..."` committed to version control. Violates AGENTS.md SS5.3/SS14.4.
   - Fix: Move to `.env` (gitignored). Add `STRIPE_SECRET_KEY=sk_test_placeholder` to `.env.example`. Use `env_file: .env` in docker-compose.
   - Also fix: **S-16** (RSA private key in same file). Move both to `.env`.
   - Verify: `git grep -i sk_test` returns zero matches. `.env.example` exists with placeholders.
 
-- [ ] **S-17 | P0 | Fix Kong Dockerfile to not run as root**
+- [x] **S-17 | P0 | Fix Kong Dockerfile to not run as root**
   - File: `services/kong-gateway/Dockerfile:43-44`
   - Problem: `USER root` at runtime. Container escape = root on the node.
   - Fix: Pre-create `/etc/kong/` with correct permissions during build. Switch final `USER` to `kong`. Run the `envsubst`/render step as `kong` user.
   - Verify: `docker run --rm kong-gateway:local whoami` returns `kong`.
 
-- [ ] **S-18 | P0 (prod) | Pin Docker base images to digest**
+- [x] **S-18 | P0 (prod) | Pin Docker base images to digest**
   - Files: `services/kong-gateway/Dockerfile:17` + all service Dockerfiles
   - Problem: Tag-only references (`kong:3.7-ubuntu`, `node:24-alpine`, etc.) are mutable. Supply chain attack vector.
   - Fix: For each base image, resolve the current digest and pin with `@sha256:...`. Only required for production images; docker-compose (dev-only) can stay tag-based.
@@ -69,13 +69,13 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 1.3 Resilience
 
-- [ ] **R-03 | P0 | Implement DLQ in ticket-service Kafka consumer**
+- [x] **R-03 | P0 | Implement DLQ in ticket-service Kafka consumer**
   - File: `services/ticket-service/internal/kafka/consumer.go:123`
   - Problem: `TODO: publish to DLQ; for now log and commit`. Failed messages permanently lost.
   - Fix: After 3 retry attempts with exponential backoff+jitter, produce the failed message to `orders.order.created.dlq` / `orders.order.cancelled.dlq`. Only commit offset after successful DLQ write.
   - Verify: Integration test — inject a processing error, assert message appears on DLQ topic.
 
-- [ ] **R-04 | P0 | Implement DLQ in expiration-service Kafka consumer**
+- [x] **R-04 | P0 | Implement DLQ in expiration-service Kafka consumer**
   - File: `services/expiration-service/internal/kafka/consumer.go:74-80`
   - Problem: Same as R-03. `TopicExpirationCompleteDLQ` constant exists but is never used.
   - Fix: Same pattern as R-03. Use the existing constant. Route to `orders.order.created.dlq` after retries.
@@ -83,7 +83,7 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 1.4 Infrastructure
 
-- [ ] **I-11 | P0 | Add deploy stages to CI pipelines**
+- [x] **I-11 | P0 | Add deploy stages to CI pipelines**
   - Files: All `.github/workflows/ci-*.yml`
   - Problem: Pipelines end at "push image to GHCR." No deployment, no smoke test, no rollback.
   - Fix: Add stages: `deploy (dev) -> smoke test -> deploy (staging) -> e2e test -> deploy (prod, gated)`. Use `helm upgrade` or `kubectl set image`. Add automatic rollback on smoke test failure.
@@ -97,7 +97,7 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 2.1 Security (P1)
 
-- [ ] **S-01 | P1 | Implement refresh token rotation**
+- [x] **S-01 | P1 | Implement refresh token rotation**
   - File: `services/auth-service/src/modules/auth/auth.service.ts`
   - AGENTS.md: SS5.1 requires "short-lived access tokens (15 min), long-lived refresh tokens stored server-side (Redis) and rotatable."
   - Fix: Issue refresh tokens (stored in Redis with TTL), rotate on use, return as HttpOnly cookie alongside access token. Add `POST /api/auth/refresh` endpoint.
@@ -106,11 +106,11 @@ Items are organized into **execution phases** — work through them in order. Ea
   - File: `services/auth-service/src/modules/auth/auth.controller.ts:52-58`
   - Fix: Verify the JWT from the cookie at the service level in addition to trusting `X-User-Id`. Ensure NetworkPolicy restricts direct pod access.
 
-- [ ] **S-07 | P1 | Set maxAge on client auth cookie**
+- [x] **S-07 | P1 | Set maxAge on client auth cookie**
   - File: `services/client/app/actions/auth.ts:47-52`
   - Fix: Add `maxAge: 900` (15 min) to match JWT lifetime. Expired JWTs should not be sent.
 
-- [ ] **S-08 | P1 | Replace regex cookie parsing with proper parser**
+- [x] **S-08 | P1 | Replace regex cookie parsing with proper parser**
   - File: `services/client/app/actions/auth.ts:45`
   - Fix: Use `set-cookie-parser` package or manual `split('; ')` approach. Handle quoted values and URL-encoded characters.
 
@@ -219,7 +219,7 @@ Items are organized into **execution phases** — work through them in order. Ea
   - File: `infra/helm/values.yaml:17,38,60,87,108,128`
   - Fix: Default to `"SET_BY_CI"`. CI pipelines pass `--set <service>.image.tag=$GITHUB_SHA`.
 
-- [ ] **I-12 | P1 | Remove :latest tag from CI push jobs**
+- [x] **I-12 | P1 | Remove :latest tag from CI push jobs**
   - Files: All `.github/workflows/ci-*.yml`
   - Fix: Remove the `docker push ...:latest` line from all push jobs. Only push `${{ github.sha }}` tag.
 
