@@ -35,6 +35,19 @@ consumers:
         algorithm: RS256
         rsa_public_key: |
           {{RSA_PUBLIC_KEY}}
+    # Consumer-scoped rate limit — authenticated users get a higher allowance.
+    # Attaching it here (on the consumer) rather than as a second global plugin
+    # avoids the duplicate-global-plugin issue in Kong OSS DB-less mode (I-19).
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: {{RATE_LIMIT_AUTHENTICATED_PER_MINUTE}}
+          limit_by: consumer
+          policy: {{RATE_LIMIT_POLICY}}
+          redis_host: {{RATE_LIMIT_REDIS_HOST}}
+          redis_port: {{RATE_LIMIT_REDIS_PORT}}
+          fault_tolerant: true
+          hide_client_headers: false
 
 # ── Upstream services ─────────────────────────────────────────────────────────
 services:
@@ -279,7 +292,10 @@ plugins:
       echo_downstream: true
 
   # Rate limiting — backed by Redis in production; local counter in dev
-  # Limits: anonymous by IP, authenticated by consumer
+  # IP-based limit for anonymous (unauthenticated) requests.
+  # Authenticated consumers get a higher limit via the consumer-scoped plugin
+  # on the auth-service-issuer consumer (defined above) — avoids duplicate
+  # global plugin instances that Kong OSS DB-less mode does not support (I-19).
   - name: rate-limiting
     config:
       minute: {{RATE_LIMIT_ANONYMOUS_PER_MINUTE}}
@@ -290,13 +306,11 @@ plugins:
       fault_tolerant: true
       hide_client_headers: false
 
-  - name: rate-limiting
-    consumer: auth-service-issuer
+  # Request size limiting — reject oversized request bodies before they reach
+  # upstream services (R-09).  Default cap of 1 MB covers all REST API payloads;
+  # adjust per-route for any endpoint that legitimately needs larger bodies.
+  - name: request-size-limiting
     config:
-      minute: {{RATE_LIMIT_AUTHENTICATED_PER_MINUTE}}
-      limit_by: consumer
-      policy: {{RATE_LIMIT_POLICY}}
-      redis_host: {{RATE_LIMIT_REDIS_HOST}}
-      redis_port: {{RATE_LIMIT_REDIS_PORT}}
-      fault_tolerant: true
-      hide_client_headers: false
+      allowed_payload_size: 1
+      size_unit: megabytes
+      require_content_length: false

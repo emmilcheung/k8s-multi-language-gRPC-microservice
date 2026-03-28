@@ -1,8 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  NotFoundException,
-  InternalServerErrorException,
-} from '@nestjs/common';
+import { NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { PAYMENT_STATUS } from '../../database/schema';
 import type { Payment } from '../../database/schema';
@@ -71,7 +68,9 @@ function makeDb(txInsertReturn: Payment | null = null) {
   const updateChain = {
     set: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
-    returning: vi.fn().mockResolvedValue([txInsertReturn ?? makePayment({ status: PAYMENT_STATUS.COMPLETED })]),
+    returning: vi
+      .fn()
+      .mockResolvedValue([txInsertReturn ?? makePayment({ status: PAYMENT_STATUS.COMPLETED })]),
   };
   const tx = {
     insert: vi.fn().mockReturnValue(insertChain),
@@ -175,7 +174,10 @@ describe('PaymentsService.charge', () => {
     stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_abc' });
 
     // completePaymentWithOutbox uses db.transaction
-    const completed = makePayment({ status: PAYMENT_STATUS.COMPLETED, stripePaymentIntentId: 'pi_abc' });
+    const completed = makePayment({
+      status: PAYMENT_STATUS.COMPLETED,
+      stripePaymentIntentId: 'pi_abc',
+    });
     db._tx.update.mockReturnValue({
       set: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
@@ -190,7 +192,11 @@ describe('PaymentsService.charge', () => {
     });
 
     expect(repo.create).toHaveBeenCalledWith(
-      expect.objectContaining({ orderId: 'order-uuid-1', amount: 1000, status: PAYMENT_STATUS.PENDING }),
+      expect.objectContaining({
+        orderId: 'order-uuid-1',
+        amount: 1000,
+        status: PAYMENT_STATUS.PENDING,
+      }),
     );
     expect(stripe.paymentIntents.create).toHaveBeenCalledWith(
       expect.objectContaining({ amount: 1000, currency: 'usd' }),
@@ -208,7 +214,12 @@ describe('PaymentsService.charge', () => {
     repo.updateStatus.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.FAILED }));
 
     await expect(
-      service.charge({ orderId: 'order-uuid-1', userId: 'user-uuid-1', amount: 1000, token: 'pm_bad' }),
+      service.charge({
+        orderId: 'order-uuid-1',
+        userId: 'user-uuid-1',
+        amount: 1000,
+        token: 'pm_bad',
+      }),
     ).rejects.toThrow(InternalServerErrorException);
 
     expect(repo.updateStatus).toHaveBeenCalledWith(pending.id, PAYMENT_STATUS.FAILED);
@@ -227,7 +238,12 @@ describe('PaymentsService.charge', () => {
       returning: vi.fn().mockResolvedValue([completed]),
     });
 
-    await service.charge({ orderId: 'order-uuid-1', userId: 'user-uuid-1', amount: 500, token: 'pm_x' });
+    await service.charge({
+      orderId: 'order-uuid-1',
+      userId: 'user-uuid-1',
+      amount: 500,
+      token: 'pm_x',
+    });
 
     expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ currency: 'usd' }));
   });

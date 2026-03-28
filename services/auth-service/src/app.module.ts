@@ -2,12 +2,25 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import * as Joi from 'joi';
+import { trace } from '@opentelemetry/api';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { DatabaseModule } from './database/database.module';
 import { RedisModule } from './modules/redis/redis.module';
+
+/** Inject the active OTel traceId and spanId into every pino log line (O-02). */
+function otelMixin(): Record<string, string> {
+  const span = trace.getActiveSpan();
+  if (!span) return {};
+
+  const ctx = (
+    span as { spanContext(): { traceId: string; spanId: string } }
+  ).spanContext();
+
+  return { traceId: ctx.traceId, spanId: ctx.spanId };
+}
 
 @Module({
   imports: [
@@ -39,6 +52,8 @@ import { RedisModule } from './modules/redis/redis.module';
             config.get('NODE_ENV') !== 'production'
               ? { target: 'pino-pretty', options: { colorize: true } }
               : undefined,
+          // Inject OTel traceId + spanId into every log line (O-02)
+          mixin: otelMixin,
           // Never log sensitive fields
           redact: ['req.headers.authorization', 'req.headers.cookie'],
           serializers: {

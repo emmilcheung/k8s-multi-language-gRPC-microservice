@@ -51,7 +51,7 @@ export async function signup(
         cookieStore.set("token", tokenEntry.value, {
           httpOnly: true,
           path: "/",
-          sameSite: "strict",
+          sameSite: "lax",
           secure: process.env.NODE_ENV === "production",
           maxAge: 900, // 15 minutes — matches JWT expiry (S-07)
         });
@@ -102,7 +102,7 @@ export async function signin(
         cookieStore.set("token", tokenEntry.value, {
           httpOnly: true,
           path: "/",
-          sameSite: "strict",
+          sameSite: "lax",
           secure: process.env.NODE_ENV === "production",
           maxAge: 900, // 15 minutes — matches JWT expiry (S-07)
         });

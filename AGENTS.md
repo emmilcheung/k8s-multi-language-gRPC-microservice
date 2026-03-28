@@ -713,6 +713,51 @@ CI runs (unit + integration + Trivy + e2e Playwright) are expensive in both time
 
 ---
 
+### Session: 2026-03-28 — Fix Kong sandbox error (cjson.safe) blocking E2E ✅ CI GREEN / ⏳ AWAITING OWNER REVIEW
+
+**Branch:** `fix/audit-m6-resilience-obs` — PR #8 open. CI is green. E2E cannot auto-trigger from PR branch (GitHub `workflow_run` limitation); will run after merge to `main`.
+
+#### Root cause identified and fixed
+
+Every JWT-protected route (`POST /api/tickets`, `POST /api/orders`, `POST /api/payments`, etc.) was returning HTTP 500 from Kong with:
+```
+[post-function] .../kong/tools/sandbox.lua:79: require 'cjson.safe' not allowed within sandbox
+```
+
+Kong's plugin sandbox allowlist contains `cjson` but **not** `cjson.safe`. The `jwt-sub.lua` plugin (which extracts `sub` from the JWT payload and injects it as `X-User-Id`) used `require "cjson.safe"` — sandboxed and rejected on every request.
+
+**Fix** (`services/kong-gateway/plugins/jwt-sub.lua`):
+- Replaced `local cjson_safe = require "cjson.safe"` with `local cjson = require "cjson"` (allowlisted)
+- Replaced `cjson_safe.decode(payload_json)` with `pcall(cjson.decode, payload_json)` — equivalent error-safe decoding via `pcall`
+- Regenerated `kong.yml` via `build.sh local` (the rendered output is not tracked in git — CI always regenerates it)
+
+#### E2E trigger behavior (note for future sessions)
+
+GitHub's `workflow_run` trigger for `e2e.yml` only fires when the **default branch** (`main`) version of the downstream workflow is active. For PR branches, `workflow_run` does fire but only against the default branch's workflow definition. In practice, `e2e.yml` did NOT trigger from our PR CI run — it only triggers reliably after a PR is merged to `main`. This is expected and not a bug.
+
+**After owner merges PR #8 to `main`**, a new CI run will trigger on `main`, and the `e2e.yml` workflow will run against the merged code with the `cjson.safe` fix applied.
+
+#### Current state of PR #8
+
+All M6 checklist items confirmed implemented:
+- R-01 ✅ Circuit breaker on order-service gRPC client
+- R-05 ✅ Kafka publish fire-and-forget (DB is source of truth)
+- R-07 ✅ expiration-service readiness probe with real Redis + Kafka checkers
+- R-08 ✅ gRPC server interceptors (logging + panic recovery) in ticket-service
+- R-09 ✅ `request-size-limiting` native Kong plugin (1 MB cap)
+- R-11 ✅ Stripe webhook handler in payment-service
+- R-12 ✅ Stripe idempotency key on PaymentIntent create
+- R-15 ✅ KafkaAdmin reads bootstrap-servers from `@Value`
+- I-19 ✅ Consumer-scoped rate limit on consumer entity (no duplicate global plugin)
+- O-01 ✅ OTel SDK on all 6 services
+- O-02 ✅ traceId/spanId in all structured log output
+- O-04 ✅ GlobalExceptionFilter uses injected PinoLogger (not console.error)
+- Kong sandbox fix ✅ `cjson.safe` → `cjson + pcall` in `jwt-sub.lua`
+
+CI: **green** (run `23669507272`). E2E: pending merge to main.
+
+---
+
 ### Session: 2026-03-22 — Next.js Server Actions CSRF fix via Kong ⏳ AWAITING REVIEW
 
 **Branch:** `feat/kong-gateway-restructure` — changes committed, awaiting owner approval before merge to `main`.

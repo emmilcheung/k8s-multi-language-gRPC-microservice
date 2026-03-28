@@ -3,11 +3,22 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { LoggerModule } from 'nestjs-pino';
 import * as Joi from 'joi';
+import { trace } from '@opentelemetry/api';
 import { DatabaseModule } from './database/database.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { OrdersConsumer } from './kafka/orders.consumer';
+
+/** Inject the active OTel traceId and spanId into every pino log line (O-02). */
+function otelMixin(): Record<string, string> {
+  const span = trace.getActiveSpan();
+  if (!span) return {};
+
+  const ctx = (span as { spanContext(): { traceId: string; spanId: string } }).spanContext();
+
+  return { traceId: ctx.traceId, spanId: ctx.spanId };
+}
 
 @Module({
   imports: [
@@ -16,9 +27,7 @@ import { OrdersConsumer } from './kafka/orders.consumer';
     ConfigModule.forRoot({
       isGlobal: true,
       validationSchema: Joi.object({
-        NODE_ENV: Joi.string()
-          .valid('development', 'test', 'production')
-          .default('development'),
+        NODE_ENV: Joi.string().valid('development', 'test', 'production').default('development'),
         PORT: Joi.number().default(3001),
         DATABASE_URL: Joi.string().required(),
         STRIPE_SECRET_KEY: Joi.string().required(),
@@ -37,6 +46,8 @@ import { OrdersConsumer } from './kafka/orders.consumer';
             config.get('NODE_ENV') !== 'production'
               ? { target: 'pino-pretty', options: { colorize: true } }
               : undefined,
+          // Inject OTel traceId + spanId into every log line (O-02)
+          mixin: otelMixin,
           redact: ['req.headers.authorization', 'req.headers.cookie'],
           serializers: {
             req(req: { method: string; url: string }) {

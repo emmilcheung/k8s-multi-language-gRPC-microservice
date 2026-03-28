@@ -11,9 +11,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/acme/expiration-service/internal/config"
+	"github.com/acme/expiration-service/internal/health"
 	appkafka "github.com/acme/expiration-service/internal/kafka"
 	"github.com/acme/expiration-service/internal/scheduler"
 	"github.com/acme/expiration-service/internal/server"
+	"github.com/acme/expiration-service/internal/tracing"
 	"github.com/acme/expiration-service/internal/worker"
 	"github.com/acme/expiration-service/pkg/logger"
 )
@@ -39,6 +41,10 @@ func main() {
 		zap.Int("port", cfg.Port),
 	)
 
+	// Initialise OpenTelemetry — must happen before any network I/O
+	shutdownTracing := tracing.Init(context.Background(), "expiration-service", log)
+	defer shutdownTracing(context.Background())
+
 	// Kafka producer — publishes expiration.order.expiration_complete events.
 	producer, err := appkafka.NewProducer(cfg.KafkaBrokers, log)
 	if err != nil {
@@ -62,8 +68,14 @@ func main() {
 	}
 	defer consumer.Close()
 
+	// Dependency health checkers — wired into the readiness probe.
+	redisChecker := health.NewRedisChecker(cfg.RedisAddr)
+	defer redisChecker.Close() //nolint:errcheck
+
+	kafkaChecker := health.NewKafkaChecker(cfg.KafkaBrokers)
+
 	// Echo HTTP server — /healthz/live, /healthz/ready, /metrics.
-	httpServer := server.New(nil, nil, log)
+	httpServer := server.New(redisChecker, kafkaChecker, log)
 
 	// Start asynq worker in background.
 	go func() {

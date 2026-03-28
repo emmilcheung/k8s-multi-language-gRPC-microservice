@@ -17,11 +17,13 @@ import (
 	"github.com/acme/ticket-service/internal/middleware"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
+	"github.com/acme/ticket-service/internal/tracing"
 	"github.com/acme/ticket-service/pkg/logger"
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 	"go.uber.org/zap"
 )
 
@@ -42,6 +44,10 @@ func main() {
 	defer log.Sync() //nolint:errcheck
 
 	log.Info("starting ticket-service", zap.String("env", cfg.Env), zap.Int("port", cfg.Port), zap.Int("grpcPort", cfg.GrpcPort))
+
+	// Initialise OpenTelemetry — must happen before any network I/O
+	shutdownTracing := tracing.Init(context.Background(), "ticket-service", log)
+	defer shutdownTracing(context.Background())
 
 	// MongoDB repository
 	mongoRepo, err := repository.NewMongoTicketRepository(context.Background(), cfg.MongoURI, cfg.MongoDB)
@@ -105,6 +111,7 @@ func main() {
 
 	// Global middleware
 	e.Use(echomiddleware.Recover())
+	e.Use(otelecho.Middleware("ticket-service")) // OTel trace propagation for HTTP
 	e.Use(middleware.RequestLogger(log))
 	e.Use(echomiddleware.RequestID())
 

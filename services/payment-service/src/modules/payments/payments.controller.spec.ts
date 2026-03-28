@@ -52,7 +52,11 @@ describe('PaymentsController.charge', () => {
     const payment = makePayment();
     service.charge.mockResolvedValue(payment);
 
-    const result = await controller.charge('user-1', { orderId: 'order-1', amount: 1000, token: 'pm_x' });
+    const result = await controller.charge('user-1', {
+      orderId: 'order-1',
+      amount: 1000,
+      token: 'pm_x',
+    });
 
     expect(service.charge).toHaveBeenCalledWith(
       expect.objectContaining({ orderId: 'order-1', userId: 'user-1', amount: 1000 }),

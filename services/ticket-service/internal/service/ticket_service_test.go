@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/repository"
@@ -139,6 +140,9 @@ func TestCreateTicket_ShouldCreateTicketAndPublishEvent(t *testing.T) {
 	assert.Equal(t, 99.99, ticket.Price)
 	assert.Equal(t, "user-1", ticket.UserID)
 	assert.NotEmpty(t, ticket.ID)
+
+	// Kafka publish is async — give the goroutine time to run.
+	time.Sleep(10 * time.Millisecond)
 	assert.Len(t, pub.createdEvents, 1)
 	assert.Equal(t, ticket.ID, pub.createdEvents[0].ID)
 }
@@ -161,7 +165,9 @@ func TestCreateTicket_ShouldReturnErrorWhenRepoFails(t *testing.T) {
 }
 
 func TestCreateTicket_ShouldSucceedEvenWhenKafkaFails(t *testing.T) {
-	// Kafka publish failure should not fail the request (log only — outbox pattern handles retry)
+	// Kafka publish is fire-and-forget (goroutine). A publish failure must not
+	// cause CreateTicket to return an error — the DB write is the source of truth (R-05).
+	// The failure is logged at ERROR level so it remains observable.
 	repo := newMockRepo()
 	pub := &mockPublisher{err: errors.New("kafka unavailable")}
 	svc := newSvc(repo, pub)
@@ -173,6 +179,7 @@ func TestCreateTicket_ShouldSucceedEvenWhenKafkaFails(t *testing.T) {
 	})
 
 	require.NoError(t, err)
+	assert.NotNil(t, ticket)
 	assert.NotEmpty(t, ticket.ID)
 }
 
@@ -227,7 +234,31 @@ func TestUpdateTicket_ShouldUpdateAndPublishEvent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "New Title", ticket.Title)
 	assert.Equal(t, 15.00, ticket.Price)
+
+	// Kafka publish is async — give the goroutine time to run.
+	time.Sleep(10 * time.Millisecond)
 	assert.Len(t, pub.updatedEvents, 1)
+}
+
+func TestUpdateTicket_ShouldSucceedEvenWhenKafkaFails(t *testing.T) {
+	// Kafka publish is fire-and-forget (goroutine). A publish failure must not
+	// cause UpdateTicket to return an error — the DB write is the source of truth (R-05).
+	repo := newMockRepo()
+	pub := &mockPublisher{err: errors.New("kafka unavailable")}
+	svc := newSvc(repo, pub)
+
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Old Title", Price: 5.00, UserID: "user-1"})
+
+	ticket, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
+		ID:     "t1",
+		Title:  "New Title",
+		Price:  15.00,
+		UserID: "user-1",
+	})
+
+	require.NoError(t, err)
+	assert.NotNil(t, ticket)
+	assert.Equal(t, "New Title", ticket.Title)
 }
 
 func TestUpdateTicket_ShouldReturnUnauthorizedWhenUserDoesNotOwnTicket(t *testing.T) {

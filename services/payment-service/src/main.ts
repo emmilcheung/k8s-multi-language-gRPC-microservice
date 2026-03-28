@@ -18,7 +18,11 @@ process.on('unhandledRejection', (reason: unknown) => {
   if (isKafkaUnavailableError(reason)) {
     const name = (reason as { name?: string })?.name ?? '';
     const msg = (reason as { message?: string })?.message ?? String(reason);
-    console.warn('[payment-service] Kafka unavailable (unhandledRejection), ignoring:', name, msg.slice(0, 120));
+    console.warn(
+      '[payment-service] Kafka unavailable (unhandledRejection), ignoring:',
+      name,
+      msg.slice(0, 120),
+    );
     return;
   }
   console.error('[payment-service] Unhandled rejection:', reason);
@@ -27,7 +31,11 @@ process.on('unhandledRejection', (reason: unknown) => {
 
 process.on('uncaughtException', (err: Error) => {
   if (isKafkaUnavailableError(err)) {
-    console.warn('[payment-service] Kafka unavailable (uncaughtException), ignoring:', err.name, err.message.slice(0, 120));
+    console.warn(
+      '[payment-service] Kafka unavailable (uncaughtException), ignoring:',
+      err.name,
+      err.message.slice(0, 120),
+    );
     return;
   }
   console.error('[payment-service] Uncaught exception:', err);
@@ -49,11 +57,12 @@ async function bootstrap() {
     }),
   );
 
-  // Global exception filter — enforces standard error response shape
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  // Global exception filter — enforces standard error response shape.
+  // Resolved via DI so the filter can inject PinoLogger for structured error logging.
+  app.useGlobalFilters(new GlobalExceptionFilter(app.get(Logger)));
 
   const port = process.env.PORT ?? 3001;
   await app.listen(port);
 }
 
-bootstrap();
+void bootstrap();

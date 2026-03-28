@@ -48,6 +48,9 @@ func NewTicketService(repo repository.TicketRepository, publisher EventPublisher
 }
 
 // CreateTicket creates a new ticket and publishes a ticket.created event.
+// The DB write is the source of truth; Kafka publish is fire-and-forget in a goroutine.
+// If the publish fails, the error is logged at ERROR level (R-05: observable, not silent)
+// but the gRPC call still returns success — ticket is already durably saved.
 func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInput) (*repository.Ticket, error) {
 	ticket := &repository.Ticket{
 		Title:  input.Title,
@@ -61,16 +64,20 @@ func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInpu
 
 	s.log.Info("ticket created", zap.String("ticketId", ticket.ID), zap.String("userId", ticket.UserID))
 
-	if err := s.publisher.PublishTicketCreated(ctx, kafka.TicketEventData{
+	// Publish async — do not block or fail the gRPC response on Kafka availability.
+	// MongoDB is the source of truth; Kafka is eventually consistent.
+	eventData := kafka.TicketEventData{
 		ID:      ticket.ID,
 		Title:   ticket.Title,
 		Price:   ticket.Price,
 		UserID:  ticket.UserID,
 		Version: ticket.Version,
-	}); err != nil {
-		// Log but don't fail the request — the outbox pattern would handle this in production
-		s.log.Error("failed to publish ticket.created event", zap.Error(err), zap.String("ticketId", ticket.ID))
 	}
+	go func() {
+		if err := s.publisher.PublishTicketCreated(context.Background(), eventData); err != nil {
+			s.log.Error("failed to publish ticket.created event", zap.Error(err), zap.String("ticketId", eventData.ID))
+		}
+	}()
 
 	return ticket, nil
 }
@@ -119,15 +126,19 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 
 	s.log.Info("ticket updated", zap.String("ticketId", ticket.ID), zap.String("userId", ticket.UserID))
 
-	if err := s.publisher.PublishTicketUpdated(ctx, kafka.TicketEventData{
+	// Publish async — do not block or fail the gRPC response on Kafka availability.
+	eventData := kafka.TicketEventData{
 		ID:      ticket.ID,
 		Title:   ticket.Title,
 		Price:   ticket.Price,
 		UserID:  ticket.UserID,
 		Version: ticket.Version,
-	}); err != nil {
-		s.log.Error("failed to publish ticket.updated event", zap.Error(err), zap.String("ticketId", ticket.ID))
 	}
+	go func() {
+		if err := s.publisher.PublishTicketUpdated(context.Background(), eventData); err != nil {
+			s.log.Error("failed to publish ticket.updated event", zap.Error(err), zap.String("ticketId", eventData.ID))
+		}
+	}()
 
 	return ticket, nil
 }

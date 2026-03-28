@@ -6,6 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import type { ArgumentsHost } from '@nestjs/common';
+import { Logger } from 'nestjs-pino';
 import { GlobalExceptionFilter } from './global-exception.filter';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -18,10 +19,16 @@ function makeHost(jsonFn = vi.fn(), statusFn?: ReturnType<typeof vi.fn>) {
   } as unknown as ArgumentsHost;
 }
 
+function makeFilter() {
+  // Minimal mock logger that satisfies the Logger interface used by the filter
+  const mockLogger = { error: vi.fn() } as unknown as Logger;
+  return new GlobalExceptionFilter(mockLogger);
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('GlobalExceptionFilter', () => {
-  const filter = new GlobalExceptionFilter();
+  const filter = makeFilter();
 
   describe('catch', () => {
     it('should pass through a structured { error } body from HttpException unchanged', () => {

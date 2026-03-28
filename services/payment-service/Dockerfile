@@ -44,4 +44,4 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:3001/healthz/live || exit 1
 
-CMD ["sh", "-c", "node dist/migrate && node dist/main"]
+CMD ["sh", "-c", "node dist/migrate && NODE_OPTIONS='--require ./dist/tracing' node dist/main"]

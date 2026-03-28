@@ -15,6 +15,13 @@ COPY services/order-service/pom.xml .
 # Download dependencies offline (layer cache friendly)
 RUN mvn dependency:go-offline -q
 
+# Download OpenTelemetry Java agent — zero-code auto-instrumentation (O-01).
+# Pinned to v2.13.3. curl -fL follows GitHub's CDN redirect and fails loudly
+# on non-2xx responses, unlike Docker ADD which silently writes empty files.
+ARG OTEL_AGENT_VERSION=2.13.3
+RUN curl -fL -o /build/otel-agent.jar \
+    "https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v${OTEL_AGENT_VERSION}/opentelemetry-javaagent.jar"
+
 # Copy source and build — skip tests (run separately in CI)
 COPY services/order-service/src/ src/
 RUN mvn package -DskipTests -q
@@ -27,6 +34,8 @@ RUN addgroup -S app && adduser -S app -G app
 
 WORKDIR /app
 
+COPY --from=builder /build/otel-agent.jar /app/otel-agent.jar
+
 COPY --from=builder /build/target/order-service-*.jar app.jar
 
 USER app
@@ -36,6 +45,9 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
   CMD wget -qO- http://localhost:8080/actuator/health/liveness || exit 1
 
+# OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_SERVICE_NAME are injected as env vars at runtime.
+# When OTEL_EXPORTER_OTLP_ENDPOINT is unset the agent runs in no-op mode.
 ENTRYPOINT ["java", \
   "-Djava.security.egd=file:/dev/./urandom", \
+  "-javaagent:/app/otel-agent.jar", \
   "-jar", "app.jar"]
