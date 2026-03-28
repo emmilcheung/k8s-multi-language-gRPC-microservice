@@ -320,11 +320,11 @@ Before moving to M2, confirm all of the following:
 
 ### Checklist
 
-- [ ] **S-02** — Strip `X-User-Id` on Kong ingress globally
-- [ ] **S-05** — Add authorization check to `GET /api/payments/:id`
-- [ ] **S-15 + S-16** — Move Stripe key + RSA private key out of `docker-compose.yml` to `.env`
-- [ ] **S-17** — Fix Kong Dockerfile to run as `kong` user, not `root`
-- [ ] **S-18** — Pin all production Dockerfiles to `@sha256:` digest
+- [x] **S-02** — Strip `X-User-Id` on Kong ingress globally
+- [x] **S-05** — Add authorization check to `GET /api/payments/:id`
+- [x] **S-15 + S-16** — Move Stripe key + RSA private key out of `docker-compose.yml` to `.env`
+- [x] **S-17** — Fix Kong Dockerfile to run as `kong` user, not `root`
+- [x] **S-18** — Pin all production Dockerfiles to `@sha256:` digest
 
 ---
 
@@ -664,8 +664,8 @@ grep -r "FROM " services/*/Dockerfile | grep -v "@sha256"
 
 ### Checklist
 
-- [ ] **R-03** — Implement DLQ in ticket-service Kafka consumer
-- [ ] **R-04** — Implement DLQ in expiration-service Kafka consumer
+- [x] **R-03** — Implement DLQ in ticket-service Kafka consumer
+- [x] **R-04** — Implement DLQ in expiration-service Kafka consumer
 
 ---
 
@@ -803,8 +803,8 @@ test(expiration-service): add integration test for DLQ routing on consumer failu
 
 ### Checklist
 
-- [ ] **I-11** — Add deploy stages to all CI pipelines
-- [ ] **I-12** — Remove `:latest` tag from all CI push jobs
+- [x] **I-11** — Add deploy stages to all CI pipelines
+- [x] **I-12** — Remove `:latest` tag from all CI push jobs
 
 ---
 
@@ -1001,9 +1001,9 @@ Closes audit finding I-12.
 
 ### Checklist
 
-- [ ] **S-01** — Implement refresh token rotation in auth-service
-- [ ] **S-07** — Set `maxAge` on client auth cookie
-- [ ] **S-08** — Replace regex cookie parsing with proper parser
+- [x] **S-01** — Implement refresh token rotation in auth-service
+- [x] **S-07** — Set `maxAge` on client auth cookie
+- [x] **S-08** — Replace regex cookie parsing with proper parser
 - [x] **S-19** — Replace regex JSON parsing in `jwt-sub.lua` with `cjson` *(fixed in M6 hotfix: Kong 3.7 sandbox blocks all `require()` calls including `cjson` and `cjson.safe`; implemented using Lua string pattern matching `payload_json:match('"sub"%s*:%s*"([^"]+)"')` instead — equivalent correctness for well-formed JWTs)*
 
 ---
@@ -1707,11 +1707,11 @@ livenessProbe:
 
 | Milestone | Branch | Status | E2E | PR |
 |-----------|--------|--------|-----|----|
-| M1 — P0 Data Integrity | `fix/audit-m1-data-integrity` | 🟡 Awaiting review | 18/18 | — |
-| M2 — P0 Security Critical | `fix/audit-m2-security-critical` | ⬜ Not started | — | — |
-| M3 — P0 DLQ / Resilience | `fix/audit-m3-dlq-resilience` | ⬜ Not started | — | — |
-| M4 — P0 CI Deploy | `fix/audit-m4-ci-deploy` | ⬜ Not started | — | — |
-| M5 — P1 Auth Hardening | `fix/audit-m5-auth-hardening` | 🟡 Partial (S-19 done) | — | — |
+| M1 — P0 Data Integrity | `fix/audit-m1-data-integrity` | ✅ Merged `9619d8d` | 18/18 | #9 |
+| M2 — P0 Security Critical | `fix/audit-m2-security-critical` | 🟡 Awaiting review | 18/18 | — |
+| M3 — P0 DLQ / Resilience | `fix/audit-m3-dlq-resilience` | 🟡 Awaiting review | 18/18 | — |
+| M4 — P0 CI Deploy | `fix/audit-m4-ci-deploy` | 🟡 Awaiting review | 18/18 | — |
+| M5 — P1 Auth Hardening | `fix/audit-m5-auth-hardening` | 🟡 Awaiting review | 18/18 | — |
 | M6 — P1 Resilience + OTel | `fix/audit-m6-resilience-obs` | ✅ Merged `850b975` | 18/18 | #8 |
 | M7 — P1 Performance + Helm | `fix/audit-m7-perf-helm-ci` | ⬜ Not started | — | — |
 | M8 — P2 Security + Correctness | `fix/audit-m8-p2-security` | ⬜ Not started | — | — |
