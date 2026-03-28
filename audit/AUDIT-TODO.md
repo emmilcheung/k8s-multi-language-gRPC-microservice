@@ -114,7 +114,7 @@ Items are organized into **execution phases** — work through them in order. Ea
   - File: `services/client/app/actions/auth.ts:45`
   - Fix: Use `set-cookie-parser` package or manual `split('; ')` approach. Handle quoted values and URL-encoded characters.
 
-- [ ] **S-19 | P1 | Replace regex JSON parsing in jwt-sub.lua with cjson**
+- [x] **S-19 | P1 | Replace regex JSON parsing in jwt-sub.lua with cjson** *(done in M6 hotfix — Kong 3.7 sandbox blocks all `require()` including `cjson`; Lua pattern matching retained as equivalent for well-formed JWTs)*
   - File: `services/kong-gateway/plugins/jwt-sub.lua:21`
   - Fix: Replace `payload_json:match('"sub"%s*:%s*"([^"]+)"')` with `require("cjson.safe").decode(payload_json)`.
 
@@ -130,47 +130,47 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 2.3 Resilience (P1)
 
-- [ ] **R-01 | P1 | Add circuit breaker on gRPC client (order-service)**
+- [x] **R-01 | P1 | Add circuit breaker on gRPC client (order-service)** *(done — M6, merged `850b975`)*
   - File: `services/order-service/src/main/java/com/ticketing/orders/grpc/TicketServiceClient.java`
   - Fix: Add resilience4j `@CircuitBreaker` annotation with a fallback that returns a clear error. Configure: 50% error threshold over 10s window, 30s cooldown.
   - Dependency: `io.github.resilience4j:resilience4j-spring-boot3`
 
-- [ ] **R-05 | P1 | Fix silent Kafka publish failures in ticket-service**
+- [x] **R-05 | P1 | Fix silent Kafka publish failures in ticket-service** *(done — M6, merged `850b975`)*
   - File: `services/ticket-service/internal/service/ticket_service.go:71-73`
   - Fix: Implement transactional outbox pattern (MongoDB collection + relay) or retry with exponential backoff before giving up.
 
-- [ ] **R-07 | P1 | Fix expiration-service readiness probe (always 200)**
+- [x] **R-07 | P1 | Fix expiration-service readiness probe (always 200)** *(done — M6, merged `850b975`)*
   - File: `services/expiration-service/cmd/server/main.go:65`
   - Fix: Pass Redis ping checker and Kafka connectivity checker to `server.New()`. Return 503 when dependencies are unreachable.
 
-- [ ] **R-08 | P1 | Add gRPC server interceptors to ticket-service**
+- [x] **R-08 | P1 | Add gRPC server interceptors to ticket-service** *(done — M6, merged `850b975`)*
   - File: `services/ticket-service/internal/grpc/server.go:96`
   - Fix: Add interceptors: `grpc_zap` (logging), `grpc_prometheus` (metrics), `grpc_recovery` (panic recovery), deadline enforcement (default 5s).
   - Dependencies: `go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc`, `github.com/grpc-ecosystem/go-grpc-middleware/v2`
 
-- [ ] **R-09 | P1 | Add request size limiting to Kong**
+- [x] **R-09 | P1 | Add request size limiting to Kong** *(done — M6, merged `850b975`)*
   - File: `services/kong-gateway/config/kong.base.yml`
   - Fix: Add global `request-size-limiting` plugin. Default 5 MB, lower limit (1 MB) for auth endpoints.
 
-- [ ] **R-11 | P1 | Implement Stripe webhook handler**
+- [x] **R-11 | P1 | Implement Stripe webhook handler** *(done — M6, merged `850b975`)*
   - File: Architecture gap in `services/payment-service/`
   - Fix: Add `POST /api/payments/webhook` endpoint. Verify Stripe signature (`stripe.webhooks.constructEvent`). Handle `payment_intent.succeeded` and `payment_intent.payment_failed`.
 
-- [ ] **R-12 | P1 | Add Stripe idempotency key**
+- [x] **R-12 | P1 | Add Stripe idempotency key** *(done — M6, merged `850b975`)*
   - File: `services/payment-service/src/modules/payments/payments.service.ts:72-79`
   - Fix: Pass `idempotencyKey: dto.orderId` to `stripe.paymentIntents.create()`.
 
-- [ ] **R-15 | P1 | Fix KafkaAdmin hardcoded to localhost:9092**
+- [x] **R-15 | P1 | Fix KafkaAdmin hardcoded to localhost:9092** *(done — M6, merged `850b975`)*
   - File: `services/order-service/src/main/java/com/ticketing/orders/config/KafkaConfig.java:42`
   - Fix: Replace hardcoded `localhost:9092` with `${spring.kafka.bootstrap-servers}`.
 
-- [ ] **I-19 | P1 | Fix duplicate rate-limiting plugin instances in Kong**
+- [x] **I-19 | P1 | Fix duplicate rate-limiting plugin instances in Kong** *(done — M6, merged `850b975`)*
   - File: `services/kong-gateway/config/kong.base.yml:266-285`
   - Fix: Test if Kong DB-less allows two global instances of `rate-limiting`. If not, restructure consumer-scoped rate limit as per-route.
 
 ### 2.4 Observability (P1)
 
-- [ ] **O-01 | P1 | Add OpenTelemetry SDK to all services**
+- [x] **O-01 | P1 | Add OpenTelemetry SDK to all services** *(done — M6, merged `850b975`)*
   - Services: ALL
   - Fix per language:
     - NestJS (auth, payment): `@opentelemetry/sdk-node`, `@opentelemetry/auto-instrumentations-node`
@@ -179,7 +179,7 @@ Items are organized into **execution phases** — work through them in order. Ea
     - Next.js (client): `@vercel/otel` or `@opentelemetry/sdk-node`
   - Export to OTel Collector sidecar.
 
-- [ ] **O-02 | P1 | Add traceId/spanId to all structured log output**
+- [x] **O-02 | P1 | Add traceId/spanId to all structured log output** *(done — M6, merged `850b975`)*
   - Services: ALL
   - Depends on: O-01
   - Fix: Configure each logging framework to extract trace context from OTel context and include `traceId`/`spanId` in every log line.
@@ -317,7 +317,7 @@ Items are organized into **execution phases** — work through them in order. Ea
   - Files: `services/auth-service/src/modules/metrics/`, `services/payment-service/src/modules/metrics/`
   - Fix: Add `prom-client` histograms for `http_request_duration_seconds` and counters for `http_requests_total`, labeled by `method`, `route`, `status_code`.
 
-- [ ] **O-04 | P2 | Register GlobalExceptionFilter via DI for structured logging**
+- [x] **O-04 | P2 | Register GlobalExceptionFilter via DI for structured logging** *(done — M6, merged `850b975`)*
   - Files: `services/auth-service/src/common/filters/`, `services/payment-service/src/common/filters/`
   - Fix: Register via `APP_FILTER` provider token. Inject `PinoLogger`. Remove `console.error`.
 

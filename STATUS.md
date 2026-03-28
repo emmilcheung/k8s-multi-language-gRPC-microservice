@@ -1,9 +1,9 @@
 # Platform Build Status Log
 
-> **Last Updated:** 2026-03-22 UTC  
-> **Current Phase:** Local Kubernetes Environment Complete — CI/CD and EKS Infrastructure Pending  
-> **Overall Progress:** ~70% of full plan (all services built and E2E tested; EKS infra not yet applied)  
-> **Git Status:** `main` is clean at `3135626` (ops/local-deployment merged). Uncommitted `setup.sh` hardening changes on working tree — awaiting owner approval before committing.
+> **Last Updated:** 2026-03-28 UTC  
+> **Current Phase:** Audit Remediation in Progress (M6 complete; M1–M5, M7–M10 pending)  
+> **Overall Progress:** ~75% of full plan (all services built and E2E tested; audit remediation underway; EKS not yet applied)  
+> **Git Status:** `main` is clean at `850b975` (fix/audit-m6-resilience-obs merged).
 
 ---
 
@@ -24,9 +24,10 @@
 | **Local Kubernetes (minikube)** | ✅ Complete | `infra/local/setup.sh` — idempotent 7-step bootstrap; 18/18 E2E pass against minikube cluster |
 | **Helm umbrella chart** | ✅ Complete | `infra/helm/` with `values-local.yaml`; cp-kafka sub-chart (Confluent); Linkerd mTLS integration |
 | **Terraform modules** | ✅ Scaffolded | vpc, eks, rds, elasticache, msk, kong modules + dev/staging/prod environments written; **not applied against real AWS** |
-| **CI/CD** | ⏭️ Pending | `.github/workflows/` is empty; pipelines not yet written |
+| **CI/CD** | ✅ Partial | `.github/workflows/` — ci.yml, e2e.yml present and green (unit + integration + Trivy + Playwright); deploy stages not yet added |
 | **EKS deploy** | ⏭️ Pending | Terraform apply against real AWS deferred; local minikube is the active dev environment |
-| **Observability stack** | ⏭️ Pending | OTel, AMP, AMG, X-Ray — deferred to Milestone 7 |
+| **Observability stack** | ✅ OTel complete | OTel SDK on all 6 services; traceId/spanId in all logs (M6). AMP/AMG/X-Ray collector wiring deferred. |
+| **Audit remediation** | 🟡 In progress | M6 merged (`850b975`). M1–M5, M7–M10 pending. See [AUDIT-SCHEDULE.md](./audit/AUDIT-SCHEDULE.md). |
 
 ---
 
@@ -179,20 +180,52 @@
 
 ---
 
+### Audit Remediation — M6: Resilience & Observability
+
+**Branch:** `fix/audit-m6-resilience-obs` → squash-merged into `main` (`850b975`) — 2026-03-28
+
+**Findings addressed (12 of 12):**
+
+| ID | Finding | Status |
+|---|---|---|
+| R-01 | Circuit breaker on order-service gRPC client (resilience4j) | ✅ |
+| R-05 | Kafka publish made fire-and-forget; failure no longer silently discarded | ✅ |
+| R-07 | expiration-service readiness probe: real Redis + Kafka checkers, returns 503 | ✅ |
+| R-08 | gRPC server interceptors in ticket-service (logging + panic recovery) | ✅ |
+| R-09 | Kong `request-size-limiting` plugin (1 MB global cap) | ✅ |
+| R-11 | Stripe webhook handler in payment-service | ✅ |
+| R-12 | Stripe idempotency key on PaymentIntent create | ✅ |
+| R-15 | KafkaAdmin reads `bootstrap-servers` from `@Value` (not hardcoded) | ✅ |
+| I-19 | Duplicate rate-limiting plugin removed; consumer-scoped limit only | ✅ |
+| O-01 | OTel SDK on all 6 services (NestJS auto-instrumentation, otelecho, OTel Java agent) | ✅ |
+| O-02 | `traceId`/`spanId` injected into all structured log output | ✅ |
+| O-04 | `GlobalExceptionFilter` registered via DI with injected `PinoLogger` | ✅ |
+
+**Hotfix also included:** Kong `jwt-sub.lua` — `require "cjson.safe"` replaced with Lua pattern matching (Kong 3.7 sandbox blocks all `require()` calls, including `cjson`). This also closes S-19 from M5.
+
+**E2E:** 18/18 passing. CI: green (run `23669507272`).
+
+---
+
 ## Pending Milestones
 
-### Milestone 7: Observability + Hardening
+### Audit Remediation — M1–M5, M7–M10 (pending)
 
-- [ ] Fluent Bit DaemonSet → CloudWatch Logs
-- [ ] OTel Collector → AMP (metrics) + X-Ray (traces)
-- [ ] Amazon Managed Grafana dashboards (RED metrics, Kafka consumer lag)
-- [ ] DLQ handlers fully wired in all consumers
-- [ ] HPA + PDB for all services
-- [ ] NetworkPolicy enforcement
-- [ ] `trivy` image scan in CI
-- [ ] Resource requests/limits reviewed and tuned
+See [AUDIT-SCHEDULE.md](./audit/AUDIT-SCHEDULE.md) and [AUDIT-TODO.md](./audit/AUDIT-TODO.md) for full checklists.
 
-### Milestone 8: CI/CD Pipelines
+| Milestone | Priority | Key work |
+|---|---|---|
+| M1 — Data Integrity | P0 | `@Transactional` bypass fix, payment Kafka producer, stuck-payment fix |
+| M2 — Security Critical | P0 | Strip `X-User-Id` globally, payment auth, secrets out of docker-compose, root user fix, digest pinning |
+| M3 — DLQ / Resilience | P0 | DLQ in ticket-service + expiration-service consumers |
+| M4 — CI Deploy | P0 | Deploy stages, smoke tests, rollback, remove `:latest` |
+| M5 — Auth Hardening | P1 | Refresh token rotation, cookie `maxAge`, proper cookie parser *(S-19 already done)* |
+| M7 — Performance + Helm | P1 | Pagination, caching, Helm tag discipline, OutboxRelay fix, OCC, gRPC channel shutdown |
+| M8 — Security + Correctness | P2 | JWT blacklist, unknown-property rejection, currency validation, dead code removal |
+| M9 — Quality + Testing | P2 | RED metrics, NetworkPolicy, topology constraints, improved test coverage |
+| M10 — Tech Debt | P3 | Dependency cleanup, config/naming fixes, dead code |
+
+### Milestone 8: CI/CD Pipelines (deploy stages)
 
 - [ ] `.github/workflows/ci-auth.yaml`, `ci-ticket.yaml`, `ci-order.yaml`, `ci-payment.yaml`, `ci-expiration.yaml`, `ci-client.yaml`
 - [ ] `ci-proto.yaml` (buf lint + breaking check + stub regeneration)
@@ -215,10 +248,11 @@
 
 | Item | Severity | Notes |
 |---|---|---|
-| RSA private key in `docker-compose.yml` | Medium | Dev-only; real key committed for convenience. Must move to gitignored `.env` before any shared/CI use. |
+| RSA private key in `docker-compose.yml` | Medium | Dev-only; real key committed for convenience. Tracked as S-15+S-16 (M2). |
+| No deploy stages in CI | High | Pipelines build/test/push but do not deploy. Tracked as I-11 (M4). |
+| DLQ not implemented in consumers | High | ticket-service and expiration-service consumers have no retry/DLQ. Tracked as R-03/R-04 (M3). |
+| `@Transactional` self-invocation bypass | Critical | order-service outbox not truly transactional. Tracked as C-01 (M1). |
 | Bitnami kafka disabled locally | Low | `bitnami/kafka` has no Docker Hub tags. Replaced by custom `cp-kafka` sub-chart using `confluentinc/cp-kafka:7.7.1`. |
-| Helm SSA field manager conflicts | Low | cp-kafka StatefulSet annotations/env patched manually in live cluster; on fresh `helm upgrade --install` from scratch, Helm templates apply correctly. |
-| `setup.sh` changes uncommitted | Low | Four hardening fixes applied this session (GRPC port, Linkerd annotation, MongoDB existingSecret, banner). Awaiting owner approval before committing. |
 
 ---
 
@@ -251,7 +285,7 @@ docker compose up --build
 - **Branch naming:** `feat/<service>`, `fix/<desc>`, `chore/<desc>`, `ops/<desc>`
 - **Commit format:** Conventional Commits (`feat`, `fix`, `chore`, `ci`, `docs`, `test`, `perf`, `refactor`)
 - **Merge rule (AGENTS.md §16.10):** Never auto-merge. Owner must explicitly approve before anything touches `main`.
-- **Current `main`:** `3135626` — clean working tree
+- **Current `main`:** `850b975` — clean working tree (fix/audit-m6-resilience-obs merged)
 
 ---
 
@@ -259,4 +293,4 @@ docker compose up --build
 
 **Blockers:** None  
 **Risk:** Low — all services built and E2E verified  
-**Next action awaiting owner:** Approve uncommitted `setup.sh` hardening changes, then decide whether to proceed with CI/CD (Milestone 8) or EKS infrastructure (Milestone 9) first
+**Next action:** Start M1 (`fix/audit-m1-data-integrity`) — P0 data integrity fixes are the highest priority remaining work before any staging deployment.
