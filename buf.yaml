@@ -27,5 +27,10 @@ breaking:
   except:
     # Field presence changes are acceptable during development phase
     - FIELD_SAME_DEFAULT
+  ignore_only:
+    # C-08: price field intentionally changed from double to string for financial precision.
+    # All consumers (ticket-service, order-service, client) have been updated accordingly.
+    FIELD_SAME_TYPE:
+      - proto/tickets/v1/tickets.proto
 deps:
   - buf.build/googleapis/googleapis

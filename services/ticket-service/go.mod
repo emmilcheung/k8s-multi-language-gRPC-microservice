@@ -1,6 +1,6 @@
 module github.com/acme/ticket-service
 
-go 1.23
+go 1.25.0
 
 require (
 	github.com/alicebob/miniredis/v2 v2.35.0
@@ -9,6 +9,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.0
 	github.com/labstack/echo-contrib v0.50.1
 	github.com/labstack/echo/v4 v4.15.1
+	github.com/org/ticketing/libs/grpc-stubs/go v0.0.0
 	github.com/redis/go-redis/v9 v9.17.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.41.0
@@ -23,10 +24,9 @@ require (
 	go.uber.org/zap v1.27.1
 	google.golang.org/grpc v1.79.2
 	google.golang.org/protobuf v1.36.11
-	github.com/org/ticketing v0.0.0
 )
 
-replace github.com/org/ticketing => ../../libs/grpc-stubs/go
+replace github.com/org/ticketing/libs/grpc-stubs/go => ../../libs/grpc-stubs/go
 
 require (
 	dario.cat/mergo v1.0.2 // indirect
