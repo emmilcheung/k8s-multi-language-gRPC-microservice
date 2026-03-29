@@ -506,14 +506,14 @@ Items are organized into **execution phases** — work through them in order. Ea
 - [x] **DRY-05 | P3 | Extract shared fullName computation in Helm templates**
 - [x] **CV-02 | P3 | Add engines/packageManager field to Node.js package.json files** (same as S-21)
 - [x] **CV-03 | P3 | Rename DLQ suffix from .DLT to .dlq (order-service)**
-- [ ] **CV-04 | P3 | Move gRPC stubs from ticket-service to /libs/**
+- [x] **CV-04 | P3 | Move gRPC stubs from ticket-service to /libs/**
 - [x] **CV-06 | P3 | Remove go mod tidy from Dockerfiles** *(done — removed from ticket-service and expiration-service Dockerfiles as part of P-10)*
 - [x] **CV-07 | P3 | Remove duplicate CHECK constraint in payment migration**
 
 ### 4.8 Testing (P3)
 
-- [ ] **T-06 | P3 | Add unit tests for client Server Components / pages**
-- [ ] **T-09 | P3 | Add controller unit tests for auth-service**
+- [x] **T-06 | P3 | Add unit tests for client Server Components / pages**
+- [x] **T-09 | P3 | Add controller unit tests for auth-service**
 - [x] **T-15 | P3 | Improve StubTicketService to return realistic data (order-service)**
 - [x] **T-16 | P3 | Fix PG_POOL import in auth-service integration test** (already fixed — no PG_POOL import anywhere)
 
