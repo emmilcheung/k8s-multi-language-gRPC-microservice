@@ -69,3 +69,27 @@ variable "memory_limit" {
   type        = string
   default     = "512Mi"
 }
+
+variable "tls_enabled" {
+  description = "Enable TLS termination at the Kong NLB service."
+  type        = bool
+  default     = false
+}
+
+variable "tls_certificate_arn" {
+  description = "Existing ACM certificate ARN for Kong TLS termination. If empty and tls_enabled=true, the module can create one when tls_domain_name and tls_hosted_zone_id are set."
+  type        = string
+  default     = ""
+}
+
+variable "tls_domain_name" {
+  description = "Domain name for creating an ACM certificate when tls_enabled=true and tls_certificate_arn is not provided."
+  type        = string
+  default     = ""
+}
+
+variable "tls_hosted_zone_id" {
+  description = "Route53 hosted zone ID used for ACM DNS validation when creating a new certificate."
+  type        = string
+  default     = ""
+}

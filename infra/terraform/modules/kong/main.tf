@@ -30,6 +30,45 @@ resource "kubernetes_namespace" "infra" {
   }
 }
 
+locals {
+  should_create_certificate = var.tls_enabled && var.tls_certificate_arn == "" && var.tls_domain_name != "" && var.tls_hosted_zone_id != ""
+  effective_tls_cert_arn    = var.tls_certificate_arn != "" ? var.tls_certificate_arn : try(aws_acm_certificate.this[0].arn, "")
+}
+
+resource "aws_acm_certificate" "this" {
+  count = local.should_create_certificate ? 1 : 0
+
+  domain_name       = var.tls_domain_name
+  validation_method = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_route53_record" "cert_validation" {
+  for_each = local.should_create_certificate ? {
+    for dvo in aws_acm_certificate.this[0].domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      type   = dvo.resource_record_type
+      record = dvo.resource_record_value
+    }
+  } : {}
+
+  zone_id = var.tls_hosted_zone_id
+  name    = each.value.name
+  type    = each.value.type
+  records = [each.value.record]
+  ttl     = 60
+}
+
+resource "aws_acm_certificate_validation" "this" {
+  count = local.should_create_certificate ? 1 : 0
+
+  certificate_arn         = aws_acm_certificate.this[0].arn
+  validation_record_fqdns = [for record in aws_route53_record.cert_validation : record.fqdn]
+}
+
 resource "helm_release" "kong" {
   name       = "kong"
   repository = "https://charts.konghq.com"
@@ -69,6 +108,21 @@ resource "helm_release" "kong" {
   set {
     name  = "proxy.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-scheme"
     value = "internet-facing"
+  }
+
+  set {
+    name  = "proxy.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-ssl-ports"
+    value = var.tls_enabled ? "443" : ""
+  }
+
+  set {
+    name  = "proxy.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-ssl-cert"
+    value = local.effective_tls_cert_arn
+  }
+
+  set {
+    name  = "proxy.tls.enabled"
+    value = var.tls_enabled ? "true" : "false"
   }
 
   # ── Admin API ─────────────────────────────────────────────────────────────
@@ -181,7 +235,10 @@ resource "helm_release" "kong" {
     value = var.environment
   }
 
-  depends_on = [kubernetes_namespace.infra]
+  depends_on = [
+    kubernetes_namespace.infra,
+    aws_acm_certificate_validation.this,
+  ]
 }
 
 # ── Data source: resolve the proxy LoadBalancer hostname after deployment ───

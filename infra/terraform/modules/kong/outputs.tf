@@ -22,3 +22,13 @@ output "helm_release_status" {
   description = "Helm release status (e.g. deployed, failed)."
   value       = helm_release.kong.status
 }
+
+output "tls_enabled" {
+  description = "Whether TLS termination is enabled on the Kong proxy service."
+  value       = var.tls_enabled
+}
+
+output "tls_certificate_arn" {
+  description = "ACM certificate ARN used by the Kong NLB listener (empty when TLS is disabled)."
+  value       = local.effective_tls_cert_arn
+}
