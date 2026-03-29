@@ -3,13 +3,18 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
+
+// uuidRE matches a canonical UUID v4 string (case-insensitive).
+var uuidRE = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // TicketHandler handles HTTP requests for ticket operations.
 type TicketHandler struct {
@@ -76,7 +81,7 @@ func (h *TicketHandler) Create(c echo.Context) error {
 	if req.Title == "" {
 		details = append(details, map[string]string{"field": "title", "issue": "must not be empty"})
 	}
-	if len(req.Title) > 200 {
+	if utf8.RuneCountInString(req.Title) > 200 {
 		details = append(details, map[string]string{"field": "title", "issue": "must not exceed 200 characters"})
 	}
 	if req.Price < 0 {
@@ -130,6 +135,9 @@ func (h *TicketHandler) List(c echo.Context) error {
 // GetByID handles GET /api/tickets/:id.
 func (h *TicketHandler) GetByID(c echo.Context) error {
 	id := c.Param("id")
+	if !uuidRE.MatchString(id) {
+		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "id must be a valid UUID", nil)
+	}
 	ticket, err := h.svc.GetTicketByID(c.Request().Context(), id)
 	if err != nil {
 		if errors.Is(err, repository.ErrTicketNotFound) {
@@ -149,6 +157,9 @@ func (h *TicketHandler) Update(c echo.Context) error {
 	}
 
 	id := c.Param("id")
+	if !uuidRE.MatchString(id) {
+		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "id must be a valid UUID", nil)
+	}
 
 	var req updateTicketRequest
 	if err := c.Bind(&req); err != nil {
@@ -160,7 +171,7 @@ func (h *TicketHandler) Update(c echo.Context) error {
 	if req.Title == "" {
 		details = append(details, map[string]string{"field": "title", "issue": "must not be empty"})
 	}
-	if len(req.Title) > 200 {
+	if utf8.RuneCountInString(req.Title) > 200 {
 		details = append(details, map[string]string{"field": "title", "issue": "must not exceed 200 characters"})
 	}
 	if req.Price < 0 {

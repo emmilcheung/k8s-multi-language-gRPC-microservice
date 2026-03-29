@@ -9,7 +9,8 @@ import (
 
 // New creates a production-grade zap logger that outputs structured JSON.
 // level must be one of: debug, info, warn, error, fatal.
-func New(level string) (*zap.Logger, error) {
+// service is baked as a permanent "service" field on every log line (AGENTS.md §7.1).
+func New(level, service string) (*zap.Logger, error) {
 	var zapLevel zapcore.Level
 	if err := zapLevel.UnmarshalText([]byte(level)); err != nil {
 		return nil, fmt.Errorf("invalid log level %q: %w", level, err)
@@ -25,5 +26,5 @@ func New(level string) (*zap.Logger, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to build logger: %w", err)
 	}
-	return log, nil
+	return log.With(zap.String("service", service)), nil
 }

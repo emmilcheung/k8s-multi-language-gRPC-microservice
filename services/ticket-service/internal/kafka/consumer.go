@@ -69,16 +69,8 @@ type OrderConsumer struct {
 // groupID should be "ticket-service" (per the AGENTS.md convention).
 // producer is used to publish failed messages to the DLQ after retries are exhausted.
 func NewOrderConsumer(brokers []string, groupID string, reserver TicketReserver, producer *Producer, log *zap.Logger) (*OrderConsumer, error) {
-	brokersStr := ""
-	for i, b := range brokers {
-		if i > 0 {
-			brokersStr += ","
-		}
-		brokersStr += b
-	}
-
 	c, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers":       brokersStr,
+		"bootstrap.servers":       joinBrokers(brokers),
 		"group.id":                groupID,
 		"auto.offset.reset":       "earliest",
 		"enable.auto.commit":      false, // manual commit after successful processing

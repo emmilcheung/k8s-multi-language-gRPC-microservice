@@ -12,6 +12,7 @@ import (
 	"github.com/acme/ticket-service/internal/grpc/tickets/v1"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -92,7 +93,9 @@ func (s *TicketGrpcServer) ValidateTicketAvailability(ctx context.Context, req *
 // Start binds and starts the gRPC server on the given address. It blocks until
 // the context is cancelled, then performs a graceful stop.
 //
-// Interceptors applied (R-08):
+// Interceptors and handlers applied (R-08, O-07):
+//   - otelgrpc.NewServerHandler: propagates W3C traceparent from gRPC metadata
+//     and creates server spans — makes every RPC part of the distributed trace.
 //   - recovery: catches panics in handlers, logs a stack trace, returns INTERNAL to client.
 //   - logging:  emits a structured JSON log line per RPC (method, duration, status code).
 //   - deadline: logs a warning when the client deadline has already expired before the
@@ -156,6 +159,9 @@ func Start(ctx context.Context, addr string, srv *TicketGrpcServer, log *zap.Log
 	}
 
 	grpcServer := grpc.NewServer(
+		// OTel trace propagation: extracts W3C traceparent from incoming gRPC
+		// metadata and starts a server span for every RPC (O-07).
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainUnaryInterceptor(
 			// Logging first so we always capture timing even if recovery fires
 			loggingInterceptor,
