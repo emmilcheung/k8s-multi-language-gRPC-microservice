@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+/* eslint-disable @typescript-eslint/unbound-method */
+import { describe, it, expect, vi } from 'vitest';
 import { UnauthorizedException } from '@nestjs/common';
 import { AuthController } from './auth.controller';
 import type { AuthService } from './auth.service';
@@ -8,9 +9,7 @@ import type { Request, Response } from 'express';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makeAuthService(
-  overrides: Partial<AuthService> = {},
-): AuthService {
+function makeAuthService(overrides: Partial<AuthService> = {}): AuthService {
   return {
     signup: vi.fn().mockResolvedValue({
       accessToken: 'access.token',
@@ -64,25 +63,35 @@ function makeRes() {
 }
 
 /** Create a minimal Express-like request mock with cookies and headers. */
-function makeReq(options: {
-  cookies?: Record<string, string>;
-  headers?: Record<string, string>;
-} = {}): Request {
+function makeReq(
+  options: {
+    cookies?: Record<string, string>;
+    headers?: Record<string, string>;
+  } = {},
+): Request {
   return {
     cookies: options.cookies ?? {},
     headers: options.headers ?? {},
   } as unknown as Request;
 }
 
-function makeController(overrides: {
-  authService?: Partial<AuthService>;
-  refreshTokenService?: Partial<RefreshTokenService>;
-  configService?: ConfigService;
-} = {}) {
+function makeController(
+  overrides: {
+    authService?: Partial<AuthService>;
+    refreshTokenService?: Partial<RefreshTokenService>;
+    configService?: ConfigService;
+  } = {},
+) {
   const authService = makeAuthService(overrides.authService);
-  const refreshTokenService = makeRefreshTokenService(overrides.refreshTokenService);
+  const refreshTokenService = makeRefreshTokenService(
+    overrides.refreshTokenService,
+  );
   const configService = overrides.configService ?? makeConfigService();
-  const controller = new AuthController(authService, refreshTokenService, configService);
+  const controller = new AuthController(
+    authService,
+    refreshTokenService,
+    configService,
+  );
   return { controller, authService, refreshTokenService, configService };
 }
 
@@ -99,14 +108,25 @@ describe('AuthController', () => {
         res,
       );
 
-      expect(authService.signup).toHaveBeenCalledWith('user@example.com', 'pass123');
+      expect(authService.signup).toHaveBeenCalledWith(
+        'user@example.com',
+        'pass123',
+      );
       expect(res.cookie).toHaveBeenCalledTimes(2);
       // access token cookie
-      expect((res.cookie as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('token');
-      expect((res.cookie as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('access.token');
+      expect((res.cookie as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
+        'token',
+      );
+      expect((res.cookie as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe(
+        'access.token',
+      );
       // refresh token cookie
-      expect((res.cookie as ReturnType<typeof vi.fn>).mock.calls[1][0]).toBe('refreshToken');
-      expect((res.cookie as ReturnType<typeof vi.fn>).mock.calls[1][1]).toBe('refresh-token-id');
+      expect((res.cookie as ReturnType<typeof vi.fn>).mock.calls[1][0]).toBe(
+        'refreshToken',
+      );
+      expect((res.cookie as ReturnType<typeof vi.fn>).mock.calls[1][1]).toBe(
+        'refresh-token-id',
+      );
       expect(result).toEqual({ currentUser: { email: 'user@example.com' } });
     });
 
@@ -116,7 +136,8 @@ describe('AuthController', () => {
 
       await controller.signup({ email: 'a@b.com', password: 'p' }, res);
 
-      const cookieCalls = (res.cookie as ReturnType<typeof vi.fn>).mock.calls as unknown[][];
+      const cookieCalls = (res.cookie as ReturnType<typeof vi.fn>).mock
+        .calls as unknown[][];
       for (const [, , opts] of cookieCalls) {
         expect((opts as { httpOnly: boolean }).httpOnly).toBe(true);
       }
@@ -133,7 +154,10 @@ describe('AuthController', () => {
         res,
       );
 
-      expect(authService.signin).toHaveBeenCalledWith('user@example.com', 'secret');
+      expect(authService.signin).toHaveBeenCalledWith(
+        'user@example.com',
+        'secret',
+      );
       expect(res.cookie).toHaveBeenCalledTimes(2);
       expect(result).toEqual({ currentUser: { email: 'user@example.com' } });
     });
@@ -150,7 +174,9 @@ describe('AuthController', () => {
       await controller.signout(req, res);
 
       expect(refreshTokenService.revoke).toHaveBeenCalledWith('old-refresh-id');
-      expect(authService.blacklistAccessToken).toHaveBeenCalledWith('old.access.token');
+      expect(authService.blacklistAccessToken).toHaveBeenCalledWith(
+        'old.access.token',
+      );
       expect(res.clearCookie).toHaveBeenCalledWith('token');
       expect(res.clearCookie).toHaveBeenCalledWith('refreshToken');
     });
@@ -168,7 +194,9 @@ describe('AuthController', () => {
 
     it('should not throw if revoke fails (best-effort revocation)', async () => {
       const { controller } = makeController({
-        refreshTokenService: { revoke: vi.fn().mockRejectedValue(new Error('redis down')) },
+        refreshTokenService: {
+          revoke: vi.fn().mockRejectedValue(new Error('redis down')),
+        },
       });
       const req = makeReq({ cookies: { refreshToken: 'some-token' } });
       const res = makeRes();
@@ -185,9 +213,13 @@ describe('AuthController', () => {
 
       await controller.refresh(req, res);
 
-      expect(refreshTokenService.validate).toHaveBeenCalledWith('old-refresh-id');
+      expect(refreshTokenService.validate).toHaveBeenCalledWith(
+        'old-refresh-id',
+      );
       expect(refreshTokenService.revoke).toHaveBeenCalledWith('old-refresh-id');
-      expect(authService.issueAccessTokenForUser).toHaveBeenCalledWith('user-uuid-1');
+      expect(authService.issueAccessTokenForUser).toHaveBeenCalledWith(
+        'user-uuid-1',
+      );
       expect(refreshTokenService.issue).toHaveBeenCalledWith('user-uuid-1');
       expect(res.cookie).toHaveBeenCalledTimes(2);
     });
@@ -197,19 +229,25 @@ describe('AuthController', () => {
       const req = makeReq({ cookies: {} });
       const res = makeRes();
 
-      await expect(controller.refresh(req, res)).rejects.toThrow(UnauthorizedException);
+      await expect(controller.refresh(req, res)).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('should propagate UnauthorizedException from RefreshTokenService.validate', async () => {
       const { controller } = makeController({
         refreshTokenService: {
-          validate: vi.fn().mockRejectedValue(new UnauthorizedException('invalid')),
+          validate: vi
+            .fn()
+            .mockRejectedValue(new UnauthorizedException('invalid')),
         },
       });
       const req = makeReq({ cookies: { refreshToken: 'expired-token' } });
       const res = makeRes();
 
-      await expect(controller.refresh(req, res)).rejects.toThrow(UnauthorizedException);
+      await expect(controller.refresh(req, res)).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
   });
 
@@ -237,7 +275,9 @@ describe('AuthController', () => {
     it('should return null when token verification fails (revoked/expired)', async () => {
       const { controller } = makeController({
         authService: {
-          verifyAccessToken: vi.fn().mockRejectedValue(new Error('token expired')),
+          verifyAccessToken: vi
+            .fn()
+            .mockRejectedValue(new Error('token expired')),
         },
       });
       const req = makeReq({ cookies: { token: 'expired.jwt' } });
@@ -300,11 +340,8 @@ describe('AuthController', () => {
 
       await controller.signup({ email: 'a@b.com', password: 'p' }, res);
 
-      const [, , opts] = (res.cookie as ReturnType<typeof vi.fn>).mock.calls[0] as [
-        string,
-        string,
-        { maxAge: number },
-      ];
+      const [, , opts] = (res.cookie as ReturnType<typeof vi.fn>).mock
+        .calls[0] as [string, string, { maxAge: number }];
       // 30 minutes in milliseconds
       expect(opts.maxAge).toBe(30 * 60 * 1000);
     });
@@ -315,11 +352,8 @@ describe('AuthController', () => {
 
       await controller.signup({ email: 'a@b.com', password: 'p' }, res);
 
-      const [, , opts] = (res.cookie as ReturnType<typeof vi.fn>).mock.calls[1] as [
-        string,
-        string,
-        { path: string },
-      ];
+      const [, , opts] = (res.cookie as ReturnType<typeof vi.fn>).mock
+        .calls[1] as [string, string, { path: string }];
       expect(opts.path).toBe('/api/auth/refresh');
     });
   });

@@ -129,7 +129,9 @@ beforeEach(async () => {
   await pool.query('DELETE FROM payments');
 });
 
-function buildOrderCreatedEvent(overrides: Partial<{ orderId: string; userId: string; amount: number }> = {}) {
+function buildOrderCreatedEvent(
+  overrides: Partial<{ orderId: string; userId: string; amount: number }> = {},
+) {
   return {
     specversion: '1.0',
     type: TOPIC,
@@ -173,13 +175,12 @@ async function consumeOne(topic: string, timeoutMs = 10_000): Promise<string | n
   await consumer.connect();
   await consumer.subscribe({ topic, fromBeginning: true });
 
-  return new Promise<string | null>(async (resolve) => {
-    const timer = setTimeout(async () => {
-      await consumer.disconnect();
-      resolve(null);
+  return new Promise<string | null>((resolve) => {
+    const timer = setTimeout(() => {
+      void consumer.disconnect().then(() => resolve(null));
     }, timeoutMs);
 
-    await consumer.run({
+    void consumer.run({
       eachMessage: async ({ message }) => {
         clearTimeout(timer);
         await consumer.disconnect();

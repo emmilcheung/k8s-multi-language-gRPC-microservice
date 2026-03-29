@@ -55,19 +55,20 @@ func startRedis(t *testing.T) (addr string, cleanup func()) {
 }
 
 // startKafka spins up a Kafka container (apache/kafka KRaft combined mode) and returns
-// its bootstrap address. Testcontainers maps the container port to a random host port,
-// which avoids fixed-port conflicts when tests run in parallel (T-13).
+// its bootstrap address. A fixed host port (19092) is used so the client can connect
+// from outside the container network. Port 29092 is reserved for the DLQ integration test.
 func startKafka(t *testing.T) (brokers string, cleanup func()) {
 	t.Helper()
 	ctx := context.Background()
 
 	req := testcontainers.ContainerRequest{
 		Image:        "apache/kafka:3.7.0",
-		ExposedPorts: []string{"9092/tcp"},
+		ExposedPorts: []string{"19092:9092/tcp"},
 		Env: map[string]string{
 			"KAFKA_NODE_ID":                                  "1",
 			"KAFKA_PROCESS_ROLES":                            "broker,controller",
 			"KAFKA_LISTENERS":                                "PLAINTEXT://:9092,CONTROLLER://:9093",
+			"KAFKA_ADVERTISED_LISTENERS":                     "PLAINTEXT://localhost:19092",
 			"KAFKA_LISTENER_SECURITY_PROTOCOL_MAP":           "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT",
 			"KAFKA_CONTROLLER_QUORUM_VOTERS":                 "1@localhost:9093",
 			"KAFKA_CONTROLLER_LISTENER_NAMES":                "CONTROLLER",
@@ -86,29 +87,7 @@ func startKafka(t *testing.T) (brokers string, cleanup func()) {
 	})
 	require.NoError(t, err, "start kafka container")
 
-	host, err := container.Host(ctx)
-	require.NoError(t, err)
-	port, err := container.MappedPort(ctx, "9092")
-	require.NoError(t, err)
-
-	// Update KAFKA_ADVERTISED_LISTENERS to the dynamically assigned host port
-	// so the client can connect from outside the container network.
-	advertised := fmt.Sprintf("PLAINTEXT://%s:%s", host, port.Port())
-	_, _, execErr := container.Exec(ctx, []string{
-		"kafka-configs.sh",
-		"--bootstrap-server", "localhost:9092",
-		"--entity-type", "brokers",
-		"--entity-name", "1",
-		"--alter",
-		"--add-config", "advertised.listeners=" + advertised,
-	})
-	if execErr != nil {
-		// Non-fatal: the broker may not have fully started yet; the WaitingFor
-		// log condition is the authoritative readiness signal.
-		t.Logf("warn: kafka advertised.listeners update returned error (may be harmless): %v", execErr)
-	}
-
-	return fmt.Sprintf("%s:%s", host, port.Port()), func() {
+	return "localhost:19092", func() {
 		_ = container.Terminate(ctx)
 	}
 }

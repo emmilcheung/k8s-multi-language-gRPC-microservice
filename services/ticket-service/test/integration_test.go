@@ -60,7 +60,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, func()) {
 	e.HidePort = true
 
 	ticketH := handler.NewTicketHandler(svc, log)
-	healthH := handler.NewHealthHandler(repo, log)
+	healthH := handler.NewHealthHandler(repo, nil, nil, log)
 
 	e.GET("/healthz/live", healthH.Live)
 	e.GET("/healthz/ready", healthH.Ready)

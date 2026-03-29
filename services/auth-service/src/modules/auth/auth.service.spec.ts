@@ -77,12 +77,21 @@ function makeUsersRepo(
 function makeJwtService(overrides: Partial<JwtService> = {}): JwtService {
   return {
     sign: vi.fn().mockReturnValue('signed.jwt.token'),
-    verifyAsync: vi.fn().mockResolvedValue({ sub: 'uuid-1', email: 'user@example.com', jti: 'jti-1' }),
+    verifyAsync: vi.fn().mockResolvedValue({
+      sub: 'uuid-1',
+      email: 'user@example.com',
+      jti: 'jti-1',
+    }),
     ...overrides,
   } as unknown as JwtService;
 }
 
-function makeRedis(overrides: Partial<{ get: ReturnType<typeof vi.fn>; set: ReturnType<typeof vi.fn> }> = {}) {
+function makeRedis(
+  overrides: Partial<{
+    get: ReturnType<typeof vi.fn>;
+    set: ReturnType<typeof vi.fn>;
+  }> = {},
+) {
   return {
     get: vi.fn().mockResolvedValue(null),
     set: vi.fn().mockResolvedValue('OK'),
@@ -114,7 +123,10 @@ function makeAuthService(
     jwtService?: Partial<JwtService>;
     configService?: ConfigService;
     refreshTokenService?: Partial<RefreshTokenService>;
-    redis?: Partial<{ get: ReturnType<typeof vi.fn>; set: ReturnType<typeof vi.fn> }>;
+    redis?: Partial<{
+      get: ReturnType<typeof vi.fn>;
+      set: ReturnType<typeof vi.fn>;
+    }>;
   } = {},
 ): {
   service: AuthService;

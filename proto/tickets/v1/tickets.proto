@@ -21,7 +21,7 @@ message GetTicketRequest {
 message GetTicketResponse {
   string ticket_id = 1;
   string title = 2;
-  string price = 3;  // decimal string, e.g. "12.50" — avoids floating-point precision loss
+  string price = 3; // decimal string, e.g. "12.50" — avoids floating-point precision loss
   string user_id = 4;
   string order_id = 5;
   int64 version = 6;
@@ -36,6 +36,6 @@ message ValidateTicketRequest {
 message ValidateTicketResponse {
   bool available = 1;
   string ticket_id = 2;
-  string price = 3;  // decimal string, e.g. "12.50" — avoids floating-point precision loss
+  string price = 3; // decimal string, e.g. "12.50" — avoids floating-point precision loss
   string title = 4;
 }

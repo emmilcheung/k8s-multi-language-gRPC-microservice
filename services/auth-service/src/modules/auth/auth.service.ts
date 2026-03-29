@@ -163,7 +163,10 @@ export class AuthService {
       payload = await this.jwtService.verifyAsync<JwtPayload>(token);
     } catch {
       throw new UnauthorizedException({
-        error: { code: 'INVALID_TOKEN', message: 'Access token is invalid or expired' },
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Access token is invalid or expired',
+        },
       });
     }
 
@@ -173,7 +176,10 @@ export class AuthService {
       );
       if (blacklisted) {
         throw new UnauthorizedException({
-          error: { code: 'TOKEN_REVOKED', message: 'Access token has been revoked' },
+          error: {
+            code: 'TOKEN_REVOKED',
+            message: 'Access token has been revoked',
+          },
         });
       }
     }
@@ -197,18 +203,25 @@ export class AuthService {
   async blacklistAccessToken(token: string): Promise<void> {
     try {
       // Decode without verification — we only need the JTI and expiry claims
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const decoded = this.jwtService.decode(token);
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       if (!decoded?.jti || !decoded?.exp) {
         // Token is missing required claims — nothing to blacklist
         return;
       }
-      const ttlSeconds = decoded.exp - Math.floor(Date.now() / 1000);
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const ttlSeconds =
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        (decoded.exp as number) - Math.floor(Date.now() / 1000);
       if (ttlSeconds <= 0) {
         // Already expired — no need to blacklist
         return;
       }
       await this.redis.set(
-        `auth-service:blacklist:${decoded.jti}`,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        `auth-service:blacklist:${decoded.jti as string}`,
         '1',
         'EX',
         ttlSeconds,
