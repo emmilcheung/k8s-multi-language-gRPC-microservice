@@ -1,4 +1,6 @@
 # Stage 1: build — Debian (glibc) required by confluent-kafka-go vendored librdkafka
+# Build context must be the repo root (not the service directory) because
+# go.mod has a replace directive pointing to ../../libs/grpc-stubs/go.
 FROM golang:1.25-bookworm@sha256:7fb09d8804035fbde8a84ed59ca9f46dd68c6f160f9d193e98d795d8d9e002ec AS builder
 
 # Install build dependencies needed by confluent-kafka-go (CGO-based)
@@ -6,13 +8,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev &
 
 WORKDIR /app
 
-# Copy dependency manifests first so Docker can cache the download layer (P-10).
-# This layer is only invalidated when go.mod or go.sum change, not on every source edit.
-COPY go.mod go.sum ./
+# Copy the local replace dependency first so `go mod download` can resolve it.
+# go.mod contains: replace github.com/org/ticketing/libs/grpc-stubs/go => ../../libs/grpc-stubs/go
+# From WORKDIR /app/services/ticket-service, ../../libs/grpc-stubs/go = /app/libs/grpc-stubs/go
+COPY libs/grpc-stubs/go /app/libs/grpc-stubs/go
+
+# Copy dependency manifests for layer caching (only invalidated on go.mod/go.sum changes).
+COPY services/ticket-service/go.mod services/ticket-service/go.sum /app/services/ticket-service/
+
+WORKDIR /app/services/ticket-service
 RUN go mod download
 
-# Copy source and build
-COPY . .
+# Copy service source and build
+COPY services/ticket-service /app/services/ticket-service
 RUN CGO_ENABLED=1 GOOS=linux go build -o /ticket-service ./cmd/server
 
 # Stage 2: runtime

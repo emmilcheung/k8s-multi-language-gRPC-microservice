@@ -250,8 +250,10 @@ services:
   # ── ticket-service: Go / Echo ────────────────────────────────────────────────
   ticket-service:
     build:
-      context: ./services/ticket-service
-      dockerfile: Dockerfile
+      # Context must be repo root: go.mod has a replace directive pointing to
+      # ../../libs/grpc-stubs/go which is outside the service directory.
+      context: .
+      dockerfile: services/ticket-service/Dockerfile
     restart: unless-stopped
     environment:
       APP_ENV: development
