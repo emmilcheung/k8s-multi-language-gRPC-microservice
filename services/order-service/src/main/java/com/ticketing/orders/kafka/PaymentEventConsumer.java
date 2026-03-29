@@ -19,7 +19,7 @@ import java.util.UUID;
  * corresponding order as COMPLETE via OrderService#markComplete.
  *
  * Idempotent: markComplete is a no-op if the order is already COMPLETE or
- * not in AWAITING_PAYMENT state.
+ * in a state that does not allow payment (CANCELLED or already COMPLETE).
  */
 @Component
 public class PaymentEventConsumer {
