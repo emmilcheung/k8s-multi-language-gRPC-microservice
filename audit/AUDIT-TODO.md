@@ -3,6 +3,7 @@
 > **Generated from**: [AUDIT-REPORT.md](./AUDIT-REPORT.md)
 > **Date**: 2026-03-27
 > **Total findings**: 75 (10 P0, 22 P1, 28 P2, 15 P3)
+> **Last Update**: 2026-03-29 — Phase 2 (P2) complete ✅ PR #12 merged to main (commit 7926c02)
 
 Items are organized into **execution phases** — work through them in order. Each phase has a gate: do not start the next phase until the current one is complete and verified.
 
