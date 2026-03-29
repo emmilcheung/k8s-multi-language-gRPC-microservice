@@ -1,24 +1,23 @@
 // app/page.tsx — Landing page: hero section + available ticket grid (Server Component).
+// The first page of tickets is fetched server-side for instant SSR. Subsequent
+// pages are loaded on demand by the TicketGrid Client Component (P-02).
 
 import Link from "next/link";
-import { serverApi } from "@/lib/api";
-import type { Ticket } from "@/lib/types";
+import { fetchTicketPage } from "@/app/actions/tickets";
+import { TicketGrid } from "@/components/ticket-grid";
 import { buttonVariants } from "@/components/ui/button-variants";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Ticket as TicketIcon, ArrowRight, Tag, Zap, Shield, Globe } from "lucide-react";
 
-async function getTickets(): Promise<Ticket[]> {
-  try {
-    return await serverApi<Ticket[]>("/api/tickets");
-  } catch {
-    return [];
-  }
-}
-
 export default async function HomePage() {
-  const tickets = await getTickets();
-  const available = tickets.filter((t) => !t.orderId);
+  // Fetch first page server-side — benefits from ISR caching in fetchTicketPage.
+  const firstPage = await fetchTicketPage(null).catch(() => ({
+    tickets: [],
+    cursor: null,
+    hasMore: false,
+  }));
+
+  const availableCount = firstPage.tickets.filter((t) => !t.orderId).length;
 
   return (
     <div className="flex flex-col gap-20">
@@ -66,7 +65,7 @@ export default async function HomePage() {
         {/* Stats strip */}
         <div className="mt-6 flex flex-wrap justify-center gap-8 text-sm text-muted-foreground">
           {[
-            { icon: TicketIcon, label: `${Math.max(available.length, 10)}+ tickets listed` },
+            { icon: TicketIcon, label: `${Math.max(availableCount, 10)}+ tickets listed` },
             { icon: Shield, label: "Secure checkout" },
             { icon: Globe, label: "All events welcome" },
           ].map(({ icon: Icon, label }) => (
@@ -83,9 +82,9 @@ export default async function HomePage() {
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold tracking-tight">
             Available Tickets
-            {available.length > 0 && (
+            {availableCount > 0 && (
               <span className="ml-2 text-sm font-normal text-muted-foreground">
-                ({available.length})
+                ({availableCount}{firstPage.hasMore ? "+" : ""})
               </span>
             )}
           </h2>
@@ -101,67 +100,13 @@ export default async function HomePage() {
           </Link>
         </div>
 
-        {available.length === 0 ? (
-          /* Empty state */
-          <div className="glass rounded-2xl flex flex-col items-center gap-4 py-20 px-8 text-center">
-            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-              <TicketIcon className="w-8 h-8 text-primary/60" />
-            </div>
-            <div className="flex flex-col gap-1">
-              <p className="font-semibold text-lg">No tickets yet</p>
-              <p className="text-sm text-muted-foreground max-w-xs">
-                Be the first to list a ticket and set the market price.
-              </p>
-            </div>
-            <Link
-              href="/tickets/new"
-              className={cn(
-                buttonVariants(),
-                "gap-2 bg-primary hover:bg-primary/90 text-primary-foreground mt-2"
-              )}
-            >
-              <Tag className="w-4 h-4" />
-              List a Ticket
-            </Link>
-          </div>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {available.map((ticket) => (
-              <TicketCard key={ticket.id} ticket={ticket} />
-            ))}
-          </div>
-        )}
+        {/* Client Component: handles "Load more" interactivity */}
+        <TicketGrid
+          initialTickets={firstPage.tickets}
+          initialCursor={firstPage.cursor}
+          initialHasMore={firstPage.hasMore}
+        />
       </section>
     </div>
-  );
-}
-
-function TicketCard({ ticket }: { ticket: Ticket }) {
-  return (
-    <Link
-      href={`/tickets/${ticket.id}`}
-      className="group relative flex flex-col gap-4 glass rounded-2xl p-5 transition-all duration-200 hover:scale-[1.02] hover:glow-violet hover:border-primary/30 cursor-pointer"
-    >
-      {/* Top row: icon + price badge */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 ring-1 ring-primary/20 shrink-0">
-          <TicketIcon className="w-5 h-5 text-primary/80" />
-        </div>
-        <Badge className="bg-primary/15 text-primary border-primary/20 font-semibold text-sm px-2.5 py-0.5 shrink-0">
-          ${ticket.price.toFixed(2)}
-        </Badge>
-      </div>
-
-      {/* Title */}
-      <p className="font-semibold leading-snug line-clamp-2 group-hover:text-primary transition-colors">
-        {ticket.title}
-      </p>
-
-      {/* CTA */}
-      <div className="flex items-center gap-1 text-xs text-muted-foreground group-hover:text-primary/80 transition-colors mt-auto">
-        View ticket
-        <ArrowRight className="w-3 h-3 transition-transform group-hover:translate-x-0.5" />
-      </div>
-    </Link>
   );
 }

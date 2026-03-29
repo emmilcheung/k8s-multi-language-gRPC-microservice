@@ -3,6 +3,7 @@
 
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
 import type { Ticket } from "@/lib/types";
@@ -25,10 +26,14 @@ interface Props {
   params: Promise<{ ticketId: string }>;
 }
 
+const getTicket = cache(async (ticketId: string): Promise<Ticket> => {
+  return serverApi<Ticket>(`/api/tickets/${ticketId}`);
+});
+
 export async function generateMetadata({ params }: Props) {
   const { ticketId } = await params;
   try {
-    const ticket = await serverApi<Ticket>(`/api/tickets/${ticketId}`);
+    const ticket = await getTicket(ticketId);
     return { title: `${ticket.title} — Ticketing` };
   } catch {
     return { title: "Ticket — Ticketing" };
@@ -40,7 +45,7 @@ export default async function TicketDetailPage({ params }: Props) {
 
   let ticket: Ticket;
   try {
-    ticket = await serverApi<Ticket>(`/api/tickets/${ticketId}`);
+    ticket = await getTicket(ticketId);
   } catch {
     notFound();
   }

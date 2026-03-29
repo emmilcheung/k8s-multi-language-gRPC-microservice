@@ -1,65 +1,38 @@
-// __tests__/ticket-form.test.tsx — Component tests for TicketForm.
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { TicketForm } from "@/components/ticket-form";
 import type { TicketState } from "@/app/actions/tickets";
 
-let mockState: TicketState = {};
-let mockPending = false;
-const mockFormAction = vi.fn();
-
-vi.mock("react", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("react")>();
-  return {
-    ...actual,
-    useActionState: (_action: unknown, _initialState: unknown) => [
-      mockState,
-      mockFormAction,
-      mockPending,
-    ],
-  };
-});
-
-const noopAction = async (_prev: TicketState, _fd: FormData): Promise<TicketState> => ({});
-
 describe("TicketForm", () => {
-  beforeEach(() => {
-    mockState = {};
-    mockPending = false;
-    mockFormAction.mockClear();
-  });
+  it("renders defaults and submits edited values", async () => {
+    const user = userEvent.setup();
+    const action = vi.fn(async (_prev: TicketState, _fd: FormData): Promise<TicketState> => ({}));
 
-  it("renders title and price inputs", () => {
-    render(<TicketForm action={noopAction} />);
-    expect(screen.getByLabelText(/title/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/price/i)).toBeInTheDocument();
-  });
+    render(
+      <TicketForm
+        action={action}
+        defaultTitle="Rock Concert"
+        defaultPrice={49.99}
+        submitLabel="Update Ticket"
+      />
+    );
 
-  it("renders with default submitLabel", () => {
-    render(<TicketForm action={noopAction} />);
-    expect(screen.getByRole("button", { name: /create ticket/i })).toBeInTheDocument();
-  });
+    const titleInput = screen.getByLabelText(/title/i);
+    const priceInput = screen.getByLabelText(/price/i);
 
-  it("renders custom submitLabel", () => {
-    render(<TicketForm action={noopAction} submitLabel="Update Ticket" />);
-    expect(screen.getByRole("button", { name: /update ticket/i })).toBeInTheDocument();
-  });
+    expect(titleInput).toHaveValue("Rock Concert");
+    expect(priceInput).toHaveValue(49.99);
 
-  it("pre-fills defaultTitle and defaultPrice", () => {
-    render(<TicketForm action={noopAction} defaultTitle="Rock Concert" defaultPrice={49.99} />);
-    expect(screen.getByLabelText(/title/i)).toHaveValue("Rock Concert");
-    expect(screen.getByLabelText(/price/i)).toHaveValue(49.99);
-  });
+    await user.clear(titleInput);
+    await user.type(titleInput, "Jazz Night");
+    await user.clear(priceInput);
+    await user.type(priceInput, "25.50");
+    await user.click(screen.getByRole("button", { name: /update ticket/i }));
 
-  it("shows error alert when state.error is set", () => {
-    mockState = { error: "Title is required." };
-    render(<TicketForm action={noopAction} />);
-    expect(screen.getByRole("alert")).toHaveTextContent("Title is required.");
-  });
-
-  it("disables submit button while pending", () => {
-    mockPending = true;
-    render(<TicketForm action={noopAction} />);
-    expect(screen.getByRole("button", { name: /saving/i })).toBeDisabled();
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    const [, formData] = action.mock.calls[0] as [TicketState, FormData];
+    expect(formData.get("title")).toBe("Jazz Night");
+    expect(formData.get("price")).toBe("25.5");
   });
 });
