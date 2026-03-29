@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS payments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id UUID NOT NULL,
   user_id TEXT NOT NULL,
-  amount INTEGER NOT NULL CHECK (amount > 0),
+  amount INTEGER NOT NULL,
   currency TEXT NOT NULL DEFAULT 'usd',
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
   stripe_payment_intent_id TEXT,
