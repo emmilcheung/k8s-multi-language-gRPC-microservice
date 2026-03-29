@@ -205,7 +205,7 @@ func TestGetTicketByID_ShouldReturn404ForNonExistentTicket(t *testing.T) {
 	ts, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/tickets/non-existent-id", nil)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/tickets/11111111-1111-4111-8111-111111111111", nil)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close() //nolint:errcheck
@@ -323,7 +323,7 @@ func TestUpdateTicket_ShouldReturn404ForNonExistentTicket(t *testing.T) {
 	defer cleanup()
 
 	body := jsonBody(t, map[string]interface{}{"title": "Title", "price": 10.0})
-	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/tickets/non-existent", body)
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/tickets/22222222-2222-4222-8222-222222222222", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "user-1")
 	resp, err := http.DefaultClient.Do(req)
@@ -419,8 +419,8 @@ func TestUpdateTicket_ConcurrentOCC(t *testing.T) {
 	assert.Equal(t, 1, successes, "exactly one goroutine should succeed")
 	assert.Equal(t, 1, conflicts, "exactly one goroutine should get ErrVersionConflict")
 
-	// The surviving version in the DB should be 1 (incremented once).
+	// The surviving version in the DB should be 2 (starts at 1, incremented once).
 	updated, err := repo.FindByID(ctx, original.ID)
 	require.NoError(t, err)
-	assert.Equal(t, 1, updated.Version, "version should be 1 after one successful update")
+	assert.Equal(t, 2, updated.Version, "version should be 2 after one successful update")
 }
