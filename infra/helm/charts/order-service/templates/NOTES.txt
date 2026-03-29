@@ -1,0 +1,12 @@
+order-service deployed successfully.
+
+  Release:   {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Image:     {{ include "order-service.image" . }}
+
+Endpoints (in-cluster):
+  HTTP  http://{{ include "order-service.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+Health checks:
+  Liveness:  GET /actuator/health/liveness
+  Readiness: GET /actuator/health/readiness

@@ -1,0 +1,15 @@
+auth-service deployed successfully.
+
+  Release:   {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Image:     {{ include "auth-service.image" . }}
+
+Endpoints (in-cluster):
+  HTTP  http://{{ include "auth-service.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+Health checks:
+  Liveness:  GET /healthz/live
+  Readiness: GET /healthz/ready
+
+JWKS endpoint (for Kong JWT plugin):
+  GET /. well-known/jwks.json

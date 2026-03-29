@@ -1,0 +1,15 @@
+client deployed successfully.
+
+  Release:   {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Image:     {{ include "client.image" . }}
+
+Endpoints (in-cluster):
+  HTTP  http://{{ include "client.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+External access via Kong proxy:
+  http://<kong-proxy-ip>/ (all routes proxied through Kong)
+
+Health checks:
+  Liveness:  GET /healthz/live
+  Readiness: GET /healthz/ready

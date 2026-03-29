@@ -1,0 +1,13 @@
+ticket-service deployed successfully.
+
+  Release:   {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Image:     {{ include "ticket-service.image" . }}
+
+Endpoints (in-cluster):
+  HTTP  http://{{ include "ticket-service.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.httpPort }}
+  gRPC  {{ include "ticket-service.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.grpcPort }}
+
+Health checks:
+  Liveness:  GET /healthz/live
+  Readiness: GET /healthz/ready

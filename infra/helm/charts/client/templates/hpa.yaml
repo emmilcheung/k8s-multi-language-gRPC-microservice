@@ -1,15 +1,14 @@
 {{- if .Values.autoscaling.enabled }}
-{{- $fullName := printf "%s-%s" .Release.Name .Chart.Name | trunc 63 | trimSuffix "-" }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ $fullName }}
+  name: {{ include "client.fullname" . }}
   namespace: {{ .Release.Namespace }}
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ $fullName }}
+    name: {{ include "client.fullname" . }}
   minReplicas: {{ .Values.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.autoscaling.maxReplicas }}
   metrics:
