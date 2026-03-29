@@ -1,21 +1,9 @@
 "use server";
 // app/actions/orders.ts — Server Actions for order mutations.
 
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-
-const base = () =>
-  (process.env.INTERNAL_API_URL ?? "http://localhost:8080").replace(/\/$/, "");
-
-async function authHeaders() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get("token")?.value ?? "";
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Cookie: `token=${token}` } : {}),
-  };
-}
+import { base, authHeaders } from "@/lib/server-utils";
 
 export interface OrderState {
   error?: string;

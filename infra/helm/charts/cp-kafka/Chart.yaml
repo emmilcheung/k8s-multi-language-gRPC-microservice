@@ -1,0 +1,9 @@
+apiVersion: v2
+name: cp-kafka
+description: >
+  Single-node Confluent Platform Kafka in KRaft mode.
+  Mirrors the docker-compose kafka service configuration.
+  For local development only — not for production use.
+type: application
+version: "0.1.0"
+appVersion: "7.7.1"

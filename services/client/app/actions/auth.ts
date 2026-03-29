@@ -5,9 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { parse } from "set-cookie-parser";
 import { ApiError } from "@/lib/api";
-
-const base = () =>
-  (process.env.INTERNAL_API_URL ?? "http://localhost:8080").replace(/\/$/, "");
+import { base } from "@/lib/server-utils";
 
 // ─── Signup ───────────────────────────────────────────────────────────────────
 
@@ -25,6 +23,11 @@ export async function signup(
 
   if (!email || !password) {
     return { error: "Email and password are required." };
+  }
+
+  // Basic email format validation (S-14)
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { error: "Please enter a valid email address." };
   }
 
   try {
@@ -76,6 +79,11 @@ export async function signin(
 
   if (!email || !password) {
     return { error: "Email and password are required." };
+  }
+
+  // Basic email format validation (S-14)
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { error: "Please enter a valid email address." };
   }
 
   try {

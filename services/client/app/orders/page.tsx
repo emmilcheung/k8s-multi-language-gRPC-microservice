@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
 import type { Order } from "@/lib/types";
+import { STATUS_LABEL, STATUS_BADGE, STATUS_BORDER } from "@/lib/order-status";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -20,28 +21,6 @@ import {
 } from "lucide-react";
 
 export const metadata = { title: "My Orders — Ticketing" };
-
-const STATUS_LABEL: Record<Order["status"], string> = {
-  created: "Created",
-  awaiting_payment: "Awaiting Payment",
-  cancelled: "Cancelled",
-  complete: "Complete",
-};
-
-// Tailwind border-left color classes
-const STATUS_BORDER: Record<Order["status"], string> = {
-  created: "border-l-primary/60",
-  awaiting_payment: "border-l-amber-400/60",
-  cancelled: "border-l-destructive/60",
-  complete: "border-l-emerald-400/60",
-};
-
-const STATUS_BADGE: Record<Order["status"], string> = {
-  created: "bg-primary/15 text-primary border-primary/25",
-  awaiting_payment: "bg-amber-400/10 text-amber-400 border-amber-400/25",
-  cancelled: "bg-destructive/10 text-destructive border-destructive/25",
-  complete: "bg-emerald-400/10 text-emerald-400 border-emerald-400/25",
-};
 
 const STATUS_ICON: Record<Order["status"], React.ReactNode> = {
   created: <CircleDot className="w-3.5 h-3.5" />,

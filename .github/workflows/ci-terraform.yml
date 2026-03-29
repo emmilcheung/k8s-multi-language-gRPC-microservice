@@ -1,0 +1,114 @@
+name: ci-terraform
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "infra/terraform/**"
+      - "infra/scripts/bootstrap-state.sh"
+      - ".github/workflows/ci-terraform.yml"
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "infra/terraform/**"
+      - "infra/scripts/bootstrap-state.sh"
+      - ".github/workflows/ci-terraform.yml"
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: ci-terraform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    name: Terraform fmt
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive infra/terraform
+
+  validate:
+    name: Validate (${{ matrix.env_name }})
+    runs-on: ubuntu-24.04
+    needs: fmt
+    strategy:
+      fail-fast: false
+      matrix:
+        env_name: [dev, staging, prod]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+
+      - name: Terraform init (backend disabled)
+        run: terraform -chdir=infra/terraform/environments/${{ matrix.env_name }} init -backend=false -input=false
+
+      - name: Terraform validate
+        run: terraform -chdir=infra/terraform/environments/${{ matrix.env_name }} validate
+
+  plan:
+    name: Plan (${{ matrix.env_name }})
+    runs-on: ubuntu-24.04
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        env_name: [dev, staging, prod]
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_TERRAFORM_ROLE_ARN: ${{ secrets.AWS_TERRAFORM_ROLE_ARN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+
+      - name: Skip plan when AWS role is missing
+        if: env.AWS_TERRAFORM_ROLE_ARN == ''
+        run: |
+          echo "AWS_TERRAFORM_ROLE_ARN secret is not set — skipping terraform plan."
+          echo "Set AWS_TERRAFORM_ROLE_ARN to enable plan in CI."
+
+      - name: Configure AWS credentials
+        if: env.AWS_TERRAFORM_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Terraform init (backend disabled)
+        if: env.AWS_TERRAFORM_ROLE_ARN != ''
+        run: terraform -chdir=infra/terraform/environments/${{ matrix.env_name }} init -backend=false -input=false
+
+      - name: Terraform plan (core modules, no apply)
+        if: env.AWS_TERRAFORM_ROLE_ARN != ''
+        run: |
+          terraform -chdir=infra/terraform/environments/${{ matrix.env_name }} plan \
+            -input=false \
+            -lock=false \
+            -refresh=false \
+            -target=module.vpc \
+            -target=module.eks \
+            -target=module.rds \
+            -target=module.elasticache \
+            -target=module.msk

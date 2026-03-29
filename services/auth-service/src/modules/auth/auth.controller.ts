@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
+import ms from 'ms';
 import { AuthService } from './auth.service';
 import { SignupDto, SigninDto } from './auth.dto';
 import { RefreshTokenService } from './refresh-token.service';
@@ -76,6 +77,15 @@ export class AuthController {
       // Best-effort revocation — don't throw if the token is already gone
       await this.refreshTokenService.revoke(oldRefreshToken).catch(() => {});
     }
+
+    // Blacklist the access token so it cannot be reused before it naturally
+    // expires. This is a defence-in-depth measure — the primary defence is the
+    // short (15 min) token lifetime (S-04).
+    const accessToken = req.cookies[ACCESS_TOKEN_COOKIE] as string | undefined;
+    if (accessToken) {
+      await this.authService.blacklistAccessToken(accessToken);
+    }
+
     res.clearCookie(ACCESS_TOKEN_COOKIE);
     res.clearCookie(REFRESH_TOKEN_COOKIE);
   }
@@ -116,15 +126,40 @@ export class AuthController {
   }
 
   // GET /api/users/currentuser
-  // Kong injects X-User-Id after JWT verification; this endpoint reads that header
+  // Kong injects X-User-Id after JWT verification. As a defense-in-depth
+  // measure (S-03), we also verify the JWT from the cookie ourselves so that
+  // direct pod access (bypassing Kong) is rejected for unauthenticated callers.
   @Get('api/users/currentuser')
   @HttpCode(HttpStatus.OK)
-  currentUser(@Req() req: Request) {
-    const userId = req.headers['x-user-id'] as string | undefined;
-    if (!userId) {
+  async currentUser(@Req() req: Request) {
+    const kongUserId = req.headers['x-user-id'] as string | undefined;
+    const token = req.cookies['token'] as string | undefined;
+
+    // Fast path: no token and no Kong-injected header → not authenticated.
+    if (!token && !kongUserId) {
       return { currentUser: null };
     }
-    return { currentUser: { id: userId } };
+
+    // If a token cookie is present, verify it locally (signature + blacklist).
+    // This catches cases where someone bypasses Kong and hits the pod directly.
+    if (token) {
+      try {
+        const payload = await this.authService.verifyAccessToken(token);
+        // Cross-check: if Kong also set X-User-Id, it must match the JWT sub.
+        if (kongUserId && kongUserId !== payload.sub) {
+          // Header/token mismatch — reject the request rather than trust either.
+          return { currentUser: null };
+        }
+        return { currentUser: { id: payload.sub, email: payload.email } };
+      } catch {
+        // Token present but invalid/revoked — treat as unauthenticated.
+        return { currentUser: null };
+      }
+    }
+
+    // No cookie but Kong set X-User-Id (e.g. API client using Bearer header).
+    // Trust Kong's validation; return a minimal identity without email.
+    return { currentUser: { id: kongUserId } };
   }
 
   // GET /.well-known/jwks.json — public key endpoint consumed by Kong
@@ -141,11 +176,15 @@ export class AuthController {
   }
 
   private setAccessTokenCookie(res: Response, token: string): void {
+    // Derive maxAge from JWT_EXPIRY config so cookie lifetime stays in sync
+    // with the token's actual validity window (S-06).
+    const expiry = this.config.get<string>('JWT_EXPIRY', '15m');
+    const maxAgeMs = ms(expiry as Parameters<typeof ms>[0]) ?? 15 * 60 * 1000;
     res.cookie(ACCESS_TOKEN_COOKIE, token, {
       httpOnly: true,
       secure: this.isProduction(),
       sameSite: 'strict',
-      maxAge: 15 * 60 * 1000, // 15 minutes — matches JWT expiry
+      maxAge: maxAgeMs,
     });
   }
 

@@ -6,6 +6,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
 import type { Order } from "@/lib/types";
+import { STATUS_LABEL, STATUS_BADGE } from "@/lib/order-status";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { OrderPaymentForm } from "@/components/order-payment-form";
@@ -28,20 +29,6 @@ export async function generateMetadata({ params }: Props) {
   const { orderId } = await params;
   return { title: `Order ${orderId.slice(0, 8)} — Ticketing` };
 }
-
-const STATUS_LABEL: Record<Order["status"], string> = {
-  created: "Created",
-  awaiting_payment: "Awaiting Payment",
-  cancelled: "Cancelled",
-  complete: "Complete",
-};
-
-const STATUS_BADGE: Record<Order["status"], string> = {
-  created: "bg-primary/15 text-primary border-primary/25",
-  awaiting_payment: "bg-amber-400/10 text-amber-400 border-amber-400/25",
-  cancelled: "bg-destructive/10 text-destructive border-destructive/25",
-  complete: "bg-emerald-400/10 text-emerald-400 border-emerald-400/25",
-};
 
 // Steps for the stepper (linear happy path — cancelled shown differently)
 const STEPS: { key: Order["status"]; label: string; icon: React.ReactNode }[] = [

@@ -77,9 +77,14 @@ function makeDb(txInsertReturn: Payment | null = null) {
     update: vi.fn().mockReturnValue(updateChain),
   };
 
+  type MockTx = {
+    insert: typeof tx.insert;
+    update: typeof tx.update;
+  };
+
   return {
     // Execute the callback synchronously with the mock tx
-    transaction: vi.fn().mockImplementation(async (cb: (tx: typeof tx) => Promise<void>) => {
+    transaction: vi.fn().mockImplementation(async (cb: (tx: MockTx) => Promise<void>) => {
       await cb(tx);
     }),
     _tx: tx,

@@ -1,20 +1,52 @@
 "use server";
-// app/actions/tickets.ts — Server Actions for ticket mutations.
+// app/actions/tickets.ts — Server Actions for ticket mutations and queries.
 
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { base, authHeaders } from "@/lib/server-utils";
+import type { Ticket } from "@/lib/types";
 
-const base = () =>
-  (process.env.INTERNAL_API_URL ?? "http://localhost:8080").replace(/\/$/, "");
+// ─── Pagination ───────────────────────────────────────────────────────────────
 
-async function authHeaders() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get("token")?.value ?? "";
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Cookie: `token=${token}` } : {}),
-  };
+export interface TicketPage {
+  tickets: Ticket[];
+  /** ID of the last ticket in this page; pass as `after` to fetch the next page. */
+  cursor: string | null;
+  /** True when fewer than `limit` results were returned — no more pages exist. */
+  hasMore: boolean;
+}
+
+const PAGE_SIZE = 20;
+
+/**
+ * Fetches one page of available (unreserved) tickets using cursor-based
+ * pagination. Pass `after=null` for the first page; subsequent pages use the
+ * `cursor` returned from the previous call.
+ *
+ * This is a Server Action so it can be called from Client Components without
+ * exposing the internal API URL or auth cookie logic to the browser.
+ */
+export async function fetchTicketPage(after: string | null): Promise<TicketPage> {
+  const url = new URL(`${base()}/api/tickets`);
+  url.searchParams.set("limit", String(PAGE_SIZE));
+  if (after) url.searchParams.set("after", after);
+
+  // Public endpoint — no auth cookie required. Use ISR caching via the
+  // Next.js fetch cache (revalidate: 10 s) so repeated "Load more" calls on
+  // the same cursor hit the cache rather than the upstream.
+  const res = await fetch(url.toString(), {
+    next: { revalidate: 10 },
+  });
+
+  if (!res.ok) {
+    // Non-fatal: return empty page so the UI degrades gracefully.
+    return { tickets: [], cursor: null, hasMore: false };
+  }
+
+  const all: Ticket[] = await res.json();
+  const cursor = all.length > 0 ? all[all.length - 1].id : null;
+  const hasMore = all.length === PAGE_SIZE;
+  return { tickets: all, cursor, hasMore };
 }
 
 export interface TicketState {

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,7 +23,7 @@ func TestLoad_ValidConfig(t *testing.T) {
 }
 
 func TestLoad_MissingMongoURI(t *testing.T) {
-	require.NoError(t, os.Unsetenv("MONGO_URI"))
+	t.Setenv("MONGO_URI", "")
 	t.Setenv("KAFKA_BROKERS", "localhost:9092")
 
 	_, err := Load()
@@ -34,7 +33,7 @@ func TestLoad_MissingMongoURI(t *testing.T) {
 
 func TestLoad_MissingKafkaBrokers(t *testing.T) {
 	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
-	require.NoError(t, os.Unsetenv("KAFKA_BROKERS"))
+	t.Setenv("KAFKA_BROKERS", "")
 
 	_, err := Load()
 	require.Error(t, err)
@@ -64,8 +63,8 @@ func TestLoad_MultipleBrokers(t *testing.T) {
 func TestLoad_Defaults(t *testing.T) {
 	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
 	t.Setenv("KAFKA_BROKERS", "localhost:9092")
-	require.NoError(t, os.Unsetenv("PORT"))
-	require.NoError(t, os.Unsetenv("APP_ENV"))
+	t.Setenv("PORT", "")
+	t.Setenv("APP_ENV", "")
 
 	cfg, err := Load()
 	require.NoError(t, err)

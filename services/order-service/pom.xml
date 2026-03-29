@@ -19,7 +19,6 @@
 
   <properties>
     <java.version>21</java.version>
-    <spring-statemachine.version>4.0.0</spring-statemachine.version>
     <grpc.version>1.68.1</grpc.version>
     <protobuf.version>4.29.1</protobuf.version>
     <testcontainers.version>1.20.4</testcontainers.version>
@@ -66,13 +65,6 @@
     <dependency>
       <groupId>org.springframework.kafka</groupId>
       <artifactId>spring-kafka</artifactId>
-    </dependency>
-
-    <!-- ── Spring State Machine ──────────────────────────────────────────── -->
-    <dependency>
-      <groupId>org.springframework.statemachine</groupId>
-      <artifactId>spring-statemachine-core</artifactId>
-      <version>${spring-statemachine.version}</version>
     </dependency>
 
     <!-- ── gRPC client (stub + netty transport) ──────────────────────────── -->

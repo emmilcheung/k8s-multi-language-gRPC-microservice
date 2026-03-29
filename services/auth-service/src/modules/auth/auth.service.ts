@@ -9,12 +9,18 @@ import { JwtService } from '@nestjs/jwt';
 import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 import * as argon2 from 'argon2';
 import { createPublicKey } from 'crypto';
+import { randomUUID } from 'crypto';
+import type Redis from 'ioredis';
+import { Inject } from '@nestjs/common';
+import { REDIS_CLIENT } from '../redis/redis.module';
 import { UsersRepository } from '../users/users.repository';
 import { RefreshTokenService } from './refresh-token.service';
+import { parseRsaPrivateKey } from './rsa-key.util';
 
 export interface JwtPayload {
   sub: string;
   email: string;
+  jti: string;
   iat?: number;
   exp?: number;
 }
@@ -40,13 +46,12 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly refreshTokenService: RefreshTokenService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {
     // Load and validate RSA private key at construction time (fail loudly)
-    const raw = this.config.getOrThrow<string>('RSA_PRIVATE_KEY');
-    // Support both raw PEM and base64-encoded PEM (useful for env var injection)
-    this.rsaPrivateKey = raw.includes('-----BEGIN')
-      ? raw.replace(/\\n/g, '\n')
-      : Buffer.from(raw, 'base64').toString('utf-8');
+    this.rsaPrivateKey = parseRsaPrivateKey(
+      this.config.getOrThrow<string>('RSA_PRIVATE_KEY'),
+    );
   }
 
   async signup(email: string, password: string): Promise<AuthTokens> {
@@ -140,12 +145,100 @@ export class AuthService {
     }
   }
 
-  private issueToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
+  /**
+   * Verify an access token's signature and check whether its JTI has been
+   * blacklisted (e.g. due to an explicit signout).
+   *
+   * Used by the currentUser endpoint for defense-in-depth verification (S-03):
+   * in addition to trusting the X-User-Id header injected by Kong, we locally
+   * verify the JWT so that direct (non-Kong) pod access is also rejected for
+   * unauthenticated callers.
+   *
+   * Returns the verified payload on success. Throws UnauthorizedException if
+   * the token is invalid, expired, or blacklisted.
+   */
+  async verifyAccessToken(token: string): Promise<JwtPayload> {
+    let payload: JwtPayload;
+    try {
+      payload = await this.jwtService.verifyAsync<JwtPayload>(token);
+    } catch {
+      throw new UnauthorizedException({
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Access token is invalid or expired',
+        },
+      });
+    }
+
+    if (payload.jti) {
+      const blacklisted = await this.redis.get(
+        `auth-service:blacklist:${payload.jti}`,
+      );
+      if (blacklisted) {
+        throw new UnauthorizedException({
+          error: {
+            code: 'TOKEN_REVOKED',
+            message: 'Access token has been revoked',
+          },
+        });
+      }
+    }
+
+    return payload;
+  }
+
+  /**
+   * Blacklist a JWT access token by its JTI until it expires (S-04).
+   * Decodes the token without verification (Kong already validated it upstream).
+   * Stores the JTI in Redis with TTL = remaining token lifetime so the key
+   * is automatically cleaned up once the token can no longer be used.
+   * Kong and downstream services should check this blacklist via JWKS validation.
+   *
+   * Note: Kong performs its own JWT verification before forwarding requests.
+   * This blacklist is a defence-in-depth measure for the auth-service's own
+   * token issuance; services that rely solely on Kong JWT verification will
+   * not check this list — they rely on short token lifetimes (15 min) as the
+   * primary defence against stolen tokens post-signout.
+   */
+  async blacklistAccessToken(token: string): Promise<void> {
+    try {
+      // Decode without verification — we only need the JTI and expiry claims
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const decoded = this.jwtService.decode(token);
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      if (!decoded?.jti || !decoded?.exp) {
+        // Token is missing required claims — nothing to blacklist
+        return;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const ttlSeconds =
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        (decoded.exp as number) - Math.floor(Date.now() / 1000);
+      if (ttlSeconds <= 0) {
+        // Already expired — no need to blacklist
+        return;
+      }
+      await this.redis.set(
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        `auth-service:blacklist:${decoded.jti as string}`,
+        '1',
+        'EX',
+        ttlSeconds,
+      );
+    } catch {
+      // Best-effort — never throw from a signout path
+      this.logger.warn('Failed to blacklist access token; ignoring');
+    }
+  }
+
+  private issueToken(payload: Omit<JwtPayload, 'jti' | 'iat' | 'exp'>): string {
+    // Embed a unique JTI so the token can be individually revoked on signout (S-04).
+    const tokenPayload = { ...payload, jti: randomUUID() };
     // JwtService.sign return type is `any` in @nestjs/jwt typings.
     // We call it via an intermediate `unknown` cast to satisfy strict-any rules.
-
     const token: unknown = (this.jwtService.sign as (p: unknown) => unknown)(
-      payload,
+      tokenPayload,
     );
     return token as string;
   }

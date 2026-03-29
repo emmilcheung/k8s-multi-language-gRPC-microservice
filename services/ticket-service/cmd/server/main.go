@@ -13,6 +13,7 @@ import (
 	"github.com/acme/ticket-service/internal/config"
 	grpcserver "github.com/acme/ticket-service/internal/grpc"
 	"github.com/acme/ticket-service/internal/handler"
+	"github.com/acme/ticket-service/internal/health"
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/middleware"
 	"github.com/acme/ticket-service/internal/repository"
@@ -36,7 +37,7 @@ func main() {
 	}
 
 	// Initialise structured logger
-	log, err := logger.New(cfg.LogLevel)
+	log, err := logger.New(cfg.LogLevel, "ticket-service")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FATAL: failed to create logger: %v\n", err)
 		os.Exit(1)
@@ -57,6 +58,8 @@ func main() {
 	defer mongoRepo.Close(context.Background()) //nolint:errcheck
 
 	var ticketRepo repository.TicketRepository
+	var redisChecker *health.RedisChecker
+	var kafkaChecker *health.KafkaChecker
 	if cfg.RedisURL != "" {
 		redisOptions, err := redis.ParseURL(cfg.RedisURL)
 		if err != nil {
@@ -67,6 +70,11 @@ func main() {
 
 		ticketCache := cache.NewRedisCache(redisClient)
 		ticketRepo = repository.NewCachingTicketRepository(mongoRepo, ticketCache, log)
+		redisChecker, err = health.NewRedisChecker(cfg.RedisURL)
+		if err != nil {
+			log.Fatal("failed to create redis readiness checker", zap.Error(err))
+		}
+		defer redisChecker.Close() //nolint:errcheck
 		log.Info("ticket cache enabled", zap.String("redisAddr", redisOptions.Addr))
 	} else {
 		ticketRepo = repository.NewCachingTicketRepository(mongoRepo, cache.NewNoopCache(), log)
@@ -79,6 +87,7 @@ func main() {
 		log.Fatal("failed to create Kafka producer", zap.Error(err))
 	}
 	defer producer.Close()
+	kafkaChecker = health.NewKafkaChecker(cfg.KafkaBrokers)
 
 	// Kafka consumer — listens to order events and keeps ticket reservation state in sync.
 	// The producer is passed so the consumer can route failed messages to the DLQ.
@@ -120,7 +129,7 @@ func main() {
 	e.GET("/metrics", echoprometheus.NewHandler())
 
 	// Health checks
-	healthHandler := handler.NewHealthHandler(ticketRepo, log)
+	healthHandler := handler.NewHealthHandler(ticketRepo, redisChecker, kafkaChecker, log)
 	e.GET("/healthz/live", healthHandler.Live)
 	e.GET("/healthz/ready", healthHandler.Ready)
 

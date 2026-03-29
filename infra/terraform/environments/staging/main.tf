@@ -146,5 +146,10 @@ module "kong" {
 
   kong_config_map_name = "kong-dbless-config"
 
+  tls_enabled         = var.kong_tls_enabled
+  tls_certificate_arn = var.kong_tls_certificate_arn
+  tls_domain_name     = var.kong_tls_domain_name
+  tls_hosted_zone_id  = var.kong_tls_hosted_zone_id
+
   depends_on = [module.eks]
 }

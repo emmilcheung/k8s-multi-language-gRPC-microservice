@@ -51,16 +51,8 @@ type Producer struct {
 
 // NewProducer creates a Kafka producer with idempotence and acks=all.
 func NewProducer(brokers []string, log *zap.Logger) (*Producer, error) {
-	brokersStr := ""
-	for i, b := range brokers {
-		if i > 0 {
-			brokersStr += ","
-		}
-		brokersStr += b
-	}
-
 	p, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers":  brokersStr,
+		"bootstrap.servers":  joinBrokers(brokers),
 		"acks":               "all",
 		"enable.idempotence": true,
 		"retries":            3,

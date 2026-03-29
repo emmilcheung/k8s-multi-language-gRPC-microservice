@@ -7,8 +7,8 @@ import (
 	"time"
 
 	grpcserver "github.com/acme/ticket-service/internal/grpc"
-	v1 "github.com/acme/ticket-service/internal/grpc/tickets/v1"
 	"github.com/acme/ticket-service/internal/repository"
+	v1 "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	tcmongo "github.com/testcontainers/testcontainers-go/modules/mongodb"
@@ -115,7 +115,7 @@ func TestGrpc_GetTicket_returns_ticket_when_found(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "g-ticket-1", resp.GetTicketId())
 	assert.Equal(t, "gRPC Ticket", resp.GetTitle())
-	assert.Equal(t, 42.00, resp.GetPrice())
+	assert.Equal(t, "42", resp.GetPrice())
 	assert.Equal(t, "user-1", resp.GetUserId())
 }
 
@@ -184,7 +184,7 @@ func TestGrpc_ValidateTicketAvailability_returns_available_true_for_unreserved_t
 	require.NoError(t, err)
 	assert.True(t, resp.GetAvailable())
 	assert.Equal(t, "g-avail-1", resp.GetTicketId())
-	assert.Equal(t, 99.00, resp.GetPrice())
+	assert.Equal(t, "99", resp.GetPrice())
 }
 
 func TestGrpc_ValidateTicketAvailability_returns_available_false_for_reserved_ticket(t *testing.T) {

@@ -77,8 +77,26 @@ function makeUsersRepo(
 function makeJwtService(overrides: Partial<JwtService> = {}): JwtService {
   return {
     sign: vi.fn().mockReturnValue('signed.jwt.token'),
+    verifyAsync: vi.fn().mockResolvedValue({
+      sub: 'uuid-1',
+      email: 'user@example.com',
+      jti: 'jti-1',
+    }),
     ...overrides,
   } as unknown as JwtService;
+}
+
+function makeRedis(
+  overrides: Partial<{
+    get: ReturnType<typeof vi.fn>;
+    set: ReturnType<typeof vi.fn>;
+  }> = {},
+) {
+  return {
+    get: vi.fn().mockResolvedValue(null),
+    set: vi.fn().mockResolvedValue('OK'),
+    ...overrides,
+  };
 }
 
 function makeConfigService(rsaKey = TEST_RSA_PEM): ConfigService {
@@ -105,6 +123,10 @@ function makeAuthService(
     jwtService?: Partial<JwtService>;
     configService?: ConfigService;
     refreshTokenService?: Partial<RefreshTokenService>;
+    redis?: Partial<{
+      get: ReturnType<typeof vi.fn>;
+      set: ReturnType<typeof vi.fn>;
+    }>;
   } = {},
 ): {
   service: AuthService;
@@ -119,12 +141,14 @@ function makeAuthService(
     overrides.refreshTokenService,
   );
   const logger = makeLogger();
+  const redis = makeRedis(overrides.redis);
   const service = new AuthService(
     logger,
     usersRepo,
     jwtService,
     configService,
     refreshTokenService,
+    redis as never,
   );
   return { service, usersRepo, jwtService, refreshTokenService };
 }

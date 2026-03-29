@@ -1,0 +1,91 @@
+replicaCount: 2
+
+image:
+  repository: auth-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  port: 3000
+
+env:
+  NODE_ENV: production
+  PORT: "3000"
+
+# Name of a Kubernetes Secret containing:
+#   DATABASE_URL, JWT_SECRET, RSA_PRIVATE_KEY, KAFKA_BROKERS, REDIS_URL
+secretRef: auth-service-secrets
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+livenessProbe:
+  httpGet:
+    path: /healthz/live
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /healthz/ready
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# startupProbe runs before liveness/readiness. Gives the container up to
+# failureThreshold × periodSeconds (60 s) to complete startup before Kubernetes
+# considers it failed. Once startupProbe succeeds, the kubelet switches to the
+# regular liveness and readiness probes.
+startupProbe:
+  httpGet:
+    path: /healthz/live
+    port: http
+  failureThreshold: 12
+  periodSeconds: 5
+  timeoutSeconds: 5
+
+terminationGracePeriodSeconds: 30
+
+rollingUpdate:
+  maxSurge: 1
+  maxUnavailable: 0
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAntiAffinity:
+  enabled: true
+
+topologySpreadConstraints:
+  # Enable in production (multi-AZ EKS) to spread pods across availability zones.
+  # Requires nodes labelled with topology.kubernetes.io/zone (standard on EKS).
+  # Disabled by default (not applicable in single-node minikube).
+  enabled: false
+
+networkPolicy:
+  # Enable in staging/production to restrict pod-to-pod communication.
+  # Disabled by default to avoid breaking local (minikube) environments.
+  enabled: false

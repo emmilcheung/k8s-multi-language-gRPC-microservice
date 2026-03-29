@@ -1,5 +1,6 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { PrometheusModule } from '@willsoto/nestjs-prometheus';
+import { HttpRedMetricsMiddleware } from './http-red.middleware';
 
 @Module({
   imports: [
@@ -9,4 +10,8 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus';
     }),
   ],
 })
-export class MetricsModule {}
+export class MetricsModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(HttpRedMetricsMiddleware).forRoutes('*');
+  }
+}

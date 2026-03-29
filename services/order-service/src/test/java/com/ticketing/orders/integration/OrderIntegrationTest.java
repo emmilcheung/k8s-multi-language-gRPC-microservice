@@ -9,6 +9,7 @@ import com.ticketing.orders.grpc.ValidateTicketRequest;
 import com.ticketing.orders.grpc.ValidateTicketResponse;
 import com.ticketing.orders.repository.OrderRepository;
 import com.ticketing.orders.repository.OrderTicketRepository;
+import com.ticketing.orders.service.OrderService;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;
 import io.grpc.inprocess.InProcessChannelBuilder;
@@ -27,6 +28,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.GenericContainer;
@@ -35,6 +37,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -94,7 +97,7 @@ class OrderIntegrationTest {
     static Server grpcServer;
     static ManagedChannel grpcChannel;
 
-    /** Minimal ticket-service stub that always returns "available". */
+    /** Minimal ticket-service stub that returns realistic ticket data matching seeded test data. */
     static class StubTicketService extends TicketServiceGrpc.TicketServiceImplBase {
         @Override
         public void validateTicketAvailability(
@@ -102,6 +105,9 @@ class OrderIntegrationTest {
                 StreamObserver<ValidateTicketResponse> responseObserver) {
             responseObserver.onNext(ValidateTicketResponse.newBuilder()
                     .setAvailable(true)
+                    .setTicketId(request.getTicketId())
+                    .setTitle("Test Concert")
+                    .setPrice("79.99")
                     .build());
             responseObserver.onCompleted();
         }
@@ -137,6 +143,8 @@ class OrderIntegrationTest {
     @Autowired ObjectMapper objectMapper;
     @Autowired OrderTicketRepository orderTicketRepository;
     @Autowired OrderRepository orderRepository;
+    @Autowired OrderService orderService;
+    @Autowired KafkaTemplate<String, String> kafkaTemplate;
 
     private final UUID userId = UUID.randomUUID();
     private UUID ticketId;
@@ -361,5 +369,115 @@ class OrderIntegrationTest {
                         .header("X-User-Id", userId))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"));
+    }
+
+    // ── Kafka consumer integration (T-03) ────────────────────────────────────
+
+    @Test
+    void paymentCapturedEvent_marks_order_complete() throws Exception {
+        UUID orderId = createOrderAndReturnId(ticketId, userId);
+        orderService.markAwaitingPayment(orderId);
+
+        String event = """
+                {
+                  "specversion":"1.0",
+                  "type":"payments.payment.captured",
+                  "source":"payment-service",
+                  "id":"%s",
+                  "time":"%s",
+                  "datacontenttype":"application/json",
+                  "data":{"orderId":"%s"}
+                }
+                """.formatted(UUID.randomUUID(), OffsetDateTime.now(), orderId);
+
+        publish("payments.payment.captured", event);
+        awaitOrderStatus(orderId, OrderStatus.COMPLETE);
+    }
+
+    @Test
+    void expirationEvent_cancels_non_terminal_order() throws Exception {
+        UUID orderId = createOrderAndReturnId(ticketId, userId);
+
+        String event = """
+                {
+                  "specversion":"1.0",
+                  "type":"expiration.order.expiration_complete",
+                  "source":"expiration-service",
+                  "id":"%s",
+                  "time":"%s",
+                  "datacontenttype":"application/json",
+                  "data":{"orderId":"%s"}
+                }
+                """.formatted(UUID.randomUUID(), OffsetDateTime.now(), orderId);
+
+        publish("expiration.order.expiration_complete", event);
+        awaitOrderStatus(orderId, OrderStatus.CANCELLED);
+    }
+
+    @Test
+    void ticketUpdatedEvent_updates_local_ticket_replica() throws Exception {
+        String updatedTitle = "Updated Concert Title";
+        String event = """
+                {
+                  "specversion":"1.0",
+                  "type":"tickets.ticket.updated",
+                  "source":"ticket-service",
+                  "id":"%s",
+                  "time":"%s",
+                  "datacontenttype":"application/json",
+                  "data":{
+                    "id":"%s",
+                    "title":"%s",
+                    "price":"120.50"
+                  }
+                }
+                """.formatted(UUID.randomUUID(), OffsetDateTime.now(), ticketId, updatedTitle);
+
+        publish("tickets.ticket.updated", event);
+
+        awaitCondition(() -> orderTicketRepository.findById(ticketId)
+                .map(t -> updatedTitle.equals(t.getTitle()) && new BigDecimal("120.50").compareTo(t.getPrice()) == 0)
+                .orElse(false));
+    }
+
+    private UUID createOrderAndReturnId(UUID targetTicketId, UUID targetUserId) throws Exception {
+        String body = """
+                { "ticketId": "%s" }
+                """.formatted(targetTicketId);
+
+        MvcResult result = mockMvc.perform(post("/api/orders")
+                        .header("X-User-Id", targetUserId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        return UUID.fromString(objectMapper.readTree(result.getResponse().getContentAsString()).path("id").asText());
+    }
+
+    private void publish(String topic, String payload) throws Exception {
+        kafkaTemplate.send(topic, payload).get(10, TimeUnit.SECONDS);
+    }
+
+    private void awaitOrderStatus(UUID orderId, OrderStatus expected) throws Exception {
+        awaitCondition(() -> orderRepository.findByIdWithTicket(orderId)
+                .map(o -> o.getStatus() == expected)
+                .orElse(false));
+    }
+
+    private void awaitCondition(Condition condition) throws Exception {
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (System.currentTimeMillis() < deadline) {
+            if (condition.ok()) {
+                return;
+            }
+            Thread.sleep(100);
+        }
+        Assertions.fail("Condition not met within timeout");
+    }
+
+    @FunctionalInterface
+    private interface Condition {
+        boolean ok() throws Exception;
     }
 }

@@ -13,11 +13,16 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import path from 'path';
+import pino from 'pino';
+
+// Standalone structured logger for the migration script (O-09).
+// Uses the same JSON format as the main app without requiring NestJS bootstrap.
+const log = pino({ base: { service: 'auth-service' }, messageKey: 'message' });
 
 async function runMigrations(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
-    console.error('[migrate] DATABASE_URL is not set — cannot run migrations');
+    log.error('[migrate] DATABASE_URL is not set — cannot run migrations');
     process.exit(1);
   }
 
@@ -25,13 +30,13 @@ async function runMigrations(): Promise<void> {
 
   try {
     const db = drizzle(pool);
-    console.log('[migrate] Applying pending migrations…');
+    log.info('[migrate] Applying pending migrations…');
     await migrate(db, {
       migrationsFolder: path.join(__dirname, '..', 'migrations'),
     });
-    console.log('[migrate] Migrations applied successfully');
+    log.info('[migrate] Migrations applied successfully');
   } catch (err) {
-    console.error('[migrate] Migration failed:', err);
+    log.error({ err }, '[migrate] Migration failed');
     process.exit(1);
   } finally {
     await pool.end();

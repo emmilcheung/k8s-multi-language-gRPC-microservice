@@ -1,0 +1,55 @@
+{{/* ClusterIP Service — stable DNS name for in-cluster clients */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cp-kafka.fullname" . }}
+  labels:
+    {{- include "cp-kafka.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "cp-kafka.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: internal
+      port: {{ .Values.internalPort }}
+      targetPort: internal
+---
+{{/* Headless Service — required by StatefulSet for stable pod DNS */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cp-kafka.fullname" . }}-headless
+  labels:
+    {{- include "cp-kafka.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    {{- include "cp-kafka.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: internal
+      port: {{ .Values.internalPort }}
+      targetPort: internal
+    - name: controller
+      port: {{ .Values.controllerPort }}
+      targetPort: controller
+{{- if .Values.external.enabled }}
+---
+{{/* LoadBalancer Service — exposes Kafka EXTERNAL listener to the host via minikube tunnel.
+     On macOS + Docker driver, NodePort IPs are not routable from the host; LoadBalancer
+     services are reachable on localhost after `minikube tunnel` is running (same as Kong). */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cp-kafka.fullname" . }}-external
+  labels:
+    {{- include "cp-kafka.labels" . | nindent 4 }}
+spec:
+  type: LoadBalancer
+  selector:
+    {{- include "cp-kafka.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: external
+      port: 9093
+      targetPort: external
+{{- end }}

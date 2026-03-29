@@ -71,7 +71,15 @@ public class Order {
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
 
-    /** True when this order is in a state that allows payment (CREATED or AWAITING_PAYMENT). */
+    /** True when this order is in a state that allows payment (CREATED or AWAITING_PAYMENT).
+     *
+     * AWAITING_PAYMENT is a UI display state; there is no production producer that
+     * transitions orders into it before payment capture.  The real state machine is:
+     *   CREATED → COMPLETE  (payment captured)
+     *   CREATED → CANCELLED (expiration or user cancel)
+     * Accepting CREATED here keeps this method consistent with the client's canPay
+     * logic (order.status === "awaiting_payment" || order.status === "created").
+     */
     public boolean isAwaitingPayment() {
         return this.status == OrderStatus.AWAITING_PAYMENT || this.status == OrderStatus.CREATED;
     }

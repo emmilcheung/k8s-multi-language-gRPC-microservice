@@ -1,0 +1,51 @@
+{{- if .Values.networkPolicy.enabled }}
+# NetworkPolicy for auth-service (I-01)
+# Ingress: only from Kong proxy pods (labelled app=kong or app.kubernetes.io/name=kong)
+# Egress:  PostgreSQL (5432), Redis (6379), Kafka (9092), DNS (53)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "auth-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "auth-service.selectorLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "auth-service.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow HTTP from Kong proxy pods
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kong
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.port }}
+  egress:
+    # DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # PostgreSQL
+    - ports:
+        - protocol: TCP
+          port: 5432
+    # Redis
+    - ports:
+        - protocol: TCP
+          port: 6379
+    # Kafka
+    - ports:
+        - protocol: TCP
+          port: 9092
+    # Allow HTTPS for external calls (JWKS endpoint fetch, etc.)
+    - ports:
+        - protocol: TCP
+          port: 443
+{{- end }}

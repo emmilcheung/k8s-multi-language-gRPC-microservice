@@ -36,7 +36,6 @@ function otelMixin(): Record<string, string> {
         DATABASE_URL: Joi.string().required(),
         RSA_PRIVATE_KEY: Joi.string().required(),
         JWT_EXPIRY: Joi.string().default('15m'),
-        COOKIE_DOMAIN: Joi.string().default('localhost'),
         REDIS_URL: Joi.string().required(),
       }),
       validationOptions: { abortEarly: false },

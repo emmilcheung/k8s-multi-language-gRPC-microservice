@@ -19,6 +19,9 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     @Query("SELECT o FROM Order o JOIN FETCH o.ticket WHERE o.id = :id")
     Optional<Order> findByIdWithTicket(UUID id);
 
-    @Query("SELECT o FROM Order o JOIN FETCH o.ticket WHERE o.ticket.id = :ticketId AND o.status NOT IN :excludedStatuses")
-    Optional<Order> findActiveByTicketId(UUID ticketId, List<OrderStatus> excludedStatuses);
+    /**
+     * Returns true if an active (non-cancelled, non-complete) order exists for the given ticket.
+     * Derived query — no JOIN FETCH needed; Spring Data generates an efficient EXISTS query (P-06).
+     */
+    boolean existsByTicketIdAndStatusNotIn(UUID ticketId, List<OrderStatus> excludedStatuses);
 }

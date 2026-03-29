@@ -29,7 +29,7 @@ func main() {
 	}
 
 	// Initialise structured JSON logger.
-	log, err := logger.New(cfg.LogLevel)
+	log, err := logger.New(cfg.LogLevel, "expiration-service")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FATAL: failed to create logger: %v\n", err)
 		os.Exit(1)

@@ -1,0 +1,87 @@
+replicaCount: 2
+
+image:
+  repository: payment-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  port: 3002
+
+env:
+  NODE_ENV: production
+  PORT: "3002"
+  ORDER_SERVICE_URL: "http://order-service:8082"
+
+secretRef: payment-service-secrets  # contains DATABASE_URL, STRIPE_SECRET_KEY, KAFKA_BROKERS, REDIS_URL
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+livenessProbe:
+  httpGet:
+    path: /healthz/live
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /healthz/ready
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# startupProbe: 60 s budget for NestJS + Kafka consumer initialization.
+startupProbe:
+  httpGet:
+    path: /healthz/live
+    port: http
+  failureThreshold: 12
+  periodSeconds: 5
+  timeoutSeconds: 5
+
+terminationGracePeriodSeconds: 30
+
+rollingUpdate:
+  maxSurge: 1
+  maxUnavailable: 0
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAntiAffinity:
+  enabled: true
+
+topologySpreadConstraints:
+  # Enable in production (multi-AZ EKS) to spread pods across availability zones.
+  # Requires nodes labelled with topology.kubernetes.io/zone (standard on EKS).
+  # Disabled by default (not applicable in single-node minikube).
+  enabled: false
+
+networkPolicy:
+  # Enable in staging/production to restrict pod-to-pod communication.
+  # Disabled by default to avoid breaking local (minikube) environments.
+  enabled: false

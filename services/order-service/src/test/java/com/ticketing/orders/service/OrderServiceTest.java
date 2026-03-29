@@ -98,10 +98,10 @@ class OrderServiceTest {
                         .setAvailable(true)
                         .setTicketId(ticketId.toString())
                         .setTitle(ticket.getTitle())
-                        .setPrice(ticket.getPrice().floatValue())
+                        .setPrice(ticket.getPrice().toPlainString())
                         .build());
-        when(orderRepository.findActiveByTicketId(eq(ticketId), anyList()))
-                .thenReturn(Optional.empty());
+        when(orderRepository.existsByTicketIdAndStatusNotIn(eq(ticketId), anyList()))
+                .thenReturn(false);
         when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
         when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -117,10 +117,8 @@ class OrderServiceTest {
     @Test
     void createOrder_should_throw_BadRequestException_when_ticket_already_reserved() {
         // Test the transactional service directly — this exercises the guard logic.
-        Order existing = new Order(UUID.randomUUID(), OrderStatus.CREATED,
-                OffsetDateTime.now().plusMinutes(15), ticket);
-        when(orderRepository.findActiveByTicketId(eq(ticketId), anyList()))
-                .thenReturn(Optional.of(existing));
+        when(orderRepository.existsByTicketIdAndStatusNotIn(eq(ticketId), anyList()))
+                .thenReturn(true);
 
         // grpcTicket is null because the "already reserved" guard throws before it is used
         assertThatThrownBy(() -> orderTransactionService.createOrderTransactional(userId, ticketId, null))
@@ -134,8 +132,8 @@ class OrderServiceTest {
     void createOrder_should_upsert_ticket_replica_from_grpc_when_local_replica_missing() {
         // When Kafka is disabled (local dev) or delivery is delayed, the local replica may
         // not exist yet. The service should upsert it from the authoritative gRPC response.
-        when(orderRepository.findActiveByTicketId(eq(ticketId), anyList()))
-                .thenReturn(Optional.empty());
+        when(orderRepository.existsByTicketIdAndStatusNotIn(eq(ticketId), anyList()))
+                .thenReturn(false);
         when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.empty());
         when(orderTicketRepository.save(any(OrderTicket.class))).thenAnswer(inv -> inv.getArgument(0));
         when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -144,7 +142,7 @@ class OrderServiceTest {
                 .setAvailable(true)
                 .setTicketId(ticketId.toString())
                 .setTitle("Concert Ticket")
-                .setPrice(49.99f)
+                .setPrice("49.99")
                 .build();
 
         OrderResponse response = orderTransactionService.createOrderTransactional(userId, ticketId, grpcTicket);
@@ -198,9 +196,9 @@ class OrderServiceTest {
                         .setAvailable(true)
                         .setTicketId(ticketId.toString())
                         .setTitle(ticket.getTitle())
-                        .setPrice(ticket.getPrice().floatValue())
+                        .setPrice(ticket.getPrice().toPlainString())
                         .build());
-        when(orderRepository.findActiveByTicketId(eq(ticketId), anyList())).thenReturn(Optional.empty());
+        when(orderRepository.existsByTicketIdAndStatusNotIn(eq(ticketId), anyList())).thenReturn(false);
         when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
         when(orderRepository.save(any(Order.class))).thenThrow(new RuntimeException("db write failed"));
 
@@ -223,9 +221,9 @@ class OrderServiceTest {
                         .setAvailable(true)
                         .setTicketId(ticketId.toString())
                         .setTitle(ticket.getTitle())
-                        .setPrice(ticket.getPrice().floatValue())
+                        .setPrice(ticket.getPrice().toPlainString())
                         .build());
-        when(orderRepository.findActiveByTicketId(eq(ticketId), anyList())).thenReturn(Optional.empty());
+        when(orderRepository.existsByTicketIdAndStatusNotIn(eq(ticketId), anyList())).thenReturn(false);
         when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
         when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
 

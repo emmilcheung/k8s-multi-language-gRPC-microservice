@@ -59,7 +59,7 @@ spring:
     serialization:
       write-dates-as-timestamps: false
     deserialization:
-      fail-on-unknown-properties: false
+      fail-on-unknown-properties: true
 
 server:
   port: ${PORT:8080}
@@ -88,7 +88,7 @@ management:
 grpc:
   ticket-service:
     host: ${TICKET_SERVICE_GRPC_HOST:localhost}
-    port: ${TICKET_SERVICE_GRPC_PORT:9090}
+    port: ${TICKET_SERVICE_GRPC_PORT:50051}
 
 redis:
   url: ${REDIS_URL:redis://localhost:6379}

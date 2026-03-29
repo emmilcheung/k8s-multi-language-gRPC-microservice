@@ -1,0 +1,90 @@
+replicaCount: 2
+
+image:
+  repository: ticket-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  httpPort: 3001
+  grpcPort: 50051
+
+env:
+  APP_ENV: production
+  PORT: "3001"
+  GRPC_PORT: "50051"
+  LOG_LEVEL: info
+  MONGO_DB: tickets
+
+secretRef: ticket-service-secrets  # contains MONGO_URI, KAFKA_BROKERS
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+livenessProbe:
+  httpGet:
+    path: /healthz/live
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /healthz/ready
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# startupProbe: 60 s budget (12 × 5 s) for Go binary startup + MongoDB ping.
+startupProbe:
+  httpGet:
+    path: /healthz/live
+    port: http
+  failureThreshold: 12
+  periodSeconds: 5
+  timeoutSeconds: 5
+
+terminationGracePeriodSeconds: 30
+
+rollingUpdate:
+  maxSurge: 1
+  maxUnavailable: 0
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAntiAffinity:
+  enabled: true
+
+topologySpreadConstraints:
+  # Enable in production (multi-AZ EKS) to spread pods across availability zones.
+  # Requires nodes labelled with topology.kubernetes.io/zone (standard on EKS).
+  # Disabled by default (not applicable in single-node minikube).
+  enabled: false
+
+networkPolicy:
+  # Enable in staging/production to restrict pod-to-pod communication.
+  # Disabled by default to avoid breaking local (minikube) environments.
+  enabled: false
