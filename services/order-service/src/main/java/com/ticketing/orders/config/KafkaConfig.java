@@ -63,7 +63,7 @@ public class KafkaConfig {
      *
      * Retries up to 3 times with exponential back-off starting at 1 s, multiplied by 2
      * each attempt. After exhausting retries the message is forwarded to the DLQ topic
-     * (automatically named "<original-topic>.DLT" by DeadLetterPublishingRecoverer —
+     * (automatically named "<original-topic>.dlq" by DeadLetterPublishingRecoverer —
      * we declare matching topic names above).
      */
     @Bean

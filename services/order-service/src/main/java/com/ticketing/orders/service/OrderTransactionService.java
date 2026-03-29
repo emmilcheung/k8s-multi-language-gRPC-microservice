@@ -73,10 +73,10 @@ public class OrderTransactionService {
      */
     @Transactional
     public OrderResponse createOrderTransactional(UUID userId, UUID ticketId, ValidateTicketResponse grpcTicket) {
-        // Guard: reject if an active order already exists for this ticket
+        // Guard: reject if an active order already exists for this ticket.
+        // existsBy derived query avoids a JOIN FETCH — efficient EXISTS check (P-06).
         boolean alreadyReserved = orderRepository
-                .findActiveByTicketId(ticketId, java.util.List.of(OrderStatus.CANCELLED, OrderStatus.COMPLETE))
-                .isPresent();
+                .existsByTicketIdAndStatusNotIn(ticketId, java.util.List.of(OrderStatus.CANCELLED, OrderStatus.COMPLETE));
         if (alreadyReserved) {
             throw new BadRequestException("Ticket is already reserved by another order");
         }
