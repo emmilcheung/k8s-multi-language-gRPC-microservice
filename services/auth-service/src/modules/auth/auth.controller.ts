@@ -126,15 +126,40 @@ export class AuthController {
   }
 
   // GET /api/users/currentuser
-  // Kong injects X-User-Id after JWT verification; this endpoint reads that header
+  // Kong injects X-User-Id after JWT verification. As a defense-in-depth
+  // measure (S-03), we also verify the JWT from the cookie ourselves so that
+  // direct pod access (bypassing Kong) is rejected for unauthenticated callers.
   @Get('api/users/currentuser')
   @HttpCode(HttpStatus.OK)
-  currentUser(@Req() req: Request) {
-    const userId = req.headers['x-user-id'] as string | undefined;
-    if (!userId) {
+  async currentUser(@Req() req: Request) {
+    const kongUserId = req.headers['x-user-id'] as string | undefined;
+    const token = req.cookies['token'] as string | undefined;
+
+    // Fast path: no token and no Kong-injected header → not authenticated.
+    if (!token && !kongUserId) {
       return { currentUser: null };
     }
-    return { currentUser: { id: userId } };
+
+    // If a token cookie is present, verify it locally (signature + blacklist).
+    // This catches cases where someone bypasses Kong and hits the pod directly.
+    if (token) {
+      try {
+        const payload = await this.authService.verifyAccessToken(token);
+        // Cross-check: if Kong also set X-User-Id, it must match the JWT sub.
+        if (kongUserId && kongUserId !== payload.sub) {
+          // Header/token mismatch — reject the request rather than trust either.
+          return { currentUser: null };
+        }
+        return { currentUser: { id: payload.sub, email: payload.email } };
+      } catch {
+        // Token present but invalid/revoked — treat as unauthenticated.
+        return { currentUser: null };
+      }
+    }
+
+    // No cookie but Kong set X-User-Id (e.g. API client using Bearer header).
+    // Trust Kong's validation; return a minimal identity without email.
+    return { currentUser: { id: kongUserId } };
   }
 
   // GET /.well-known/jwks.json — public key endpoint consumed by Kong

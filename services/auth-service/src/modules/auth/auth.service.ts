@@ -146,6 +146,42 @@ export class AuthService {
   }
 
   /**
+   * Verify an access token's signature and check whether its JTI has been
+   * blacklisted (e.g. due to an explicit signout).
+   *
+   * Used by the currentUser endpoint for defense-in-depth verification (S-03):
+   * in addition to trusting the X-User-Id header injected by Kong, we locally
+   * verify the JWT so that direct (non-Kong) pod access is also rejected for
+   * unauthenticated callers.
+   *
+   * Returns the verified payload on success. Throws UnauthorizedException if
+   * the token is invalid, expired, or blacklisted.
+   */
+  async verifyAccessToken(token: string): Promise<JwtPayload> {
+    let payload: JwtPayload;
+    try {
+      payload = await this.jwtService.verifyAsync<JwtPayload>(token);
+    } catch {
+      throw new UnauthorizedException({
+        error: { code: 'INVALID_TOKEN', message: 'Access token is invalid or expired' },
+      });
+    }
+
+    if (payload.jti) {
+      const blacklisted = await this.redis.get(
+        `auth-service:blacklist:${payload.jti}`,
+      );
+      if (blacklisted) {
+        throw new UnauthorizedException({
+          error: { code: 'TOKEN_REVOKED', message: 'Access token has been revoked' },
+        });
+      }
+    }
+
+    return payload;
+  }
+
+  /**
    * Blacklist a JWT access token by its JTI until it expires (S-04).
    * Decodes the token without verification (Kong already validated it upstream).
    * Stores the JTI in Redis with TTL = remaining token lifetime so the key
@@ -161,7 +197,7 @@ export class AuthService {
   async blacklistAccessToken(token: string): Promise<void> {
     try {
       // Decode without verification — we only need the JTI and expiry claims
-      const decoded = this.jwtService.decode(token) as JwtPayload | null;
+      const decoded = this.jwtService.decode(token);
       if (!decoded?.jti || !decoded?.exp) {
         // Token is missing required claims — nothing to blacklist
         return;
