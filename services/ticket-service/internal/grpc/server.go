@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/acme/ticket-service/internal/grpc/tickets/v1"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
+	v1 "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"

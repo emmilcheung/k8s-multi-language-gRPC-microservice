@@ -23,7 +23,10 @@ require (
 	go.uber.org/zap v1.27.1
 	google.golang.org/grpc v1.79.2
 	google.golang.org/protobuf v1.36.11
+	github.com/org/ticketing v0.0.0
 )
+
+replace github.com/org/ticketing => ../../libs/grpc-stubs/go
 
 require (
 	dario.cat/mergo v1.0.2 // indirect

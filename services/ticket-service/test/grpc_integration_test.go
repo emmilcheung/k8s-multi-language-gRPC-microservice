@@ -7,8 +7,8 @@ import (
 	"time"
 
 	grpcserver "github.com/acme/ticket-service/internal/grpc"
-	v1 "github.com/acme/ticket-service/internal/grpc/tickets/v1"
 	"github.com/acme/ticket-service/internal/repository"
+	v1 "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	tcmongo "github.com/testcontainers/testcontainers-go/modules/mongodb"
