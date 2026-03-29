@@ -5,9 +5,15 @@ FROM golang:1.25-bookworm@sha256:7fb09d8804035fbde8a84ed59ca9f46dd68c6f160f9d193
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Copy dependency manifests first so Docker can cache the download layer (P-10).
+# This layer is only invalidated when go.mod or go.sum change, not on every source edit.
 COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source and build
 COPY . .
-RUN go mod tidy && CGO_ENABLED=1 GOOS=linux go build -o /expiration-service ./cmd/server
+RUN CGO_ENABLED=1 GOOS=linux go build -o /expiration-service ./cmd/server
 
 # Stage 2: runtime
 FROM debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a AS runtime
