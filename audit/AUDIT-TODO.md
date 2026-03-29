@@ -102,7 +102,7 @@ Items are organized into **execution phases** — work through them in order. Ea
   - AGENTS.md: SS5.1 requires "short-lived access tokens (15 min), long-lived refresh tokens stored server-side (Redis) and rotatable."
   - Fix: Issue refresh tokens (stored in Redis with TTL), rotate on use, return as HttpOnly cookie alongside access token. Add `POST /api/auth/refresh` endpoint.
 
-- [ ] **S-03 | P1 | Add defense-in-depth JWT verification to currentUser**
+- [x] **S-03 | P1 | Add defense-in-depth JWT verification to currentUser**
   - File: `services/auth-service/src/modules/auth/auth.controller.ts:52-58`
   - Fix: Verify the JWT from the cookie at the service level in addition to trusting `X-User-Id`. Ensure NetworkPolicy restricts direct pod access.
 
@@ -184,7 +184,7 @@ Items are organized into **execution phases** — work through them in order. Ea
   - Depends on: O-01
   - Fix: Configure each logging framework to extract trace context from OTel context and include `traceId`/`spanId` in every log line.
 
-- [ ] **O-07 | P1 | Make gRPC server observable (duplicate of R-08)**
+- [x] **O-07 | P1 | Make gRPC server observable (duplicate of R-08)** *(done — otelgrpc.NewServerHandler() added as grpc.StatsHandler in ticket-service grpc/server.go)*
   - Covered by R-08 above. Ensure gRPC interceptors include OTel trace propagation.
 
 ### 2.5 Performance (P1)
@@ -193,7 +193,7 @@ Items are organized into **execution phases** — work through them in order. Ea
   - File: `services/ticket-service/internal/repository/mongo_ticket_repository.go:171-186`
   - Fix: Implement cursor-based pagination with `limit` and `after` parameters. Update HTTP handler and gRPC service to accept pagination params.
 
-- [ ] **P-02 | P1 | Add pagination to client homepage**
+- [x] **P-02 | P1 | Add pagination to client homepage** *(done — fetchTicketPage Server Action added to tickets.ts; TicketGrid client component created with Load More button; page.tsx updated to use server-rendered first page)*
   - File: `services/client/app/page.tsx:21`
   - Fix: Add `?limit=20&offset=0` support. Implement pagination UI (numbered pages or infinite scroll).
 
@@ -203,15 +203,15 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 2.6 Infrastructure (P1)
 
-- [ ] **I-01 | P1 | Add NetworkPolicy to all Helm sub-charts**
+- [x] **I-01 | P1 | Add NetworkPolicy to all Helm sub-charts** *(done — networkpolicy.yaml added to all 6 sub-charts; gated on networkPolicy.enabled: false by default)*
   - Files: All `infra/helm/charts/*/templates/`
   - Fix: Add `networkpolicy.yaml` template to each sub-chart. Example: auth-service allows ingress only from Kong; order-service allows ingress from Kong, egress to ticket-service + Kafka + PostgreSQL.
 
-- [ ] **I-02 | P1 | Add startupProbe for slow-starting services**
+- [x] **I-02 | P1 | Add startupProbe for slow-starting services** *(done — startupProbe added to all 6 sub-charts; order-service gets 150 s budget, others 30–60 s; livenessProbe.initialDelaySeconds reduced to 5 s)*
   - File: `infra/helm/charts/order-service/values.yaml:43-50`
   - Fix: Add `startupProbe` with `failureThreshold: 30`, `periodSeconds: 5` (150s budget). Reduce liveness `initialDelaySeconds` back to a short value.
 
-- [ ] **I-03 | P1 | Add topologySpreadConstraints for production**
+- [x] **I-03 | P1 | Add topologySpreadConstraints for production** *(done — topologySpreadConstraints block added to all 6 deployment templates; gated on topologySpreadConstraints.enabled: false by default)*
   - Files: All Helm deployment templates
   - Fix: Add `topologySpreadConstraints` with `topology.kubernetes.io/zone` key. Only apply in production (conditional on values).
 
@@ -243,54 +243,54 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 3.1 Security (P2)
 
-- [ ] **S-04 | P2 | Implement Redis-based JWT blacklist on signout**
+- [x] **S-04 | P2 | Implement Redis-based JWT blacklist on signout**
   - File: `services/auth-service/src/modules/auth/auth.controller.ts:44-46`
   - Fix: On signout, add the token's `jti` to Redis with TTL = remaining token lifetime. Check blacklist on every auth check.
 
-- [ ] **S-06 | P2 | Derive cookie maxAge from JWT_EXPIRY config**
+- [x] **S-06 | P2 | Derive cookie maxAge from JWT_EXPIRY config**
   - File: `services/auth-service/src/modules/auth/auth.controller.ts:72`
   - Fix: Use `ms()` to parse `JWT_EXPIRY` string, set `maxAge` dynamically.
 
-- [ ] **S-09 | P2 | Set fail-on-unknown-properties: true in order-service**
+- [x] **S-09 | P2 | Set fail-on-unknown-properties: true in order-service**
   - File: `services/order-service/src/main/resources/application.yml:62`
 
-- [ ] **S-10 | P2 | Add UUID format validation to CreateOrderRequest.ticketId**
+- [x] **S-10 | P2 | Add UUID format validation to CreateOrderRequest.ticketId**
   - File: `services/order-service/src/main/java/com/ticketing/orders/dto/CreateOrderRequest.java:12`
   - Fix: Add `@Pattern(regexp = "^[0-9a-f]{8}-...")` or add `IllegalArgumentException` handler to `GlobalExceptionHandler`.
 
-- [ ] **S-11 | P2 | Restrict currency field to valid ISO 4217 codes**
+- [x] **S-11 | P2 | Restrict currency field to valid ISO 4217 codes**
   - File: `services/payment-service/src/modules/payments/payments.dto.ts:12-13`
   - Fix: Use `@IsIn(['usd', 'eur', ...])` or at minimum `@MaxLength(3)`.
 
-- [ ] **S-14 | P2 | Add email format validation in client Server Actions**
+- [x] **S-14 | P2 | Add email format validation in client Server Actions**
   - File: `services/client/app/actions/auth.ts:25-26`
 
-- [ ] **S-20 | P2 | Audit Git history for committed .env files**
+- [x] **S-20 | P2 | Audit Git history for committed .env files**
   - Run: `git log --all --diff-filter=A -- '**/.env'`. If found, consider rotating any exposed credentials.
 
 ### 3.2 Correctness (P2)
 
-- [ ] **C-04 | P2 | Distinguish OCC conflict from not-found in ticket-service Update**
+- [x] **C-04 | P2 | Distinguish OCC conflict from not-found in ticket-service Update**
   - File: `services/ticket-service/internal/repository/mongo_ticket_repository.go:213`
   - Fix: After `MatchedCount == 0`, do `FindByID`. If exists → `ErrVersionConflict` (409). If not → `ErrTicketNotFound` (404).
 
-- [ ] **C-07 | P2 | Delete dead state machine package in order-service**
+- [x] **C-07 | P2 | Delete dead state machine package in order-service**
   - File: `services/order-service/src/main/java/com/ticketing/orders/statemachine/` (entire package)
   - Remove `@EnableStateMachineFactory` from application class.
 
-- [ ] **C-08 | P2 | Change proto price from double to string (or int64 cents)**
+- [x] **C-08 | P2 | Change proto price from double to string (or int64 cents)**
   - File: `proto/tickets/v1/tickets.proto:39`
   - Impact: Requires regenerating stubs and updating all services that consume the proto.
 
-- [ ] **C-09 | P2 | Tighten isAwaitingPayment() to exclude CREATED status**
+- [x] **C-09 | P2 | Tighten isAwaitingPayment() to exclude CREATED status**
   - File: `services/order-service/src/main/java/com/ticketing/orders/entity/Order.java:76`
   - Fix: Return `true` only for `AWAITING_PAYMENT`, not for `CREATED`.
 
-- [ ] **C-11 | P2 | Fix STRIPE_SECRET_KEY mock-mode mismatch**
+- [x] **C-11 | P2 | Fix STRIPE_SECRET_KEY mock-mode mismatch**
   - Files: `services/payment-service/.env` + `src/modules/payments/payments.service.ts:60`
   - Fix: Align `.env` value to `test_mock` (no `sk_` prefix) or change the comparison.
 
-- [ ] **C-12 | P2 | Fix TICKET_SERVICE_GRPC_PORT default to 50051**
+- [x] **C-12 | P2 | Fix TICKET_SERVICE_GRPC_PORT default to 50051**
   - Files: `services/order-service/src/main/resources/application.yml:91`, `.env.example:11`
 
 ### 3.3 Resilience (P2)
@@ -303,7 +303,7 @@ Items are organized into **execution phases** — work through them in order. Ea
   - Files: `services/ticket-service/cmd/server/main.go:97`, `services/expiration-service/cmd/server/main.go:69-72`
   - Fix: Use errgroup or channel to propagate errors to main goroutine.
 
-- [ ] **R-13 | P2 | Map gRPC status codes to appropriate HTTP codes**
+- [x] **R-13 | P2 | Map gRPC status codes to appropriate HTTP codes**
   - File: `services/order-service/src/main/java/com/ticketing/orders/grpc/TicketServiceClient.java:38-42`
   - Fix: Inspect `e.getStatus().getCode()`. Map `UNAVAILABLE` → 503, `INTERNAL` → 500, `NOT_FOUND` → 404, etc.
 
@@ -313,7 +313,7 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 3.4 Observability (P2)
 
-- [ ] **O-03 | P2 | Add custom RED metrics to NestJS services**
+- [x] **O-03 | P2 | Add custom RED metrics to NestJS services**
   - Files: `services/auth-service/src/modules/metrics/`, `services/payment-service/src/modules/metrics/`
   - Fix: Add `prom-client` histograms for `http_request_duration_seconds` and counters for `http_requests_total`, labeled by `method`, `route`, `status_code`.
 
@@ -321,51 +321,51 @@ Items are organized into **execution phases** — work through them in order. Ea
   - Files: `services/auth-service/src/common/filters/`, `services/payment-service/src/common/filters/`
   - Fix: Register via `APP_FILTER` provider token. Inject `PinoLogger`. Remove `console.error`.
 
-- [ ] **O-06 | P2 | Add all-dependency readiness checks**
+- [x] **O-06 | P2 | Add all-dependency readiness checks**
   - Services: auth-service, ticket-service, payment-service, expiration-service
   - Fix: Check Kafka, Redis, gRPC upstream connectivity in readiness probes. Return 503 if any dependency is down.
 
 ### 3.5 Performance (P2)
 
-- [ ] **P-04 | P2 | Fix duplicate API calls on ticket detail page**
+- [x] **P-04 | P2 | Fix duplicate API calls on ticket detail page**
   - File: `services/client/app/tickets/[ticketId]/page.tsx:28-46`
   - Depends on: P-03 (caching fix). Once caching is enabled, Next.js deduplicates automatically.
 
-- [ ] **P-05 | P2 | Decode JWT from cookie instead of HTTP roundtrip for user ID**
+- [x] **P-05 | P2 | Decode JWT from cookie instead of HTTP roundtrip for user ID**
   - File: `services/client/app/tickets/[ticketId]/page.tsx:54-61`
   - Fix: Decode the JWT payload (base64) from the cookie to extract user ID. No network call needed.
 
-- [ ] **P-07 | P2 | Add memory metric to HPA definitions**
+- [x] **P-07 | P2 | Add memory metric to HPA definitions**
   - Files: All `infra/helm/charts/*/templates/hpa.yaml`
   - Fix: Add memory utilization as a second scaling metric.
 
-- [ ] **P-08 | P2 | Add loading.tsx Suspense boundaries**
+- [x] **P-08 | P2 | Add loading.tsx Suspense boundaries**
   - Files: `services/client/app/tickets/[ticketId]/`, `app/orders/[orderId]/`, `app/orders/`
   - Fix: Create `loading.tsx` files with skeleton screens for data-heavy routes.
 
-- [ ] **P-11 | P2 | Fix static replicas conflicting with HPA**
+- [x] **P-11 | P2 | Fix static replicas conflicting with HPA**
   - Files: All `infra/helm/charts/*/templates/deployment.yaml`
   - Fix: Conditionally omit `replicas` when HPA is enabled: `{{- if not .Values.autoscaling.enabled }}`.
 
 ### 3.6 Infrastructure (P2)
 
-- [ ] **I-05 | P2 | Add conditional guard on ticket-service envFrom**
+- [x] **I-05 | P2 | Add conditional guard on ticket-service envFrom**
   - File: `infra/helm/charts/ticket-service/templates/deployment.yaml:51-53`
   - Fix: Wrap `envFrom` in `{{- if .Values.secretRef }}` like other services.
 
-- [ ] **I-06 | P2 | Add ServiceAccount per service in Helm**
+- [x] **I-06 | P2 | Add ServiceAccount per service in Helm**
   - Files: All Helm sub-charts
   - Fix: Add `serviceaccount.yaml` template. Reference in deployment spec. Even if IRSA isn't configured yet, it's needed for EKS.
 
-- [ ] **I-13 | P2 | Add concurrency control to CI workflows**
+- [x] **I-13 | P2 | Add concurrency control to CI workflows**
   - Files: All `.github/workflows/`
   - Fix: Add `concurrency: { group: ci-<service>-${{ github.ref }}, cancel-in-progress: true }`.
 
-- [ ] **I-14 | P2 | Eliminate double image build in CI push job**
+- [x] **I-14 | P2 | Eliminate double image build in CI push job**
   - Files: All CI pipelines
   - Fix: Export image as tar artifact in build job, load in push job. Or use a single job.
 
-- [ ] **I-15 | P2 | Create CI pipeline for kong-gateway**
+- [x] **I-15 | P2 | Create CI pipeline for kong-gateway**
   - File: Create `.github/workflows/ci-kong-gateway.yml`
   - Fix: Run `build.sh` + `validate.sh` per environment. Verify config rendering.
 
@@ -381,71 +381,71 @@ Items are organized into **execution phases** — work through them in order. Ea
   - File: `.github/workflows/e2e.yml:28-31`
   - Fix: Derive public key from private key and set both env vars.
 
-- [ ] **I-20 | P2 | Create S3 state backend bootstrap script**
+- [x] **I-20 | P2 | Create S3 state backend bootstrap script**
   - File: Create `infra/scripts/bootstrap-state.sh`
   - Fix: Script that creates S3 bucket + DynamoDB lock table for Terraform state.
 
-- [ ] **I-21 | P2 | Add TLS termination config to Kong Terraform module**
+- [x] **I-21 | P2 | Add TLS termination config to Kong Terraform module**
   - File: `infra/terraform/modules/kong/main.tf`
   - Fix: Add ACM certificate resource and NLB HTTPS listener.
 
-- [ ] **I-22 | P2 | Create Terraform CI/CD pipeline**
+- [x] **I-22 | P2 | Create Terraform CI/CD pipeline**
   - File: Create `.github/workflows/ci-terraform.yml`
   - Fix: `terraform fmt -check` + `terraform validate` + `terraform plan` (no apply in CI without approval).
 
 ### 3.7 Code Quality (P2)
 
-- [ ] **DRY-01 | P2 | Extract shared RSA key parsing in auth-service**
+- [x] **DRY-01 | P2 | Extract shared RSA key parsing in auth-service**
   - Files: `services/auth-service/src/modules/auth/auth.module.ts:16-18`, `auth.service.ts:40-42`
   - Fix: Create a shared utility function or provider that parses the RSA key once.
 
-- [ ] **DRY-02 | P2 | Extract shared base()/authHeaders() in client Server Actions**
+- [x] **DRY-02 | P2 | Extract shared base()/authHeaders() in client Server Actions**
   - Files: `services/client/app/actions/auth.ts`, `actions/tickets.ts`, `actions/orders.ts`
   - Fix: Move to a shared `lib/server-utils.ts` file.
 
-- [ ] **D-01 | P2 | Delete dead state machine package** (same as C-07)
+- [x] **D-01 | P2 | Delete dead state machine package** (same as C-07)
 
-- [ ] **D-05 | P2 | Remove dead clientApi (axios) export**
+- [x] **D-05 | P2 | Remove dead clientApi (axios) export**
   - File: `services/client/lib/api.ts:43-49`
   - Also remove `axios` from `package.json` dependencies.
 
-- [ ] **CV-01 | P2 | Fix go.mod Go version (1.25 doesn't exist)**
+- [x] **CV-01 | P2 | Fix go.mod Go version (1.25 doesn't exist)**
   - Files: `services/ticket-service/go.mod:3`, `services/expiration-service/go.mod:3`
   - Fix: Change to `go 1.23` (or the actual Go version in use).
 
-- [ ] **CV-05 | P2 | Fix EXPOSE port mismatch in expiration-service Dockerfile**
+- [x] **CV-05 | P2 | Fix EXPOSE port mismatch in expiration-service Dockerfile**
   - File: `services/expiration-service/Dockerfile:23`
   - Fix: Change `EXPOSE 8083` to `EXPOSE 8080` (or whatever `PORT` env var defaults to).
 
 ### 3.8 Testing (P2)
 
-- [ ] **T-03 | P2 | Add Kafka consumer integration tests to order-service**
+- [x] **T-03 | P2 | Add Kafka consumer integration tests to order-service**
   - Fix: Test payment/ticket/expiration event handling with real Kafka (Testcontainers).
 
-- [ ] **T-04 | P2 | Add Kafka consumer integration tests to payment-service**
+- [x] **T-04 | P2 | Add Kafka consumer integration tests to payment-service**
   - Fix: Include `OrdersConsumer` in the test module. Test with real Kafka.
 
-- [ ] **T-05 | P2 | Add unit tests for client Server Actions**
+- [x] **T-05 | P2 | Add unit tests for client Server Actions**
   - Fix: Test validation logic and cookie handling in `auth.ts`, `tickets.ts`, `orders.ts`.
 
-- [ ] **T-08 | P2 | Add concurrent OCC conflict test to ticket-service**
+- [x] **T-08 | P2 | Add concurrent OCC conflict test to ticket-service**
   - Fix: Two goroutines update the same ticket simultaneously. Verify one succeeds and one gets a version conflict.
 
-- [ ] **T-10 | P2 | Fix auth-service integration test isolation**
+- [x] **T-10 | P2 | Fix auth-service integration test isolation**
   - File: `services/auth-service/test/auth.integration.spec.ts`
   - Fix: Use per-test transaction rollback or truncate tables in `beforeEach`.
 
-- [ ] **T-11 | P2 | Replace os.Unsetenv with t.Setenv in Go config tests**
+- [x] **T-11 | P2 | Replace os.Unsetenv with t.Setenv in Go config tests**
   - Files: `services/ticket-service/internal/config/config_test.go`, `services/expiration-service/...`
 
-- [ ] **T-12 | P2 | Replace time.Sleep with polling assertions in expiration tests**
+- [x] **T-12 | P2 | Replace time.Sleep with polling assertions in expiration tests**
   - File: `services/expiration-service/test/integration_test.go:156,181,204`
 
-- [ ] **T-13 | P2 | Remove fixed host port for Kafka in expiration tests**
+- [x] **T-13 | P2 | Remove fixed host port for Kafka in expiration tests**
   - File: `services/expiration-service/test/integration_test.go:65`
   - Fix: Use dynamic port assignment from Testcontainers.
 
-- [ ] **T-14 | P2 | Improve client component test mocking strategy**
+- [x] **T-14 | P2 | Improve client component test mocking strategy**
   - Files: `services/client/__tests__/*.test.tsx`
   - Fix: Test actual form submission instead of mocking `useActionState` at module level.
 
@@ -457,65 +457,65 @@ Items are organized into **execution phases** — work through them in order. Ea
 
 ### 4.1 Security (P3)
 
-- [ ] **S-12 | P3 | Add UUID format validation on ticket-service path params**
-- [ ] **S-13 | P3 | Use utf8.RuneCountInString() for title length validation**
-- [ ] **S-21 | P3 | Add packageManager field to all Node.js package.json files**
+- [x] **S-12 | P3 | Add UUID format validation on ticket-service path params** *(done — uuidRE regex added to GetByID and Update handlers in ticket_handler.go)*
+- [x] **S-13 | P3 | Use utf8.RuneCountInString() for title length validation** *(done — utf8.RuneCountInString used in Create and Update handlers)*
+- [x] **S-21 | P3 | Add packageManager field to all Node.js package.json files** *(done — packageManager + engines added to auth-service, payment-service, client)*
 
 ### 4.2 Correctness (P3)
 
-- [ ] **C-10 | P3 | Fix drizzle.config.ts output directory mismatch**
+- [x] **C-10 | P3 | Fix drizzle.config.ts output directory mismatch** *(done — auth-service drizzle.config.ts `out` changed from `./drizzle` to `./migrations` to match migrate.ts migrationsFolder path)*
 
 ### 4.3 Resilience (P3)
 
-- [ ] **R-10 | P3 | Fix quadratic backoff to exponential with jitter in expiration-service**
+- [x] **R-10 | P3 | Fix quadratic backoff to exponential with jitter in expiration-service** *(done — exponentialBackoffWithJitter() implemented in both ticket-service and expiration-service kafka consumers)*
 
 ### 4.4 Observability (P3)
 
-- [ ] **O-05 | P3 | Add service field to ticket-service/expiration-service logger**
-- [ ] **O-08 | P3 | Parse traceparent header to extract just trace ID**
-- [ ] **O-09 | P3 | Replace console.log in migrate.ts with standalone Pino instance**
+- [x] **O-05 | P3 | Add service field to ticket-service/expiration-service logger** *(done — logger.New() now accepts a `service string` param and bakes it as a permanent zap field on every log line)*
+- [x] **O-08 | P3 | Parse traceparent header to extract just trace ID** *(done — middleware already uses spanCtx.TraceID().String() from OTel span context, not the raw traceparent header)*
+- [x] **O-09 | P3 | Replace console.log in migrate.ts with standalone Pino instance** *(done — standalone pino logger added to both auth-service and payment-service migrate.ts; pino added as direct dependency)*
 
 ### 4.5 Performance (P3)
 
-- [ ] **P-06 | P3 | Replace JOIN FETCH with existsBy query in order-service**
-- [ ] **P-09 | P3 | Remove unused axios dependency from client**
-- [ ] **P-10 | P3 | Fix Docker layer caching for Go services**
+- [x] **P-06 | P3 | Replace JOIN FETCH with existsBy query in order-service** *(done — OrderRepository.findActiveByTicketId replaced with existsByTicketIdAndStatusNotIn derived query; OrderTransactionService and OrderServiceTest updated)*
+- [x] **P-09 | P3 | Remove unused axios dependency from client** *(done — axios was already removed from package.json and not referenced in any source file)*
+- [x] **P-10 | P3 | Fix Docker layer caching for Go services** *(done — split `COPY . .` from `COPY go.mod go.sum` + `go mod download` in ticket-service and expiration-service Dockerfiles; also removed `go mod tidy` from build step)*
 
 ### 4.6 Infrastructure (P3)
 
-- [ ] **I-07 | P3 | Add _helpers.tpl to all Helm sub-charts**
-- [ ] **I-08 | P3 | Wire global.imageRegistry into deployment templates or remove it**
-- [ ] **I-09 | P3 | Add explicit RollingUpdate strategy to deployments**
-- [ ] **I-10 | P3 | Add NOTES.txt to Helm sub-charts**
+- [x] **I-07 | P3 | Add _helpers.tpl to all Helm sub-charts**
+- [x] **I-08 | P3 | Wire global.imageRegistry into deployment templates or remove it**
+- [x] **I-09 | P3 | Add explicit RollingUpdate strategy to deployments**
+- [x] **I-10 | P3 | Add NOTES.txt to Helm sub-charts**
 
 ### 4.7 Code Quality (P3)
 
-- [ ] **D-02 | P3 | Remove unused NON_TERMINAL_STATUSES constant (order-service)**
-- [ ] **D-03 | P3 | Delete app.e2e-spec.ts scaffold test (auth-service)**
-- [ ] **D-04 | P3 | Delete jest-e2e.json config (auth-service uses Vitest)**
-- [ ] **D-06 | P3 | Remove unused jwks-rsa dependency (auth-service)**
-- [ ] **D-07 | P3 | Remove unused @nestjs/microservices dependency (payment-service)**
-- [ ] **D-08 | P3 | Remove unused source-map-support, ts-loader dev deps (auth-service)**
-- [ ] **D-09 | P3 | Move pino-pretty to devDependencies (payment-service)**
-- [ ] **D-10 | P3 | Remove unused COOKIE_DOMAIN from Joi schema (auth-service)**
-- [ ] **D-11 | P3 | Remove unused TopicExpirationCompleteDLQ constant** (fixed by R-04)
-- [ ] **D-12 | P3 | Remove unused ConflictException import (payment-service)**
-- [ ] **D-13 | P3 | Replace Jest globals with Vitest in ESLint config (auth, payment)**
-- [ ] **DRY-03 | P3 | Extract shared broker string join logic (ticket-service)**
-- [ ] **DRY-04 | P3 | Extract shared status config maps (client)**
-- [ ] **DRY-05 | P3 | Extract shared fullName computation in Helm templates**
-- [ ] **CV-02 | P3 | Add engines/packageManager field to Node.js package.json files** (same as S-21)
-- [ ] **CV-03 | P3 | Rename DLQ suffix from .DLT to .dlq (order-service)**
+- [x] **D-02 | P3 | Remove unused NON_TERMINAL_STATUSES constant (order-service)**
+- [x] **D-03 | P3 | Delete app.e2e-spec.ts scaffold test (auth-service)**
+- [x] **D-04 | P3 | Delete jest-e2e.json config (auth-service uses Vitest)**
+- [x] **D-06 | P3 | Remove unused jwks-rsa dependency (auth-service)**
+- [x] **D-07 | P3 | Remove unused @nestjs/microservices dependency (payment-service)**
+- [x] **D-08 | P3 | Remove unused source-map-support, ts-loader dev deps (auth-service)**
+- [x] **D-09 | P3 | Move pino-pretty to devDependencies (payment-service)**
+- [x] **D-10 | P3 | Remove unused COOKIE_DOMAIN from Joi schema (auth-service)**
+- [x] **D-11 | P3 | Remove unused TopicExpirationCompleteDLQ constant** (fixed by R-04 — constant IS actively used; finding was incorrect)
+- [x] **D-12 | P3 | Remove unused ConflictException import (payment-service)**
+- [x] **D-13 | P3 | Replace Jest globals with Vitest in ESLint config (auth, payment)**
+- [x] **DRY-03 | P3 | Extract shared broker string join logic (ticket-service)**
+- [x] **DRY-04 | P3 | Extract shared status config maps (client)**
+- [x] **DRY-05 | P3 | Extract shared fullName computation in Helm templates**
+- [x] **CV-02 | P3 | Add engines/packageManager field to Node.js package.json files** (same as S-21)
+- [x] **CV-03 | P3 | Rename DLQ suffix from .DLT to .dlq (order-service)**
 - [ ] **CV-04 | P3 | Move gRPC stubs from ticket-service to /libs/**
-- [ ] **CV-06 | P3 | Remove go mod tidy from Dockerfiles**
-- [ ] **CV-07 | P3 | Remove duplicate CHECK constraint in payment migration**
+- [x] **CV-06 | P3 | Remove go mod tidy from Dockerfiles** *(done — removed from ticket-service and expiration-service Dockerfiles as part of P-10)*
+- [x] **CV-07 | P3 | Remove duplicate CHECK constraint in payment migration**
 
 ### 4.8 Testing (P3)
 
 - [ ] **T-06 | P3 | Add unit tests for client Server Components / pages**
 - [ ] **T-09 | P3 | Add controller unit tests for auth-service**
-- [ ] **T-15 | P3 | Improve StubTicketService to return realistic data (order-service)**
-- [ ] **T-16 | P3 | Fix PG_POOL import in auth-service integration test**
+- [x] **T-15 | P3 | Improve StubTicketService to return realistic data (order-service)**
+- [x] **T-16 | P3 | Fix PG_POOL import in auth-service integration test** (already fixed — no PG_POOL import anywhere)
 
 ---
 
