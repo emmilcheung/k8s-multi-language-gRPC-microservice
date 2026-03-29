@@ -13,7 +13,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { LoggerModule } from 'nestjs-pino';
+import { Logger, LoggerModule } from 'nestjs-pino';
 import * as Joi from 'joi';
 import { Pool } from 'pg';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -25,6 +25,7 @@ import { GlobalExceptionFilter } from '../src/common/filters/global-exception.fi
 import { DatabaseModule } from '../src/database/database.module';
 import { PaymentsModule } from '../src/modules/payments/payments.module';
 import { HealthModule } from '../src/modules/health/health.module';
+import { KafkaChecker } from '../src/modules/health/kafka.checker';
 import { STRIPE_CLIENT } from '../src/modules/payments/stripe.constants';
 
 // ── Suite setup / teardown ────────────────────────────────────────────────────
@@ -53,6 +54,10 @@ const mockStripe = {
         status: 'succeeded',
       }),
   },
+};
+
+const mockKafkaChecker = {
+  ping: () => Promise.resolve(),
 };
 
 beforeAll(async () => {
@@ -102,13 +107,15 @@ beforeAll(async () => {
   })
     .overrideProvider(STRIPE_CLIENT)
     .useValue(mockStripe)
+    .overrideProvider(KafkaChecker)
+    .useValue(mockKafkaChecker)
     .compile();
 
   app = moduleRef.createNestApplication();
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
   );
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  app.useGlobalFilters(new GlobalExceptionFilter(app.get(Logger)));
 
   await app.init();
   request = supertest(app.getHttpServer());

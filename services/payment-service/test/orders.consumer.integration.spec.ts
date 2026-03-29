@@ -44,29 +44,28 @@ beforeAll(async () => {
     .withPassword('payments_pass')
     .start();
 
-  kafkaContainer = await new GenericContainer('confluentinc/cp-kafka:7.7.1')
-    .withExposedPorts(9093)
+  kafkaContainer = await new GenericContainer('apache/kafka:3.7.0')
+    .withExposedPorts({ container: 9092, host: 19093 })
     .withEnvironment({
       KAFKA_NODE_ID: '1',
       KAFKA_PROCESS_ROLES: 'broker,controller',
-      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:9093,CONTROLLER://0.0.0.0:9094',
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9093',
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT',
-      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@localhost:9094',
+      KAFKA_LISTENERS: 'PLAINTEXT://:9092,CONTROLLER://:9093',
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:19093',
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT',
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@localhost:9093',
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER',
       KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT',
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1',
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1',
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: '1',
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: '0',
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true',
     })
-    .withWaitStrategy(Wait.forLogMessage('Kafka Server started'))
+    .withWaitStrategy(Wait.forLogMessage('Kafka Server started').withStartupTimeout(90_000))
     .start();
 
   const databaseUrl = pgContainer.getConnectionUri();
-  const kafkaHost = kafkaContainer.getHost();
-  const kafkaPort = kafkaContainer.getMappedPort(9093);
-  const kafkaBroker = `${kafkaHost}:${kafkaPort}`;
+  const kafkaBroker = 'localhost:19093';
 
   process.env['DATABASE_URL'] = databaseUrl;
   process.env['STRIPE_SECRET_KEY'] = 'test_mock';
@@ -115,6 +114,21 @@ beforeAll(async () => {
   app.useGlobalFilters(new GlobalExceptionFilter(app.get(Logger)));
 
   await app.init();
+
+  const kafka = new Kafka({
+    clientId: 'payments-consumer-it-admin',
+    brokers: [kafkaBroker],
+  });
+  const admin = kafka.admin();
+  await admin.connect();
+  await admin.createTopics({
+    waitForLeaders: true,
+    topics: [
+      { topic: TOPIC, numPartitions: 1, replicationFactor: 1 },
+      { topic: DLQ_TOPIC, numPartitions: 1, replicationFactor: 1 },
+    ],
+  });
+  await admin.disconnect();
 }, 120_000);
 
 afterAll(async () => {
@@ -176,17 +190,32 @@ async function consumeOne(topic: string, timeoutMs = 10_000): Promise<string | n
   await consumer.subscribe({ topic, fromBeginning: true });
 
   return new Promise<string | null>((resolve) => {
+    let settled = false;
+    const finish = (value: string | null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(value);
+      void consumer.disconnect().catch(() => undefined);
+    };
+
     const timer = setTimeout(() => {
-      void consumer.disconnect().then(() => resolve(null));
+      finish(null);
     }, timeoutMs);
 
-    void consumer.run({
-      eachMessage: async ({ message }) => {
+    void consumer
+      .run({
+        eachMessage: ({ message }) => {
+          clearTimeout(timer);
+          finish(message.value?.toString() ?? null);
+          return Promise.resolve();
+        },
+      })
+      .catch(() => {
         clearTimeout(timer);
-        await consumer.disconnect();
-        resolve(message.value?.toString() ?? null);
-      },
-    });
+        finish(null);
+      });
   });
 }
 
