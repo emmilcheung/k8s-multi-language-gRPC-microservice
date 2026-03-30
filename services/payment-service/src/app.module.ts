@@ -2,13 +2,21 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { LoggerModule } from 'nestjs-pino';
-import * as Joi from 'joi';
+import { z } from 'zod';
 import { trace } from '@opentelemetry/api';
 import { DatabaseModule } from './database/database.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { OrdersConsumer } from './kafka/orders.consumer';
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().default(3001),
+  DATABASE_URL: z.string(),
+  STRIPE_SECRET_KEY: z.string(),
+  KAFKA_BROKERS: z.string(),
+});
 
 /** Inject the active OTel traceId and spanId into every pino log line (O-02). */
 function otelMixin(): Record<string, string> {
@@ -26,14 +34,17 @@ function otelMixin(): Record<string, string> {
     // Validates all required env vars at startup — fails loudly if missing
     ConfigModule.forRoot({
       isGlobal: true,
-      validationSchema: Joi.object({
-        NODE_ENV: Joi.string().valid('development', 'test', 'production').default('development'),
-        PORT: Joi.number().default(3001),
-        DATABASE_URL: Joi.string().required(),
-        STRIPE_SECRET_KEY: Joi.string().required(),
-        KAFKA_BROKERS: Joi.string().required(),
-      }),
-      validationOptions: { abortEarly: false },
+      validate: (config: Record<string, unknown>) => {
+        const result = envSchema.safeParse(config);
+        if (!result.success) {
+          throw new Error(
+            `Config validation failed:\n${result.error.issues
+              .map((e) => `  ${e.path.join('.')}: ${e.message}`)
+              .join('\n')}`,
+          );
+        }
+        return result.data;
+      },
     }),
 
     // ── Structured JSON logging (pino) ───────────────────────────────────────

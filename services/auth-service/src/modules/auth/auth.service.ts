@@ -211,7 +211,6 @@ export class AuthService {
         return;
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       const ttlSeconds =
         // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
         (decoded.exp as number) - Math.floor(Date.now() / 1000);

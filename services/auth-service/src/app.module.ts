@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
-import * as Joi from 'joi';
+import { z } from 'zod';
 import { trace } from '@opentelemetry/api';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -9,6 +9,17 @@ import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { DatabaseModule } from './database/database.module';
 import { RedisModule } from './modules/redis/redis.module';
+
+const envSchema = z.object({
+  NODE_ENV: z
+    .enum(['development', 'test', 'production'])
+    .default('development'),
+  PORT: z.coerce.number().default(3000),
+  DATABASE_URL: z.string(),
+  RSA_PRIVATE_KEY: z.string(),
+  JWT_EXPIRY: z.string().default('15m'),
+  REDIS_URL: z.string(),
+});
 
 /** Inject the active OTel traceId and spanId into every pino log line (O-02). */
 function otelMixin(): Record<string, string> {
@@ -28,17 +39,17 @@ function otelMixin(): Record<string, string> {
     // Validates all required env vars at startup — fails loudly if anything is missing
     ConfigModule.forRoot({
       isGlobal: true,
-      validationSchema: Joi.object({
-        NODE_ENV: Joi.string()
-          .valid('development', 'test', 'production')
-          .default('development'),
-        PORT: Joi.number().default(3000),
-        DATABASE_URL: Joi.string().required(),
-        RSA_PRIVATE_KEY: Joi.string().required(),
-        JWT_EXPIRY: Joi.string().default('15m'),
-        REDIS_URL: Joi.string().required(),
-      }),
-      validationOptions: { abortEarly: false },
+      validate: (config: Record<string, unknown>) => {
+        const result = envSchema.safeParse(config);
+        if (!result.success) {
+          throw new Error(
+            `Config validation failed:\n${result.error.issues
+              .map((e) => `  ${e.path.join('.')}: ${e.message}`)
+              .join('\n')}`,
+          );
+        }
+        return result.data;
+      },
     }),
 
     // ── Structured JSON logging (pino) ───────────────────────────────────────
