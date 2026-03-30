@@ -136,7 +136,7 @@ client:
     enabled: false
   livenessProbe:
     httpGet:
-      path: /
+      path: /api/health
       port: http
     initialDelaySeconds: 20
     periodSeconds: 15
@@ -144,7 +144,7 @@ client:
     failureThreshold: 3
   readinessProbe:
     httpGet:
-      path: /
+      path: /api/health
       port: http
     initialDelaySeconds: 15
     periodSeconds: 15

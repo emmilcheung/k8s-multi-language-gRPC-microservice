@@ -49,7 +49,7 @@ CP_KAFKA_IMG   := confluentinc/cp-kafka:7.7.1
 KONG_IMG       := kong:3.9
 
 # ── Phony targets ─────────────────────────────────────────────────────────────
-.PHONY: help up deploy build build-order build-services load-infra-images \
+.PHONY: help up deploy build build-order build-ticket build-services load-infra-images \
         secrets kong-config helm-upgrade \
         tunnel status logs restart \
         down stop clean
@@ -104,7 +104,7 @@ deploy: _check-secrets secrets kong-config helm-upgrade
 # ─────────────────────────────────────────────────────────────────────────────
 ## build : Build all service Docker images and load them into minikube
 # ─────────────────────────────────────────────────────────────────────────────
-build: build-order build-services
+build: build-order build-ticket build-services
 	@echo "All images loaded into minikube."
 
 # order-service uses the repo root as its Docker build context (copies /proto)
@@ -115,19 +115,32 @@ build-order:
 		--tag order-service:latest \
 		--quiet \
 		$(REPO_ROOT)
-	@minikube image load order-service:latest
+	@minikube image load --overwrite order-service:latest
 	@echo "  Loaded order-service:latest"
+
+# ticket-service uses the repo root as its Docker build context because its
+# go.mod has a replace directive pointing to ../../libs/grpc-stubs/go which
+# lives outside the service directory.
+build-ticket:
+	@echo "  Building ticket-service (context: repo root)..."
+	@docker build \
+		--file $(REPO_ROOT)/services/ticket-service/Dockerfile \
+		--tag ticket-service:latest \
+		--quiet \
+		$(REPO_ROOT)
+	@minikube image load --overwrite ticket-service:latest
+	@echo "  Loaded ticket-service:latest"
 
 # All other services use their own directory as the build context
 build-services:
-	@for svc in auth-service ticket-service payment-service expiration-service client; do \
+	@for svc in auth-service payment-service expiration-service client; do \
 		echo "  Building $$svc..."; \
 		docker build \
 			--file $(REPO_ROOT)/services/$$svc/Dockerfile \
 			--tag $$svc:latest \
 			--quiet \
 			$(REPO_ROOT)/services/$$svc; \
-		minikube image load $$svc:latest; \
+		minikube image load --overwrite $$svc:latest; \
 		echo "  Loaded $$svc:latest"; \
 	done
 
