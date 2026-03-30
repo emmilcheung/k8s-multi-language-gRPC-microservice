@@ -14,7 +14,24 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(['development', 'test', 'production'])
     .default('development'),
-  PORT: z.coerce.number().default(3000),
+  PORT: z
+    .preprocess((value) => {
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        // Treat empty string as invalid (will fail numeric validation below)
+        if (trimmed === '') {
+          return value;
+        }
+        const parsed = Number(trimmed);
+        if (Number.isInteger(parsed)) {
+          return parsed;
+        }
+        // Non-integer strings remain as-is and will fail validation
+        return value;
+      }
+      return value;
+    }, z.number().int().min(1).max(65535))
+    .default(3000),
   DATABASE_URL: z.string(),
   RSA_PRIVATE_KEY: z.string(),
   JWT_EXPIRY: z.string().default('15m'),
