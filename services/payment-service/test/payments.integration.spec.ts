@@ -14,7 +14,7 @@ import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Logger, LoggerModule } from 'nestjs-pino';
-import * as Joi from 'joi';
+import { z } from 'zod';
 import { Pool } from 'pg';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import * as fs from 'fs';
@@ -91,12 +91,18 @@ beforeAll(async () => {
     imports: [
       ConfigModule.forRoot({
         isGlobal: true,
-        validationSchema: Joi.object({
-          DATABASE_URL: Joi.string().required(),
-          STRIPE_SECRET_KEY: Joi.string().required(),
-          KAFKA_BROKERS: Joi.string().required(),
-          NODE_ENV: Joi.string().default('test'),
-        }),
+        validate: (config: Record<string, unknown>) => {
+          const result = z
+            .object({
+              DATABASE_URL: z.string(),
+              STRIPE_SECRET_KEY: z.string(),
+              KAFKA_BROKERS: z.string(),
+              NODE_ENV: z.string().default('test'),
+            })
+            .safeParse(config);
+          if (!result.success) throw new Error(result.error.message);
+          return result.data;
+        },
         ignoreEnvFile: true,
       }),
       LoggerModule.forRoot({ pinoHttp: { level: 'silent' } }),

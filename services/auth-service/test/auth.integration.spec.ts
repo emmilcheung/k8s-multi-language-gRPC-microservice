@@ -14,7 +14,7 @@ import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
-import * as Joi from 'joi';
+import { z } from 'zod';
 import { Pool } from 'pg';
 import Redis from 'ioredis';
 import {
@@ -110,13 +110,19 @@ beforeAll(async () => {
     imports: [
       ConfigModule.forRoot({
         isGlobal: true,
-        validationSchema: Joi.object({
-          DATABASE_URL: Joi.string().required(),
-          REDIS_URL: Joi.string().required(),
-          RSA_PRIVATE_KEY: Joi.string().required(),
-          JWT_EXPIRY: Joi.string().default('15m'),
-          NODE_ENV: Joi.string().default('test'),
-        }),
+        validate: (config: Record<string, unknown>) => {
+          const result = z
+            .object({
+              DATABASE_URL: z.string(),
+              REDIS_URL: z.string(),
+              RSA_PRIVATE_KEY: z.string(),
+              JWT_EXPIRY: z.string().default('15m'),
+              NODE_ENV: z.string().default('test'),
+            })
+            .safeParse(config);
+          if (!result.success) throw new Error(result.error.message);
+          return result.data;
+        },
         ignoreEnvFile: true,
       }),
       LoggerModule.forRoot({ pinoHttp: { level: 'silent' } }),
