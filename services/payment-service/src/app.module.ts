@@ -12,7 +12,7 @@ import { OrdersConsumer } from './kafka/orders.consumer';
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.coerce.number().default(3001),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   DATABASE_URL: z.string(),
   STRIPE_SECRET_KEY: z.string(),
   KAFKA_BROKERS: z.string(),
