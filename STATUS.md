@@ -1,9 +1,9 @@
 # Platform Build Status Log
 
-> **Last Updated:** 2026-03-28 UTC  
-> **Current Phase:** Audit Remediation in Progress (M6 complete; M1–M5, M7–M10 pending)  
-> **Overall Progress:** ~75% of full plan (all services built and E2E tested; audit remediation underway; EKS not yet applied)  
-> **Git Status:** `main` is clean at `850b975` (fix/audit-m6-resilience-obs merged).
+> **Last Updated:** 2026-04-01 UTC  
+> **Current Phase:** Post-audit lint hardening (PR #16 open, awaiting review)  
+> **Overall Progress:** ~90% of full plan (all 75 audit items complete; lint/type hardening done; EKS not yet applied)  
+> **Git Status:** `main` is clean at `889e57b`. Branch `fix/audit-typescript-errors` has PR #16 open.
 
 ---
 
@@ -27,7 +27,7 @@
 | **CI/CD** | ✅ Partial | `.github/workflows/` — ci.yml, e2e.yml present and green (unit + integration + Trivy + Playwright); deploy stages not yet added |
 | **EKS deploy** | ⏭️ Pending | Terraform apply against real AWS deferred; local minikube is the active dev environment |
 | **Observability stack** | ✅ OTel complete | OTel SDK on all 6 services; traceId/spanId in all logs (M6). AMP/AMG/X-Ray collector wiring deferred. |
-| **Audit remediation** | 🟡 In progress | M6 merged (`850b975`). M1–M5, M7–M10 pending. See [AUDIT-SCHEDULE.md](./audit/AUDIT-SCHEDULE.md). |
+| **Audit remediation** | ✅ All 75 items complete | M1–M10 all done. PR #12 (P0–P3), PR #16 (post-audit lint) merged/open. |
 
 ---
 

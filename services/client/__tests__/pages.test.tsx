@@ -48,13 +48,13 @@ vi.mock("react", async () => {
 
 const fetchTicketPageMock = vi.fn<() => Promise<TicketPage>>();
 vi.mock("@/app/actions/tickets", () => ({
-  fetchTicketPage: (...args: unknown[]) => fetchTicketPageMock(...args),
+  fetchTicketPage: (...args: unknown[]) => fetchTicketPageMock(...args as Parameters<typeof fetchTicketPageMock>),
   updateTicket: vi.fn(),
 }));
 
 const serverApiMock = vi.fn<() => Promise<Ticket>>();
 vi.mock("@/lib/api", () => ({
-  serverApi: (...args: unknown[]) => serverApiMock(...args),
+  serverApi: (...args: unknown[]) => serverApiMock(...args as Parameters<typeof serverApiMock>),
   ApiError: class ApiError extends Error {
     constructor(public status: number, message: string) { super(message); }
   },

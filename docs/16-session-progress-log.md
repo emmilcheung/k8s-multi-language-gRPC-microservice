@@ -4,7 +4,67 @@
 
 ---
 
-## Session: 2026-03-29 — Phase 2 (P2 Medium) audit items: PR #12 merged ✅ COMPLETE
+## Session: 2026-04-01 — Post-audit lint/type hardening: PR #16 ⏳ AWAITING REVIEW
+
+**Branch:** `fix/audit-typescript-errors` → PR #16 (open, awaiting owner review).
+
+### What was done
+
+Completed a full lint and type-check pass across all six services, discovering and fixing post-audit regressions not captured by the AUDIT-TODO checklist.
+
+**1. auth-service — TypeScript errors in integration test (9 → 0)**
+- File: `test/auth.integration.spec.ts`
+- Root cause A: Audit fix O-04 refactored `GlobalExceptionFilter` to require DI-injected `Logger`; the integration test still called `new GlobalExceptionFilter()` with no argument → TS2554.
+  Fix: added `import { Logger } from 'nestjs-pino'`; changed instantiation to `new GlobalExceptionFilter(moduleRef.get(Logger))`.
+- Root cause B: supertest v7.2.2 + `@types/supertest ^6.0.3` type mismatch — v7 types the `set-cookie` response header as `string`, but the test code cast to `string[]` → 8× TS2352.
+  Fix: inserted `unknown` intermediary: `as unknown as string[] | undefined`.
+
+**2. client — TypeScript errors in unit test (2 → 0)**
+- File: `__tests__/pages.test.tsx`
+- Root cause: `vi.fn<() => Promise<TicketPage>>()` is typed as a no-argument function; spreading `unknown[]` into it fails TS2556.
+  Fix: `mockFn(...args as Parameters<typeof mockFn>)` at both call sites.
+
+**3. order-service — Checkstyle configuration and import hygiene**
+- AGENTS.md mandates `mvn -q checkstyle:check` but no plugin existed; the
+  default Sun checks produced 676 violations and Google checks produced 817 (all on
+  4-space indentation the project doesn't use).
+- Created `services/order-service/checkstyle.xml` — project-tuned rules:
+  `AvoidStarImport`, `UnusedImports`, `RedundantImport`, `IllegalImport`,
+  naming conventions (TypeName, MemberName, ParameterName, LocalVariableName,
+  MethodName, PackageName), `ConstantName` with SLF4J `log`/`logger` exception,
+  `EmptyCatchBlock`, `FallThrough`, `MultipleVariableDeclarations`, `UpperEll`,
+  `ArrayTypeStyle`, `ModifierOrder`.
+- Updated `pom.xml` to reference `checkstyle.xml` instead of `google_checks.xml`.
+- Fixed 4 star-import violations:
+  - `Order.java`: `jakarta.persistence.*` → 12 explicit imports
+  - `OutboxMessage.java`: `jakarta.persistence.*` → 7 explicit imports
+  - `OrderTicket.java`: `jakarta.persistence.*` → 7 explicit imports
+  - `OrderController.java`: `org.springframework.web.bind.annotation.*` → 8 explicit imports
+- Removed stale unused `KafkaTemplate` import from `OutboxRelay.java`.
+
+### Verification Matrix
+
+| Service | Command | Result |
+|---|---|---|
+| auth-service | `pnpm tsc --noEmit` | ✅ 0 errors |
+| client | `pnpm tsc --noEmit` | ✅ 0 errors |
+| payment-service | `pnpm tsc --noEmit` | ✅ 0 errors |
+| ticket-service | `go vet ./...` | ✅ clean |
+| expiration-service | `go vet ./...` | ✅ clean |
+| order-service | `mvn -q checkstyle:check` | ✅ 0 violations |
+
+### PR Summary
+
+**PR #16**: fix: post-audit lint and type hardening
+- **Branch**: `fix/audit-typescript-errors`
+- **Status**: ⏳ AWAITING OWNER REVIEW
+- **Commits**: 1
+- **Files Changed**: 9 (+115 / -17 lines)
+- **Breaking Changes**: None
+
+---
+
+
 
 **Branch:** `fix/audit-m8-p2-security` — PR #12 merged to main (commit 7926c02). All 34 P2 audit items complete and verified in production code.
 
