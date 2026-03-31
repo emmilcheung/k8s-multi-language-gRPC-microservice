@@ -56,6 +56,7 @@ jobs:
       payment:    ${{ steps.filter.outputs.payment }}
       proto:      ${{ steps.filter.outputs.proto }}
       ticket:     ${{ steps.filter.outputs.ticket }}
+      skip-ci:    ${{ steps.set-skip-ci.outputs.skip-ci }}
     steps:
       - uses: actions/checkout@v4
 
@@ -91,6 +92,24 @@ jobs:
               - 'services/ticket-service/**'
               - 'proto/**'
               - '.github/workflows/ci.yml'
+            # skip-ci: true if ONLY markdown/docs files changed (no code/config changes)
+            ci-required:
+              - 'services/**'
+              - 'proto/**'
+              - 'infra/**'
+              - '.github/workflows/ci.yml'
+              - 'buf.yaml'
+              - 'buf.gen.yaml'
+              - 'docker-compose.yml'
+
+      - name: Set skip-ci output (true if only markdown/docs changed)
+        id: set-skip-ci
+        run: |
+          if [ "${{ steps.filter.outputs.ci-required }}" == "false" ]; then
+            echo "skip-ci=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip-ci=false" >> $GITHUB_OUTPUT
+          fi
 
   # ── auth-service (TypeScript / NestJS / pnpm / Vitest) ─────────────────────
   auth:
@@ -815,8 +834,14 @@ jobs:
     if: always()
     needs: [changes, auth, client, expiration, kong, order, payment, proto, ticket]
     steps:
-      - name: Check all jobs passed
+      - name: Check all jobs passed (or skip if only markdown changed)
         run: |
+          skip_ci='${{ needs.changes.outputs.skip-ci }}'
+          if [ "$skip_ci" = "true" ]; then
+            echo "✓ CI skipped — only markdown/docs files changed"
+            exit 0
+          fi
+          
           results='${{ toJSON(needs) }}'
           echo "$results" | python3 -c "
           import sys, json
