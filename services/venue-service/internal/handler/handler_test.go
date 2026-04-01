@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/acme/venue-service/internal/handler"
+	"github.com/acme/venue-service/internal/hold"
 	"github.com/acme/venue-service/internal/repository"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
@@ -333,4 +335,199 @@ func TestPlanHandler_Create_ShouldReturn422_WhenVenueIDMissing(t *testing.T) {
 
 	require.NoError(t, h.Create(c))
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}
+
+// ── SeatHoldHandler tests ──────────────────────────────────────────────────────
+
+type stubHoldManager struct {
+	holdFn         func(ctx context.Context, planID, userID, sessionID string, seatIDs []string) (*hold.HoldResult, error)
+	releaseFn      func(ctx context.Context, planID, userID string, seatIDs []string) error
+	availabilityFn func(ctx context.Context, planID string) (*hold.AvailabilitySnapshot, error)
+}
+
+func (s *stubHoldManager) HoldSeats(ctx context.Context, planID, userID, sessionID string, seatIDs []string) (*hold.HoldResult, error) {
+	return s.holdFn(ctx, planID, userID, sessionID, seatIDs)
+}
+func (s *stubHoldManager) ReleaseHold(ctx context.Context, planID, userID string, seatIDs []string) error {
+	return s.releaseFn(ctx, planID, userID, seatIDs)
+}
+func (s *stubHoldManager) GetAvailability(ctx context.Context, planID string) (*hold.AvailabilitySnapshot, error) {
+	return s.availabilityFn(ctx, planID)
+}
+
+func TestSeatHoldHandler_HoldSeats_ShouldReturn200_WhenValid(t *testing.T) {
+	expiresAt := time.Now().UTC().Add(10 * time.Minute)
+	mgr := &stubHoldManager{
+		holdFn: func(_ context.Context, _, _, _ string, seatIDs []string) (*hold.HoldResult, error) {
+			return &hold.HoldResult{Held: seatIDs, ExpiresAt: expiresAt}, nil
+		},
+	}
+	h := handler.NewSeatHoldHandler(mgr, zap.NewNop())
+	e := newEcho()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/seats/hold",
+		jsonBody(t, map[string]interface{}{
+			"seatIds":   []string{"seat-1", "seat-2"},
+			"sessionId": "session-abc",
+		}))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("planId")
+	c.SetParamValues("plan-1")
+
+	require.NoError(t, h.HoldSeats(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Contains(t, resp, "held")
+	assert.Contains(t, resp, "expiresAt")
+}
+
+func TestSeatHoldHandler_HoldSeats_ShouldReturn401_WhenNoUserID(t *testing.T) {
+	h := handler.NewSeatHoldHandler(&stubHoldManager{}, zap.NewNop())
+	e := newEcho()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/seats/hold",
+		jsonBody(t, map[string]interface{}{"seatIds": []string{"seat-1"}}))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("planId")
+	c.SetParamValues("plan-1")
+
+	require.NoError(t, h.HoldSeats(c))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+func TestSeatHoldHandler_HoldSeats_ShouldReturn422_WhenNoSeatIDs(t *testing.T) {
+	h := handler.NewSeatHoldHandler(&stubHoldManager{}, zap.NewNop())
+	e := newEcho()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/seats/hold",
+		jsonBody(t, map[string]interface{}{"seatIds": []string{}}))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("planId")
+	c.SetParamValues("plan-1")
+
+	require.NoError(t, h.HoldSeats(c))
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+}
+
+func TestSeatHoldHandler_HoldSeats_ShouldReturn409_WhenSeatNotAvailable(t *testing.T) {
+	mgr := &stubHoldManager{
+		holdFn: func(_ context.Context, _, _, _ string, _ []string) (*hold.HoldResult, error) {
+			return nil, repository.ErrSeatNotAvailable
+		},
+	}
+	h := handler.NewSeatHoldHandler(mgr, zap.NewNop())
+	e := newEcho()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/seats/hold",
+		jsonBody(t, map[string]interface{}{"seatIds": []string{"seat-1"}}))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("planId")
+	c.SetParamValues("plan-1")
+
+	require.NoError(t, h.HoldSeats(c))
+	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
+func TestSeatHoldHandler_HoldSeats_ShouldReturn409_WhenPlanNotActive(t *testing.T) {
+	mgr := &stubHoldManager{
+		holdFn: func(_ context.Context, _, _, _ string, _ []string) (*hold.HoldResult, error) {
+			return nil, hold.ErrPlanNotActive
+		},
+	}
+	h := handler.NewSeatHoldHandler(mgr, zap.NewNop())
+	e := newEcho()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/seats/hold",
+		jsonBody(t, map[string]interface{}{"seatIds": []string{"seat-1"}}))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("planId")
+	c.SetParamValues("plan-1")
+
+	require.NoError(t, h.HoldSeats(c))
+	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
+func TestSeatHoldHandler_ReleaseHold_ShouldReturn204_WhenValid(t *testing.T) {
+	mgr := &stubHoldManager{
+		releaseFn: func(_ context.Context, _, _ string, _ []string) error {
+			return nil
+		},
+	}
+	h := handler.NewSeatHoldHandler(mgr, zap.NewNop())
+	e := newEcho()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/seats/release",
+		jsonBody(t, map[string]interface{}{"seatIds": []string{"seat-1"}}))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("planId")
+	c.SetParamValues("plan-1")
+
+	require.NoError(t, h.ReleaseHold(c))
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestSeatHoldHandler_GetAvailability_ShouldReturn200_WhenValid(t *testing.T) {
+	mgr := &stubHoldManager{
+		availabilityFn: func(_ context.Context, planID string) (*hold.AvailabilitySnapshot, error) {
+			return &hold.AvailabilitySnapshot{
+				PlanID:  planID,
+				SeatMap: map[string]string{"seat-1": "AVAILABLE"},
+				Counts:  map[string]int{"AVAILABLE": 1},
+			}, nil
+		},
+	}
+	h := handler.NewSeatHoldHandler(mgr, zap.NewNop())
+	e := newEcho()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/seating-plans/plan-1/availability", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("planId")
+	c.SetParamValues("plan-1")
+
+	require.NoError(t, h.GetAvailability(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp hold.AvailabilitySnapshot
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "plan-1", resp.PlanID)
+	assert.Equal(t, "AVAILABLE", resp.SeatMap["seat-1"])
+}
+
+func TestSeatHoldHandler_GetAvailability_ShouldReturn404_WhenPlanNotFound(t *testing.T) {
+	mgr := &stubHoldManager{
+		availabilityFn: func(_ context.Context, _ string) (*hold.AvailabilitySnapshot, error) {
+			return nil, repository.ErrPlanNotFound
+		},
+	}
+	h := handler.NewSeatHoldHandler(mgr, zap.NewNop())
+	e := newEcho()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/seating-plans/missing/availability", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("planId")
+	c.SetParamValues("missing")
+
+	require.NoError(t, h.GetAvailability(c))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }

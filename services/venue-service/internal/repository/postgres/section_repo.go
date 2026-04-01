@@ -285,6 +285,26 @@ func (r *SectionRepo) SellSeats(ctx context.Context, seatIDs []string) error {
 	return err
 }
 
+// SweepExpiredHolds releases all HELD seats whose held_until timestamp has
+// already passed. Called periodically by the hold sweeper goroutine.
+// Returns the number of seats released.
+func (r *SectionRepo) SweepExpiredHolds(ctx context.Context) (int64, error) {
+	const q = `
+		UPDATE seats
+		SET status     = 'AVAILABLE',
+		    held_by    = NULL,
+		    held_until = NULL,
+		    version    = version + 1,
+		    updated_at = now()
+		WHERE status = 'HELD'
+		  AND held_until < now()`
+	tag, err := r.pool.Exec(ctx, q)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // ── internal helpers ──────────────────────────────────────────────────────────
 
 func (r *SectionRepo) scanSeats(ctx context.Context, q string, arg any) ([]*repository.Seat, error) {
