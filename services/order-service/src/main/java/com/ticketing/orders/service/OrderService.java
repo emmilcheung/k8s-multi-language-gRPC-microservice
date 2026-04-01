@@ -8,28 +8,30 @@ import com.ticketing.orders.entity.Order;
 import com.ticketing.orders.entity.OrderStatus;
 import com.ticketing.orders.entity.OutboxMessage;
 import com.ticketing.orders.event.OrderCancelledEvent;
+import com.ticketing.orders.event.OrderCompletedEvent;
 import com.ticketing.orders.exception.BadRequestException;
-import com.ticketing.orders.exception.ConflictException;
 import com.ticketing.orders.exception.ForbiddenException;
 import com.ticketing.orders.exception.NotFoundException;
+import com.ticketing.orders.grpc.ReserveQuotaResponse;
 import com.ticketing.orders.grpc.TicketServiceClient;
-import com.ticketing.orders.grpc.ValidateTicketResponse;
 import com.ticketing.orders.repository.OrderRepository;
 import com.ticketing.orders.repository.OutboxRepository;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
-// Audit C-01 fix: transactional order creation is delegated to OrderTransactionService
-// so that Spring's AOP proxy intercepts the @Transactional boundary correctly.
-// Direct self-invocation (this.createOrderTransactional()) bypasses the proxy.
+// CP-05: replaced Redisson distributed lock + ValidateTicketAvailability with a
+// synchronous ReserveQuota gRPC call. Atomicity is now enforced by the inventory
+// owner (ticket-service) through the reservation ledger, not by an application-level
+// lock.  If the DB transaction fails after a successful reservation, a synchronous
+// ReleaseReservation compensation call is made immediately.
 
 /**
  * Core business logic for order lifecycle.
@@ -37,8 +39,8 @@ import java.util.concurrent.TimeUnit;
  * Design decisions:
  * - All state changes and outbox writes happen in a single @Transactional boundary
  *   to guarantee the outbox pattern (no event lost, no partial state).
- * - gRPC ticket validation happens outside the transaction (network I/O should not
- *   hold a DB connection). The ticket local-replica is fetched from the DB inside.
+ * - gRPC ReserveQuota happens outside the transaction (network I/O should not
+ *   hold a DB connection). Compensation is called synchronously on TX failure.
  * - Authorisation (ownership check) happens before any write.
  * - The transactional order creation is delegated to {@link OrderTransactionService}
  *   to avoid the Spring AOP self-invocation proxy bypass (audit finding C-01).
@@ -48,11 +50,13 @@ public class OrderService {
 
     private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
+    @Value("${order.expiration.minutes:15}")
+    private int expirationMinutes;
+
     private final OrderRepository orderRepository;
     private final OutboxRepository outboxRepository;
     private final TicketServiceClient ticketServiceClient;
     private final ObjectMapper objectMapper;
-    private final RedissonClient redissonClient;
     private final OrderTransactionService orderTransactionService;
 
     public OrderService(
@@ -60,53 +64,50 @@ public class OrderService {
             OutboxRepository outboxRepository,
             TicketServiceClient ticketServiceClient,
             ObjectMapper objectMapper,
-            RedissonClient redissonClient,
             OrderTransactionService orderTransactionService) {
         this.orderRepository = orderRepository;
         this.outboxRepository = outboxRepository;
         this.ticketServiceClient = ticketServiceClient;
         this.objectMapper = objectMapper;
-        this.redissonClient = redissonClient;
         this.orderTransactionService = orderTransactionService;
     }
 
     // ── Create ────────────────────────────────────────────────────────────────
 
     /**
-     * Create a new order for a ticket.
+     * Create a new order for a ticket using the GA reservation flow.
      *
      * Steps:
-     * 1. Call gRPC ticket-service to validate ticket exists and is available (outside TX).
-     * 2. Delegate to OrderTransactionService which atomically: checks no active order
-     *    already exists, upserts the local ticket replica, creates the order, and writes
-     *    the outbox message — all within a single @Transactional boundary.
+     * 1. Generate a reservationId (idempotency key).
+     * 2. Call gRPC ReserveQuota on ticket-service BEFORE opening a DB transaction.
+     * 3. If reservation succeeds, delegate to OrderTransactionService which atomically
+     *    creates the order and outbox message within a single @Transactional boundary.
+     * 4. If the DB transaction fails, immediately call ReleaseReservation as compensation.
      */
     public OrderResponse createOrder(UUID userId, CreateOrderRequest request) {
         UUID ticketId = request.getTicketId();
-        String lockKey = "order-service:lock:ticket:" + ticketId;
-        RLock lock = redissonClient.getLock(lockKey);
+        int quantity = request.getQuantity();
+        UUID reservationId = UUID.randomUUID();
 
-        boolean acquired = false;
+        // Set reservation expiry to order expiry + a small buffer so that ticket-service's
+        // expiry worker does not reclaim the reservation before the order TX commits.
+        Instant reservationExpiresAt = Instant.now().plus(expirationMinutes + 1, ChronoUnit.MINUTES);
+
+        // Step 1: reserve quota outside the DB transaction (network I/O must not hold a
+        // connection).  This is the authoritative availability check — no Redisson lock needed.
+        ReserveQuotaResponse reserveResponse = ticketServiceClient.reserveQuota(
+                ticketId.toString(), reservationId, userId, quantity, reservationExpiresAt);
+
+        // Step 2: create order + outbox in a single DB transaction.
         try {
-            acquired = lock.tryLock(0, 5, TimeUnit.SECONDS);
-            if (!acquired) {
-                throw new ConflictException(
-                        "Another order for ticket " + ticketId + " is being processed. Please retry.");
-            }
-
-            // Validate ticket via gRPC BEFORE opening a DB transaction.
-            ValidateTicketResponse grpcTicket = ticketServiceClient.validateAvailability(ticketId.toString());
-
-            // Delegate to the separate service bean so Spring's AOP proxy applies
-            // @Transactional correctly (fixes audit finding C-01: self-invocation bypass).
-            return orderTransactionService.createOrderTransactional(userId, ticketId, grpcTicket);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ConflictException("Order creation interrupted for ticket " + ticketId);
-        } finally {
-            if (acquired && lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
+            return orderTransactionService.createOrderTransactional(
+                    userId, ticketId, reserveResponse, reservationId, quantity);
+        } catch (Exception e) {
+            // Compensation: release the reservation so inventory is returned immediately.
+            log.error("Order TX failed after successful ReserveQuota — compensating reservationId={} ticketId={}",
+                    reservationId, ticketId, e);
+            ticketServiceClient.releaseReservation(reservationId, "COMPENSATION");
+            throw e;
         }
     }
 
@@ -147,12 +148,7 @@ public class OrderService {
         orderRepository.save(order);
 
         writeOutbox("orders.order.cancelled", order.getId().toString(),
-                new OrderCancelledEvent(
-                        order.getId().toString(),
-                        userId.toString(),
-                        order.getTicket().getId().toString(),
-                        order.getVersion()
-                ));
+                buildCancelledEvent(order));
 
         log.info("Order cancelled orderId={} userId={}", orderId, userId);
         return OrderResponse.from(order);
@@ -177,6 +173,8 @@ public class OrderService {
 
     /**
      * Mark an order as COMPLETE after payment captured.
+     * Emits an orders.order.completed outbox event so ticket-service can finalize
+     * the reservation (GA path: transitions RESERVED → SOLD, decrements per-user count).
      */
     @Transactional
     public void markComplete(UUID orderId) {
@@ -184,7 +182,18 @@ public class OrderService {
             if (order.isAwaitingPayment()) {
                 order.setStatus(OrderStatus.COMPLETE);
                 orderRepository.save(order);
-                log.info("Order completed orderId={}", orderId);
+
+                writeOutbox("orders.order.completed", order.getId().toString(),
+                        new OrderCompletedEvent(
+                                order.getId().toString(),
+                                order.getUserId().toString(),
+                                order.getTicket().getId().toString(),
+                                order.getReservationId() != null ? order.getReservationId().toString() : null,
+                                order.getQuantity(),
+                                order.getVersion()
+                        ));
+
+                log.info("Order completed orderId={} reservationId={}", orderId, order.getReservationId());
             }
         });
     }
@@ -201,12 +210,7 @@ public class OrderService {
                 orderRepository.save(order);
 
                 writeOutbox("orders.order.cancelled", order.getId().toString(),
-                        new OrderCancelledEvent(
-                                order.getId().toString(),
-                                order.getUserId().toString(),
-                                order.getTicket().getId().toString(),
-                                order.getVersion()
-                        ));
+                        buildCancelledEvent(order));
 
                 log.info("Order expired orderId={}", orderId);
             }
@@ -214,6 +218,27 @@ public class OrderService {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private OrderCancelledEvent buildCancelledEvent(Order order) {
+        if (order.getReservationId() != null) {
+            // GA path — include reservationId so ticket-service uses ReleaseReservation
+            return new OrderCancelledEvent(
+                    order.getId().toString(),
+                    order.getUserId().toString(),
+                    order.getTicket().getId().toString(),
+                    order.getReservationId().toString(),
+                    order.getQuantity(),
+                    order.getVersion()
+            );
+        }
+        // Legacy path — no reservationId, ticket-service falls back to ReleaseTicket
+        return new OrderCancelledEvent(
+                order.getId().toString(),
+                order.getUserId().toString(),
+                order.getTicket().getId().toString(),
+                order.getVersion()
+        );
+    }
 
     private void writeOutbox(String topic, String partitionKey, Object payload) {
         try {

@@ -13,6 +13,8 @@ public class OrderResponse {
     private OrderStatus status;
     private OffsetDateTime expiresAt;
     private TicketSummary ticket;
+    private UUID reservationId;
+    private int quantity;
     private int version;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
@@ -23,6 +25,8 @@ public class OrderResponse {
         r.userId = order.getUserId();
         r.status = order.getStatus();
         r.expiresAt = order.getExpiresAt();
+        r.reservationId = order.getReservationId();
+        r.quantity = order.getQuantity();
         r.version = order.getVersion();
         r.createdAt = order.getCreatedAt();
         r.updatedAt = order.getUpdatedAt();
@@ -47,6 +51,8 @@ public class OrderResponse {
     public OrderStatus getStatus() { return status; }
     public OffsetDateTime getExpiresAt() { return expiresAt; }
     public TicketSummary getTicket() { return ticket; }
+    public UUID getReservationId() { return reservationId; }
+    public int getQuantity() { return quantity; }
     public int getVersion() { return version; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
