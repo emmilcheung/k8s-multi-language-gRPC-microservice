@@ -13,6 +13,7 @@ import (
 	grpcserver "github.com/acme/venue-service/internal/grpc"
 	"github.com/acme/venue-service/internal/handler"
 	"github.com/acme/venue-service/internal/health"
+	"github.com/acme/venue-service/internal/hold"
 	"github.com/acme/venue-service/internal/kafka"
 	"github.com/acme/venue-service/internal/middleware"
 	"github.com/acme/venue-service/internal/migrations"
@@ -119,6 +120,15 @@ func main() {
 	// Business logic service (implements OrderEventHandler for Kafka consumer).
 	svc := service.NewVenueService(reservationRepo, sectionRepo, log)
 
+	// Hold manager — Redis hot path + PostgreSQL fallback.
+	holdMgr := hold.NewManager(redisClient, sectionRepo, planRepo, log)
+
+	// Hold sweeper — releases expired holds every 30 seconds.
+	sweeper := hold.NewSweeper(holdMgr, 30*time.Second, log)
+	sweeperCtx, sweeperCancel := context.WithCancel(context.Background())
+	defer sweeperCancel()
+	go sweeper.Start(sweeperCtx)
+
 	// Kafka consumer — listens to order lifecycle events.
 	orderConsumer, err := kafka.NewOrderConsumer(cfg.KafkaBrokers, "venue-service", svc, log)
 	if err != nil {
@@ -171,6 +181,9 @@ func main() {
 	sectionHandler := handler.NewSectionHandler(planRepo, sectionRepo, priceTierRepo, log)
 	sectionHandler.RegisterRoutes(api.Group("/seating-plans/:planId"))
 
+	seatHoldHandler := handler.NewSeatHoldHandler(holdMgr, log)
+	seatHoldHandler.RegisterRoutes(api.Group("/seating-plans/:planId"))
+
 	// Graceful shutdown.
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	go func() {
@@ -187,6 +200,7 @@ func main() {
 	log.Info("shutting down venue-service")
 	grpcCancel()
 	consumerCancel()
+	sweeperCancel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
