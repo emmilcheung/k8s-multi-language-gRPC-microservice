@@ -310,7 +310,7 @@ Verification:
 
 ## CP-07 Venue-Service Scaffold And Persistence Foundation
 
-- [ ] Create the `venue-service` skeleton and durable schema
+- [x] Create the `venue-service` skeleton and durable schema
 
 Owner:
 
@@ -348,7 +348,7 @@ Verification:
 
 ## CP-08 Venue Template And Seating Plan CRUD
 
-- [ ] Implement organizer CRUD for venues and draft plans
+- [x] Implement organizer CRUD for venues and draft plans
 
 Owner:
 
@@ -705,8 +705,8 @@ Use this section as lightweight scrum tracking.
 | CP-04 | [x] | @agent | PR #20 | gRPC RPCs + Kafka consumer for reservation lifecycle |
 | CP-05 | [x] | @agent | PR #21 | Order-service GA reservation integration with gRPC + compensation |
 | CP-06 | [x] | @agent | PR #24 | 3× E2E lifecycle tests + Kong smoke (AC-1/2/3 all pass); migration/rollback doc added |
-| CP-07 | [ ] | TBD |  |  |
-| CP-08 | [ ] | TBD |  |  |
+| CP-07 | [x] | @agent | PR #25 | venue-service scaffold + 7 migrations + CI job; 5/5 unit + 7/7 integration tests pass |
+| CP-08 | [x] | @agent | PR #26 | Venue + plan CRUD repos, REST handlers, wired main.go; 10 unit + 1 integration tests pass |
 | CP-09 | [ ] | TBD |  |  |
 | CP-10 | [ ] | TBD |  |  |
 | CP-11 | [ ] | TBD |  |  |

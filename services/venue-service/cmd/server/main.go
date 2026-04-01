@@ -16,6 +16,7 @@ import (
 	"github.com/acme/venue-service/internal/kafka"
 	"github.com/acme/venue-service/internal/middleware"
 	"github.com/acme/venue-service/internal/migrations"
+	pgrepo "github.com/acme/venue-service/internal/repository/postgres"
 	"github.com/acme/venue-service/internal/service"
 	"github.com/acme/venue-service/internal/tracing"
 	"github.com/acme/venue-service/pkg/logger"
@@ -108,9 +109,15 @@ func main() {
 	}
 	defer producer.Close()
 
+	// Repositories — wired in CP-08.
+	venueRepo := pgrepo.NewVenueRepo(pool)
+	planRepo := pgrepo.NewPlanRepo(pool)
+	sectionRepo := pgrepo.NewSectionRepo(pool)
+	priceTierRepo := pgrepo.NewPriceTierRepo(pool)
+	reservationRepo := pgrepo.NewReservationRepo(pool)
+
 	// Business logic service (implements OrderEventHandler for Kafka consumer).
-	// Repositories will be wired in later CPs; nil is safe for the scaffold.
-	svc := service.NewVenueService(nil, nil, log)
+	svc := service.NewVenueService(reservationRepo, sectionRepo, log)
 
 	// Kafka consumer — listens to order lifecycle events.
 	orderConsumer, err := kafka.NewOrderConsumer(cfg.KafkaBrokers, "venue-service", svc, log)
@@ -121,9 +128,8 @@ func main() {
 	defer consumerCancel()
 	go orderConsumer.Start(consumerCtx)
 
-	// gRPC server — runs alongside HTTP in a separate goroutine.
-	// Repositories are nil in CP-07 (scaffold); real implementations arrive in CP-08+.
-	grpcSrv := grpcserver.NewVenueGrpcServer(nil, nil, nil, log)
+	// gRPC server — wired with real repos in CP-08.
+	grpcSrv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, log)
 	grpcCtx, grpcCancel := context.WithCancel(context.Background())
 	defer grpcCancel()
 	grpcAddr := fmt.Sprintf(":%d", cfg.GrpcPort)
@@ -152,6 +158,18 @@ func main() {
 	healthHandler := handler.NewHealthHandler(dbChecker, redisChecker, kafkaChecker, log)
 	e.GET("/healthz/live", healthHandler.Live)
 	e.GET("/healthz/ready", healthHandler.Ready)
+
+	// API routes.
+	api := e.Group("/api")
+
+	venueHandler := handler.NewVenueHandler(venueRepo, log)
+	venueHandler.RegisterRoutes(api.Group("/venues"))
+
+	planHandler := handler.NewPlanHandler(planRepo, log)
+	planHandler.RegisterRoutes(api.Group("/seating-plans"))
+
+	sectionHandler := handler.NewSectionHandler(planRepo, sectionRepo, priceTierRepo, log)
+	sectionHandler.RegisterRoutes(api.Group("/seating-plans/:planId"))
 
 	// Graceful shutdown.
 	addr := fmt.Sprintf(":%d", cfg.Port)
