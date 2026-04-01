@@ -63,7 +63,9 @@ func (s *stubReservationRepo) CreateReservation(ctx context.Context, r *reposito
 }
 
 // nopSectionRepo satisfies SectionRepository with no-ops (not used by CP-10 RPCs).
-type nopSectionRepo struct{}
+type nopSectionRepo struct {
+	getAvailableFn func(ctx context.Context, sectionID string) ([]*repository.Seat, error)
+}
 
 func (n *nopSectionRepo) CreateSection(ctx context.Context, s *repository.Section) error {
 	return nil
@@ -82,6 +84,9 @@ func (n *nopSectionRepo) FindSeatsByIDs(ctx context.Context, seatIDs []string) (
 	return nil, nil
 }
 func (n *nopSectionRepo) GetAvailableSeatsInSection(ctx context.Context, sectionID string) ([]*repository.Seat, error) {
+	if n.getAvailableFn != nil {
+		return n.getAvailableFn(ctx, sectionID)
+	}
 	return nil, nil
 }
 func (n *nopSectionRepo) HoldSeats(ctx context.Context, seatIDs []string, userID string, expiresAt time.Time) error {
@@ -119,6 +124,11 @@ func (n *nopPlanRepo) Update(ctx context.Context, p *repository.SeatingPlan) err
 // newTestServer creates a VenueGrpcServer with the given reservation repo stub.
 func newTestServer(rr repository.ReservationRepository) *grpcserver.VenueGrpcServer {
 	return grpcserver.NewVenueGrpcServer(rr, &nopSectionRepo{}, &nopPlanRepo{}, zap.NewNop())
+}
+
+// newTestServerWithSection creates a VenueGrpcServer with a configurable section repo.
+func newTestServerWithSection(rr repository.ReservationRepository, sr repository.SectionRepository) *grpcserver.VenueGrpcServer {
+	return grpcserver.NewVenueGrpcServer(rr, sr, &nopPlanRepo{}, zap.NewNop())
 }
 
 // ── ReserveHeldSeats tests ────────────────────────────────────────────────────
@@ -478,4 +488,191 @@ func TestFinalizeSeatReservation_ShouldReturnFailedPrecondition_WhenAlreadyRelea
 	})
 	require.Error(t, err)
 	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+}
+
+// ── AutoAssignAndReserve tests ────────────────────────────────────────────────
+
+func TestAutoAssignAndReserve_ShouldReturnInvalidArgument_WhenPlanIdMissing(t *testing.T) {
+	srv := newTestServer(&stubReservationRepo{})
+	_, err := srv.AutoAssignAndReserve(context.Background(), &venuev1.AutoAssignAndReserveRequest{
+		TicketId:      "ticket-1",
+		SectionId:     "section-1",
+		ReservationId: "res-1",
+		UserId:        "user-1",
+		Quantity:      2,
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestAutoAssignAndReserve_ShouldReturnInvalidArgument_WhenQuantityIsZero(t *testing.T) {
+	srv := newTestServer(&stubReservationRepo{})
+	_, err := srv.AutoAssignAndReserve(context.Background(), &venuev1.AutoAssignAndReserveRequest{
+		PlanId:        "plan-1",
+		TicketId:      "ticket-1",
+		SectionId:     "section-1",
+		ReservationId: "res-1",
+		UserId:        "user-1",
+		Quantity:      0,
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestAutoAssignAndReserve_ShouldReturnSuccessImmediately_WhenReservationAlreadyReserved(t *testing.T) {
+	items := []repository.SeatReservationItem{
+		{ReservationID: "res-aa", SeatID: "s1", SectionID: "sec-1", Price: "50.00", SeatLabel: "A1"},
+		{ReservationID: "res-aa", SeatID: "s2", SectionID: "sec-1", Price: "50.00", SeatLabel: "A2"},
+	}
+	stub := &stubReservationRepo{
+		findByIDFn: func(_ context.Context, id string) (*repository.SeatReservation, error) {
+			return &repository.SeatReservation{
+				ID:     id,
+				Status: repository.ReservationStatusReserved,
+				Items:  items,
+			}, nil
+		},
+	}
+
+	srv := newTestServer(stub)
+	resp, err := srv.AutoAssignAndReserve(context.Background(), &venuev1.AutoAssignAndReserveRequest{
+		PlanId:        "plan-1",
+		TicketId:      "ticket-1",
+		SectionId:     "section-1",
+		ReservationId: "res-aa",
+		UserId:        "user-1",
+		Quantity:      2,
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.Success)
+	assert.Equal(t, "res-aa", resp.ReservationId)
+	require.Len(t, resp.Seats, 2)
+}
+
+func TestAutoAssignAndReserve_ShouldSucceed_WhenSeatsAvailable(t *testing.T) {
+	seats := []*repository.Seat{
+		{ID: "s1", RowLabel: "A", ColumnNumber: 1, Status: repository.SeatStatusAvailable, SeatLabel: "A1", SectionID: "sec-1"},
+		{ID: "s2", RowLabel: "A", ColumnNumber: 2, Status: repository.SeatStatusAvailable, SeatLabel: "A2", SectionID: "sec-1"},
+		{ID: "s3", RowLabel: "A", ColumnNumber: 3, Status: repository.SeatStatusAvailable, SeatLabel: "A3", SectionID: "sec-1"},
+	}
+	secRepo := &nopSectionRepo{
+		getAvailableFn: func(_ context.Context, _ string) ([]*repository.Seat, error) {
+			return seats, nil
+		},
+	}
+	stub := &stubReservationRepo{
+		findByIDFn: func(_ context.Context, _ string) (*repository.SeatReservation, error) {
+			return nil, repository.ErrReservationNotFound
+		},
+		atomicReserveAndFn: func(_ context.Context, seatIDs []string, r *repository.SeatReservation) error {
+			for _, id := range seatIDs {
+				r.Items = append(r.Items, repository.SeatReservationItem{
+					ReservationID: r.ID, SeatID: id, SectionID: "sec-1", Price: "50.00", SeatLabel: id,
+				})
+			}
+			return nil
+		},
+	}
+
+	srv := newTestServerWithSection(stub, secRepo)
+	resp, err := srv.AutoAssignAndReserve(context.Background(), &venuev1.AutoAssignAndReserveRequest{
+		PlanId:        "plan-1",
+		TicketId:      "ticket-1",
+		SectionId:     "section-1",
+		ReservationId: "res-new",
+		UserId:        "user-1",
+		Quantity:      2,
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.Success)
+	assert.Equal(t, "res-new", resp.ReservationId)
+	require.Len(t, resp.Seats, 2)
+}
+
+func TestAutoAssignAndReserve_ShouldReturnSuccessFalse_WhenNotEnoughSeats(t *testing.T) {
+	secRepo := &nopSectionRepo{
+		getAvailableFn: func(_ context.Context, _ string) ([]*repository.Seat, error) {
+			return []*repository.Seat{}, nil // no available seats
+		},
+	}
+	stub := &stubReservationRepo{
+		findByIDFn: func(_ context.Context, _ string) (*repository.SeatReservation, error) {
+			return nil, repository.ErrReservationNotFound
+		},
+	}
+
+	srv := newTestServerWithSection(stub, secRepo)
+	resp, err := srv.AutoAssignAndReserve(context.Background(), &venuev1.AutoAssignAndReserveRequest{
+		PlanId:        "plan-1",
+		TicketId:      "ticket-1",
+		SectionId:     "section-1",
+		ReservationId: "res-fail",
+		UserId:        "user-1",
+		Quantity:      3,
+	})
+	require.NoError(t, err)
+	assert.False(t, resp.Success)
+}
+
+func TestAutoAssignAndReserve_ShouldReturnSuccessFalse_WhenRaceConditionOnReserve(t *testing.T) {
+	seats := []*repository.Seat{
+		{ID: "s1", RowLabel: "A", ColumnNumber: 1, Status: repository.SeatStatusAvailable, SeatLabel: "A1"},
+		{ID: "s2", RowLabel: "A", ColumnNumber: 2, Status: repository.SeatStatusAvailable, SeatLabel: "A2"},
+	}
+	secRepo := &nopSectionRepo{
+		getAvailableFn: func(_ context.Context, _ string) ([]*repository.Seat, error) {
+			return seats, nil
+		},
+	}
+	stub := &stubReservationRepo{
+		findByIDFn: func(_ context.Context, _ string) (*repository.SeatReservation, error) {
+			return nil, repository.ErrReservationNotFound
+		},
+		atomicReserveAndFn: func(_ context.Context, _ []string, _ *repository.SeatReservation) error {
+			return repository.ErrSeatNotAvailable // concurrent reservation took the seats
+		},
+	}
+
+	srv := newTestServerWithSection(stub, secRepo)
+	resp, err := srv.AutoAssignAndReserve(context.Background(), &venuev1.AutoAssignAndReserveRequest{
+		PlanId:        "plan-1",
+		TicketId:      "ticket-1",
+		SectionId:     "section-1",
+		ReservationId: "res-race",
+		UserId:        "user-1",
+		Quantity:      2,
+	})
+	require.NoError(t, err)
+	assert.False(t, resp.Success)
+}
+
+func TestAutoAssignAndReserve_ShouldReturnInternal_WhenAtomicReserveFails(t *testing.T) {
+	seats := []*repository.Seat{
+		{ID: "s1", RowLabel: "A", ColumnNumber: 1, Status: repository.SeatStatusAvailable, SeatLabel: "A1"},
+	}
+	secRepo := &nopSectionRepo{
+		getAvailableFn: func(_ context.Context, _ string) ([]*repository.Seat, error) {
+			return seats, nil
+		},
+	}
+	stub := &stubReservationRepo{
+		findByIDFn: func(_ context.Context, _ string) (*repository.SeatReservation, error) {
+			return nil, repository.ErrReservationNotFound
+		},
+		atomicReserveAndFn: func(_ context.Context, _ []string, _ *repository.SeatReservation) error {
+			return assert.AnError
+		},
+	}
+
+	srv := newTestServerWithSection(stub, secRepo)
+	_, err := srv.AutoAssignAndReserve(context.Background(), &venuev1.AutoAssignAndReserveRequest{
+		PlanId:        "plan-1",
+		TicketId:      "ticket-1",
+		SectionId:     "section-1",
+		ReservationId: "res-err",
+		UserId:        "user-1",
+		Quantity:      1,
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
 }

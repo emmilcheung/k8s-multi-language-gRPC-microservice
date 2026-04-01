@@ -7,6 +7,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/acme/venue-service/internal/autoassign"
 	"github.com/acme/venue-service/internal/repository"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
@@ -18,8 +19,8 @@ import (
 )
 
 // VenueGrpcServer implements the generated VenueServiceServer interface.
-// CP-07 delivers the skeleton only — all RPCs return UNIMPLEMENTED and will be
-// filled in during CP-10 (Seated Reservation Lifecycle).
+// CP-10 implemented the seated reservation lifecycle RPCs.
+// CP-11 implements AutoAssignAndReserve.
 type VenueGrpcServer struct {
 	venuev1.UnimplementedVenueServiceServer
 	reservationRepo repository.ReservationRepository
@@ -134,10 +135,129 @@ func (s *VenueGrpcServer) ReserveHeldSeats(ctx context.Context, req *venuev1.Res
 	}, nil
 }
 
-// AutoAssignAndReserve selects the best available block and atomically reserves it.
-// Fully implemented in CP-11.
-func (s *VenueGrpcServer) AutoAssignAndReserve(_ context.Context, _ *venuev1.AutoAssignAndReserveRequest) (*venuev1.AutoAssignAndReserveResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "AutoAssignAndReserve not yet implemented — coming in CP-11")
+// AutoAssignAndReserve selects the best available block of seats in the given
+// section and atomically reserves them.
+//
+// Algorithm (§10 of venue-seating-plan-design.md):
+//  1. Validate required fields.
+//  2. Idempotency: if reservationId already exists and is RESERVED, return success.
+//  3. Load all AVAILABLE seats in the section via GetAvailableSeatsInSection.
+//  4. Run the auto-assign algorithm to find the best contiguous block.
+//  5. Atomically reserve the chosen seats via AtomicReserveAndCreate.
+//  6. Return success, reservationId, and snapshotted seat details.
+func (s *VenueGrpcServer) AutoAssignAndReserve(ctx context.Context, req *venuev1.AutoAssignAndReserveRequest) (*venuev1.AutoAssignAndReserveResponse, error) {
+	if req.PlanId == "" || req.TicketId == "" || req.SectionId == "" || req.ReservationId == "" || req.UserId == "" {
+		return nil, status.Error(codes.InvalidArgument,
+			"plan_id, ticket_id, section_id, reservation_id, and user_id are required")
+	}
+	if req.Quantity <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "quantity must be greater than zero")
+	}
+
+	// Idempotency: check whether a reservation for this ID already exists.
+	existing, err := s.reservationRepo.FindReservationByID(ctx, req.ReservationId)
+	if err == nil {
+		switch existing.Status {
+		case repository.ReservationStatusReserved:
+			return &venuev1.AutoAssignAndReserveResponse{
+				Success:       true,
+				ReservationId: existing.ID,
+				Seats:         toSeatDetails(existing.Items),
+			}, nil
+		case repository.ReservationStatusReleased, repository.ReservationStatusExpired:
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"reservation %s was already released", req.ReservationId)
+		case repository.ReservationStatusSold:
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"reservation %s was already sold", req.ReservationId)
+		}
+	} else if err != repository.ErrReservationNotFound {
+		s.log.Error("AutoAssignAndReserve: lookup failed", zap.Error(err),
+			zap.String("reservationId", req.ReservationId))
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+
+	// Load available seats in the section.
+	availableSeats, err := s.sectionRepo.GetAvailableSeatsInSection(ctx, req.SectionId)
+	if err != nil {
+		if err == repository.ErrSectionNotFound {
+			return nil, status.Errorf(codes.NotFound, "section not found: %s", req.SectionId)
+		}
+		s.log.Error("AutoAssignAndReserve: GetAvailableSeatsInSection failed", zap.Error(err),
+			zap.String("sectionId", req.SectionId))
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+
+	// Run the auto-assign algorithm.
+	chosenSeatIDs, err := autoassign.FindBestBlock(availableSeats, int(req.Quantity))
+	if err != nil {
+		if err == autoassign.ErrNotEnoughSeats {
+			return &venuev1.AutoAssignAndReserveResponse{
+				Success: false,
+			}, nil
+		}
+		s.log.Error("AutoAssignAndReserve: FindBestBlock failed", zap.Error(err))
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+
+	// Build reservation domain object.
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil {
+		t := req.ExpiresAt.AsTime()
+		expiresAt = &t
+	}
+
+	res := &repository.SeatReservation{
+		ID:        req.ReservationId,
+		PlanID:    req.PlanId,
+		TicketID:  req.TicketId,
+		UserID:    req.UserId,
+		SectionID: req.SectionId,
+		Status:    repository.ReservationStatusReserved,
+		ExpiresAt: expiresAt,
+	}
+
+	// Atomic: lock seats, transition AVAILABLE → RESERVED, write ledger.
+	if err := s.reservationRepo.AtomicReserveAndCreate(ctx, chosenSeatIDs, res); err != nil {
+		switch err {
+		case repository.ErrSeatNotAvailable:
+			// Race condition — seats were taken between query and reserve.
+			return &venuev1.AutoAssignAndReserveResponse{
+				Success: false,
+			}, nil
+		case repository.ErrReservationAlreadyDone:
+			// Concurrent duplicate — reload and return success idempotently.
+			if loaded, loadErr := s.reservationRepo.FindReservationByID(ctx, req.ReservationId); loadErr == nil {
+				return &venuev1.AutoAssignAndReserveResponse{
+					Success:       true,
+					ReservationId: loaded.ID,
+					Seats:         toSeatDetails(loaded.Items),
+				}, nil
+			}
+			return &venuev1.AutoAssignAndReserveResponse{
+				Success:       true,
+				ReservationId: req.ReservationId,
+			}, nil
+		default:
+			s.log.Error("AutoAssignAndReserve: atomic reserve failed", zap.Error(err),
+				zap.String("reservationId", req.ReservationId),
+				zap.String("planId", req.PlanId))
+			return nil, status.Error(codes.Internal, "internal error")
+		}
+	}
+
+	s.log.Info("AutoAssignAndReserve: reservation created",
+		zap.String("reservationId", res.ID),
+		zap.String("planId", req.PlanId),
+		zap.String("sectionId", req.SectionId),
+		zap.Int32("quantity", req.Quantity),
+	)
+
+	return &venuev1.AutoAssignAndReserveResponse{
+		Success:       true,
+		ReservationId: res.ID,
+		Seats:         toSeatDetails(res.Items),
+	}, nil
 }
 
 // ReleaseSeatReservation transitions a reservation RESERVED → RELEASED and

@@ -64,12 +64,23 @@ type ExtendedSectionRepo interface {
 	SweepExpiredHolds(ctx context.Context) (int64, error)
 }
 
+// SeatEventPublisher is an optional in-process broadcaster used when Redis is
+// not available. It receives the same JSON payloads that would otherwise be
+// published to Redis pub/sub.
+type SeatEventPublisher interface {
+	Publish(planID, payload string)
+}
+
 // Manager coordinates the Redis + PostgreSQL hold hot path.
 type Manager struct {
 	redis       *redis.Client
 	sectionRepo ExtendedSectionRepo
 	planRepo    repository.PlanRepository
 	log         *zap.Logger
+
+	// broadcaster is used for in-process SSE fan-out when Redis is unavailable.
+	// It may be nil.
+	broadcaster SeatEventPublisher
 }
 
 // NewManager creates a new hold Manager.
@@ -86,6 +97,12 @@ func NewManager(
 		planRepo:    planRepo,
 		log:         log,
 	}
+}
+
+// WithBroadcaster attaches an in-process SSE broadcaster to the Manager.
+// When Redis is unavailable, changes are published directly to the broadcaster.
+func (m *Manager) WithBroadcaster(b SeatEventPublisher) {
+	m.broadcaster = b
 }
 
 // ── Key helpers ───────────────────────────────────────────────────────────────
@@ -387,9 +404,6 @@ func (m *Manager) redisReleaseHold(ctx context.Context, planID, userID string, s
 }
 
 func (m *Manager) publishChange(ctx context.Context, planID, event string, seatIDs []string) {
-	if m.redis == nil {
-		return
-	}
 	payload, err := json.Marshal(map[string]interface{}{
 		"event":   event,
 		"seatIds": seatIDs,
@@ -398,7 +412,18 @@ func (m *Manager) publishChange(ctx context.Context, planID, event string, seatI
 	if err != nil {
 		return
 	}
-	if pubErr := m.redis.Publish(ctx, changesKey(planID), string(payload)).Err(); pubErr != nil {
-		m.log.Warn("failed to publish seat change", zap.Error(pubErr), zap.String("planId", planID))
+
+	if m.redis != nil {
+		if pubErr := m.redis.Publish(ctx, changesKey(planID), string(payload)).Err(); pubErr != nil {
+			m.log.Warn("failed to publish seat change", zap.Error(pubErr), zap.String("planId", planID))
+		}
+		// Redis pub/sub takes care of delivering to SSE subscribers.
+		return
+	}
+
+	// No Redis — publish directly to the in-process broadcaster if attached.
+	if m.broadcaster != nil {
+		ssePayload := fmt.Sprintf("data: %s\n\n", string(payload))
+		m.broadcaster.Publish(planID, ssePayload)
 	}
 }
