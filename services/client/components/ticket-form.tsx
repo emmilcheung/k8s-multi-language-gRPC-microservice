@@ -12,7 +12,7 @@ import type { TicketState } from "@/app/actions/tickets";
 interface TicketFormProps {
   action: (_prev: TicketState, formData: FormData) => Promise<TicketState>;
   defaultTitle?: string;
-  defaultPrice?: number;
+  defaultPrice?: number | string;
   submitLabel?: string;
 }
 

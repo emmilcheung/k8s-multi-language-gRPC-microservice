@@ -99,7 +99,7 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   return {
     id: "ticket-uuid-1",
     title: "Concert Night",
-    price: 49.99,
+    price: "49.99",
     userId: "owner-uuid",
     orderId: null,
     version: 1,

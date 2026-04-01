@@ -163,7 +163,7 @@ export default async function OrderDetailPage({ params }: Props) {
               <div className="flex flex-col gap-0.5">
                 <p className="text-xs text-muted-foreground uppercase tracking-wider">Amount</p>
                 <p className="text-2xl font-bold gradient-text">
-                  ${order.ticket.price.toFixed(2)}
+                  ${parseFloat(order.ticket.price).toFixed(2)}
                 </p>
               </div>
             </div>
@@ -198,7 +198,7 @@ export default async function OrderDetailPage({ params }: Props) {
         {canPay && (
           <OrderPaymentForm
             orderId={order.id}
-            amount={order.ticket.price}
+            amount={parseFloat(order.ticket.price)}
             expiresAt={order.expiresAt}
           />
         )}

@@ -321,13 +321,24 @@ test.describe("orders", () => {
     // Poll the order detail page until the status flips to complete.
     // The page is server-rendered and reads the order status from order-service;
     // Kafka consumption has variable latency so we reload until the state is reflected.
+    //
+    // IMPORTANT: Next.js App Router streams RSC content after the initial HTML.
+    // page.goto() resolves (load event) before streaming completes, so the page
+    // may still show the loading skeleton. We wait for the real content to appear
+    // (Order Summary heading) before checking for the success message.
     await expect
       .poll(
         async () => {
           await page.goto(page.url());
+          // Wait for the streaming RSC content to replace the loading skeleton.
+          // "Order Summary" heading only appears in the real page, not the skeleton.
+          await page
+            .getByRole("heading", { name: /order summary/i })
+            .waitFor({ timeout: 10000 })
+            .catch(() => {});
           return page.getByText(/payment received/i).isVisible();
         },
-        { timeout: 30000, intervals: [2000, 3000, 5000] }
+        { timeout: 45000, intervals: [2000, 3000, 5000] }
       )
       .toBe(true);
 

@@ -8,9 +8,14 @@ export interface User {
 export interface Ticket {
   id: string;
   title: string;
-  price: number;
+  /** ticket-service returns price as a decimal string (e.g. "25.00") */
+  price: string;
   userId: string;
   orderId?: string | null;
+  /** GA quota fields — number of units currently reserved (active reservations) */
+  reserved?: number;
+  quota?: number;
+  sold?: number;
   version: number;
 }
 
@@ -22,7 +27,8 @@ export interface Order {
   ticket: {
     id: string;
     title: string;
-    price: number;
+    /** ticket price returned as a decimal string from ticket-service */
+    price: string;
   };
   version: number;
 }
