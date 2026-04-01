@@ -418,3 +418,65 @@ test.describe("orders", () => {
     await expect(page.getByRole("button", { name: /purchase ticket/i })).toHaveCount(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Seating plan (CP-14) tests
+// ---------------------------------------------------------------------------
+
+test.describe("seating plan", () => {
+  test("organizer sees seating plan panel on own ticket", async ({ page }) => {
+    const email = uniqueEmail("org-seatplan");
+    await signup(page, email);
+
+    await createTicket(page, `Seating Plan Test ${Date.now()}`, "50.00");
+
+    // The AttachSeatingPlanForm is only rendered for the ticket owner.
+    // It contains a "Seating Plan" heading (p.font-semibold) and an "Attach Seating Plan" button.
+    await expect(page.getByText("Seating Plan").first()).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /attach seating plan/i })
+    ).toBeVisible();
+    // The label for the plan ID input must be present
+    await expect(page.getByLabel("Seating Plan ID")).toBeVisible();
+  });
+
+  test("attach seating plan form shows error for unknown plan UUID", async ({ page }) => {
+    const email = uniqueEmail("org-attach-err");
+    await signup(page, email);
+
+    await createTicket(page, `Attach Error Test ${Date.now()}`, "30.00");
+
+    // The input has a UUID pattern attribute — remove it so the fake UUID can be submitted
+    await page.locator('#planId').evaluate((el: HTMLInputElement) => {
+      el.removeAttribute("required");
+      el.removeAttribute("pattern");
+    });
+
+    const fakeUUID = "00000000-0000-0000-0000-000000000000";
+    await page.getByLabel("Seating Plan ID").fill(fakeUUID);
+    await page.getByRole("button", { name: /attach seating plan/i }).click();
+
+    // Server action returns an error; AttachSeatingPlanForm renders it in role="alert"
+    const alert = page.locator('[role="alert"]:not([id="__next-route-announcer__"])');
+    await expect(alert).toBeVisible({ timeout: 10000 });
+  });
+
+  test("GA ticket with default quota does not show quantity stepper", async ({ page }) => {
+    const sellerEmail = uniqueEmail("seller-ga-qty");
+    const buyerEmail = uniqueEmail("buyer-ga-qty");
+    await signup(page, sellerEmail);
+
+    const ticketUrl = await createTicket(page, `GA No Stepper ${Date.now()}`, "20.00");
+
+    await signout(page);
+    await signup(page, buyerEmail);
+
+    await page.goto(ticketUrl);
+
+    // The "Purchase Ticket" button should be visible for the buyer
+    await expect(page.getByRole("button", { name: /purchase ticket/i })).toBeVisible();
+    // The quantity stepper input is only rendered when maxQuantity > 1 (quota > 1).
+    // A freshly created ticket has quota=1, so the stepper must be absent.
+    await expect(page.locator('#quantity[type="number"]')).toHaveCount(0);
+  });
+});

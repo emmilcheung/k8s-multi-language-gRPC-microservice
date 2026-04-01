@@ -17,6 +17,7 @@ import (
 	"github.com/acme/venue-service/internal/kafka"
 	"github.com/acme/venue-service/internal/middleware"
 	"github.com/acme/venue-service/internal/migrations"
+	"github.com/acme/venue-service/internal/reconciler"
 	pgrepo "github.com/acme/venue-service/internal/repository/postgres"
 	"github.com/acme/venue-service/internal/service"
 	"github.com/acme/venue-service/internal/sse"
@@ -142,6 +143,17 @@ func main() {
 	defer sweeperCancel()
 	go sweeper.Start(sweeperCtx)
 
+	// Redis reconciler — re-seeds the seat state hash after a Redis restart.
+	// Only started when Redis is configured; no-op otherwise.
+	var reconcilerCancel context.CancelFunc
+	if redisClient != nil {
+		rec := reconciler.NewReconciler(redisClient, planRepo, sectionRepo, 5*time.Minute, log)
+		var reconcilerCtx context.Context
+		reconcilerCtx, reconcilerCancel = context.WithCancel(context.Background())
+		defer reconcilerCancel()
+		go rec.Start(reconcilerCtx)
+	}
+
 	// Kafka consumer — listens to order lifecycle events.
 	orderConsumer, err := kafka.NewOrderConsumer(cfg.KafkaBrokers, "venue-service", svc, log)
 	if err != nil {
@@ -217,6 +229,9 @@ func main() {
 	grpcCancel()
 	consumerCancel()
 	sweeperCancel()
+	if reconcilerCancel != nil {
+		reconcilerCancel()
+	}
 	heartbeatCancel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

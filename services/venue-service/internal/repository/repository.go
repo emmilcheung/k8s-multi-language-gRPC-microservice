@@ -171,6 +171,7 @@ type PlanRepository interface {
 	Create(ctx context.Context, p *SeatingPlan) error
 	FindByID(ctx context.Context, id string) (*SeatingPlan, error)
 	ListByTicket(ctx context.Context, ticketID string) ([]*SeatingPlan, error)
+	ListActivePlans(ctx context.Context) ([]*SeatingPlan, error)
 	AttachTicket(ctx context.Context, planID, ticketID string, expectedVersion int) error
 	Activate(ctx context.Context, planID string, expectedVersion int) error
 	Update(ctx context.Context, p *SeatingPlan) error

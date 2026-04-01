@@ -16,6 +16,7 @@ import (
 	"github.com/acme/ticket-service/internal/health"
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/middleware"
+	"github.com/acme/ticket-service/internal/reconciler"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
 	"github.com/acme/ticket-service/internal/tracing"
@@ -69,6 +70,10 @@ func main() {
 		defer redisClient.Close() //nolint:errcheck
 
 		ticketCache := cache.NewRedisCache(redisClient)
+		quotaManager := cache.NewRedisQuotaManager(redisClient)
+		// Attach the quota manager to mongoRepo so that reservation hot-path
+		// uses Redis Lua scripts; mongo stays the source of truth.
+		repository.WithQuotaManager(quotaManager)(mongoRepo)
 		ticketRepo = repository.NewCachingTicketRepository(mongoRepo, ticketCache, log)
 		redisChecker, err = health.NewRedisChecker(cfg.RedisURL)
 		if err != nil {
@@ -76,6 +81,12 @@ func main() {
 		}
 		defer redisChecker.Close() //nolint:errcheck
 		log.Info("ticket cache enabled", zap.String("redisAddr", redisOptions.Addr))
+
+		// Start quota reconciliation worker — corrects Redis drift vs MongoDB.
+		reconcilerCtx, reconcilerCancel := context.WithCancel(context.Background())
+		defer reconcilerCancel()
+		rec := reconciler.New(mongoRepo, mongoRepo, quotaManager, reconciler.DefaultInterval, log)
+		go rec.Start(reconcilerCtx)
 	} else {
 		ticketRepo = repository.NewCachingTicketRepository(mongoRepo, cache.NewNoopCache(), log)
 		log.Info("REDIS_URL not set, ticket cache disabled")

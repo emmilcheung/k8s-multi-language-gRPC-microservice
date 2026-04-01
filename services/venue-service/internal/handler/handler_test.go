@@ -68,6 +68,9 @@ func (s *stubPlanRepo) Activate(ctx context.Context, planID string, version int)
 func (s *stubPlanRepo) Update(ctx context.Context, p *repository.SeatingPlan) error {
 	return s.updateFn(ctx, p)
 }
+func (s *stubPlanRepo) ListActivePlans(_ context.Context) ([]*repository.SeatingPlan, error) {
+	return nil, nil
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

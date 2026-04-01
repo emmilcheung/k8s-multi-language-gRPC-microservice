@@ -712,5 +712,5 @@ Use this section as lightweight scrum tracking.
 | CP-11 | [x] | @agent | PR #29 | Auto-assign algorithm (row-based + cross-row fallback), AutoAssignAndReserve gRPC, SSE broadcaster + HTTP handler; 8 autoassign unit + 7 gRPC unit + 3 integration tests pass |
 | CP-12 | [x] | @agent | PR #31 | Seated order flow: V3 migration, OrderSeat entity, VenueServiceClient, SeatedOrderTransactionService, POST /api/orders/seated; 20/20 tests pass |
 | CP-13 | [x] | @agent | PR #32 | `seatingPlanId` model, attach/detach handlers, gRPC seated guard, Kafka field, 9 integration tests |
-| CP-14 | [ ] | TBD |  |  |
-| CP-15 | [ ] | TBD |  |  |
+| CP-14 | [x] | @agent | PR #33 | Client UI: ticket detail page (seating plan panel, seated/GA CTA, quota stepper), attach/detach server actions, seats page scaffold |
+| CP-15 | [x] | @agent | PR #34 | ticket-service quota reconciler (5/5 tests), venue-service Redis reconciler (3/3 tests), 3 new E2E tests (seating plan panel, attach error, GA no stepper) |

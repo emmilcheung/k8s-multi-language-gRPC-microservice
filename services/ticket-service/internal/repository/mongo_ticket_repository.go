@@ -878,6 +878,48 @@ func (r *MongoTicketRepository) FinalizeReservation(ctx context.Context, reserva
 	return nil
 }
 
+// ─── Reconciliation helpers ────────────────────────────────────────────────────
+
+// SweepExpiredReservations finds all reservations with status=RESERVED whose
+// expiresAt is in the past, transitions each to RELEASED via ReleaseReservation
+// (which also restores the ticket counter and Redis quota), and returns the
+// count of reservations that were expired.
+//
+// This method is intended for use by the quota reconciliation worker. It is not
+// part of the TicketRepository interface — callers take the concrete type.
+func (r *MongoTicketRepository) SweepExpiredReservations(ctx context.Context) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	now := time.Now().UTC()
+	filter := bson.M{
+		"status":    ReservationStatusReserved,
+		"expiresAt": bson.M{"$lt": now},
+	}
+
+	cursor, err := r.reservations.Find(ctx, filter)
+	if err != nil {
+		return 0, fmt.Errorf("sweep expired reservations: find: %w", err)
+	}
+	defer cursor.Close(ctx) //nolint:errcheck
+
+	var expired []TicketReservation
+	if err := cursor.All(ctx, &expired); err != nil {
+		return 0, fmt.Errorf("sweep expired reservations: decode: %w", err)
+	}
+
+	count := 0
+	for _, res := range expired {
+		if releaseErr := r.ReleaseReservation(ctx, res.ID); releaseErr != nil {
+			// Log-worthy but non-fatal: continue sweeping remaining reservations.
+			// The reconciler will log this at its level.
+			continue
+		}
+		count++
+	}
+	return count, nil
+}
+
 // ─── Seating plan attachment methods (CP-13) ──────────────────────────────────
 
 // AttachSeatingPlan sets seatingPlanId on a ticket. The caller must own the ticket.

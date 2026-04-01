@@ -120,6 +120,9 @@ func (n *nopPlanRepo) Activate(ctx context.Context, planID string, expectedVersi
 	return nil
 }
 func (n *nopPlanRepo) Update(ctx context.Context, p *repository.SeatingPlan) error { return nil }
+func (n *nopPlanRepo) ListActivePlans(_ context.Context) ([]*repository.SeatingPlan, error) {
+	return nil, nil
+}
 
 // newTestServer creates a VenueGrpcServer with the given reservation repo stub.
 func newTestServer(rr repository.ReservationRepository) *grpcserver.VenueGrpcServer {
