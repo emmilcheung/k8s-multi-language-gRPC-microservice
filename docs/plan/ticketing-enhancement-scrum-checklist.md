@@ -424,7 +424,7 @@ Verification:
 
 ## CP-10 Venue Seated Reservation Lifecycle
 
-- [ ] Implement seated reservation ledger and order-facing gRPC
+- [x] Implement seated reservation ledger and order-facing gRPC
 
 Owner:
 
@@ -708,7 +708,7 @@ Use this section as lightweight scrum tracking.
 | CP-07 | [x] | @agent | PR #25 | venue-service scaffold + 7 migrations + CI job; 5/5 unit + 7/7 integration tests pass |
 | CP-08 | [x] | @agent | PR #26 | Venue + plan CRUD repos, REST handlers, wired main.go; 10 unit + 1 integration tests pass |
 | CP-09 | [x] | @agent | PR #27 | Redis Lua hold/release scripts, SeatHoldHandler, hold sweeper; 18 unit + 5 integration tests pass |
-| CP-10 | [ ] | TBD |  |  |
+| CP-10 | [x] | @agent | PR #28 | Seated reservation gRPC RPCs + Kafka handlers + reservation ledger; 21 unit + 5 integration tests pass |
 | CP-11 | [ ] | TBD |  |  |
 | CP-12 | [ ] | TBD |  |  |
 | CP-13 | [ ] | TBD |  |  |
