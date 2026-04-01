@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"runtime/debug"
-	"strconv"
 	"time"
 
 	"github.com/acme/ticket-service/internal/repository"
@@ -50,7 +49,7 @@ func (s *TicketGrpcServer) GetTicket(ctx context.Context, req *v1.GetTicketReque
 	return &v1.GetTicketResponse{
 		TicketId:  ticket.ID,
 		Title:     ticket.Title,
-		Price:     strconv.FormatFloat(ticket.Price, 'f', -1, 64),
+		Price:     ticket.Price,
 		UserId:    ticket.UserID,
 		OrderId:   ticket.OrderID,
 		Version:   int64(ticket.Version),
@@ -74,18 +73,20 @@ func (s *TicketGrpcServer) ValidateTicketAvailability(ctx context.Context, req *
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 
-	available := ticket.OrderID == ""
+	available := (ticket.Quota - ticket.Reserved - ticket.Sold) > 0
 	if !available {
-		s.log.Info("ticket is not available (already reserved)",
+		s.log.Info("ticket is not available (quota exhausted)",
 			zap.String("ticketId", req.TicketId),
-			zap.String("orderId", ticket.OrderID),
+			zap.Int("quota", ticket.Quota),
+			zap.Int("reserved", ticket.Reserved),
+			zap.Int("sold", ticket.Sold),
 		)
 	}
 
 	return &v1.ValidateTicketResponse{
 		Available: available,
 		TicketId:  ticket.ID,
-		Price:     strconv.FormatFloat(ticket.Price, 'f', -1, 64),
+		Price:     ticket.Price,
 		Title:     ticket.Title,
 	}, nil
 }

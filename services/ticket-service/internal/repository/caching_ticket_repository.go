@@ -138,3 +138,57 @@ func (r *CachingTicketRepository) Ping(ctx context.Context) error {
 func (r *CachingTicketRepository) Close(ctx context.Context) error {
 	return r.inner.Close(ctx)
 }
+
+// ─── Quota-based reservation passthrough ─────────────────────────────────────
+// Reservation writes invalidate the ticket cache because reserved/sold counters change.
+
+func (r *CachingTicketRepository) CreateReservation(ctx context.Context, res *TicketReservation) error {
+	if err := r.inner.CreateReservation(ctx, res); err != nil {
+		return err
+	}
+	if err := r.cache.InvalidateTicket(ctx, res.TicketID); err != nil {
+		r.log.Warn("failed to invalidate ticket cache after CreateReservation", zap.String("ticketId", res.TicketID), zap.Error(err))
+	}
+	if err := r.cache.InvalidateList(ctx); err != nil {
+		r.log.Warn("failed to invalidate ticket list cache after CreateReservation", zap.Error(err))
+	}
+	return nil
+}
+
+func (r *CachingTicketRepository) FindReservationByID(ctx context.Context, reservationID string) (*TicketReservation, error) {
+	return r.inner.FindReservationByID(ctx, reservationID)
+}
+
+func (r *CachingTicketRepository) ReleaseReservation(ctx context.Context, reservationID string) error {
+	res, err := r.inner.FindReservationByID(ctx, reservationID)
+	if err != nil {
+		return err
+	}
+	if err := r.inner.ReleaseReservation(ctx, reservationID); err != nil {
+		return err
+	}
+	if err := r.cache.InvalidateTicket(ctx, res.TicketID); err != nil {
+		r.log.Warn("failed to invalidate ticket cache after ReleaseReservation", zap.String("ticketId", res.TicketID), zap.Error(err))
+	}
+	if err := r.cache.InvalidateList(ctx); err != nil {
+		r.log.Warn("failed to invalidate ticket list cache after ReleaseReservation", zap.Error(err))
+	}
+	return nil
+}
+
+func (r *CachingTicketRepository) FinalizeReservation(ctx context.Context, reservationID, orderID string) error {
+	res, err := r.inner.FindReservationByID(ctx, reservationID)
+	if err != nil {
+		return err
+	}
+	if err := r.inner.FinalizeReservation(ctx, reservationID, orderID); err != nil {
+		return err
+	}
+	if err := r.cache.InvalidateTicket(ctx, res.TicketID); err != nil {
+		r.log.Warn("failed to invalidate ticket cache after FinalizeReservation", zap.String("ticketId", res.TicketID), zap.Error(err))
+	}
+	if err := r.cache.InvalidateList(ctx); err != nil {
+		r.log.Warn("failed to invalidate ticket list cache after FinalizeReservation", zap.Error(err))
+	}
+	return nil
+}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/acme/ticket-service/internal/repository"
@@ -15,6 +16,9 @@ import (
 
 // uuidRE matches a canonical UUID v4 string (case-insensitive).
 var uuidRE = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// decimalPriceRE matches a positive decimal string with up to 15 integer digits and 4 decimal places.
+var decimalPriceRE = regexp.MustCompile(`^\d{1,15}(\.\d{1,4})?$`)
 
 // TicketHandler handles HTTP requests for ticket operations.
 type TicketHandler struct {
@@ -28,40 +32,64 @@ func NewTicketHandler(svc *service.TicketService, log *zap.Logger) *TicketHandle
 }
 
 // createTicketRequest is the request body for POST /api/tickets.
+// Price is a decimal string to avoid IEEE 754 precision drift on purchase paths.
 type createTicketRequest struct {
-	Title string  `json:"title"`
-	Price float64 `json:"price"`
+	Title      string `json:"title"`
+	Price      string `json:"price"`
+	Quota      int    `json:"quota"`
+	MaxPerUser int    `json:"maxPerUser"`
 }
 
 // updateTicketRequest is the request body for PUT /api/tickets/:id.
 type updateTicketRequest struct {
-	Title string  `json:"title"`
-	Price float64 `json:"price"`
+	Title string `json:"title"`
+	Price string `json:"price"`
 }
 
 // ticketResponse is the JSON response shape for a ticket.
 type ticketResponse struct {
-	ID        string  `json:"id"`
-	Title     string  `json:"title"`
-	Price     float64 `json:"price"`
-	UserID    string  `json:"userId"`
-	OrderID   string  `json:"orderId,omitempty"`
-	Version   int     `json:"version"`
-	CreatedAt string  `json:"createdAt"`
-	UpdatedAt string  `json:"updatedAt"`
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	Price      string `json:"price"`
+	UserID     string `json:"userId"`
+	OrderID    string `json:"orderId,omitempty"`
+	Quota      int    `json:"quota"`
+	Reserved   int    `json:"reserved"`
+	Sold       int    `json:"sold"`
+	MaxPerUser int    `json:"maxPerUser"`
+	Version    int    `json:"version"`
+	CreatedAt  string `json:"createdAt"`
+	UpdatedAt  string `json:"updatedAt"`
 }
 
 func toResponse(t *repository.Ticket) ticketResponse {
 	return ticketResponse{
-		ID:        t.ID,
-		Title:     t.Title,
-		Price:     t.Price,
-		UserID:    t.UserID,
-		OrderID:   t.OrderID,
-		Version:   t.Version,
-		CreatedAt: t.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt: t.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		ID:         t.ID,
+		Title:      t.Title,
+		Price:      t.Price,
+		UserID:     t.UserID,
+		OrderID:    t.OrderID,
+		Quota:      t.Quota,
+		Reserved:   t.Reserved,
+		Sold:       t.Sold,
+		MaxPerUser: t.MaxPerUser,
+		Version:    t.Version,
+		CreatedAt:  t.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:  t.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
+}
+
+// validatePrice checks that price is a non-negative decimal string with up to 15 integer
+// digits and 4 decimal places. Returns the trimmed raw string on success.
+func validatePrice(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", errors.New("price is required")
+	}
+	if !decimalPriceRE.MatchString(raw) {
+		return "", errors.New("price must be a positive decimal number with up to 15 integer digits and 4 decimal places (e.g. \"9.99\")")
+	}
+	return raw, nil
 }
 
 // Create handles POST /api/tickets.
@@ -84,17 +112,26 @@ func (h *TicketHandler) Create(c echo.Context) error {
 	if utf8.RuneCountInString(req.Title) > 200 {
 		details = append(details, map[string]string{"field": "title", "issue": "must not exceed 200 characters"})
 	}
-	if req.Price < 0 {
-		details = append(details, map[string]string{"field": "price", "issue": "must be a non-negative number"})
+	normPrice, priceErr := validatePrice(req.Price)
+	if priceErr != nil {
+		details = append(details, map[string]string{"field": "price", "issue": priceErr.Error()})
+	}
+	if req.Quota < 0 {
+		details = append(details, map[string]string{"field": "quota", "issue": "must be a non-negative integer"})
+	}
+	if req.MaxPerUser < 0 {
+		details = append(details, map[string]string{"field": "maxPerUser", "issue": "must be a non-negative integer"})
 	}
 	if len(details) > 0 {
 		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "Request validation failed", details)
 	}
 
 	ticket, err := h.svc.CreateTicket(c.Request().Context(), service.CreateTicketInput{
-		Title:  req.Title,
-		Price:  req.Price,
-		UserID: userID,
+		Title:      req.Title,
+		Price:      normPrice,
+		UserID:     userID,
+		Quota:      req.Quota,
+		MaxPerUser: req.MaxPerUser,
 	})
 	if err != nil {
 		h.log.Error("create ticket failed", zap.Error(err))
@@ -174,8 +211,9 @@ func (h *TicketHandler) Update(c echo.Context) error {
 	if utf8.RuneCountInString(req.Title) > 200 {
 		details = append(details, map[string]string{"field": "title", "issue": "must not exceed 200 characters"})
 	}
-	if req.Price < 0 {
-		details = append(details, map[string]string{"field": "price", "issue": "must be a non-negative number"})
+	normPrice, priceErr := validatePrice(req.Price)
+	if priceErr != nil {
+		details = append(details, map[string]string{"field": "price", "issue": priceErr.Error()})
 	}
 	if len(details) > 0 {
 		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "Request validation failed", details)
@@ -184,7 +222,7 @@ func (h *TicketHandler) Update(c echo.Context) error {
 	ticket, err := h.svc.UpdateTicket(c.Request().Context(), service.UpdateTicketInput{
 		ID:     id,
 		Title:  req.Title,
-		Price:  req.Price,
+		Price:  normPrice,
 		UserID: userID,
 	})
 	if err != nil {

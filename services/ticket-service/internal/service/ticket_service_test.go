@@ -17,12 +17,16 @@ import (
 // --- Mock repository ---
 
 type mockRepo struct {
-	tickets map[string]*repository.Ticket
-	err     error
+	tickets      map[string]*repository.Ticket
+	reservations map[string]*repository.TicketReservation
+	err          error
 }
 
 func newMockRepo() *mockRepo {
-	return &mockRepo{tickets: make(map[string]*repository.Ticket)}
+	return &mockRepo{
+		tickets:      make(map[string]*repository.Ticket),
+		reservations: make(map[string]*repository.TicketReservation),
+	}
 }
 
 func (m *mockRepo) Create(ctx context.Context, t *repository.Ticket) error {
@@ -33,6 +37,12 @@ func (m *mockRepo) Create(ctx context.Context, t *repository.Ticket) error {
 		t.ID = "ticket-uuid-1"
 	}
 	t.Version = 1
+	if t.Quota == 0 {
+		t.Quota = 1
+	}
+	if t.MaxPerUser == 0 {
+		t.MaxPerUser = 1
+	}
 	m.tickets[t.ID] = t
 	return nil
 }
@@ -94,6 +104,52 @@ func (m *mockRepo) ReleaseTicket(ctx context.Context, ticketID string) error {
 	return nil
 }
 
+// Quota-based reservation stubs — minimal implementations sufficient for service unit tests.
+
+func (m *mockRepo) CreateReservation(ctx context.Context, r *repository.TicketReservation) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.reservations[r.ID] = r
+	return nil
+}
+
+func (m *mockRepo) FindReservationByID(ctx context.Context, reservationID string) (*repository.TicketReservation, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	r, ok := m.reservations[reservationID]
+	if !ok {
+		return nil, repository.ErrReservationNotFound
+	}
+	return r, nil
+}
+
+func (m *mockRepo) ReleaseReservation(ctx context.Context, reservationID string) error {
+	if m.err != nil {
+		return m.err
+	}
+	r, ok := m.reservations[reservationID]
+	if !ok {
+		return repository.ErrReservationNotFound
+	}
+	r.Status = repository.ReservationStatusReleased
+	return nil
+}
+
+func (m *mockRepo) FinalizeReservation(ctx context.Context, reservationID, orderID string) error {
+	if m.err != nil {
+		return m.err
+	}
+	r, ok := m.reservations[reservationID]
+	if !ok {
+		return repository.ErrReservationNotFound
+	}
+	r.Status = repository.ReservationStatusSold
+	r.OrderID = orderID
+	return nil
+}
+
 // --- Mock event publisher ---
 
 type mockPublisher struct {
@@ -131,13 +187,13 @@ func TestCreateTicket_ShouldCreateTicketAndPublishEvent(t *testing.T) {
 
 	ticket, err := svc.CreateTicket(context.Background(), service.CreateTicketInput{
 		Title:  "Concert Ticket",
-		Price:  99.99,
+		Price:  "99.99",
 		UserID: "user-1",
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, "Concert Ticket", ticket.Title)
-	assert.Equal(t, 99.99, ticket.Price)
+	assert.Equal(t, "99.99", ticket.Price)
 	assert.Equal(t, "user-1", ticket.UserID)
 	assert.NotEmpty(t, ticket.ID)
 
@@ -155,7 +211,7 @@ func TestCreateTicket_ShouldReturnErrorWhenRepoFails(t *testing.T) {
 
 	_, err := svc.CreateTicket(context.Background(), service.CreateTicketInput{
 		Title:  "Concert Ticket",
-		Price:  10.00,
+		Price:  "10.00",
 		UserID: "user-1",
 	})
 
@@ -174,7 +230,7 @@ func TestCreateTicket_ShouldSucceedEvenWhenKafkaFails(t *testing.T) {
 
 	ticket, err := svc.CreateTicket(context.Background(), service.CreateTicketInput{
 		Title:  "Concert Ticket",
-		Price:  10.00,
+		Price:  "10.00",
 		UserID: "user-1",
 	})
 
@@ -189,7 +245,7 @@ func TestGetTicketByID_ShouldReturnTicketWhenExists(t *testing.T) {
 	svc := newSvc(repo, pub)
 
 	// Seed a ticket
-	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Test", Price: 5.00, UserID: "u1"})
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Test", Price: "5.00", UserID: "u1"})
 
 	ticket, err := svc.GetTicketByID(context.Background(), "t1")
 	require.NoError(t, err)
@@ -209,8 +265,8 @@ func TestListTickets_ShouldReturnAllTickets(t *testing.T) {
 	repo := newMockRepo()
 	svc := newSvc(repo, &mockPublisher{})
 
-	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "A", Price: 1, UserID: "u1"})
-	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t2", Title: "B", Price: 2, UserID: "u1"})
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "A", Price: "1.00", UserID: "u1"})
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t2", Title: "B", Price: "2.00", UserID: "u1"})
 
 	tickets, err := svc.ListTickets(context.Background(), repository.PaginationParams{})
 	require.NoError(t, err)
@@ -222,18 +278,18 @@ func TestUpdateTicket_ShouldUpdateAndPublishEvent(t *testing.T) {
 	pub := &mockPublisher{}
 	svc := newSvc(repo, pub)
 
-	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Old Title", Price: 5.00, UserID: "user-1"})
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Old Title", Price: "5.00", UserID: "user-1"})
 
 	ticket, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
 		ID:     "t1",
 		Title:  "New Title",
-		Price:  15.00,
+		Price:  "15.00",
 		UserID: "user-1",
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, "New Title", ticket.Title)
-	assert.Equal(t, 15.00, ticket.Price)
+	assert.Equal(t, "15.00", ticket.Price)
 
 	// Kafka publish is async — give the goroutine time to run.
 	time.Sleep(10 * time.Millisecond)
@@ -247,12 +303,12 @@ func TestUpdateTicket_ShouldSucceedEvenWhenKafkaFails(t *testing.T) {
 	pub := &mockPublisher{err: errors.New("kafka unavailable")}
 	svc := newSvc(repo, pub)
 
-	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Old Title", Price: 5.00, UserID: "user-1"})
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Old Title", Price: "5.00", UserID: "user-1"})
 
 	ticket, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
 		ID:     "t1",
 		Title:  "New Title",
-		Price:  15.00,
+		Price:  "15.00",
 		UserID: "user-1",
 	})
 
@@ -265,12 +321,12 @@ func TestUpdateTicket_ShouldReturnUnauthorizedWhenUserDoesNotOwnTicket(t *testin
 	repo := newMockRepo()
 	svc := newSvc(repo, &mockPublisher{})
 
-	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Title", Price: 5.00, UserID: "owner-user"})
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Title", Price: "5.00", UserID: "owner-user"})
 
 	_, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
 		ID:     "t1",
 		Title:  "Hijacked",
-		Price:  1.00,
+		Price:  "1.00",
 		UserID: "other-user",
 	})
 
@@ -282,13 +338,13 @@ func TestUpdateTicket_ShouldReturnErrorWhenTicketIsReserved(t *testing.T) {
 	repo := newMockRepo()
 	svc := newSvc(repo, &mockPublisher{})
 
-	// Ticket with an orderId is considered reserved
-	repo.tickets["t1"] = &repository.Ticket{ID: "t1", Title: "Title", Price: 5.00, UserID: "user-1", OrderID: "order-99", Version: 1}
+	// Ticket with active reserved count is considered reserved
+	repo.tickets["t1"] = &repository.Ticket{ID: "t1", Title: "Title", Price: "5.00", UserID: "user-1", Reserved: 1, Quota: 5, MaxPerUser: 5, Version: 1}
 
 	_, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
 		ID:     "t1",
 		Title:  "New Title",
-		Price:  10.00,
+		Price:  "10.00",
 		UserID: "user-1",
 	})
 
@@ -303,7 +359,7 @@ func TestUpdateTicket_ShouldReturnNotFoundWhenTicketMissing(t *testing.T) {
 	_, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
 		ID:     "nonexistent",
 		Title:  "Title",
-		Price:  5.00,
+		Price:  "5.00",
 		UserID: "user-1",
 	})
 
