@@ -6,6 +6,7 @@ import (
 
 	"github.com/acme/venue-service/internal/repository"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -203,6 +204,124 @@ func (r *ReservationRepo) FinalizeReservation(ctx context.Context, reservationID
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+// AtomicReserveAndCreate locks the requested seats, transitions them from
+// HELD/AVAILABLE → RESERVED, and writes the reservation header + items in a
+// single PostgreSQL transaction.
+//
+// r.ID must be pre-populated by the caller (the reservationId from the gRPC
+// request).  r.Items is populated with snapshotted seat data on success.
+func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []string, res *repository.SeatReservation) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// 1. Lock seats and fetch status + snapshotted price in one pass.
+	//    FOR UPDATE OF s prevents concurrent reservations for the same seats.
+	const lockQ = `
+		SELECT s.id, s.section_id, s.seat_label, s.status, pt.price::text
+		FROM   seats s
+		JOIN   price_tiers pt ON pt.id = s.price_tier_id
+		WHERE  s.id = ANY($1)
+		FOR UPDATE OF s`
+
+	type seatRow struct {
+		id        string
+		sectionID string
+		seatLabel string
+		status    string
+		price     string
+	}
+
+	rows, err := tx.Query(ctx, lockQ, seatIDs)
+	if err != nil {
+		return err
+	}
+	locked := make(map[string]seatRow, len(seatIDs))
+	for rows.Next() {
+		var sr seatRow
+		if err := rows.Scan(&sr.id, &sr.sectionID, &sr.seatLabel, &sr.status, &sr.price); err != nil {
+			rows.Close()
+			return err
+		}
+		locked[sr.id] = sr
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// 2. Validate all requested seats exist and are in a reservable state.
+	for _, id := range seatIDs {
+		sr, ok := locked[id]
+		if !ok {
+			return repository.ErrSeatNotAvailable
+		}
+		if sr.status != string(repository.SeatStatusHeld) && sr.status != string(repository.SeatStatusAvailable) {
+			return repository.ErrSeatNotAvailable
+		}
+	}
+
+	// 3. Transition seats → RESERVED.  Store reservationId as held_by so the
+	//    seats can be easily traced back to the ledger without extra lookups.
+	const updateQ = `
+		UPDATE seats
+		SET    status     = 'RESERVED',
+		       held_by    = $1,
+		       held_until = NULL,
+		       version    = version + 1,
+		       updated_at = now()
+		WHERE  id = ANY($2)`
+	if _, err := tx.Exec(ctx, updateQ, res.ID, seatIDs); err != nil {
+		return err
+	}
+
+	// 4. Insert the reservation header with the caller-supplied ID.
+	const hq = `
+		INSERT INTO seat_reservations
+		            (id, plan_id, ticket_id, user_id, section_id, status, expires_at)
+		VALUES      ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING   created_at, updated_at`
+	err = tx.QueryRow(ctx, hq,
+		res.ID, res.PlanID, res.TicketID, res.UserID,
+		nullStr(res.SectionID), string(res.Status), res.ExpiresAt,
+	).Scan(&res.CreatedAt, &res.UpdatedAt)
+	if err != nil {
+		// Unique constraint violation means this reservationId was already committed
+		// (race between two concurrent identical requests).
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return repository.ErrReservationAlreadyDone
+		}
+		return err
+	}
+
+	// 5. Insert reservation items with snapshotted prices.
+	res.Items = make([]repository.SeatReservationItem, 0, len(seatIDs))
+	for _, id := range seatIDs {
+		sr := locked[id]
+		item := repository.SeatReservationItem{
+			ReservationID: res.ID,
+			SeatID:        sr.id,
+			SectionID:     sr.sectionID,
+			Price:         sr.price,
+			SeatLabel:     sr.seatLabel,
+		}
+		const iq = `
+			INSERT INTO seat_reservation_items (reservation_id, seat_id, section_id, price, seat_label)
+			VALUES ($1, $2, $3, $4::numeric, $5)`
+		if _, err := tx.Exec(ctx, iq,
+			item.ReservationID, item.SeatID, item.SectionID, item.Price, item.SeatLabel,
+		); err != nil {
+			return err
+		}
+		res.Items = append(res.Items, item)
+	}
+
+	return tx.Commit(ctx)
+}
 
 // nullStr returns nil if s is empty, otherwise returns &s.
 // Used to map empty-string sentinel to SQL NULL.
