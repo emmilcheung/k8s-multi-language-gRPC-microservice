@@ -79,7 +79,7 @@ func TestReconciler_Run_ShouldReseedMissingSeatHash(t *testing.T) {
 	defer mr.Close()
 
 	client := newTestClient(t, mr)
-	defer client.Close()
+	defer client.Close() //nolint:errcheck
 
 	planID := "plan-aaa"
 	sectionID := "sec-1"
@@ -128,7 +128,7 @@ func TestReconciler_Run_ShouldSkipExistingHash(t *testing.T) {
 	defer mr.Close()
 
 	client := newTestClient(t, mr)
-	defer client.Close()
+	defer client.Close() //nolint:errcheck
 
 	planID := "plan-bbb"
 	sectionID := "sec-2"
@@ -172,7 +172,7 @@ func TestReconciler_Run_ShouldHandleEmptyPlanList(t *testing.T) {
 	defer mr.Close()
 
 	client := newTestClient(t, mr)
-	defer client.Close()
+	defer client.Close() //nolint:errcheck
 
 	planRepo := &stubPlanRepo{plans: nil}
 	sectionRepo := &stubSectionLister{}
