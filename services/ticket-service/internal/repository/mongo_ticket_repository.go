@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/acme/ticket-service/internal/cache"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -134,10 +135,21 @@ type MongoTicketRepository struct {
 	client       *mongo.Client
 	collection   *mongo.Collection
 	reservations *mongo.Collection
+	quota        cache.QuotaManager // optional; nil means no Redis quota gate
+}
+
+// Option is a functional option for NewMongoTicketRepository.
+type Option func(*MongoTicketRepository)
+
+// WithQuotaManager attaches a Redis QuotaManager to the repository.
+// When set, CreateReservation / ReleaseReservation / FinalizeReservation use
+// Redis Lua scripts as the hot-path gate; Mongo remains the source of truth.
+func WithQuotaManager(qm cache.QuotaManager) Option {
+	return func(r *MongoTicketRepository) { r.quota = qm }
 }
 
 // NewMongoTicketRepository creates a new repository, verifying connectivity at construction time.
-func NewMongoTicketRepository(ctx context.Context, uri, dbName string) (*MongoTicketRepository, error) {
+func NewMongoTicketRepository(ctx context.Context, uri, dbName string, opts ...Option) (*MongoTicketRepository, error) {
 	clientOpts := options.Client().ApplyURI(uri)
 	client, err := mongo.Connect(clientOpts)
 	if err != nil {
@@ -170,11 +182,15 @@ func NewMongoTicketRepository(ctx context.Context, uri, dbName string) (*MongoTi
 		return nil, fmt.Errorf("ensure reservation indexes: %w", err)
 	}
 
-	return &MongoTicketRepository{
+	repo := &MongoTicketRepository{
 		client:       client,
 		collection:   coll,
 		reservations: resvColl,
-	}, nil
+	}
+	for _, o := range opts {
+		o(repo)
+	}
+	return repo, nil
 }
 
 func ensureCollectionSchema(ctx context.Context, db *mongo.Database, coll *mongo.Collection) error {
@@ -347,6 +363,18 @@ func (r *MongoTicketRepository) Create(ctx context.Context, t *Ticket) error {
 	if err != nil {
 		return fmt.Errorf("insert ticket: %w", err)
 	}
+
+	// Seed Redis availability counter after durable write succeeds.
+	// Use force=false so a key that survived a previous create (e.g. retry) is not reset.
+	if r.quota != nil {
+		available := t.Quota - t.Reserved - t.Sold
+		if seedErr := r.quota.Seed(ctx, t.ID, available, false); seedErr != nil {
+			// Non-fatal: Redis will be re-seeded by the reconciliation worker.
+			// Log here would be ideal; for now return the error so callers are aware.
+			return fmt.Errorf("seed redis quota: %w", seedErr)
+		}
+	}
+
 	return nil
 }
 
@@ -516,6 +544,11 @@ func (r *MongoTicketRepository) ReleaseTicket(ctx context.Context, ticketID stri
 // CreateReservation writes a new TicketReservation to MongoDB and atomically
 // increments the ticket's reserved counter inside a multi-document transaction.
 //
+// When a QuotaManager is configured the Redis gate runs first: if Redis rejects
+// the reservation (quota exhausted or per-user limit) the Mongo transaction is
+// skipped entirely. On Mongo failure after a successful Redis reserve, the Redis
+// decrement is immediately compensated.
+//
 // Returns ErrTicketNotFound if the ticket does not exist.
 // Returns ErrInsufficientQuota if quota - reserved - sold < quantity.
 // Returns ErrPerUserLimitExceeded if the per-user cap would be breached.
@@ -527,8 +560,46 @@ func (r *MongoTicketRepository) CreateReservation(ctx context.Context, res *Tick
 	res.UpdatedAt = now
 	res.Status = ReservationStatusReserved
 
+	// ── Redis hot-path gate ────────────────────────────────────────────────────
+	// When Redis is available, reject obvious quota/limit violations before
+	// hitting the Mongo transaction. This reduces write amplification on sold-out
+	// tickets and provides low-latency feedback to callers.
+	//
+	// If the availability key is not initialised (ErrKeyNotInitialised) we fall
+	// through to Mongo — the reservation ledger is authoritative. The key will be
+	// re-seeded by the reconciliation worker or by the next successful Create.
+	var redisReserved bool
+	if r.quota != nil {
+		// We need the ticket's maxPerUser to enforce the per-user limit in Redis.
+		// Read the ticket outside the transaction; Mongo will re-check inside.
+		var maxPerUser int
+		if t, findErr := r.FindByID(ctx, res.TicketID); findErr == nil {
+			maxPerUser = t.MaxPerUser
+		}
+		// maxPerUser == 0 means the ticket was not found; the Mongo transaction
+		// will return ErrTicketNotFound — no need to call Redis.
+		if maxPerUser > 0 {
+			redisErr := r.quota.Reserve(ctx, res.TicketID, res.UserID, res.Quantity, maxPerUser)
+			switch {
+			case errors.Is(redisErr, cache.ErrKeyNotInitialised):
+				// Key absent — fall through to Mongo; do not set redisReserved.
+			case errors.Is(redisErr, cache.ErrQuotaInsufficient):
+				return ErrInsufficientQuota
+			case errors.Is(redisErr, cache.ErrUserLimitExceeded):
+				return ErrPerUserLimitExceeded
+			case redisErr != nil:
+				return fmt.Errorf("redis reserve: %w", redisErr)
+			default:
+				redisReserved = true
+			}
+		}
+	}
+
 	sess, err := r.client.StartSession()
 	if err != nil {
+		if redisReserved {
+			_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
+		}
 		return fmt.Errorf("CreateReservation start session: %w", err)
 	}
 	defer sess.EndSession(ctx)
@@ -589,6 +660,14 @@ func (r *MongoTicketRepository) CreateReservation(ctx context.Context, res *Tick
 
 		return nil, nil
 	})
+
+	// ── Redis compensation on Mongo failure ────────────────────────────────────
+	// If we decremented Redis but the durable write failed, restore the counter.
+	// Compensation is best-effort; a reconciliation worker corrects residual drift.
+	if txErr != nil && redisReserved {
+		_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
+	}
+
 	return txErr
 }
 
@@ -659,6 +738,7 @@ func (r *MongoTicketRepository) ReleaseReservation(ctx context.Context, reservat
 	defer sess.EndSession(ctx)
 
 	now := time.Now().UTC()
+	var actuallyReleased bool
 
 	_, txErr := sess.WithTransaction(ctx, func(sessCtx context.Context) (interface{}, error) {
 		// Re-check status inside transaction to guard against concurrent release.
@@ -672,7 +752,7 @@ func (r *MongoTicketRepository) ReleaseReservation(ctx context.Context, reservat
 		}
 		switch current.Status {
 		case ReservationStatusReleased, ReservationStatusExpired:
-			return nil, nil // concurrent release already succeeded
+			return nil, nil // concurrent release already succeeded — no counter change
 		case ReservationStatusSold:
 			return nil, ErrReservationConflict
 		}
@@ -692,8 +772,18 @@ func (r *MongoTicketRepository) ReleaseReservation(ctx context.Context, reservat
 			return nil, fmt.Errorf("decrement ticket reserved counter on release: %w", updErr)
 		}
 
+		actuallyReleased = true
 		return nil, nil
 	})
+
+	// After a successful Mongo release, restore the Redis availability counter.
+	// If Redis fails here the reconciliation worker will correct the drift.
+	// Only call Release when the transaction actually transitioned the status —
+	// skip if another goroutine already released (concurrent idempotent no-op).
+	if txErr == nil && actuallyReleased && r.quota != nil {
+		_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
+	}
+
 	return txErr
 }
 
@@ -722,6 +812,7 @@ func (r *MongoTicketRepository) FinalizeReservation(ctx context.Context, reserva
 	defer sess.EndSession(ctx)
 
 	now := time.Now().UTC()
+	var actuallyFinalized bool
 
 	_, txErr := sess.WithTransaction(ctx, func(sessCtx context.Context) (interface{}, error) {
 		// Re-check inside transaction.
@@ -735,7 +826,7 @@ func (r *MongoTicketRepository) FinalizeReservation(ctx context.Context, reserva
 		}
 		switch current.Status {
 		case ReservationStatusSold:
-			return nil, nil // concurrent finalize already succeeded
+			return nil, nil // concurrent finalize already succeeded — no counter change
 		case ReservationStatusReleased, ReservationStatusExpired:
 			return nil, ErrReservationConflict
 		}
@@ -761,7 +852,16 @@ func (r *MongoTicketRepository) FinalizeReservation(ctx context.Context, reserva
 			return nil, fmt.Errorf("update ticket counters on finalize: %w", updErr)
 		}
 
+		actuallyFinalized = true
 		return nil, nil
 	})
+
+	// After a successful Mongo finalize, clear the per-user reserved counter in Redis.
+	// Availability is NOT restored — the quantity was permanently sold.
+	// Only fire when this invocation actually performed the transition.
+	if txErr == nil && actuallyFinalized && r.quota != nil {
+		_ = r.quota.Finalize(ctx, res.TicketID, res.UserID, res.Quantity)
+	}
+
 	return txErr
 }
