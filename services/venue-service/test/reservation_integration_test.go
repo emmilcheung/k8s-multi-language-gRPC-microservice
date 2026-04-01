@@ -211,7 +211,158 @@ func TestReservation_ShouldFinalize_WhenFinalizeSeatReservationCalled(t *testing
 	assert.Equal(t, orderID, loaded.OrderID)
 }
 
-// TestReservation_ShouldRejectDuplicateSeatReservation_WhenSeatsAlreadyReserved
+// TestAutoAssign_ShouldAutoAssignAndReserve_WhenSeatsAvailable verifies the
+// happy-path: AutoAssignAndReserve selects the best contiguous block, creates
+// the reservation ledger row, and returns snapshotted seat details.
+func TestAutoAssign_ShouldAutoAssignAndReserve_WhenSeatsAvailable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	ctx := context.Background()
+	pool, planID, _ := setupHoldFixture(t, ctx)
+	defer pool.Close()
+
+	reservationRepo := pgrepo.NewReservationRepo(pool)
+	sectionRepo := pgrepo.NewSectionRepo(pool)
+	planRepo := pgrepo.NewPlanRepo(pool)
+	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, zap.NewNop())
+
+	const (
+		ticketID      = "00000000-0000-0000-0000-000000000002"
+		reservationID = "cccccccc-0000-0000-0000-000000000001"
+		userID        = "00000000-0000-0000-0000-000000000010"
+	)
+
+	// Retrieve the section ID for the plan.
+	sections, err := sectionRepo.ListSectionsByPlan(ctx, planID)
+	require.NoError(t, err)
+	require.NotEmpty(t, sections, "fixture should have at least one section")
+	sectionID := sections[0].ID
+
+	expiry := time.Now().UTC().Add(10 * time.Minute)
+	resp, err := srv.AutoAssignAndReserve(ctx, &venuev1.AutoAssignAndReserveRequest{
+		PlanId:        planID,
+		TicketId:      ticketID,
+		SectionId:     sectionID,
+		ReservationId: reservationID,
+		UserId:        userID,
+		Quantity:      2,
+		ExpiresAt:     timestamppb.New(expiry),
+	})
+
+	require.NoError(t, err)
+	assert.True(t, resp.Success)
+	assert.Equal(t, reservationID, resp.ReservationId)
+	require.Len(t, resp.Seats, 2)
+	for _, sd := range resp.Seats {
+		assert.NotEmpty(t, sd.SeatId)
+		assert.NotEmpty(t, sd.SeatLabel)
+	}
+
+	// Verify the ledger row exists in the DB.
+	loaded, err := reservationRepo.FindReservationByID(ctx, reservationID)
+	require.NoError(t, err)
+	assert.Equal(t, "RESERVED", string(loaded.Status))
+	assert.Len(t, loaded.Items, 2)
+}
+
+// TestAutoAssign_ShouldBeIdempotent_WhenCalledTwice verifies that calling
+// AutoAssignAndReserve with the same reservationId twice returns success both times.
+func TestAutoAssign_ShouldBeIdempotent_WhenCalledTwice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	ctx := context.Background()
+	pool, planID, _ := setupHoldFixture(t, ctx)
+	defer pool.Close()
+
+	reservationRepo := pgrepo.NewReservationRepo(pool)
+	sectionRepo := pgrepo.NewSectionRepo(pool)
+	planRepo := pgrepo.NewPlanRepo(pool)
+	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, zap.NewNop())
+
+	const (
+		ticketID      = "00000000-0000-0000-0000-000000000002"
+		reservationID = "cccccccc-0000-0000-0000-000000000002"
+		userID        = "00000000-0000-0000-0000-000000000010"
+	)
+
+	sections, err := sectionRepo.ListSectionsByPlan(ctx, planID)
+	require.NoError(t, err)
+	require.NotEmpty(t, sections)
+	sectionID := sections[0].ID
+
+	req := &venuev1.AutoAssignAndReserveRequest{
+		PlanId:        planID,
+		TicketId:      ticketID,
+		SectionId:     sectionID,
+		ReservationId: reservationID,
+		UserId:        userID,
+		Quantity:      1,
+	}
+
+	resp1, err := srv.AutoAssignAndReserve(ctx, req)
+	require.NoError(t, err)
+	assert.True(t, resp1.Success)
+
+	resp2, err := srv.AutoAssignAndReserve(ctx, req)
+	require.NoError(t, err)
+	assert.True(t, resp2.Success)
+	assert.Equal(t, reservationID, resp2.ReservationId)
+}
+
+// TestAutoAssign_ShouldReturnSuccessFalse_WhenNotEnoughSeats verifies that
+// requesting more seats than are available returns success=false (not an error).
+func TestAutoAssign_ShouldReturnSuccessFalse_WhenNotEnoughSeats(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	ctx := context.Background()
+	pool, planID, seatIDs := setupHoldFixture(t, ctx)
+	defer pool.Close()
+
+	reservationRepo := pgrepo.NewReservationRepo(pool)
+	sectionRepo := pgrepo.NewSectionRepo(pool)
+	planRepo := pgrepo.NewPlanRepo(pool)
+	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, zap.NewNop())
+
+	const (
+		ticketID      = "00000000-0000-0000-0000-000000000002"
+		reservationID = "cccccccc-0000-0000-0000-000000000003"
+		userID        = "00000000-0000-0000-0000-000000000010"
+	)
+
+	sections, err := sectionRepo.ListSectionsByPlan(ctx, planID)
+	require.NoError(t, err)
+	require.NotEmpty(t, sections)
+	sectionID := sections[0].ID
+
+	// Reserve all 3 available seats first so nothing is left.
+	const priorReservationID = "cccccccc-0000-0000-0000-000000000099"
+	_, err = srv.ReserveHeldSeats(ctx, &venuev1.ReserveHeldSeatsRequest{
+		PlanId:        planID,
+		TicketId:      ticketID,
+		ReservationId: priorReservationID,
+		UserId:        userID,
+		SeatIds:       seatIDs,
+	})
+	require.NoError(t, err)
+
+	resp, err := srv.AutoAssignAndReserve(ctx, &venuev1.AutoAssignAndReserveRequest{
+		PlanId:        planID,
+		TicketId:      ticketID,
+		SectionId:     sectionID,
+		ReservationId: reservationID,
+		UserId:        userID,
+		Quantity:      1, // all seats already reserved
+	})
+	require.NoError(t, err)
+	assert.False(t, resp.Success, "should return success=false when no seats available")
+}
+
 // verifies that two independent reservations cannot reserve the same seats.
 func TestReservation_ShouldRejectDuplicateSeatReservation_WhenSeatsAlreadyReserved(t *testing.T) {
 	if testing.Short() {

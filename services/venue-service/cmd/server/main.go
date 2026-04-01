@@ -19,6 +19,7 @@ import (
 	"github.com/acme/venue-service/internal/migrations"
 	pgrepo "github.com/acme/venue-service/internal/repository/postgres"
 	"github.com/acme/venue-service/internal/service"
+	"github.com/acme/venue-service/internal/sse"
 	"github.com/acme/venue-service/internal/tracing"
 	"github.com/acme/venue-service/pkg/logger"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -123,6 +124,18 @@ func main() {
 	// Hold manager — Redis hot path + PostgreSQL fallback.
 	holdMgr := hold.NewManager(redisClient, sectionRepo, planRepo, log)
 
+	// SSE broadcaster — real-time seat state fan-out to connected clients.
+	// Uses Redis pub/sub when Redis is available; falls through to in-process fan-out.
+	sseBroadcaster := sse.NewBroadcaster(redisClient, log)
+
+	// Wire broadcaster into hold manager for no-Redis in-process fan-out.
+	holdMgr.WithBroadcaster(sseBroadcaster)
+
+	// Start SSE heartbeat goroutine.
+	heartbeatCtx, heartbeatCancel := context.WithCancel(context.Background())
+	defer heartbeatCancel()
+	sseBroadcaster.StartHeartbeat(heartbeatCtx)
+
 	// Hold sweeper — releases expired holds every 30 seconds.
 	sweeper := hold.NewSweeper(holdMgr, 30*time.Second, log)
 	sweeperCtx, sweeperCancel := context.WithCancel(context.Background())
@@ -184,6 +197,9 @@ func main() {
 	seatHoldHandler := handler.NewSeatHoldHandler(holdMgr, log)
 	seatHoldHandler.RegisterRoutes(api.Group("/seating-plans/:planId"))
 
+	sseHandler := handler.NewSSEHandler(sseBroadcaster, log)
+	sseHandler.RegisterRoutes(api.Group("/seating-plans/:planId"))
+
 	// Graceful shutdown.
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	go func() {
@@ -201,6 +217,7 @@ func main() {
 	grpcCancel()
 	consumerCancel()
 	sweeperCancel()
+	heartbeatCancel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
