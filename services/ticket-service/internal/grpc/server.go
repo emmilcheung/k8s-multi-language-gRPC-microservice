@@ -91,6 +91,228 @@ func (s *TicketGrpcServer) ValidateTicketAvailability(ctx context.Context, req *
 	}, nil
 }
 
+// ReserveQuota atomically reserves quota for a ticket and creates a durable
+// reservation record keyed by the caller-supplied reservationId.
+//
+// gRPC status code mapping:
+//   - INVALID_ARGUMENT  — missing required fields
+//   - NOT_FOUND         — ticket does not exist
+//   - ALREADY_EXISTS    — reservationId is already used (idempotent: same params → OK)
+//   - RESOURCE_EXHAUSTED — quota is insufficient (sold out)
+//   - FAILED_PRECONDITION — per-user limit exceeded
+//   - INTERNAL          — unexpected storage error
+func (s *TicketGrpcServer) ReserveQuota(ctx context.Context, req *v1.ReserveQuotaRequest) (*v1.ReserveQuotaResponse, error) {
+	if req.TicketId == "" {
+		return nil, status.Error(codes.InvalidArgument, "ticket_id is required")
+	}
+	if req.ReservationId == "" {
+		return nil, status.Error(codes.InvalidArgument, "reservation_id is required")
+	}
+	if req.UserId == "" {
+		return nil, status.Error(codes.InvalidArgument, "user_id is required")
+	}
+	if req.Quantity < 1 {
+		return nil, status.Error(codes.InvalidArgument, "quantity must be >= 1")
+	}
+
+	// Resolve expiry from request or default to 15 minutes.
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil {
+		t := req.ExpiresAt.AsTime()
+		expiresAt = &t
+	} else {
+		t := time.Now().UTC().Add(15 * time.Minute)
+		expiresAt = &t
+	}
+
+	// Look up the ticket first so we can return ticket metadata in the response.
+	ticket, err := s.repo.FindByID(ctx, req.TicketId)
+	if err != nil {
+		if errors.Is(err, repository.ErrTicketNotFound) {
+			return nil, status.Errorf(codes.NotFound, "ticket not found: %s", req.TicketId)
+		}
+		s.log.Error("grpc ReserveQuota: FindByID failed", zap.Error(err), zap.String("ticketId", req.TicketId))
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+
+	resv := &repository.TicketReservation{
+		ID:        req.ReservationId,
+		TicketID:  req.TicketId,
+		UserID:    req.UserId,
+		Quantity:  int(req.Quantity),
+		ExpiresAt: expiresAt,
+	}
+
+	if err := s.repo.CreateReservation(ctx, resv); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrTicketNotFound):
+			return nil, status.Errorf(codes.NotFound, "ticket not found: %s", req.TicketId)
+		case errors.Is(err, repository.ErrInsufficientQuota):
+			s.log.Info("grpc ReserveQuota: quota insufficient",
+				zap.String("ticketId", req.TicketId),
+				zap.String("reservationId", req.ReservationId),
+				zap.Int32("requested", req.Quantity),
+			)
+			return nil, status.Errorf(codes.ResourceExhausted, "insufficient quota for ticket %s", req.TicketId)
+		case errors.Is(err, repository.ErrPerUserLimitExceeded):
+			s.log.Info("grpc ReserveQuota: per-user limit exceeded",
+				zap.String("ticketId", req.TicketId),
+				zap.String("userId", req.UserId),
+			)
+			return nil, status.Errorf(codes.FailedPrecondition, "per-user limit exceeded for ticket %s", req.TicketId)
+		default:
+			// Check if the duplicate key indicates the reservationId was already used.
+			// We treat an existing RESERVED reservation with same id as idempotent success.
+			existing, findErr := s.repo.FindReservationByID(ctx, req.ReservationId)
+			if findErr == nil && existing.TicketID == req.TicketId && existing.UserID == req.UserId && existing.Quantity == int(req.Quantity) {
+				s.log.Info("grpc ReserveQuota: idempotent duplicate accepted",
+					zap.String("reservationId", req.ReservationId),
+				)
+				remaining := ticket.Quota - ticket.Reserved - ticket.Sold
+				return &v1.ReserveQuotaResponse{
+					Success:       true,
+					ReservationId: existing.ID,
+					TicketId:      ticket.ID,
+					Quantity:      int32(existing.Quantity),
+					Remaining:     int32(remaining),
+					Title:         ticket.Title,
+					Price:         ticket.Price,
+					MaxPerUser:    int32(ticket.MaxPerUser),
+				}, nil
+			}
+			s.log.Error("grpc ReserveQuota: CreateReservation failed",
+				zap.Error(err),
+				zap.String("ticketId", req.TicketId),
+				zap.String("reservationId", req.ReservationId),
+			)
+			return nil, status.Error(codes.Internal, "internal error")
+		}
+	}
+
+	// Recompute remaining after reservation.
+	// We re-read the ticket to get the updated counters. If the read fails we
+	// approximate from pre-reservation data so we always return success.
+	remaining := int32(ticket.Quota - ticket.Reserved - ticket.Sold - int(req.Quantity))
+	if updated, readErr := s.repo.FindByID(ctx, req.TicketId); readErr == nil {
+		remaining = int32(updated.Quota - updated.Reserved - updated.Sold)
+	}
+
+	s.log.Info("grpc ReserveQuota: reservation created",
+		zap.String("ticketId", req.TicketId),
+		zap.String("reservationId", req.ReservationId),
+		zap.String("userId", req.UserId),
+		zap.Int32("quantity", req.Quantity),
+		zap.Int32("remaining", remaining),
+	)
+
+	return &v1.ReserveQuotaResponse{
+		Success:       true,
+		ReservationId: req.ReservationId,
+		TicketId:      ticket.ID,
+		Quantity:      req.Quantity,
+		Remaining:     remaining,
+		Title:         ticket.Title,
+		Price:         ticket.Price,
+		MaxPerUser:    int32(ticket.MaxPerUser),
+	}, nil
+}
+
+// ReleaseReservation transitions a reservation from RESERVED → RELEASED and
+// restores quota availability. Idempotent: releasing an already-released
+// reservation returns success.
+//
+// gRPC status code mapping:
+//   - INVALID_ARGUMENT    — missing reservation_id
+//   - NOT_FOUND           — reservation does not exist
+//   - FAILED_PRECONDITION — reservation is already SOLD (cannot be released)
+//   - INTERNAL            — unexpected storage error
+func (s *TicketGrpcServer) ReleaseReservation(ctx context.Context, req *v1.ReleaseReservationRequest) (*v1.ReleaseReservationResponse, error) {
+	if req.ReservationId == "" {
+		return nil, status.Error(codes.InvalidArgument, "reservation_id is required")
+	}
+
+	if err := s.repo.ReleaseReservation(ctx, req.ReservationId); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrReservationNotFound):
+			return nil, status.Errorf(codes.NotFound, "reservation not found: %s", req.ReservationId)
+		case errors.Is(err, repository.ErrReservationConflict):
+			// Reservation is already SOLD — cannot release a sold reservation.
+			return nil, status.Errorf(codes.FailedPrecondition, "reservation %s is already finalized (SOLD)", req.ReservationId)
+		default:
+			s.log.Error("grpc ReleaseReservation failed",
+				zap.Error(err),
+				zap.String("reservationId", req.ReservationId),
+				zap.String("reason", req.Reason),
+			)
+			return nil, status.Error(codes.Internal, "internal error")
+		}
+	}
+
+	// Best-effort: read ticket to return remaining count.
+	var remaining int32
+	if resv, err := s.repo.FindReservationByID(ctx, req.ReservationId); err == nil {
+		if ticket, err := s.repo.FindByID(ctx, resv.TicketID); err == nil {
+			remaining = int32(ticket.Quota - ticket.Reserved - ticket.Sold)
+		}
+	}
+
+	s.log.Info("grpc ReleaseReservation: released",
+		zap.String("reservationId", req.ReservationId),
+		zap.String("reason", req.Reason),
+	)
+
+	return &v1.ReleaseReservationResponse{
+		Success:       true,
+		ReservationId: req.ReservationId,
+		Remaining:     remaining,
+	}, nil
+}
+
+// FinalizeReservation transitions a reservation from RESERVED → SOLD, records
+// the orderId, and moves quantity from reserved to sold. Idempotent: finalizing
+// an already-sold reservation returns success.
+//
+// gRPC status code mapping:
+//   - INVALID_ARGUMENT    — missing reservation_id or order_id
+//   - NOT_FOUND           — reservation does not exist
+//   - FAILED_PRECONDITION — reservation is RELEASED (cannot finalize a released reservation)
+//   - INTERNAL            — unexpected storage error
+func (s *TicketGrpcServer) FinalizeReservation(ctx context.Context, req *v1.FinalizeReservationRequest) (*v1.FinalizeReservationResponse, error) {
+	if req.ReservationId == "" {
+		return nil, status.Error(codes.InvalidArgument, "reservation_id is required")
+	}
+	if req.OrderId == "" {
+		return nil, status.Error(codes.InvalidArgument, "order_id is required")
+	}
+
+	if err := s.repo.FinalizeReservation(ctx, req.ReservationId, req.OrderId); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrReservationNotFound):
+			return nil, status.Errorf(codes.NotFound, "reservation not found: %s", req.ReservationId)
+		case errors.Is(err, repository.ErrReservationConflict):
+			// Reservation is RELEASED — cannot finalize.
+			return nil, status.Errorf(codes.FailedPrecondition, "reservation %s is already released", req.ReservationId)
+		default:
+			s.log.Error("grpc FinalizeReservation failed",
+				zap.Error(err),
+				zap.String("reservationId", req.ReservationId),
+				zap.String("orderId", req.OrderId),
+			)
+			return nil, status.Error(codes.Internal, "internal error")
+		}
+	}
+
+	s.log.Info("grpc FinalizeReservation: finalized",
+		zap.String("reservationId", req.ReservationId),
+		zap.String("orderId", req.OrderId),
+	)
+
+	return &v1.FinalizeReservationResponse{
+		Success:       true,
+		ReservationId: req.ReservationId,
+	}, nil
+}
+
 // Start binds and starts the gRPC server on the given address. It blocks until
 // the context is cancelled, then performs a graceful stop.
 //
