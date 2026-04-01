@@ -21,6 +21,9 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	TicketService_GetTicket_FullMethodName                  = "/acme.tickets.v1.TicketService/GetTicket"
 	TicketService_ValidateTicketAvailability_FullMethodName = "/acme.tickets.v1.TicketService/ValidateTicketAvailability"
+	TicketService_ReserveQuota_FullMethodName               = "/acme.tickets.v1.TicketService/ReserveQuota"
+	TicketService_ReleaseReservation_FullMethodName         = "/acme.tickets.v1.TicketService/ReleaseReservation"
+	TicketService_FinalizeReservation_FullMethodName        = "/acme.tickets.v1.TicketService/FinalizeReservation"
 )
 
 // TicketServiceClient is the client API for TicketService service.
@@ -29,6 +32,9 @@ const (
 type TicketServiceClient interface {
 	GetTicket(ctx context.Context, in *GetTicketRequest, opts ...grpc.CallOption) (*GetTicketResponse, error)
 	ValidateTicketAvailability(ctx context.Context, in *ValidateTicketRequest, opts ...grpc.CallOption) (*ValidateTicketResponse, error)
+	ReserveQuota(ctx context.Context, in *ReserveQuotaRequest, opts ...grpc.CallOption) (*ReserveQuotaResponse, error)
+	ReleaseReservation(ctx context.Context, in *ReleaseReservationRequest, opts ...grpc.CallOption) (*ReleaseReservationResponse, error)
+	FinalizeReservation(ctx context.Context, in *FinalizeReservationRequest, opts ...grpc.CallOption) (*FinalizeReservationResponse, error)
 }
 
 type ticketServiceClient struct {
@@ -59,12 +65,45 @@ func (c *ticketServiceClient) ValidateTicketAvailability(ctx context.Context, in
 	return out, nil
 }
 
+func (c *ticketServiceClient) ReserveQuota(ctx context.Context, in *ReserveQuotaRequest, opts ...grpc.CallOption) (*ReserveQuotaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReserveQuotaResponse)
+	err := c.cc.Invoke(ctx, TicketService_ReserveQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ticketServiceClient) ReleaseReservation(ctx context.Context, in *ReleaseReservationRequest, opts ...grpc.CallOption) (*ReleaseReservationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReleaseReservationResponse)
+	err := c.cc.Invoke(ctx, TicketService_ReleaseReservation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ticketServiceClient) FinalizeReservation(ctx context.Context, in *FinalizeReservationRequest, opts ...grpc.CallOption) (*FinalizeReservationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FinalizeReservationResponse)
+	err := c.cc.Invoke(ctx, TicketService_FinalizeReservation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TicketServiceServer is the server API for TicketService service.
 // All implementations should embed UnimplementedTicketServiceServer
 // for forward compatibility.
 type TicketServiceServer interface {
 	GetTicket(context.Context, *GetTicketRequest) (*GetTicketResponse, error)
 	ValidateTicketAvailability(context.Context, *ValidateTicketRequest) (*ValidateTicketResponse, error)
+	ReserveQuota(context.Context, *ReserveQuotaRequest) (*ReserveQuotaResponse, error)
+	ReleaseReservation(context.Context, *ReleaseReservationRequest) (*ReleaseReservationResponse, error)
+	FinalizeReservation(context.Context, *FinalizeReservationRequest) (*FinalizeReservationResponse, error)
 }
 
 // UnimplementedTicketServiceServer should be embedded to have
@@ -79,6 +118,15 @@ func (UnimplementedTicketServiceServer) GetTicket(context.Context, *GetTicketReq
 }
 func (UnimplementedTicketServiceServer) ValidateTicketAvailability(context.Context, *ValidateTicketRequest) (*ValidateTicketResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ValidateTicketAvailability not implemented")
+}
+func (UnimplementedTicketServiceServer) ReserveQuota(context.Context, *ReserveQuotaRequest) (*ReserveQuotaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReserveQuota not implemented")
+}
+func (UnimplementedTicketServiceServer) ReleaseReservation(context.Context, *ReleaseReservationRequest) (*ReleaseReservationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReleaseReservation not implemented")
+}
+func (UnimplementedTicketServiceServer) FinalizeReservation(context.Context, *FinalizeReservationRequest) (*FinalizeReservationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FinalizeReservation not implemented")
 }
 func (UnimplementedTicketServiceServer) testEmbeddedByValue() {}
 
@@ -136,6 +184,60 @@ func _TicketService_ValidateTicketAvailability_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TicketService_ReserveQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReserveQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TicketServiceServer).ReserveQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TicketService_ReserveQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TicketServiceServer).ReserveQuota(ctx, req.(*ReserveQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TicketService_ReleaseReservation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReleaseReservationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TicketServiceServer).ReleaseReservation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TicketService_ReleaseReservation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TicketServiceServer).ReleaseReservation(ctx, req.(*ReleaseReservationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TicketService_FinalizeReservation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FinalizeReservationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TicketServiceServer).FinalizeReservation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TicketService_FinalizeReservation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TicketServiceServer).FinalizeReservation(ctx, req.(*FinalizeReservationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TicketService_ServiceDesc is the grpc.ServiceDesc for TicketService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -150,6 +252,18 @@ var TicketService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ValidateTicketAvailability",
 			Handler:    _TicketService_ValidateTicketAvailability_Handler,
+		},
+		{
+			MethodName: "ReserveQuota",
+			Handler:    _TicketService_ReserveQuota_Handler,
+		},
+		{
+			MethodName: "ReleaseReservation",
+			Handler:    _TicketService_ReleaseReservation_Handler,
+		},
+		{
+			MethodName: "FinalizeReservation",
+			Handler:    _TicketService_FinalizeReservation_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

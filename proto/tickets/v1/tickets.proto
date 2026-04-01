@@ -12,6 +12,9 @@ option java_package = "com.ticketing.orders.grpc";
 service TicketService {
   rpc GetTicket(GetTicketRequest) returns (GetTicketResponse);
   rpc ValidateTicketAvailability(ValidateTicketRequest) returns (ValidateTicketResponse);
+  rpc ReserveQuota(ReserveQuotaRequest) returns (ReserveQuotaResponse);
+  rpc ReleaseReservation(ReleaseReservationRequest) returns (ReleaseReservationResponse);
+  rpc FinalizeReservation(FinalizeReservationRequest) returns (FinalizeReservationResponse);
 }
 
 message GetTicketRequest {
@@ -23,10 +26,15 @@ message GetTicketResponse {
   string title = 2;
   string price = 3; // decimal string, e.g. "12.50" — avoids floating-point precision loss
   string user_id = 4;
-  string order_id = 5;
+  string order_id = 5; // deprecated: kept for rollout compatibility with legacy flow
   int64 version = 6;
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
+  int32 quota = 9;
+  int32 reserved = 10;
+  int32 sold = 11;
+  int32 max_per_user = 12;
+  string seating_plan_id = 13;
 }
 
 message ValidateTicketRequest {
@@ -38,4 +46,44 @@ message ValidateTicketResponse {
   string ticket_id = 2;
   string price = 3; // decimal string, e.g. "12.50" — avoids floating-point precision loss
   string title = 4;
+}
+
+message ReserveQuotaRequest {
+  string ticket_id = 1;
+  string reservation_id = 2;
+  string user_id = 3;
+  int32 quantity = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+message ReserveQuotaResponse {
+  bool success = 1;
+  string reservation_id = 2;
+  string ticket_id = 3;
+  int32 quantity = 4;
+  int32 remaining = 5;
+  string title = 6;
+  string price = 7;
+  int32 max_per_user = 8;
+}
+
+message ReleaseReservationRequest {
+  string reservation_id = 1;
+  string reason = 2; // CANCELLED | EXPIRED | COMPENSATION
+}
+
+message ReleaseReservationResponse {
+  bool success = 1;
+  string reservation_id = 2;
+  int32 remaining = 3;
+}
+
+message FinalizeReservationRequest {
+  string reservation_id = 1;
+  string order_id = 2;
+}
+
+message FinalizeReservationResponse {
+  bool success = 1;
+  string reservation_id = 2;
 }
