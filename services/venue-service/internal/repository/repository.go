@@ -212,6 +212,18 @@ type ReservationRepository interface {
 
 	FindReservationByID(ctx context.Context, id string) (*SeatReservation, error)
 
+	// AtomicReserveAndCreate locks the given seats, transitions them from
+	// HELD/AVAILABLE → RESERVED, and writes the reservation header + items in a
+	// single PostgreSQL transaction.
+	//
+	// r.ID must be pre-populated by the caller (the caller-supplied reservationId).
+	// r.Items is populated with the snapshotted seat data (label, price) on success.
+	//
+	// Returns ErrSeatNotAvailable if any seat cannot be reserved (wrong status or
+	// not found).  Returns ErrReservationAlreadyDone if r.ID already exists in the
+	// ledger (idempotency guard under concurrent retries).
+	AtomicReserveAndCreate(ctx context.Context, seatIDs []string, r *SeatReservation) error
+
 	// ReleaseReservation transitions RESERVED → RELEASED and restores seats to AVAILABLE.
 	// Idempotent: RELEASED reservations return success.
 	// Returns ErrReservationConflict if already SOLD.

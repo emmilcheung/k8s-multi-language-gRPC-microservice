@@ -43,28 +43,166 @@ func NewVenueGrpcServer(
 	}
 }
 
-// ReserveHeldSeats converts a set of held seats into a durable reservation.
-// Fully implemented in CP-10; returns UNIMPLEMENTED for now.
-func (s *VenueGrpcServer) ReserveHeldSeats(_ context.Context, _ *venuev1.ReserveHeldSeatsRequest) (*venuev1.ReserveHeldSeatsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "ReserveHeldSeats not yet implemented — coming in CP-10")
+// ReserveHeldSeats converts a set of held (or still-available) seats into a
+// durable reservation keyed by reservationId.
+//
+// Idempotent: if the reservationId already exists and is RESERVED, success is
+// returned immediately with the existing seat details.
+func (s *VenueGrpcServer) ReserveHeldSeats(ctx context.Context, req *venuev1.ReserveHeldSeatsRequest) (*venuev1.ReserveHeldSeatsResponse, error) {
+	if req.PlanId == "" || req.TicketId == "" || req.ReservationId == "" || req.UserId == "" {
+		return nil, status.Error(codes.InvalidArgument, "plan_id, ticket_id, reservation_id, and user_id are required")
+	}
+	if len(req.SeatIds) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "seat_ids must not be empty")
+	}
+
+	// Idempotency: check whether a reservation for this ID already exists.
+	existing, err := s.reservationRepo.FindReservationByID(ctx, req.ReservationId)
+	if err == nil {
+		switch existing.Status {
+		case repository.ReservationStatusReserved:
+			return &venuev1.ReserveHeldSeatsResponse{
+				Success:       true,
+				ReservationId: existing.ID,
+				Seats:         toSeatDetails(existing.Items),
+			}, nil
+		case repository.ReservationStatusReleased, repository.ReservationStatusExpired:
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"reservation %s was already released", req.ReservationId)
+		case repository.ReservationStatusSold:
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"reservation %s was already sold", req.ReservationId)
+		}
+	} else if err != repository.ErrReservationNotFound {
+		s.log.Error("ReserveHeldSeats: lookup failed", zap.Error(err),
+			zap.String("reservationId", req.ReservationId))
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+
+	// Build the reservation domain object.
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil {
+		t := req.ExpiresAt.AsTime()
+		expiresAt = &t
+	}
+
+	res := &repository.SeatReservation{
+		ID:        req.ReservationId,
+		PlanID:    req.PlanId,
+		TicketID:  req.TicketId,
+		UserID:    req.UserId,
+		Status:    repository.ReservationStatusReserved,
+		ExpiresAt: expiresAt,
+		// SectionID is intentionally left empty for manual-pick reservations
+		// spanning multiple sections; it is captured per-item.
+	}
+
+	// Atomic: lock seats, transition HELD/AVAILABLE → RESERVED, write ledger.
+	if err := s.reservationRepo.AtomicReserveAndCreate(ctx, req.SeatIds, res); err != nil {
+		switch err {
+		case repository.ErrSeatNotAvailable:
+			// Return success=false with the full list so the caller can inspect.
+			return &venuev1.ReserveHeldSeatsResponse{
+				Success:            false,
+				UnavailableSeatIds: req.SeatIds,
+			}, nil
+		case repository.ErrReservationAlreadyDone:
+			// Concurrent duplicate — treat as idempotent success but reload items.
+			if loaded, loadErr := s.reservationRepo.FindReservationByID(ctx, req.ReservationId); loadErr == nil {
+				return &venuev1.ReserveHeldSeatsResponse{
+					Success:       true,
+					ReservationId: loaded.ID,
+					Seats:         toSeatDetails(loaded.Items),
+				}, nil
+			}
+			return &venuev1.ReserveHeldSeatsResponse{
+				Success:       true,
+				ReservationId: req.ReservationId,
+			}, nil
+		default:
+			s.log.Error("ReserveHeldSeats: atomic reserve failed", zap.Error(err),
+				zap.String("reservationId", req.ReservationId),
+				zap.String("planId", req.PlanId))
+			return nil, status.Error(codes.Internal, "internal error")
+		}
+	}
+
+	return &venuev1.ReserveHeldSeatsResponse{
+		Success:       true,
+		ReservationId: res.ID,
+		Seats:         toSeatDetails(res.Items),
+	}, nil
 }
 
 // AutoAssignAndReserve selects the best available block and atomically reserves it.
-// Fully implemented in CP-10/11.
+// Fully implemented in CP-11.
 func (s *VenueGrpcServer) AutoAssignAndReserve(_ context.Context, _ *venuev1.AutoAssignAndReserveRequest) (*venuev1.AutoAssignAndReserveResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "AutoAssignAndReserve not yet implemented — coming in CP-11")
 }
 
-// ReleaseSeatReservation transitions a reservation RESERVED → RELEASED.
-// Fully implemented in CP-10.
-func (s *VenueGrpcServer) ReleaseSeatReservation(_ context.Context, _ *venuev1.ReleaseSeatReservationRequest) (*venuev1.ReleaseSeatReservationResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "ReleaseSeatReservation not yet implemented — coming in CP-10")
+// ReleaseSeatReservation transitions a reservation RESERVED → RELEASED and
+// restores seats to AVAILABLE.
+//
+// Idempotent: already-released reservations return success.
+func (s *VenueGrpcServer) ReleaseSeatReservation(ctx context.Context, req *venuev1.ReleaseSeatReservationRequest) (*venuev1.ReleaseSeatReservationResponse, error) {
+	if req.ReservationId == "" {
+		return nil, status.Error(codes.InvalidArgument, "reservation_id is required")
+	}
+
+	if err := s.reservationRepo.ReleaseReservation(ctx, req.ReservationId, req.Reason); err != nil {
+		switch err {
+		case repository.ErrReservationAlreadyDone:
+			// Already released — idempotent success.
+			return &venuev1.ReleaseSeatReservationResponse{Success: true}, nil
+		case repository.ErrReservationNotFound:
+			return nil, status.Errorf(codes.NotFound, "reservation not found: %s", req.ReservationId)
+		case repository.ErrReservationConflict:
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"reservation %s is already sold and cannot be released", req.ReservationId)
+		default:
+			s.log.Error("ReleaseSeatReservation failed", zap.Error(err),
+				zap.String("reservationId", req.ReservationId))
+			return nil, status.Error(codes.Internal, "internal error")
+		}
+	}
+
+	s.log.Info("ReleaseSeatReservation: reservation released",
+		zap.String("reservationId", req.ReservationId),
+		zap.String("reason", req.Reason))
+	return &venuev1.ReleaseSeatReservationResponse{Success: true}, nil
 }
 
-// FinalizeSeatReservation transitions a reservation RESERVED → SOLD.
-// Fully implemented in CP-10.
-func (s *VenueGrpcServer) FinalizeSeatReservation(_ context.Context, _ *venuev1.FinalizeSeatReservationRequest) (*venuev1.FinalizeSeatReservationResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "FinalizeSeatReservation not yet implemented — coming in CP-10")
+// FinalizeSeatReservation transitions a reservation RESERVED → SOLD and
+// records the orderId.
+//
+// Idempotent: already-sold reservations return success.
+func (s *VenueGrpcServer) FinalizeSeatReservation(ctx context.Context, req *venuev1.FinalizeSeatReservationRequest) (*venuev1.FinalizeSeatReservationResponse, error) {
+	if req.ReservationId == "" || req.OrderId == "" {
+		return nil, status.Error(codes.InvalidArgument, "reservation_id and order_id are required")
+	}
+
+	if err := s.reservationRepo.FinalizeReservation(ctx, req.ReservationId, req.OrderId); err != nil {
+		switch err {
+		case repository.ErrReservationAlreadyDone:
+			// Already sold — idempotent success.
+			return &venuev1.FinalizeSeatReservationResponse{Success: true}, nil
+		case repository.ErrReservationNotFound:
+			return nil, status.Errorf(codes.NotFound, "reservation not found: %s", req.ReservationId)
+		case repository.ErrReservationConflict:
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"reservation %s was released and cannot be finalized", req.ReservationId)
+		default:
+			s.log.Error("FinalizeSeatReservation failed", zap.Error(err),
+				zap.String("reservationId", req.ReservationId),
+				zap.String("orderId", req.OrderId))
+			return nil, status.Error(codes.Internal, "internal error")
+		}
+	}
+
+	s.log.Info("FinalizeSeatReservation: reservation finalized",
+		zap.String("reservationId", req.ReservationId),
+		zap.String("orderId", req.OrderId))
+	return &venuev1.FinalizeSeatReservationResponse{Success: true}, nil
 }
 
 // GetSeatingPlan returns the plan metadata including status and attached ticket.
@@ -88,6 +226,20 @@ func (s *VenueGrpcServer) GetSeatingPlan(ctx context.Context, req *venuev1.GetSe
 		TicketId: plan.TicketID,
 		Status:   string(plan.Status),
 	}, nil
+}
+
+// toSeatDetails converts reservation items into the proto SeatDetail slice.
+func toSeatDetails(items []repository.SeatReservationItem) []*venuev1.SeatDetail {
+	details := make([]*venuev1.SeatDetail, len(items))
+	for i, item := range items {
+		details[i] = &venuev1.SeatDetail{
+			SeatId:    item.SeatID,
+			SectionId: item.SectionID,
+			SeatLabel: item.SeatLabel,
+			Price:     item.Price,
+		}
+	}
+	return details
 }
 
 // Start binds and starts the gRPC server on the given address. It blocks until
