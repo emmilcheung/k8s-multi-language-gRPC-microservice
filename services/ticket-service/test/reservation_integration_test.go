@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,17 @@ func newRepoForReservationTests(t *testing.T) *repository.MongoTicketRepository 
 
 	mongoURI, err := mongoContainer.ConnectionString(ctx)
 	require.NoError(t, err)
+
+	// directConnection=true bypasses replica-set member hostname resolution.
+	// The replica set container advertises its members using the Docker-internal
+	// hostname (container ID), which is not reachable from the test host.
+	// Connecting directly to the mapped localhost port is sufficient for a
+	// single-node replica set, and transactions still work correctly.
+	sep := "?"
+	if strings.Contains(mongoURI, "?") {
+		sep = "&"
+	}
+	mongoURI += sep + "directConnection=true"
 
 	repo, err := repository.NewMongoTicketRepository(ctx, mongoURI, dbName(t.Name()))
 	require.NoError(t, err)
