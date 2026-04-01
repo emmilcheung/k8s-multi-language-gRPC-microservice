@@ -270,7 +270,7 @@ Verification:
 
 ## CP-06 GA End-To-End Verification And Rollout Readiness
 
-- [ ] Close the GA quota enhancement loop
+- [x] Close the GA quota enhancement loop
 
 Owner:
 
@@ -699,12 +699,12 @@ Use this section as lightweight scrum tracking.
 
 | Checkpoint | Status | Owner | PR / Branch | Notes |
 |---|---|---|---|---|
-| CP-01 | [x] | @agent | local workspace | `tickets.proto` and new `venue.proto` landed; Go stubs regenerated |
-| CP-02 | [ ] | TBD |  |  |
-| CP-03 | [ ] | TBD |  |  |
-| CP-04 | [ ] | TBD |  |  |
-| CP-05 | [ ] | TBD |  |  |
-| CP-06 | [ ] | TBD |  |  |
+| CP-01 | [x] | @agent | PR #17 | `tickets.proto` and new `venue.proto` landed; Go stubs regenerated |
+| CP-02 | [x] | @agent | PR #18 | Quota fields + reservation ledger in ticket-service; MongoDB indexes |
+| CP-03 | [x] | @agent | PR #19 | Redis Lua scripts for atomic quota reserve/release/finalize |
+| CP-04 | [x] | @agent | PR #20 | gRPC RPCs + Kafka consumer for reservation lifecycle |
+| CP-05 | [x] | @agent | PR #21 | Order-service GA reservation integration with gRPC + compensation |
+| CP-06 | [x] | @agent | PR #24 | 3× E2E lifecycle tests + Kong smoke (AC-1/2/3 all pass); migration/rollback doc added |
 | CP-07 | [ ] | TBD |  |  |
 | CP-08 | [ ] | TBD |  |  |
 | CP-09 | [ ] | TBD |  |  |
