@@ -111,7 +111,8 @@ public class OrderTransactionService {
                         order.getExpiresAt().toString(),
                         reservationId.toString(),
                         quantity,
-                        order.getVersion()
+                        order.getVersion(),
+                        null  // GA orders have no seat IDs (CP-12)
                 ));
 
         log.info("Order created orderId={} userId={} ticketId={} reservationId={} quantity={}",

@@ -1,6 +1,7 @@
 package com.ticketing.orders.event;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -10,6 +11,9 @@ import java.util.UUID;
  * (triggered by PaymentEventConsumer).  ticket-service consumes it to call
  * FinalizeReservation(reservationId, orderId), which transitions the reservation
  * from RESERVED to SOLD and decrements the per-user reserved count.
+ *
+ * CP-12: added {@code seatIds} (null for GA orders) so venue-service consumer can
+ * finalize individual seat reservations when payment is captured.
  */
 public class OrderCompletedEvent {
 
@@ -27,8 +31,9 @@ public class OrderCompletedEvent {
             String ticketId,
             String reservationId,
             int quantity,
-            int version) {
-        this.data = new Data(orderId, userId, ticketId, reservationId, quantity, version);
+            int version,
+            List<String> seatIds) {
+        this.data = new Data(orderId, userId, ticketId, reservationId, quantity, version, seatIds);
     }
 
     // ── accessors ─────────────────────────────────────────────────────────────
@@ -49,6 +54,7 @@ public class OrderCompletedEvent {
             String ticketId,
             String reservationId,
             int quantity,
-            int version
+            int version,
+            List<String> seatIds    // null for GA orders
     ) {}
 }

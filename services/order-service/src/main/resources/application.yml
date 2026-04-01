@@ -89,6 +89,9 @@ grpc:
   ticket-service:
     host: ${TICKET_SERVICE_GRPC_HOST:localhost}
     port: ${TICKET_SERVICE_GRPC_PORT:50051}
+  venue-service:
+    host: ${VENUE_SERVICE_GRPC_HOST:localhost}
+    port: ${VENUE_SERVICE_GRPC_PORT:50052}
 
 redis:
   url: ${REDIS_URL:redis://localhost:6379}
@@ -113,6 +116,17 @@ resilience4j:
         # Throw CallNotPermittedException when OPEN (caught by fallback)
         automaticTransitionFromOpenToHalfOpenEnabled: true
         # Record gRPC StatusRuntimeException and all its subtypes as failures
+        recordExceptions:
+          - io.grpc.StatusRuntimeException
+          - java.util.concurrent.TimeoutException
+          - java.io.IOException
+      venueService:
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
         recordExceptions:
           - io.grpc.StatusRuntimeException
           - java.util.concurrent.TimeoutException
