@@ -56,6 +56,7 @@ jobs:
       payment:    ${{ steps.filter.outputs.payment }}
       proto:      ${{ steps.filter.outputs.proto }}
       ticket:     ${{ steps.filter.outputs.ticket }}
+      venue:      ${{ steps.filter.outputs.venue }}
       skip-ci:    ${{ steps.set-skip-ci.outputs.skip-ci }}
     steps:
       - uses: actions/checkout@v4
@@ -90,6 +91,10 @@ jobs:
               - '.github/workflows/ci.yml'
             ticket:
               - 'services/ticket-service/**'
+              - 'proto/**'
+              - '.github/workflows/ci.yml'
+            venue:
+              - 'services/venue-service/**'
               - 'proto/**'
               - '.github/workflows/ci.yml'
             # skip-ci: true if ONLY markdown/docs files changed (no code/config changes)
@@ -607,6 +612,83 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
+  # ── venue-service (Go / Echo / CGO / Testcontainers — PostgreSQL) ───────────
+  venue:
+    name: venue-service
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.venue == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: services/venue-service
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/venue-service
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install librdkafka build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc libc6-dev librdkafka-dev
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: services/venue-service/go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+          working-directory: services/venue-service
+
+      - name: Unit tests
+        run: go test -v -count=1 -run "^Test" ./internal/...
+
+      - name: Integration tests (Testcontainers — PostgreSQL)
+        run: go test -v -count=1 -timeout 5m ./test/...
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "false"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/venue-service/Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/venue-service.tar
+
+      - name: Load image for scanning
+        run: docker load --input /tmp/venue-service.tar
+        working-directory: .
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-results.sarif
+
   # ── deploy-dev (I-11) ────────────────────────────────────────────────────────
   # Deploys the umbrella Helm chart to the dev EKS namespace.
   # Conditional on:
@@ -832,7 +914,7 @@ jobs:
     name: CI
     runs-on: ubuntu-24.04
     if: always()
-    needs: [changes, auth, client, expiration, kong, order, payment, proto, ticket]
+    needs: [changes, auth, client, expiration, kong, order, payment, proto, ticket, venue]
     steps:
       - name: Check all jobs passed (or skip if only markdown changed)
         run: |
