@@ -4,25 +4,24 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * CloudEvents-envelope-compatible POJO published to {@code orders.order.cancelled}.
- * Consumed by ticket-service (to release the reservation) and payment-service
- * (to void any pending charge).
+ * CloudEvents-envelope-compatible POJO published to {@code orders.order.completed}.
  *
- * CP-05: added {@code reservationId} and {@code quantity} so ticket-service can use
- * the GA path (ReleaseReservation) instead of the legacy path (ReleaseTicket).
+ * CP-05: this event is emitted by order-service when a payment is captured
+ * (triggered by PaymentEventConsumer).  ticket-service consumes it to call
+ * FinalizeReservation(reservationId, orderId), which transitions the reservation
+ * from RESERVED to SOLD and decrements the per-user reserved count.
  */
-public class OrderCancelledEvent {
+public class OrderCompletedEvent {
 
     private final String specversion = "1.0";
-    private final String type = "orders.order.cancelled";
+    private final String type = "orders.order.completed";
     private final String source = "order-service";
     private final String id = UUID.randomUUID().toString();
     private final String time = Instant.now().toString();
     private final String datacontenttype = "application/json";
     private final Data data;
 
-    /** GA constructor — includes reservationId and quantity. */
-    public OrderCancelledEvent(
+    public OrderCompletedEvent(
             String orderId,
             String userId,
             String ticketId,
@@ -30,15 +29,6 @@ public class OrderCancelledEvent {
             int quantity,
             int version) {
         this.data = new Data(orderId, userId, ticketId, reservationId, quantity, version);
-    }
-
-    /** Legacy constructor — no reservationId or quantity (backward compat). */
-    public OrderCancelledEvent(
-            String orderId,
-            String userId,
-            String ticketId,
-            int version) {
-        this.data = new Data(orderId, userId, ticketId, null, 1, version);
     }
 
     // ── accessors ─────────────────────────────────────────────────────────────
@@ -57,7 +47,7 @@ public class OrderCancelledEvent {
             String orderId,
             String userId,
             String ticketId,
-            String reservationId,   // null for legacy orders
+            String reservationId,
             int quantity,
             int version
     ) {}

@@ -7,6 +7,9 @@ import java.util.UUID;
 /**
  * CloudEvents-envelope-compatible POJO published to {@code orders.order.created}.
  * The OutboxRelay serialises this to JSON and sets it as the Kafka message value.
+ *
+ * CP-05: added {@code reservationId} and {@code quantity} so ticket-service consumer
+ * can identify the reservation associated with this order event.
  */
 public class OrderCreatedEvent {
 
@@ -25,8 +28,11 @@ public class OrderCreatedEvent {
             String ticketTitle,
             BigDecimal ticketPrice,
             String expiresAt,
+            String reservationId,
+            int quantity,
             int version) {
-        this.data = new Data(orderId, userId, ticketId, ticketTitle, ticketPrice, expiresAt, version);
+        this.data = new Data(orderId, userId, ticketId, ticketTitle, ticketPrice, expiresAt,
+                reservationId, quantity, version);
     }
 
     // ── accessors ─────────────────────────────────────────────────────────────
@@ -48,6 +54,8 @@ public class OrderCreatedEvent {
             String ticketTitle,
             BigDecimal ticketPrice,
             String expiresAt,
+            String reservationId,   // null for legacy orders
+            int quantity,
             int version
     ) {}
 }
