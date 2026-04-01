@@ -386,7 +386,7 @@ Verification:
 
 ## CP-09 Venue Seat Hold And Availability Foundation
 
-- [ ] Implement seat hold hot path and SSE-ready state updates
+- [x] Implement seat hold hot path and SSE-ready state updates
 
 Owner:
 
@@ -707,7 +707,7 @@ Use this section as lightweight scrum tracking.
 | CP-06 | [x] | @agent | PR #24 | 3× E2E lifecycle tests + Kong smoke (AC-1/2/3 all pass); migration/rollback doc added |
 | CP-07 | [x] | @agent | PR #25 | venue-service scaffold + 7 migrations + CI job; 5/5 unit + 7/7 integration tests pass |
 | CP-08 | [x] | @agent | PR #26 | Venue + plan CRUD repos, REST handlers, wired main.go; 10 unit + 1 integration tests pass |
-| CP-09 | [ ] | TBD |  |  |
+| CP-09 | [x] | @agent | PR #27 | Redis Lua hold/release scripts, SeatHoldHandler, hold sweeper; 18 unit + 5 integration tests pass |
 | CP-10 | [ ] | TBD |  |  |
 | CP-11 | [ ] | TBD |  |  |
 | CP-12 | [ ] | TBD |  |  |
