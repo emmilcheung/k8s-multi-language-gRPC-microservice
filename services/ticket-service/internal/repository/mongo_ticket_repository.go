@@ -595,18 +595,28 @@ func (r *MongoTicketRepository) CreateReservation(ctx context.Context, res *Tick
 		}
 	}
 
-	// ── Per-user limit check (Mongo read) ─────────────────────────────────────
-	// Read the ticket to get maxPerUser, then count active reservations for this
-	// user. This is a non-transactional read-then-write; the Redis gate above
-	// covers the concurrent case for the hot path. On standalone Mongo without
-	// Redis the per-user limit may be slightly optimistic under extreme
-	// concurrency, which is acceptable for the local dev environment.
+	// ── Quota availability + per-user limit check (Mongo reads) ──────────────
+	// Read the ticket first to check both available inventory and the per-user cap.
+	// Quota insufficiency is checked before the per-user cap so that the most
+	// fundamental constraint (not enough inventory) takes precedence when both
+	// would fire simultaneously. This is a non-transactional read-then-write;
+	// the Redis gate above covers the concurrent case for the hot path.
 	ticket, findErr := r.FindByID(ctx, res.TicketID)
 	if findErr != nil {
 		if redisReserved {
 			_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
 		}
 		return findErr // ErrTicketNotFound or wrapped error
+	}
+
+	// Check overall quota first — if there is not enough inventory this takes
+	// precedence over the per-user cap.
+	available := ticket.Quota - ticket.Reserved - ticket.Sold
+	if available < res.Quantity {
+		if redisReserved {
+			_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
+		}
+		return ErrInsufficientQuota
 	}
 
 	userActive, sumErr := r.sumUserActiveReservations(ctx, res.TicketID, res.UserID)
