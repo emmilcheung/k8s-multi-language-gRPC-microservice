@@ -18,17 +18,20 @@ type EventPublisher interface {
 }
 
 // CreateTicketInput is the validated input for creating a ticket.
+// Price is a decimal string (e.g. "9.99") — no float64 to avoid precision drift.
 type CreateTicketInput struct {
-	Title  string
-	Price  float64
-	UserID string
+	Title      string
+	Price      string
+	UserID     string
+	Quota      int // defaults to 1 if 0
+	MaxPerUser int // defaults to 1 if 0
 }
 
 // UpdateTicketInput is the validated input for updating a ticket.
 type UpdateTicketInput struct {
 	ID     string
 	Title  string
-	Price  float64
+	Price  string
 	UserID string // used for ownership check
 }
 
@@ -53,9 +56,11 @@ func NewTicketService(repo repository.TicketRepository, publisher EventPublisher
 // but the gRPC call still returns success — ticket is already durably saved.
 func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInput) (*repository.Ticket, error) {
 	ticket := &repository.Ticket{
-		Title:  input.Title,
-		Price:  input.Price,
-		UserID: input.UserID,
+		Title:      input.Title,
+		Price:      input.Price,
+		UserID:     input.UserID,
+		Quota:      input.Quota,
+		MaxPerUser: input.MaxPerUser,
 	}
 
 	if err := s.repo.Create(ctx, ticket); err != nil {
@@ -112,8 +117,8 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 		return nil, ErrUnauthorized
 	}
 
-	// Reservation check — cannot update a reserved ticket
-	if ticket.OrderID != "" {
+	// Reservation check — cannot update a ticket that has active reservations
+	if ticket.Reserved > 0 {
 		return nil, repository.ErrTicketReserved
 	}
 

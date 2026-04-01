@@ -63,7 +63,7 @@ func setupGrpcServer(t *testing.T) (v1.TicketServiceClient, func()) {
 }
 
 // seedTicketViaGrpc creates a ticket directly in MongoDB so gRPC tests have data.
-func seedGrpcTicket(t *testing.T, repo repository.TicketRepository, id, userID, title string, price float64) {
+func seedGrpcTicket(t *testing.T, repo repository.TicketRepository, id, userID, title string, price string) {
 	t.Helper()
 	err := repo.Create(context.Background(), &repository.Ticket{
 		ID:     id,
@@ -90,7 +90,7 @@ func TestGrpc_GetTicket_returns_ticket_when_found(t *testing.T) {
 	require.NoError(t, err)
 	defer repo.Close(ctx) //nolint:errcheck
 
-	seedGrpcTicket(t, repo, "g-ticket-1", "user-1", "gRPC Ticket", 42.00)
+	seedGrpcTicket(t, repo, "g-ticket-1", "user-1", "gRPC Ticket", "42")
 
 	log := zap.NewNop()
 	srv := grpcserver.NewTicketGrpcServer(repo, log)
@@ -159,7 +159,7 @@ func TestGrpc_ValidateTicketAvailability_returns_available_true_for_unreserved_t
 	require.NoError(t, err)
 	defer repo.Close(ctx) //nolint:errcheck
 
-	seedGrpcTicket(t, repo, "g-avail-1", "user-2", "Available Ticket", 99.00)
+	seedGrpcTicket(t, repo, "g-avail-1", "user-2", "Available Ticket", "99")
 
 	log := zap.NewNop()
 	srv := grpcserver.NewTicketGrpcServer(repo, log)
@@ -201,7 +201,7 @@ func TestGrpc_ValidateTicketAvailability_returns_available_false_for_reserved_ti
 	require.NoError(t, err)
 	defer repo.Close(ctx) //nolint:errcheck
 
-	seedGrpcTicket(t, repo, "g-reserved-1", "user-3", "Reserved Ticket", 50.00)
+	seedGrpcTicket(t, repo, "g-reserved-1", "user-3", "Reserved Ticket", "50")
 	err = repo.ReserveTicket(ctx, "g-reserved-1", "order-xyz")
 	require.NoError(t, err)
 

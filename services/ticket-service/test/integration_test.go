@@ -103,7 +103,7 @@ func TestCreateTicket_ShouldReturn201WithTicketBody(t *testing.T) {
 	ts, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	body := jsonBody(t, map[string]interface{}{"title": "Concert Ticket", "price": 29.99})
+	body := jsonBody(t, map[string]interface{}{"title": "Concert Ticket", "price": "29.99"})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "user-123")
@@ -117,7 +117,7 @@ func TestCreateTicket_ShouldReturn201WithTicketBody(t *testing.T) {
 	var result map[string]interface{}
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 	assert.Equal(t, "Concert Ticket", result["title"])
-	assert.Equal(t, 29.99, result["price"])
+	assert.Equal(t, "29.99", result["price"])
 	assert.Equal(t, "user-123", result["userId"])
 	assert.NotEmpty(t, result["id"])
 }
@@ -126,7 +126,7 @@ func TestCreateTicket_ShouldReturn401WhenNoUserHeader(t *testing.T) {
 	ts, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	body := jsonBody(t, map[string]interface{}{"title": "Concert", "price": 10.0})
+	body := jsonBody(t, map[string]interface{}{"title": "Concert", "price": "10.00"})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	req.Header.Set("Content-Type", "application/json")
 	// No X-User-Id header
@@ -142,7 +142,7 @@ func TestCreateTicket_ShouldReturn400WhenTitleIsEmpty(t *testing.T) {
 	ts, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	body := jsonBody(t, map[string]interface{}{"title": "", "price": 10.0})
+	body := jsonBody(t, map[string]interface{}{"title": "", "price": "10.00"})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "user-1")
@@ -158,7 +158,7 @@ func TestCreateTicket_ShouldReturn400WhenPriceIsNegative(t *testing.T) {
 	ts, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	body := jsonBody(t, map[string]interface{}{"title": "Ticket", "price": -5.0})
+	body := jsonBody(t, map[string]interface{}{"title": "Ticket", "price": "-5.00"})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "user-1")
@@ -175,7 +175,7 @@ func TestGetTicketByID_ShouldReturn200ForExistingTicket(t *testing.T) {
 	defer cleanup()
 
 	// Create a ticket first
-	body := jsonBody(t, map[string]interface{}{"title": "Rock Concert", "price": 50.0})
+	body := jsonBody(t, map[string]interface{}{"title": "Rock Concert", "price": "50.00"})
 	createReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("X-User-Id", "user-1")
@@ -234,7 +234,7 @@ func TestListTickets_ShouldReturnAllCreatedTickets(t *testing.T) {
 
 	titles := []string{"Ticket A", "Ticket B", "Ticket C"}
 	for _, title := range titles {
-		body := jsonBody(t, map[string]interface{}{"title": title, "price": 10.0})
+		body := jsonBody(t, map[string]interface{}{"title": title, "price": "10.00"})
 		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-User-Id", "user-1")
@@ -260,7 +260,7 @@ func TestUpdateTicket_ShouldReturn200WhenOwnerUpdates(t *testing.T) {
 	defer cleanup()
 
 	// Create ticket
-	body := jsonBody(t, map[string]interface{}{"title": "Old Title", "price": 10.0})
+	body := jsonBody(t, map[string]interface{}{"title": "Old Title", "price": "10.00"})
 	createReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("X-User-Id", "owner-user")
@@ -274,7 +274,7 @@ func TestUpdateTicket_ShouldReturn200WhenOwnerUpdates(t *testing.T) {
 	ticketID := created["id"].(string)
 
 	// Update ticket
-	updateBody := jsonBody(t, map[string]interface{}{"title": "New Title", "price": 99.99})
+	updateBody := jsonBody(t, map[string]interface{}{"title": "New Title", "price": "99.99"})
 	updateReq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/tickets/"+ticketID, updateBody)
 	updateReq.Header.Set("Content-Type", "application/json")
 	updateReq.Header.Set("X-User-Id", "owner-user")
@@ -286,7 +286,7 @@ func TestUpdateTicket_ShouldReturn200WhenOwnerUpdates(t *testing.T) {
 	var updated map[string]interface{}
 	require.NoError(t, json.NewDecoder(updateResp.Body).Decode(&updated))
 	assert.Equal(t, "New Title", updated["title"])
-	assert.Equal(t, 99.99, updated["price"])
+	assert.Equal(t, "99.99", updated["price"])
 }
 
 func TestUpdateTicket_ShouldReturn403WhenNonOwnerUpdates(t *testing.T) {
@@ -294,7 +294,7 @@ func TestUpdateTicket_ShouldReturn403WhenNonOwnerUpdates(t *testing.T) {
 	defer cleanup()
 
 	// Create ticket as owner
-	body := jsonBody(t, map[string]interface{}{"title": "Title", "price": 10.0})
+	body := jsonBody(t, map[string]interface{}{"title": "Title", "price": "10.00"})
 	createReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("X-User-Id", "owner-user")
@@ -307,7 +307,7 @@ func TestUpdateTicket_ShouldReturn403WhenNonOwnerUpdates(t *testing.T) {
 	ticketID := created["id"].(string)
 
 	// Try to update as different user
-	updateBody := jsonBody(t, map[string]interface{}{"title": "Hijacked", "price": 1.0})
+	updateBody := jsonBody(t, map[string]interface{}{"title": "Hijacked", "price": "1.00"})
 	updateReq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/tickets/"+ticketID, updateBody)
 	updateReq.Header.Set("Content-Type", "application/json")
 	updateReq.Header.Set("X-User-Id", "attacker-user")
@@ -322,7 +322,7 @@ func TestUpdateTicket_ShouldReturn404ForNonExistentTicket(t *testing.T) {
 	ts, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	body := jsonBody(t, map[string]interface{}{"title": "Title", "price": 10.0})
+	body := jsonBody(t, map[string]interface{}{"title": "Title", "price": "10.00"})
 	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/tickets/22222222-2222-4222-8222-222222222222", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "user-1")
@@ -375,7 +375,7 @@ func TestUpdateTicket_ConcurrentOCC(t *testing.T) {
 	original := &repository.Ticket{
 		ID:     "occ-test-ticket-id",
 		Title:  "Original Title",
-		Price:  50.0,
+		Price:  "50.0",
 		UserID: "owner-123",
 	}
 	require.NoError(t, repo.Create(ctx, original))
