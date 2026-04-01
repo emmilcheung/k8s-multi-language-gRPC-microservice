@@ -68,6 +68,27 @@ services:
     networks:
       - microservices-net
 
+  # ── PostgreSQL: venue-service ───────────────────────────────────────────────
+  postgres-venue:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: venue_db
+      POSTGRES_USER: venue_user
+      POSTGRES_PASSWORD: venue_pass
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_venue_data:/var/lib/postgresql/data
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U venue_user -d venue_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - microservices-net
+
   # ── MongoDB: ticket-service ─────────────────────────────────────────────────
   mongodb:
     image: mongo:7
@@ -362,6 +383,41 @@ services:
     networks:
       - microservices-net
 
+  # ── venue-service: Go / Echo ─────────────────────────────────────────────────
+  venue-service:
+    build:
+      # Context must be repo root: go.mod has a replace directive pointing to
+      # ../../libs/grpc-stubs/go which is outside the service directory.
+      context: .
+      dockerfile: services/venue-service/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: development
+      PORT: 3003
+      GRPC_PORT: 50052
+      DATABASE_URL: postgresql://venue_user:venue_pass@postgres-venue:5432/venue_db
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: info
+    depends_on:
+      postgres-venue:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "3003:3003"
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3003/healthz/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - microservices-net
+
   # ── expiration-service: Go / asynq / Redis + Kafka ──────────────────────────
   expiration-service:
     build:
@@ -395,6 +451,7 @@ volumes:
   postgres_auth_data:
   postgres_orders_data:
   postgres_payments_data:
+  postgres_venue_data:
   mongodb_data:
   redis_data:
   kafka_data:
