@@ -19,19 +19,24 @@ import (
 // The Price field migrates from float64 to decimal string to avoid precision drift
 // on purchase paths. The OrderID field is kept for backward compatibility during
 // rollout but is no longer the primary reservation mechanism.
+//
+// SeatingPlanID (CP-13): when non-empty the ticket is a "seated" ticket linked
+// to a venue-service seating plan. Seated tickets bypass the GA quota path —
+// inventory is managed by the venue-service seat reservation instead.
 type Ticket struct {
-	ID         string    `bson:"_id"`
-	Title      string    `bson:"title"`
-	Price      string    `bson:"price"` // decimal string; migrated from float64
-	UserID     string    `bson:"userId"`
-	OrderID    string    `bson:"orderId,omitempty"` // deprecated: kept for backward compat during migration
-	Quota      int       `bson:"quota"`             // total available inventory
-	Reserved   int       `bson:"reserved"`          // currently held by active reservations
-	Sold       int       `bson:"sold"`              // permanently sold units
-	MaxPerUser int       `bson:"maxPerUser"`        // per-user purchase cap
-	Version    int       `bson:"version"`
-	CreatedAt  time.Time `bson:"createdAt"`
-	UpdatedAt  time.Time `bson:"updatedAt"`
+	ID            string    `bson:"_id"`
+	Title         string    `bson:"title"`
+	Price         string    `bson:"price"` // decimal string; migrated from float64
+	UserID        string    `bson:"userId"`
+	OrderID       string    `bson:"orderId,omitempty"`       // deprecated: kept for backward compat during migration
+	SeatingPlanID string    `bson:"seatingPlanId,omitempty"` // CP-13: venue seating plan UUID; empty = GA ticket
+	Quota         int       `bson:"quota"`                   // total available inventory (GA tickets only)
+	Reserved      int       `bson:"reserved"`                // currently held by active reservations
+	Sold          int       `bson:"sold"`                    // permanently sold units
+	MaxPerUser    int       `bson:"maxPerUser"`              // per-user purchase cap
+	Version       int       `bson:"version"`
+	CreatedAt     time.Time `bson:"createdAt"`
+	UpdatedAt     time.Time `bson:"updatedAt"`
 }
 
 // ReservationStatus represents the lifecycle state of a TicketReservation.
@@ -79,6 +84,19 @@ var ErrReservationNotFound = errors.New("reservation not found")
 
 // ErrReservationConflict is returned when an operation is invalid for the current reservation state.
 var ErrReservationConflict = errors.New("reservation state conflict")
+
+// ErrSeatedTicket is returned when a GA quota operation is attempted on a seated ticket.
+// Seated tickets are managed exclusively by the venue-service reservation path (CP-13).
+var ErrSeatedTicket = errors.New("ticket is seated — use venue-service reservation path")
+
+// ErrSeatingPlanAlreadyAttached is returned when a seating plan is attached to a ticket
+// that already has one. Callers should detach first.
+var ErrSeatingPlanAlreadyAttached = errors.New("ticket already has an attached seating plan")
+
+// ErrOwnership is returned by AttachSeatingPlan / DetachSeatingPlan when the caller
+// does not own the ticket. Distinct from service.ErrUnauthorized so that repository
+// callers can check it without importing the service package.
+var ErrOwnership = errors.New("caller does not own this ticket")
 
 // PaginationParams controls cursor-based pagination for FindAll.
 // After is an opaque cursor — the _id of the last ticket seen on the previous page.
@@ -128,6 +146,18 @@ type TicketRepository interface {
 
 	Ping(ctx context.Context) error
 	Close(ctx context.Context) error
+
+	// --- Seating plan attachment (CP-13) ---
+
+	// AttachSeatingPlan sets seatingPlanId on a ticket. The caller must own the ticket
+	// (userID must match ticket.UserID). Returns ErrTicketNotFound if the ticket does
+	// not exist, ErrUnauthorized if the user doesn't own it, and
+	// ErrSeatingPlanAlreadyAttached if a plan is already attached.
+	AttachSeatingPlan(ctx context.Context, ticketID, planID, userID string) error
+
+	// DetachSeatingPlan clears seatingPlanId from a ticket. The caller must own the
+	// ticket. Idempotent: if no plan is attached this is a no-op success.
+	DetachSeatingPlan(ctx context.Context, ticketID, userID string) error
 }
 
 // MongoTicketRepository implements TicketRepository against MongoDB.
@@ -227,11 +257,11 @@ func ensureCollectionSchema(ctx context.Context, db *mongo.Database, coll *mongo
 					{Key: "minimum", Value: 1},
 				}},
 				{Key: "version", Value: bson.D{{Key: "bsonType", Value: "int"}}},
+				// seatingPlanId is optional — present only for seated tickets (CP-13).
+				{Key: "seatingPlanId", Value: bson.D{{Key: "bsonType", Value: "string"}}},
 			}},
 		}},
 	}
-
-	// Try to create the collection with the schema; ignore "already exists" error.
 	createOpts := options.CreateCollection().SetValidator(validator)
 	err := db.CreateCollection(ctx, "tickets", createOpts)
 	if err != nil {
@@ -306,6 +336,11 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection) error {
 		{
 			Keys:    bson.D{{Key: "orderId", Value: 1}},
 			Options: options.Index().SetName("idx_orderId").SetSparse(true),
+		},
+		// Sparse index for seating plan lookups — only present on seated tickets (CP-13).
+		{
+			Keys:    bson.D{{Key: "seatingPlanId", Value: 1}},
+			Options: options.Index().SetName("idx_seatingPlanId").SetSparse(true),
 		},
 	})
 	return err
@@ -840,5 +875,93 @@ func (r *MongoTicketRepository) FinalizeReservation(ctx context.Context, reserva
 		_ = r.quota.Finalize(ctx, updated.TicketID, updated.UserID, updated.Quantity)
 	}
 
+	return nil
+}
+
+// ─── Seating plan attachment methods (CP-13) ──────────────────────────────────
+
+// AttachSeatingPlan sets seatingPlanId on a ticket. The caller must own the ticket.
+// Returns ErrTicketNotFound if the ticket does not exist, ErrUnauthorized if the
+// user doesn't own it, and ErrSeatingPlanAlreadyAttached if a plan is already set.
+//
+// Uses a conditional filter ($and) so the update is atomic: the seatingPlanId field
+// must be absent or empty, ensuring two concurrent callers cannot both attach.
+func (r *MongoTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	now := time.Now().UTC()
+
+	// Only match tickets owned by the caller AND without a seating plan attached.
+	filter := bson.M{
+		"_id":    ticketID,
+		"userId": userID,
+		"$or": bson.A{
+			bson.M{"seatingPlanId": bson.M{"$exists": false}},
+			bson.M{"seatingPlanId": ""},
+		},
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"seatingPlanId": planID,
+			"updatedAt":     now,
+		},
+		"$inc": bson.M{"version": 1},
+	}
+
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("attach seating plan to ticket %s: %w", ticketID, err)
+	}
+	if result.MatchedCount == 0 {
+		// Distinguish the three failure cases by reading the current state.
+		var t Ticket
+		findErr := r.collection.FindOne(ctx, bson.M{"_id": ticketID}).Decode(&t)
+		if errors.Is(findErr, mongo.ErrNoDocuments) {
+			return ErrTicketNotFound
+		}
+		if findErr != nil {
+			return fmt.Errorf("attach seating plan: lookup ticket: %w", findErr)
+		}
+		if t.UserID != userID {
+			return ErrOwnership
+		}
+		// Ticket exists and is owned by caller — the filter failed because a plan is already set.
+		return ErrSeatingPlanAlreadyAttached
+	}
+	return nil
+}
+
+// DetachSeatingPlan clears seatingPlanId from a ticket. The caller must own the
+// ticket. Idempotent: if no plan is attached the update is a no-op success.
+func (r *MongoTicketRepository) DetachSeatingPlan(ctx context.Context, ticketID, userID string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	now := time.Now().UTC()
+
+	filter := bson.M{"_id": ticketID, "userId": userID}
+	update := bson.M{
+		"$unset": bson.M{"seatingPlanId": ""},
+		"$set":   bson.M{"updatedAt": now},
+		"$inc":   bson.M{"version": 1},
+	}
+
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("detach seating plan from ticket %s: %w", ticketID, err)
+	}
+	if result.MatchedCount == 0 {
+		// Distinguish not-found from ownership failure.
+		var t Ticket
+		findErr := r.collection.FindOne(ctx, bson.M{"_id": ticketID}).Decode(&t)
+		if errors.Is(findErr, mongo.ErrNoDocuments) {
+			return ErrTicketNotFound
+		}
+		if findErr != nil {
+			return fmt.Errorf("detach seating plan: lookup ticket: %w", findErr)
+		}
+		return ErrOwnership
+	}
 	return nil
 }

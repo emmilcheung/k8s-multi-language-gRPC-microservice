@@ -135,6 +135,17 @@ func (s *TicketGrpcServer) ReserveQuota(ctx context.Context, req *v1.ReserveQuot
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 
+	// CP-13: seated tickets must not be reserved via the GA quota path.
+	// Callers must use the venue-service seated reservation endpoint instead.
+	if ticket.SeatingPlanID != "" {
+		s.log.Info("grpc ReserveQuota: rejected for seated ticket",
+			zap.String("ticketId", req.TicketId),
+			zap.String("seatingPlanId", ticket.SeatingPlanID),
+		)
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"ticket %s is a seated ticket — use the venue-service reservation path", req.TicketId)
+	}
+
 	resv := &repository.TicketReservation{
 		ID:        req.ReservationId,
 		TicketID:  req.TicketId,

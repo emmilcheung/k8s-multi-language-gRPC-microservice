@@ -36,12 +36,15 @@ type CloudEvent struct {
 
 // TicketEventData is the domain payload for ticket events.
 // Price is a decimal string to match the quota-based ticket model (no float drift).
+// SeatingPlanID (CP-13): non-empty for seated tickets; consumers use this to route
+// inventory management to the venue-service path.
 type TicketEventData struct {
-	ID      string `json:"id"`
-	Title   string `json:"title"`
-	Price   string `json:"price"`
-	UserID  string `json:"userId"`
-	Version int    `json:"version"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	Price         string `json:"price"`
+	UserID        string `json:"userId"`
+	SeatingPlanID string `json:"seatingPlanId,omitempty"`
+	Version       int    `json:"version"`
 }
 
 // Producer wraps the Confluent Kafka producer with structured event publishing.

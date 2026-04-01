@@ -48,34 +48,36 @@ type updateTicketRequest struct {
 
 // ticketResponse is the JSON response shape for a ticket.
 type ticketResponse struct {
-	ID         string `json:"id"`
-	Title      string `json:"title"`
-	Price      string `json:"price"`
-	UserID     string `json:"userId"`
-	OrderID    string `json:"orderId,omitempty"`
-	Quota      int    `json:"quota"`
-	Reserved   int    `json:"reserved"`
-	Sold       int    `json:"sold"`
-	MaxPerUser int    `json:"maxPerUser"`
-	Version    int    `json:"version"`
-	CreatedAt  string `json:"createdAt"`
-	UpdatedAt  string `json:"updatedAt"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	Price         string `json:"price"`
+	UserID        string `json:"userId"`
+	OrderID       string `json:"orderId,omitempty"`
+	SeatingPlanID string `json:"seatingPlanId,omitempty"`
+	Quota         int    `json:"quota"`
+	Reserved      int    `json:"reserved"`
+	Sold          int    `json:"sold"`
+	MaxPerUser    int    `json:"maxPerUser"`
+	Version       int    `json:"version"`
+	CreatedAt     string `json:"createdAt"`
+	UpdatedAt     string `json:"updatedAt"`
 }
 
 func toResponse(t *repository.Ticket) ticketResponse {
 	return ticketResponse{
-		ID:         t.ID,
-		Title:      t.Title,
-		Price:      t.Price,
-		UserID:     t.UserID,
-		OrderID:    t.OrderID,
-		Quota:      t.Quota,
-		Reserved:   t.Reserved,
-		Sold:       t.Sold,
-		MaxPerUser: t.MaxPerUser,
-		Version:    t.Version,
-		CreatedAt:  t.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:  t.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		ID:            t.ID,
+		Title:         t.Title,
+		Price:         t.Price,
+		UserID:        t.UserID,
+		OrderID:       t.OrderID,
+		SeatingPlanID: t.SeatingPlanID,
+		Quota:         t.Quota,
+		Reserved:      t.Reserved,
+		Sold:          t.Sold,
+		MaxPerUser:    t.MaxPerUser,
+		Version:       t.Version,
+		CreatedAt:     t.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:     t.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 }
 
@@ -254,4 +256,87 @@ func errorResponse(c echo.Context, status int, code, message string, details int
 		},
 	}
 	return c.JSON(status, body)
+}
+
+// attachSeatingPlanRequest is the request body for PUT /api/tickets/:id/seating-plan.
+type attachSeatingPlanRequest struct {
+	SeatingPlanID string `json:"seatingPlanId"`
+}
+
+// AttachSeatingPlan handles PUT /api/tickets/:id/seating-plan.
+// Links a venue-service seating plan UUID to the ticket. Once attached, the ticket
+// is treated as "seated" and the GA quota reservation path (ReserveQuota gRPC) will
+// refuse reservations, directing callers to the venue-service instead.
+func (h *TicketHandler) AttachSeatingPlan(c echo.Context) error {
+	userID := c.Request().Header.Get("X-User-Id")
+	if userID == "" {
+		return errorResponse(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+	}
+
+	id := c.Param("id")
+	if !uuidRE.MatchString(id) {
+		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "id must be a valid UUID", nil)
+	}
+
+	var req attachSeatingPlanRequest
+	if err := c.Bind(&req); err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil)
+	}
+
+	if !uuidRE.MatchString(req.SeatingPlanID) {
+		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "seatingPlanId must be a valid UUID", nil)
+	}
+
+	ticket, err := h.svc.AttachSeatingPlan(c.Request().Context(), service.AttachSeatingPlanInput{
+		TicketID: id,
+		PlanID:   req.SeatingPlanID,
+		UserID:   userID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrTicketNotFound):
+			return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Ticket not found", nil)
+		case errors.Is(err, service.ErrUnauthorized):
+			return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Not authorised to modify this ticket", nil)
+		case errors.Is(err, repository.ErrSeatingPlanAlreadyAttached):
+			return errorResponse(c, http.StatusConflict, "CONFLICT", "Ticket already has a seating plan attached — detach it first", nil)
+		default:
+			h.log.Error("attach seating plan failed", zap.Error(err), zap.String("ticketId", id))
+			return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred", nil)
+		}
+	}
+
+	return c.JSON(http.StatusOK, toResponse(ticket))
+}
+
+// DetachSeatingPlan handles DELETE /api/tickets/:id/seating-plan.
+// Removes the seating plan association, reverting the ticket to a GA (general-admission) ticket.
+func (h *TicketHandler) DetachSeatingPlan(c echo.Context) error {
+	userID := c.Request().Header.Get("X-User-Id")
+	if userID == "" {
+		return errorResponse(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+	}
+
+	id := c.Param("id")
+	if !uuidRE.MatchString(id) {
+		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "id must be a valid UUID", nil)
+	}
+
+	ticket, err := h.svc.DetachSeatingPlan(c.Request().Context(), service.DetachSeatingPlanInput{
+		TicketID: id,
+		UserID:   userID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrTicketNotFound):
+			return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Ticket not found", nil)
+		case errors.Is(err, service.ErrUnauthorized):
+			return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Not authorised to modify this ticket", nil)
+		default:
+			h.log.Error("detach seating plan failed", zap.Error(err), zap.String("ticketId", id))
+			return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred", nil)
+		}
+	}
+
+	return c.JSON(http.StatusOK, toResponse(ticket))
 }

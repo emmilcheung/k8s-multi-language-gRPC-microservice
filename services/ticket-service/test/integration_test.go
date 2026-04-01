@@ -70,6 +70,8 @@ func setupTestServer(t *testing.T) (*httptest.Server, func()) {
 	g.GET("", ticketH.List)
 	g.GET("/:id", ticketH.GetByID)
 	g.PUT("/:id", ticketH.Update)
+	g.PUT("/:id/seating-plan", ticketH.AttachSeatingPlan)
+	g.DELETE("/:id/seating-plan", ticketH.DetachSeatingPlan)
 
 	ts := httptest.NewServer(e)
 

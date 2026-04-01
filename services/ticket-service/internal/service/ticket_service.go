@@ -35,6 +35,19 @@ type UpdateTicketInput struct {
 	UserID string // used for ownership check
 }
 
+// AttachSeatingPlanInput is the validated input for attaching a seating plan to a ticket.
+type AttachSeatingPlanInput struct {
+	TicketID string
+	PlanID   string
+	UserID   string // must own the ticket
+}
+
+// DetachSeatingPlanInput is the validated input for detaching a seating plan from a ticket.
+type DetachSeatingPlanInput struct {
+	TicketID string
+	UserID   string // must own the ticket
+}
+
 // ErrUnauthorized is returned when a user tries to modify a ticket they don't own.
 var ErrUnauthorized = errors.New("not authorised to modify this ticket")
 
@@ -133,15 +146,101 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 
 	// Publish async — do not block or fail the gRPC response on Kafka availability.
 	eventData := kafka.TicketEventData{
+		ID:            ticket.ID,
+		Title:         ticket.Title,
+		Price:         ticket.Price,
+		UserID:        ticket.UserID,
+		SeatingPlanID: ticket.SeatingPlanID,
+		Version:       ticket.Version,
+	}
+	go func() {
+		if err := s.publisher.PublishTicketUpdated(context.Background(), eventData); err != nil {
+			s.log.Error("failed to publish ticket.updated event", zap.Error(err), zap.String("ticketId", eventData.ID))
+		}
+	}()
+
+	return ticket, nil
+}
+
+// AttachSeatingPlan links a venue-service seating plan UUID to the ticket.
+// After attachment the ticket is "seated": the GA quota reservation path (ReserveQuota gRPC)
+// will refuse to reserve seats for it, directing callers to the venue-service path instead.
+//
+// Validations performed here:
+//   - ticketID and planID must be non-empty (format validated by the HTTP handler)
+//   - ownership enforced in the repository layer (ErrOwnership → ErrUnauthorized)
+//   - plan-already-attached detected atomically in the repository layer
+func (s *TicketService) AttachSeatingPlan(ctx context.Context, input AttachSeatingPlanInput) (*repository.Ticket, error) {
+	if err := s.repo.AttachSeatingPlan(ctx, input.TicketID, input.PlanID, input.UserID); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrOwnership):
+			return nil, ErrUnauthorized
+		default:
+			return nil, fmt.Errorf("attach seating plan: %w", err)
+		}
+	}
+
+	ticket, err := s.repo.FindByID(ctx, input.TicketID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch ticket after attach: %w", err)
+	}
+
+	s.log.Info("seating plan attached",
+		zap.String("ticketId", ticket.ID),
+		zap.String("seatingPlanId", ticket.SeatingPlanID),
+		zap.String("userId", input.UserID),
+	)
+
+	eventData := kafka.TicketEventData{
+		ID:            ticket.ID,
+		Title:         ticket.Title,
+		Price:         ticket.Price,
+		UserID:        ticket.UserID,
+		SeatingPlanID: ticket.SeatingPlanID,
+		Version:       ticket.Version,
+	}
+	go func() {
+		if err := s.publisher.PublishTicketUpdated(context.Background(), eventData); err != nil {
+			s.log.Error("failed to publish ticket.updated event after attach", zap.Error(err), zap.String("ticketId", eventData.ID))
+		}
+	}()
+
+	return ticket, nil
+}
+
+// DetachSeatingPlan removes the seating plan association from a ticket, reverting it to a GA
+// ticket. The caller must own the ticket.
+func (s *TicketService) DetachSeatingPlan(ctx context.Context, input DetachSeatingPlanInput) (*repository.Ticket, error) {
+	if err := s.repo.DetachSeatingPlan(ctx, input.TicketID, input.UserID); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrOwnership):
+			return nil, ErrUnauthorized
+		default:
+			return nil, fmt.Errorf("detach seating plan: %w", err)
+		}
+	}
+
+	ticket, err := s.repo.FindByID(ctx, input.TicketID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch ticket after detach: %w", err)
+	}
+
+	s.log.Info("seating plan detached",
+		zap.String("ticketId", ticket.ID),
+		zap.String("userId", input.UserID),
+	)
+
+	eventData := kafka.TicketEventData{
 		ID:      ticket.ID,
 		Title:   ticket.Title,
 		Price:   ticket.Price,
 		UserID:  ticket.UserID,
 		Version: ticket.Version,
+		// SeatingPlanID is intentionally empty — the plan was just detached.
 	}
 	go func() {
 		if err := s.publisher.PublishTicketUpdated(context.Background(), eventData); err != nil {
-			s.log.Error("failed to publish ticket.updated event", zap.Error(err), zap.String("ticketId", eventData.ID))
+			s.log.Error("failed to publish ticket.updated event after detach", zap.Error(err), zap.String("ticketId", eventData.ID))
 		}
 	}()
 

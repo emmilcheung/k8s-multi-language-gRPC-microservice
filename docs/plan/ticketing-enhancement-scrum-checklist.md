@@ -499,7 +499,7 @@ Verification:
 
 ## CP-12 Order-Service Seated Flow Integration
 
-- [ ] Integrate seated reservations into `order-service`
+- [x] Integrate seated reservations into `order-service`
 
 Owner:
 
@@ -710,7 +710,7 @@ Use this section as lightweight scrum tracking.
 | CP-09 | [x] | @agent | PR #27 | Redis Lua hold/release scripts, SeatHoldHandler, hold sweeper; 18 unit + 5 integration tests pass |
 | CP-10 | [x] | @agent | PR #28 | Seated reservation gRPC RPCs + Kafka handlers + reservation ledger; 21 unit + 5 integration tests pass |
 | CP-11 | [x] | @agent | PR #29 | Auto-assign algorithm (row-based + cross-row fallback), AutoAssignAndReserve gRPC, SSE broadcaster + HTTP handler; 8 autoassign unit + 7 gRPC unit + 3 integration tests pass |
-| CP-12 | [ ] | TBD |  |  |
+| CP-12 | [x] | @agent | PR #31 | Seated order flow: V3 migration, OrderSeat entity, VenueServiceClient, SeatedOrderTransactionService, POST /api/orders/seated; 20/20 tests pass |
 | CP-13 | [ ] | TBD |  |  |
 | CP-14 | [ ] | TBD |  |  |
 | CP-15 | [ ] | TBD |  |  |

@@ -150,6 +150,42 @@ func (m *mockRepo) FinalizeReservation(ctx context.Context, reservationID, order
 	return nil
 }
 
+// attachErr / detachErr allow per-call error injection distinct from the generic m.err.
+// These are separate fields so tests can inject targeted errors without breaking other methods.
+
+func (m *mockRepo) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID string) error {
+	if m.err != nil {
+		return m.err
+	}
+	t, ok := m.tickets[ticketID]
+	if !ok {
+		return repository.ErrTicketNotFound
+	}
+	if t.UserID != userID {
+		return repository.ErrOwnership
+	}
+	if t.SeatingPlanID != "" {
+		return repository.ErrSeatingPlanAlreadyAttached
+	}
+	t.SeatingPlanID = planID
+	return nil
+}
+
+func (m *mockRepo) DetachSeatingPlan(ctx context.Context, ticketID, userID string) error {
+	if m.err != nil {
+		return m.err
+	}
+	t, ok := m.tickets[ticketID]
+	if !ok {
+		return repository.ErrTicketNotFound
+	}
+	if t.UserID != userID {
+		return repository.ErrOwnership
+	}
+	t.SeatingPlanID = ""
+	return nil
+}
+
 // --- Mock event publisher ---
 
 type mockPublisher struct {
@@ -361,6 +397,138 @@ func TestUpdateTicket_ShouldReturnNotFoundWhenTicketMissing(t *testing.T) {
 		Title:  "Title",
 		Price:  "5.00",
 		UserID: "user-1",
+	})
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, repository.ErrTicketNotFound))
+}
+
+// ── AttachSeatingPlan ─────────────────────────────────────────────────────────
+
+func TestAttachSeatingPlan_ShouldAttachAndPublishEvent(t *testing.T) {
+	repo := newMockRepo()
+	pub := &mockPublisher{}
+	svc := newSvc(repo, pub)
+
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "50.00", UserID: "owner-1"})
+
+	ticket, err := svc.AttachSeatingPlan(context.Background(), service.AttachSeatingPlanInput{
+		TicketID: "t1",
+		PlanID:   "plan-uuid-1",
+		UserID:   "owner-1",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "plan-uuid-1", ticket.SeatingPlanID)
+
+	// Kafka publish is async — give the goroutine time to run.
+	time.Sleep(10 * time.Millisecond)
+	require.Len(t, pub.updatedEvents, 1)
+	assert.Equal(t, "plan-uuid-1", pub.updatedEvents[0].SeatingPlanID)
+}
+
+func TestAttachSeatingPlan_ShouldReturnUnauthorizedWhenNotOwner(t *testing.T) {
+	repo := newMockRepo()
+	svc := newSvc(repo, &mockPublisher{})
+
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "50.00", UserID: "owner-1"})
+
+	_, err := svc.AttachSeatingPlan(context.Background(), service.AttachSeatingPlanInput{
+		TicketID: "t1",
+		PlanID:   "plan-uuid-1",
+		UserID:   "attacker",
+	})
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, service.ErrUnauthorized))
+}
+
+func TestAttachSeatingPlan_ShouldReturnNotFoundWhenTicketMissing(t *testing.T) {
+	repo := newMockRepo()
+	svc := newSvc(repo, &mockPublisher{})
+
+	_, err := svc.AttachSeatingPlan(context.Background(), service.AttachSeatingPlanInput{
+		TicketID: "nonexistent",
+		PlanID:   "plan-uuid-1",
+		UserID:   "owner-1",
+	})
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, repository.ErrTicketNotFound))
+}
+
+func TestAttachSeatingPlan_ShouldReturnErrorWhenPlanAlreadyAttached(t *testing.T) {
+	repo := newMockRepo()
+	svc := newSvc(repo, &mockPublisher{})
+
+	// Seed a ticket that already has a seating plan.
+	repo.tickets["t1"] = &repository.Ticket{
+		ID: "t1", Title: "Concert", Price: "50.00", UserID: "owner-1",
+		SeatingPlanID: "existing-plan", Quota: 1, MaxPerUser: 1, Version: 1,
+	}
+
+	_, err := svc.AttachSeatingPlan(context.Background(), service.AttachSeatingPlanInput{
+		TicketID: "t1",
+		PlanID:   "new-plan",
+		UserID:   "owner-1",
+	})
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, repository.ErrSeatingPlanAlreadyAttached))
+}
+
+// ── DetachSeatingPlan ─────────────────────────────────────────────────────────
+
+func TestDetachSeatingPlan_ShouldDetachAndPublishEvent(t *testing.T) {
+	repo := newMockRepo()
+	pub := &mockPublisher{}
+	svc := newSvc(repo, pub)
+
+	// Seed a ticket with a seating plan already attached.
+	repo.tickets["t1"] = &repository.Ticket{
+		ID: "t1", Title: "Concert", Price: "50.00", UserID: "owner-1",
+		SeatingPlanID: "plan-uuid-1", Quota: 1, MaxPerUser: 1, Version: 1,
+	}
+
+	ticket, err := svc.DetachSeatingPlan(context.Background(), service.DetachSeatingPlanInput{
+		TicketID: "t1",
+		UserID:   "owner-1",
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, ticket.SeatingPlanID)
+
+	// Kafka publish is async — give the goroutine time to run.
+	time.Sleep(10 * time.Millisecond)
+	require.Len(t, pub.updatedEvents, 1)
+	assert.Empty(t, pub.updatedEvents[0].SeatingPlanID)
+}
+
+func TestDetachSeatingPlan_ShouldReturnUnauthorizedWhenNotOwner(t *testing.T) {
+	repo := newMockRepo()
+	svc := newSvc(repo, &mockPublisher{})
+
+	repo.tickets["t1"] = &repository.Ticket{
+		ID: "t1", Title: "Concert", Price: "50.00", UserID: "owner-1",
+		SeatingPlanID: "plan-uuid-1", Quota: 1, MaxPerUser: 1, Version: 1,
+	}
+
+	_, err := svc.DetachSeatingPlan(context.Background(), service.DetachSeatingPlanInput{
+		TicketID: "t1",
+		UserID:   "attacker",
+	})
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, service.ErrUnauthorized))
+}
+
+func TestDetachSeatingPlan_ShouldReturnNotFoundWhenTicketMissing(t *testing.T) {
+	repo := newMockRepo()
+	svc := newSvc(repo, &mockPublisher{})
+
+	_, err := svc.DetachSeatingPlan(context.Background(), service.DetachSeatingPlanInput{
+		TicketID: "nonexistent",
+		UserID:   "owner-1",
 	})
 
 	require.Error(t, err)
