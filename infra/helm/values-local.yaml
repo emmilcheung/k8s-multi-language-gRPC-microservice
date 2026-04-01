@@ -120,6 +120,23 @@ expiration-service:
   autoscaling:
     enabled: false
 
+venue-service:
+  replicaCount: 1
+  image:
+    repository: venue-service
+    tag: latest
+  env:
+    REDIS_URL: redis://ticketing-redis-master.ticketing.svc.cluster.local:6379
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 300m
+      memory: 128Mi
+  autoscaling:
+    enabled: false
+
 client:
   replicaCount: 1
   image:
@@ -196,6 +213,24 @@ postgres-payments:
     username: "payments_user"
     password: "payments-local-secret"
     database: "payments_db"
+  primary:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  metrics:
+    enabled: false
+
+postgres-venue:
+  auth:
+    existingSecret: ""
+    postgresPassword: "venue-local-secret"
+    username: "venue_user"
+    password: "venue-local-secret"
+    database: "venue_db"
   primary:
     resources:
       requests:
