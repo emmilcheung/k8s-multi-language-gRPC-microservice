@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/acme/venue-service/internal/sse"
@@ -87,37 +86,6 @@ func (h *SSEHandler) Stream(c echo.Context) error {
 			flusher.Flush()
 		case <-c.Request().Context().Done():
 			return nil
-		}
-	}
-}
-
-// streamWithContext is a helper that selects on ctx rather than request ctx.
-// Exposed for testing.
-func (h *SSEHandler) streamWithContext(
-	ctx context.Context,
-	planID string,
-	w http.ResponseWriter,
-) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		return
-	}
-
-	client := h.broadcaster.Subscribe(planID)
-	defer h.broadcaster.Unsubscribe(client)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg, open := <-client.MsgChan:
-			if !open {
-				return
-			}
-			if _, err := w.Write([]byte(msg)); err != nil {
-				return
-			}
-			flusher.Flush()
 		}
 	}
 }
