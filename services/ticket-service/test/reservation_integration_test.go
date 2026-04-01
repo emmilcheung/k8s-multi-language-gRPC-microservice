@@ -2,7 +2,7 @@ package integration_test
 
 import (
 	"context"
-	"strings"
+	"net/url"
 	"testing"
 	"time"
 
@@ -30,11 +30,15 @@ func newRepoForReservationTests(t *testing.T) *repository.MongoTicketRepository 
 	// hostname (container ID), which is not reachable from the test host.
 	// Connecting directly to the mapped localhost port is sufficient for a
 	// single-node replica set, and transactions still work correctly.
-	sep := "?"
-	if strings.Contains(mongoURI, "?") {
-		sep = "&"
-	}
-	mongoURI += sep + "directConnection=true"
+	// We strip the replicaSet query param because the Go driver rejects a URI
+	// that sets both replicaSet and directConnection simultaneously.
+	u, urlErr := url.Parse(mongoURI)
+	require.NoError(t, urlErr)
+	q := u.Query()
+	q.Del("replicaSet")
+	q.Set("directConnection", "true")
+	u.RawQuery = q.Encode()
+	mongoURI = u.String()
 
 	repo, err := repository.NewMongoTicketRepository(ctx, mongoURI, dbName(t.Name()))
 	require.NoError(t, err)
