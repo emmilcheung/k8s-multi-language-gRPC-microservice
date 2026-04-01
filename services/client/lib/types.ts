@@ -16,7 +16,55 @@ export interface Ticket {
   reserved?: number;
   quota?: number;
   sold?: number;
+  /** CP-13: optional seating plan UUID — if set, this is a seated ticket */
+  seatingPlanId?: string | null;
   version: number;
+}
+
+/** Seat state as returned by venue-service availability snapshot. */
+export type SeatStatus = "available" | "held" | "reserved" | "sold" | "blocked";
+
+/** Per-seat entry in the availability snapshot. */
+export interface SeatAvailability {
+  status: SeatStatus;
+}
+
+/** Availability snapshot returned by GET /api/seating-plans/:planId/availability */
+export interface AvailabilitySnapshot {
+  planId: string;
+  seatMap: Record<string, SeatAvailability>;
+  counts: {
+    available: number;
+    held: number;
+    reserved: number;
+    sold: number;
+    blocked: number;
+  };
+  cachedAt: string;
+}
+
+/** A seat section from venue-service GET /api/seating-plans/:id */
+export interface Section {
+  id: string;
+  name: string;
+  sectionType: "SEATED" | "GA";
+  rowCount: number;
+  seatsPerRow: number;
+  capacity: number;
+}
+
+/** A seating plan from venue-service GET /api/seating-plans/:id */
+export interface SeatingPlan {
+  id: string;
+  venueId: string;
+  ticketId?: string | null;
+  organizerId: string;
+  name: string;
+  status: "draft" | "active" | "inactive";
+  holdTtlSec: number;
+  maxSeatsPerOrder: number;
+  version: number;
+  sections?: Section[];
 }
 
 export interface Order {

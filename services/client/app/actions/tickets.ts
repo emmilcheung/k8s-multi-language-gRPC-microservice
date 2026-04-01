@@ -109,3 +109,59 @@ export async function updateTicket(
   revalidatePath("/");
   redirect(`/tickets/${ticketId}`);
 }
+
+// ─── Seating plan attach / detach (CP-14) ────────────────────────────────────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Attaches a seating plan to a ticket.
+ * Calls PATCH /api/tickets/:ticketId/seating-plan via Kong → ticket-service.
+ */
+export async function attachSeatingPlan(
+  ticketId: string,
+  _prev: TicketState,
+  formData: FormData
+): Promise<TicketState> {
+  const planId = (formData.get("planId") as string | null)?.trim() ?? "";
+
+  if (!planId) return { error: "Seating plan ID is required." };
+  if (!UUID_RE.test(planId)) return { error: "Seating plan ID must be a valid UUID." };
+
+  const res = await fetch(`${base()}/api/tickets/${ticketId}/seating-plan`, {
+    method: "PATCH",
+    headers: await authHeaders(),
+    body: JSON.stringify({ seatingPlanId: planId }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { error: body?.error?.message ?? "Failed to attach seating plan." };
+  }
+
+  revalidatePath(`/tickets/${ticketId}`);
+  redirect(`/tickets/${ticketId}`);
+}
+
+/**
+ * Detaches the seating plan from a ticket.
+ * Calls DELETE /api/tickets/:ticketId/seating-plan via Kong → ticket-service.
+ */
+export async function detachSeatingPlan(
+  ticketId: string,
+  _prev: TicketState,
+  _formData: FormData
+): Promise<TicketState> {
+  const res = await fetch(`${base()}/api/tickets/${ticketId}/seating-plan`, {
+    method: "DELETE",
+    headers: await authHeaders(),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { error: body?.error?.message ?? "Failed to detach seating plan." };
+  }
+
+  revalidatePath(`/tickets/${ticketId}`);
+  redirect(`/tickets/${ticketId}`);
+}

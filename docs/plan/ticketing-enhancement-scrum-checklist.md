@@ -540,7 +540,7 @@ Verification:
 
 ## CP-13 Ticket-Service Seated Catalog Integration
 
-- [ ] Add `seatingPlanId` catalog support in `ticket-service`
+- [x] Add `seatingPlanId` catalog support in `ticket-service`
 
 Owner:
 
@@ -576,7 +576,7 @@ Verification:
 
 ## CP-14 Client And Organizer UI
 
-- [ ] Add user-facing and organizer-facing UI support
+- [x] Add user-facing and organizer-facing UI support
 
 Owner:
 
@@ -711,6 +711,6 @@ Use this section as lightweight scrum tracking.
 | CP-10 | [x] | @agent | PR #28 | Seated reservation gRPC RPCs + Kafka handlers + reservation ledger; 21 unit + 5 integration tests pass |
 | CP-11 | [x] | @agent | PR #29 | Auto-assign algorithm (row-based + cross-row fallback), AutoAssignAndReserve gRPC, SSE broadcaster + HTTP handler; 8 autoassign unit + 7 gRPC unit + 3 integration tests pass |
 | CP-12 | [x] | @agent | PR #31 | Seated order flow: V3 migration, OrderSeat entity, VenueServiceClient, SeatedOrderTransactionService, POST /api/orders/seated; 20/20 tests pass |
-| CP-13 | [ ] | TBD |  |  |
+| CP-13 | [x] | @agent | PR #32 | `seatingPlanId` model, attach/detach handlers, gRPC seated guard, Kafka field, 9 integration tests |
 | CP-14 | [ ] | TBD |  |  |
 | CP-15 | [ ] | TBD |  |  |
