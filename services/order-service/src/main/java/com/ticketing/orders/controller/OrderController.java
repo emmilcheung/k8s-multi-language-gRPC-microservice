@@ -26,7 +26,8 @@ import java.util.UUID;
  * It never re-validates the token (AGENTS.md §5.1).
  *
  * Routes:
- *   POST   /api/orders            — create order
+ *   POST   /api/orders            — create GA order
+ *   POST   /api/orders/seated     — create seated order (CP-12)
  *   GET    /api/orders            — list user's orders
  *   GET    /api/orders/{id}       — get single order
  *   DELETE /api/orders/{id}       — cancel order
@@ -48,6 +49,18 @@ public class OrderController {
             @RequestHeader(USER_ID_HEADER) UUID userId,
             @Valid @RequestBody CreateOrderRequest request) {
         OrderResponse response = orderService.createOrder(userId, request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    /**
+     * CP-12: creates a seated order — supports both MANUAL_SEATED (seatIds provided)
+     * and AUTO_ASSIGN_SEATED (sectionId + planId + quantity provided) sub-flows.
+     */
+    @PostMapping("/seated")
+    public ResponseEntity<OrderResponse> createSeatedOrder(
+            @RequestHeader(USER_ID_HEADER) UUID userId,
+            @Valid @RequestBody CreateOrderRequest request) {
+        OrderResponse response = orderService.createSeatedOrder(userId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 

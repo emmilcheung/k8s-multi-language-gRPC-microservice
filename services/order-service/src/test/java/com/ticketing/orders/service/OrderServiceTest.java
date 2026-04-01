@@ -6,12 +6,19 @@ import com.ticketing.orders.dto.OrderResponse;
 import com.ticketing.orders.entity.Order;
 import com.ticketing.orders.entity.OrderStatus;
 import com.ticketing.orders.entity.OrderTicket;
+import com.ticketing.orders.entity.OrderType;
 import com.ticketing.orders.exception.BadRequestException;
+import com.ticketing.orders.exception.ConflictException;
 import com.ticketing.orders.exception.ForbiddenException;
 import com.ticketing.orders.exception.NotFoundException;
+import com.ticketing.orders.grpc.AutoAssignAndReserveResponse;
+import com.ticketing.orders.grpc.ReserveHeldSeatsResponse;
 import com.ticketing.orders.grpc.ReserveQuotaResponse;
+import com.ticketing.orders.grpc.SeatDetail;
 import com.ticketing.orders.grpc.TicketServiceClient;
+import com.ticketing.orders.grpc.VenueServiceClient;
 import com.ticketing.orders.repository.OrderRepository;
+import com.ticketing.orders.repository.OrderSeatRepository;
 import com.ticketing.orders.repository.OrderTicketRepository;
 import com.ticketing.orders.repository.OutboxRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,11 +27,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -50,15 +60,19 @@ import static org.mockito.Mockito.when;
  * - gRPC errors propagate without compensation
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class OrderServiceTest {
 
     @Mock OrderRepository orderRepository;
+    @Mock OrderSeatRepository orderSeatRepository;
     @Mock OrderTicketRepository orderTicketRepository;
     @Mock OutboxRepository outboxRepository;
     @Mock TicketServiceClient ticketServiceClient;
+    @Mock VenueServiceClient venueServiceClient;
 
     // The two collaborating services — constructed manually so we can wire them together
     private OrderTransactionService orderTransactionService;
+    private SeatedOrderTransactionService seatedOrderTransactionService;
     private OrderService orderService;
 
     private final UUID userId   = UUID.randomUUID();
@@ -75,12 +89,22 @@ class OrderServiceTest {
                 orderRepository, orderTicketRepository, outboxRepository, objectMapper);
         ReflectionTestUtils.setField(orderTransactionService, "expirationMinutes", 15);
 
+        seatedOrderTransactionService = new SeatedOrderTransactionService(
+                orderRepository, orderTicketRepository, orderSeatRepository, outboxRepository,
+                objectMapper);
+        ReflectionTestUtils.setField(seatedOrderTransactionService, "expirationMinutes", 15);
+
         orderService = new OrderService(
-                orderRepository, outboxRepository, ticketServiceClient,
-                objectMapper, orderTransactionService);
+                orderRepository, orderSeatRepository, outboxRepository, ticketServiceClient,
+                venueServiceClient, objectMapper, orderTransactionService,
+                seatedOrderTransactionService);
         ReflectionTestUtils.setField(orderService, "expirationMinutes", 15);
 
         ticket = new OrderTicket(ticketId, "Concert Ticket", new BigDecimal("49.99"));
+
+        // Default stub: no order_seats for any order (GA tests don't create them)
+        when(orderSeatRepository.findAllByOrderId(any(UUID.class)))
+                .thenReturn(Collections.emptyList());
     }
 
     /** Build a minimal {@link ReserveQuotaResponse} suitable for use in tests. */
@@ -334,5 +358,161 @@ class OrderServiceTest {
         orderService.markComplete(orderId);
 
         verify(outboxRepository, never()).save(any());
+    }
+
+    // ── createSeatedOrder (MANUAL_SEATED) ─────────────────────────────────────
+
+    /** Build a minimal {@link SeatDetail} suitable for use in tests. */
+    private SeatDetail buildSeatDetail(UUID seatId, UUID sectionId, String label) {
+        return SeatDetail.newBuilder()
+                .setSeatId(seatId.toString())
+                .setSectionId(sectionId.toString())
+                .setSeatLabel(label)
+                .setPrice(ticket.getPrice().toPlainString())
+                .build();
+    }
+
+    @Test
+    void createSeatedOrder_manual_should_reserve_held_seats_and_persist_order_with_seats() {
+        UUID seatId    = UUID.randomUUID();
+        UUID sectionId = UUID.randomUUID();
+        UUID planId    = UUID.randomUUID();
+
+        SeatDetail seatDetail = buildSeatDetail(seatId, sectionId, "A1");
+
+        ReserveHeldSeatsResponse reserveResponse = ReserveHeldSeatsResponse.newBuilder()
+                .setSuccess(true)
+                .setReservationId(UUID.randomUUID().toString())
+                .addSeats(seatDetail)
+                .build();
+
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+        req.setPlanId(planId.toString());
+        req.setSeatIds(List.of(seatId.toString()));
+        req.setQuantity(1);
+
+        when(venueServiceClient.reserveHeldSeats(
+                eq(planId.toString()), eq(ticketId.toString()), any(UUID.class),
+                eq(userId), anyList(), any(Instant.class)))
+                .thenReturn(reserveResponse);
+        when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
+        when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(orderSeatRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+
+        OrderResponse response = orderService.createSeatedOrder(userId, req);
+
+        verify(venueServiceClient).reserveHeldSeats(
+                eq(planId.toString()), eq(ticketId.toString()), any(UUID.class),
+                eq(userId), anyList(), any(Instant.class));
+        verify(orderRepository).save(any(Order.class));
+        verify(orderSeatRepository).saveAll(anyList());
+        verify(outboxRepository).save(any());
+        assertThat(response.getStatus()).isEqualTo(OrderStatus.CREATED);
+        assertThat(response.getOrderType()).isEqualTo(OrderType.MANUAL_SEATED);
+        assertThat(response.getSeats()).hasSize(1);
+    }
+
+    @Test
+    void createSeatedOrder_manual_should_throw_ConflictException_when_seats_unavailable() {
+        UUID seatId = UUID.randomUUID();
+        UUID planId = UUID.randomUUID();
+
+        ReserveHeldSeatsResponse failResponse = ReserveHeldSeatsResponse.newBuilder()
+                .setSuccess(false)
+                .addUnavailableSeatIds(seatId.toString())
+                .build();
+
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+        req.setPlanId(planId.toString());
+        req.setSeatIds(List.of(seatId.toString()));
+        req.setQuantity(1);
+
+        when(venueServiceClient.reserveHeldSeats(
+                eq(planId.toString()), eq(ticketId.toString()), any(UUID.class),
+                eq(userId), anyList(), any(Instant.class)))
+                .thenReturn(failResponse);
+
+        assertThatThrownBy(() -> orderService.createSeatedOrder(userId, req))
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("no longer available");
+
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    void createSeatedOrder_manual_should_compensate_when_db_tx_fails() {
+        UUID seatId    = UUID.randomUUID();
+        UUID sectionId = UUID.randomUUID();
+        UUID planId    = UUID.randomUUID();
+
+        SeatDetail seatDetail = buildSeatDetail(seatId, sectionId, "B2");
+
+        ReserveHeldSeatsResponse reserveResponse = ReserveHeldSeatsResponse.newBuilder()
+                .setSuccess(true)
+                .setReservationId(UUID.randomUUID().toString())
+                .addSeats(seatDetail)
+                .build();
+
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+        req.setPlanId(planId.toString());
+        req.setSeatIds(List.of(seatId.toString()));
+        req.setQuantity(1);
+
+        when(venueServiceClient.reserveHeldSeats(
+                eq(planId.toString()), eq(ticketId.toString()), any(UUID.class),
+                eq(userId), anyList(), any(Instant.class)))
+                .thenReturn(reserveResponse);
+        when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
+        when(orderRepository.save(any(Order.class))).thenThrow(new RuntimeException("db exploded"));
+
+        assertThatThrownBy(() -> orderService.createSeatedOrder(userId, req))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("db exploded");
+
+        verify(venueServiceClient).releaseSeatReservation(any(UUID.class), eq("COMPENSATION"));
+    }
+
+    @Test
+    void createSeatedOrder_autoAssign_should_call_autoAssignAndReserve_and_persist_order() {
+        UUID seatId    = UUID.randomUUID();
+        UUID sectionId = UUID.randomUUID();
+        UUID planId    = UUID.randomUUID();
+
+        SeatDetail seatDetail = buildSeatDetail(seatId, sectionId, "C3");
+
+        AutoAssignAndReserveResponse assignResponse = AutoAssignAndReserveResponse.newBuilder()
+                .setSuccess(true)
+                .setReservationId(UUID.randomUUID().toString())
+                .addSeats(seatDetail)
+                .build();
+
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+        req.setPlanId(planId.toString());
+        req.setSectionId(sectionId.toString());
+        req.setQuantity(1);
+
+        when(venueServiceClient.autoAssignAndReserve(
+                eq(planId.toString()), eq(ticketId.toString()), eq(sectionId.toString()),
+                any(UUID.class), eq(userId), eq(1), any(Instant.class)))
+                .thenReturn(assignResponse);
+        when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
+        when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(orderSeatRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+
+        OrderResponse response = orderService.createSeatedOrder(userId, req);
+
+        verify(venueServiceClient).autoAssignAndReserve(
+                eq(planId.toString()), eq(ticketId.toString()), eq(sectionId.toString()),
+                any(UUID.class), eq(userId), eq(1), any(Instant.class));
+        verify(orderRepository).save(any(Order.class));
+        verify(orderSeatRepository).saveAll(anyList());
+        verify(outboxRepository).save(any());
+        assertThat(response.getStatus()).isEqualTo(OrderStatus.CREATED);
+        assertThat(response.getOrderType()).isEqualTo(OrderType.AUTO_ASSIGN_SEATED);
+        assertThat(response.getSeats()).hasSize(1);
     }
 }

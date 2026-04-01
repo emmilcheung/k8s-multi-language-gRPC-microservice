@@ -17,6 +17,14 @@ public class GrpcClientConfig {
     @Value("${grpc.ticket-service.port}")
     private int ticketServicePort;
 
+    @Value("${grpc.venue-service.host}")
+    private String venueServiceHost;
+
+    @Value("${grpc.venue-service.port}")
+    private int venueServicePort;
+
+    // ── ticket-service ─────────────────────────────────────────────────────────
+
     @Bean(destroyMethod = "shutdown")
     public ManagedChannel ticketServiceChannel() {
         return ManagedChannelBuilder
@@ -30,5 +38,24 @@ public class GrpcClientConfig {
     @Bean
     public TicketServiceGrpc.TicketServiceBlockingStub ticketServiceStub(ManagedChannel ticketServiceChannel) {
         return TicketServiceGrpc.newBlockingStub(ticketServiceChannel);
+    }
+
+    // ── venue-service ──────────────────────────────────────────────────────────
+
+    @Bean(name = "venueServiceChannel", destroyMethod = "shutdown")
+    public ManagedChannel venueServiceChannel() {
+        return ManagedChannelBuilder
+                .forAddress(venueServiceHost, venueServicePort)
+                .usePlaintext()
+                .keepAliveTime(30, TimeUnit.SECONDS)
+                .keepAliveTimeout(5, TimeUnit.SECONDS)
+                .build();
+    }
+
+    @Bean
+    public VenueServiceGrpc.VenueServiceBlockingStub venueServiceStub(
+            @org.springframework.beans.factory.annotation.Qualifier("venueServiceChannel")
+            ManagedChannel venueServiceChannel) {
+        return VenueServiceGrpc.newBlockingStub(venueServiceChannel);
     }
 }

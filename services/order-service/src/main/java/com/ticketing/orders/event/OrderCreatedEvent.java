@@ -2,6 +2,7 @@ package com.ticketing.orders.event;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -10,6 +11,9 @@ import java.util.UUID;
  *
  * CP-05: added {@code reservationId} and {@code quantity} so ticket-service consumer
  * can identify the reservation associated with this order event.
+ *
+ * CP-12: added {@code seatIds} (null for GA orders) so venue-service consumer can
+ * correlate which specific seats belong to this order.
  */
 public class OrderCreatedEvent {
 
@@ -30,9 +34,10 @@ public class OrderCreatedEvent {
             String expiresAt,
             String reservationId,
             int quantity,
-            int version) {
+            int version,
+            List<String> seatIds) {
         this.data = new Data(orderId, userId, ticketId, ticketTitle, ticketPrice, expiresAt,
-                reservationId, quantity, version);
+                reservationId, quantity, version, seatIds);
     }
 
     // ── accessors ─────────────────────────────────────────────────────────────
@@ -56,6 +61,7 @@ public class OrderCreatedEvent {
             String expiresAt,
             String reservationId,   // null for legacy orders
             int quantity,
-            int version
+            int version,
+            List<String> seatIds    // null for GA orders
     ) {}
 }

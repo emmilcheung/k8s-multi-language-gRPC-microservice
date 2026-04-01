@@ -5,16 +5,23 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
 import com.ticketing.orders.entity.Order;
+import com.ticketing.orders.entity.OrderSeat;
 import com.ticketing.orders.entity.OrderStatus;
+import com.ticketing.orders.entity.OrderType;
 import com.ticketing.orders.entity.OutboxMessage;
 import com.ticketing.orders.event.OrderCancelledEvent;
 import com.ticketing.orders.event.OrderCompletedEvent;
 import com.ticketing.orders.exception.BadRequestException;
+import com.ticketing.orders.exception.ConflictException;
 import com.ticketing.orders.exception.ForbiddenException;
 import com.ticketing.orders.exception.NotFoundException;
+import com.ticketing.orders.grpc.AutoAssignAndReserveResponse;
+import com.ticketing.orders.grpc.ReserveHeldSeatsResponse;
 import com.ticketing.orders.grpc.ReserveQuotaResponse;
 import com.ticketing.orders.grpc.TicketServiceClient;
+import com.ticketing.orders.grpc.VenueServiceClient;
 import com.ticketing.orders.repository.OrderRepository;
+import com.ticketing.orders.repository.OrderSeatRepository;
 import com.ticketing.orders.repository.OutboxRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,24 +33,31 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 // CP-05: replaced Redisson distributed lock + ValidateTicketAvailability with a
 // synchronous ReserveQuota gRPC call. Atomicity is now enforced by the inventory
 // owner (ticket-service) through the reservation ledger, not by an application-level
 // lock.  If the DB transaction fails after a successful reservation, a synchronous
 // ReleaseReservation compensation call is made immediately.
+//
+// CP-12: added createSeatedOrder() for MANUAL_SEATED and AUTO_ASSIGN_SEATED flows
+// backed by VenueServiceClient RPCs.
 
 /**
  * Core business logic for order lifecycle.
  *
- * Design decisions:
- * - All state changes and outbox writes happen in a single @Transactional boundary
- *   to guarantee the outbox pattern (no event lost, no partial state).
- * - gRPC ReserveQuota happens outside the transaction (network I/O should not
- *   hold a DB connection). Compensation is called synchronously on TX failure.
- * - Authorisation (ownership check) happens before any write.
- * - The transactional order creation is delegated to {@link OrderTransactionService}
- *   to avoid the Spring AOP self-invocation proxy bypass (audit finding C-01).
+ * <p>Design decisions:
+ * <ul>
+ *   <li>All state changes and outbox writes happen in a single {@code @Transactional} boundary
+ *       to guarantee the outbox pattern (no event lost, no partial state).</li>
+ *   <li>gRPC calls happen outside the transaction (network I/O should not hold a DB connection).
+ *       Compensation is called synchronously on TX failure.</li>
+ *   <li>Authorisation (ownership check) happens before any write.</li>
+ *   <li>The transactional creation is delegated to {@link OrderTransactionService} (GA) or
+ *       {@link SeatedOrderTransactionService} (seated) to avoid the Spring AOP self-invocation
+ *       proxy bypass (audit finding C-01).</li>
+ * </ul>
  */
 @Service
 public class OrderService {
@@ -54,35 +68,46 @@ public class OrderService {
     private int expirationMinutes;
 
     private final OrderRepository orderRepository;
+    private final OrderSeatRepository orderSeatRepository;
     private final OutboxRepository outboxRepository;
     private final TicketServiceClient ticketServiceClient;
+    private final VenueServiceClient venueServiceClient;
     private final ObjectMapper objectMapper;
     private final OrderTransactionService orderTransactionService;
+    private final SeatedOrderTransactionService seatedOrderTransactionService;
 
     public OrderService(
             OrderRepository orderRepository,
+            OrderSeatRepository orderSeatRepository,
             OutboxRepository outboxRepository,
             TicketServiceClient ticketServiceClient,
+            VenueServiceClient venueServiceClient,
             ObjectMapper objectMapper,
-            OrderTransactionService orderTransactionService) {
+            OrderTransactionService orderTransactionService,
+            SeatedOrderTransactionService seatedOrderTransactionService) {
         this.orderRepository = orderRepository;
+        this.orderSeatRepository = orderSeatRepository;
         this.outboxRepository = outboxRepository;
         this.ticketServiceClient = ticketServiceClient;
+        this.venueServiceClient = venueServiceClient;
         this.objectMapper = objectMapper;
         this.orderTransactionService = orderTransactionService;
+        this.seatedOrderTransactionService = seatedOrderTransactionService;
     }
 
-    // ── Create ────────────────────────────────────────────────────────────────
+    // ── Create (GA) ───────────────────────────────────────────────────────────
 
     /**
      * Create a new order for a ticket using the GA reservation flow.
      *
-     * Steps:
-     * 1. Generate a reservationId (idempotency key).
-     * 2. Call gRPC ReserveQuota on ticket-service BEFORE opening a DB transaction.
-     * 3. If reservation succeeds, delegate to OrderTransactionService which atomically
-     *    creates the order and outbox message within a single @Transactional boundary.
-     * 4. If the DB transaction fails, immediately call ReleaseReservation as compensation.
+     * <p>Steps:
+     * <ol>
+     *   <li>Generate a reservationId (idempotency key).</li>
+     *   <li>Call gRPC ReserveQuota on ticket-service BEFORE opening a DB transaction.</li>
+     *   <li>If reservation succeeds, delegate to OrderTransactionService which atomically
+     *       creates the order and outbox message within a single {@code @Transactional} boundary.</li>
+     *   <li>If the DB transaction fails, immediately call ReleaseReservation as compensation.</li>
+     * </ol>
      */
     public OrderResponse createOrder(UUID userId, CreateOrderRequest request) {
         UUID ticketId = request.getTicketId();
@@ -111,6 +136,78 @@ public class OrderService {
         }
     }
 
+    // ── Create (Seated) ───────────────────────────────────────────────────────
+
+    /**
+     * Create a new order using the seated reservation flow (CP-12).
+     *
+     * <p>Supports two sub-flows:
+     * <ul>
+     *   <li><b>MANUAL_SEATED</b> — client specifies exact seatIds it has held; calls
+     *       {@code ReserveHeldSeats} on venue-service.</li>
+     *   <li><b>AUTO_ASSIGN_SEATED</b> — client specifies a sectionId and quantity; calls
+     *       {@code AutoAssignAndReserve} on venue-service which picks the best seats.</li>
+     * </ul>
+     *
+     * <p>If the gRPC call succeeds but the DB transaction fails, a best-effort compensation
+     * call to {@code ReleaseSeatReservation} is made so seats are not held indefinitely.
+     */
+    public OrderResponse createSeatedOrder(UUID userId, CreateOrderRequest request) {
+        request.validate();
+
+        UUID ticketId = request.getTicketId();
+        int quantity = request.getQuantity();
+        OrderType orderType = request.determineOrderType();
+
+        UUID reservationId = UUID.randomUUID();
+        Instant reservationExpiresAt = Instant.now().plus(expirationMinutes + 1, ChronoUnit.MINUTES);
+
+        if (orderType == OrderType.MANUAL_SEATED) {
+            String planId = request.getPlanId();
+            List<String> seatIds = request.getSeatIds();
+
+            ReserveHeldSeatsResponse reserveResponse = venueServiceClient.reserveHeldSeats(
+                    planId, ticketId.toString(), reservationId, userId, seatIds, reservationExpiresAt);
+
+            if (!reserveResponse.getSuccess()) {
+                List<String> unavailable = reserveResponse.getUnavailableSeatIdsList();
+                throw new ConflictException("Some seats are no longer available: " + unavailable);
+            }
+
+            try {
+                return seatedOrderTransactionService.createSeatedOrderTransactional(
+                        userId, ticketId, UUID.fromString(planId),
+                        reservationId, quantity, reserveResponse.getSeatsList(),
+                        OrderType.MANUAL_SEATED, null);
+            } catch (Exception e) {
+                log.error("Seated order TX failed after ReserveHeldSeats — compensating "
+                        + "reservationId={} ticketId={}", reservationId, ticketId, e);
+                venueServiceClient.releaseSeatReservation(reservationId, "COMPENSATION");
+                throw e;
+            }
+        }
+
+        // AUTO_ASSIGN_SEATED
+        String planId = request.getPlanId();
+        String sectionId = request.getSectionId();
+
+        AutoAssignAndReserveResponse assignResponse = venueServiceClient.autoAssignAndReserve(
+                planId, ticketId.toString(), sectionId, reservationId, userId,
+                quantity, reservationExpiresAt);
+
+        try {
+            return seatedOrderTransactionService.createSeatedOrderTransactional(
+                    userId, ticketId, UUID.fromString(planId),
+                    reservationId, quantity, assignResponse.getSeatsList(),
+                    OrderType.AUTO_ASSIGN_SEATED, UUID.fromString(sectionId));
+        } catch (Exception e) {
+            log.error("Seated order TX failed after AutoAssignAndReserve — compensating "
+                    + "reservationId={} ticketId={}", reservationId, ticketId, e);
+            venueServiceClient.releaseSeatReservation(reservationId, "COMPENSATION");
+            throw e;
+        }
+    }
+
     // ── Read ──────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
@@ -120,15 +217,19 @@ public class OrderService {
         if (!order.getUserId().equals(userId)) {
             throw new ForbiddenException("You do not own this order");
         }
-        return OrderResponse.from(order);
+        List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
+        return OrderResponse.from(order, seats);
     }
 
     @Transactional(readOnly = true)
     public List<OrderResponse> listOrders(UUID userId) {
         return orderRepository.findAllByUserIdWithTicket(userId)
                 .stream()
-                .map(OrderResponse::from)
-                .toList();
+                .map(order -> {
+                    List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(order.getId());
+                    return OrderResponse.from(order, seats);
+                })
+                .collect(Collectors.toList());
     }
 
     // ── Cancel ────────────────────────────────────────────────────────────────
@@ -147,11 +248,12 @@ public class OrderService {
         order.setStatus(OrderStatus.CANCELLED);
         orderRepository.save(order);
 
+        List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
         writeOutbox("orders.order.cancelled", order.getId().toString(),
-                buildCancelledEvent(order));
+                buildCancelledEventWithSeats(order, seats));
 
         log.info("Order cancelled orderId={} userId={}", orderId, userId);
-        return OrderResponse.from(order);
+        return OrderResponse.from(order, seats);
     }
 
     // ── Internal state transitions (called by Kafka consumers) ───────────────
@@ -173,8 +275,10 @@ public class OrderService {
 
     /**
      * Mark an order as COMPLETE after payment captured.
-     * Emits an orders.order.completed outbox event so ticket-service can finalize
-     * the reservation (GA path: transitions RESERVED → SOLD, decrements per-user count).
+     *
+     * <p>Emits {@code orders.order.completed} so ticket-service can finalize the GA
+     * reservation (RESERVED → SOLD). For seated orders, also calls venue-service's
+     * {@code FinalizeSeatReservation} directly (best-effort, does not affect the TX).
      */
     @Transactional
     public void markComplete(UUID orderId) {
@@ -183,6 +287,11 @@ public class OrderService {
                 order.setStatus(OrderStatus.COMPLETE);
                 orderRepository.save(order);
 
+                List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
+                List<String> seatIds = seats.stream()
+                        .map(s -> s.getSeatId().toString())
+                        .collect(Collectors.toList());
+
                 writeOutbox("orders.order.completed", order.getId().toString(),
                         new OrderCompletedEvent(
                                 order.getId().toString(),
@@ -190,10 +299,19 @@ public class OrderService {
                                 order.getTicket().getId().toString(),
                                 order.getReservationId() != null ? order.getReservationId().toString() : null,
                                 order.getQuantity(),
-                                order.getVersion()
+                                order.getVersion(),
+                                seatIds.isEmpty() ? null : seatIds
                         ));
 
-                log.info("Order completed orderId={} reservationId={}", orderId, order.getReservationId());
+                // For seated orders, proactively call venue-service to finalize the reservation
+                // without waiting for the Kafka consumer on the venue side.
+                if (order.getOrderType() != OrderType.GA && order.getReservationId() != null) {
+                    venueServiceClient.finalizeSeatReservation(
+                            order.getReservationId(), order.getId().toString());
+                }
+
+                log.info("Order completed orderId={} reservationId={} orderType={}",
+                        orderId, order.getReservationId(), order.getOrderType());
             }
         });
     }
@@ -209,8 +327,9 @@ public class OrderService {
                 order.setStatus(OrderStatus.CANCELLED);
                 orderRepository.save(order);
 
+                List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
                 writeOutbox("orders.order.cancelled", order.getId().toString(),
-                        buildCancelledEvent(order));
+                        buildCancelledEventWithSeats(order, seats));
 
                 log.info("Order expired orderId={}", orderId);
             }
@@ -219,19 +338,24 @@ public class OrderService {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private OrderCancelledEvent buildCancelledEvent(Order order) {
+    private OrderCancelledEvent buildCancelledEventWithSeats(Order order, List<OrderSeat> seats) {
+        List<String> seatIds = seats.stream()
+                .map(s -> s.getSeatId().toString())
+                .collect(Collectors.toList());
+
         if (order.getReservationId() != null) {
-            // GA path — include reservationId so ticket-service uses ReleaseReservation
+            // GA and seated paths — include reservationId so consumers can release appropriately
             return new OrderCancelledEvent(
                     order.getId().toString(),
                     order.getUserId().toString(),
                     order.getTicket().getId().toString(),
                     order.getReservationId().toString(),
                     order.getQuantity(),
-                    order.getVersion()
+                    order.getVersion(),
+                    seatIds.isEmpty() ? null : seatIds
             );
         }
-        // Legacy path — no reservationId, ticket-service falls back to ReleaseTicket
+        // Legacy path — no reservationId; ticket-service falls back to ReleaseTicket
         return new OrderCancelledEvent(
                 order.getId().toString(),
                 order.getUserId().toString(),
