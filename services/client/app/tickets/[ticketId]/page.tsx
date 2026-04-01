@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TicketForm } from "@/components/ticket-form";
 import { PurchaseButton } from "@/components/purchase-button";
+import { AttachSeatingPlanForm } from "@/components/attach-seating-plan-form";
 import { updateTicket } from "@/app/actions/tickets";
 import {
   ArrowLeft,
@@ -20,6 +21,7 @@ import {
   Tag,
   User,
   ShieldCheck,
+  MapPin,
 } from "lucide-react";
 
 interface Props {
@@ -71,11 +73,15 @@ export default async function TicketDetailPage({ params }: Props) {
   }
 
   const isOwner = currentUserId !== null && currentUserId === ticket.userId;
+  const isSeated = Boolean(ticket.seatingPlanId);
   // GA flow: reservation tracked in ticket.reserved counter (ticket.orderId is legacy).
   // A ticket is considered reserved when either the legacy orderId is set OR the
   // quota-based reserved counter is > 0 (meaning at least one active reservation exists).
-  const isReserved = Boolean(ticket.orderId) || (ticket.reserved != null && ticket.reserved > 0);
+  const isReserved = !isSeated && (Boolean(ticket.orderId) || (ticket.reserved != null && ticket.reserved > 0));
   const updateAction = updateTicket.bind(null, ticketId);
+
+  // GA max-per-order: use ticket.quota if available, capped at 10, default 1.
+  const gaMaxQuantity = ticket.quota ? Math.min(ticket.quota, 10) : 1;
 
   return (
     <div className="flex flex-col gap-8 max-w-4xl mx-auto">
@@ -100,11 +106,19 @@ export default async function TicketDetailPage({ params }: Props) {
             <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-primary/10 ring-1 ring-primary/20 shrink-0">
               <TicketIcon className="w-7 h-7 text-primary" />
             </div>
-            {isReserved && (
-              <Badge className="bg-destructive/15 text-destructive border-destructive/20">
-                Reserved
-              </Badge>
-            )}
+            <div className="flex items-center gap-2">
+              {isSeated && (
+                <Badge className="bg-primary/15 text-primary border-primary/20">
+                  <MapPin className="w-3 h-3 mr-1" />
+                  Seated
+                </Badge>
+              )}
+              {isReserved && (
+                <Badge className="bg-destructive/15 text-destructive border-destructive/20">
+                  Reserved
+                </Badge>
+              )}
+            </div>
           </div>
 
           {/* Title */}
@@ -136,38 +150,76 @@ export default async function TicketDetailPage({ params }: Props) {
         {/* Right — action panel */}
         <div className="flex flex-col gap-4">
           {isOwner ? (
-            /* Owner: edit form */
-            !isReserved ? (
-              <TicketForm
-                action={updateAction}
-                defaultTitle={ticket.title}
-                defaultPrice={ticket.price}
-                submitLabel="Update Ticket"
+            /* Owner: edit form + seating plan attachment */
+            <div className="flex flex-col gap-4">
+              {!isReserved ? (
+                <TicketForm
+                  action={updateAction}
+                  defaultTitle={ticket.title}
+                  defaultPrice={ticket.price}
+                  submitLabel="Update Ticket"
+                />
+              ) : (
+                <div className="glass rounded-2xl p-6 flex flex-col gap-3">
+                  <p className="font-semibold">Your listing</p>
+                  <p className="text-sm text-muted-foreground">
+                    This ticket is currently reserved and cannot be edited.
+                  </p>
+                </div>
+              )}
+              {/* Seating plan management panel (CP-14) */}
+              <AttachSeatingPlanForm
+                ticketId={ticketId}
+                currentPlanId={ticket.seatingPlanId ?? null}
               />
-            ) : (
-              <div className="glass rounded-2xl p-6 flex flex-col gap-3">
-                <p className="font-semibold">Your listing</p>
-                <p className="text-sm text-muted-foreground">
-                  This ticket is currently reserved and cannot be edited.
-                </p>
-              </div>
-            )
+            </div>
           ) : (
             /* Buyer: purchase or sign-in */
             <div className="glass rounded-2xl p-6 flex flex-col gap-4">
               <div className="flex flex-col gap-1">
-                <p className="text-sm text-muted-foreground">Total price</p>
+                <p className="text-sm text-muted-foreground">
+                  {isSeated ? "Select your seats" : "Total price"}
+                </p>
                 <p className="text-3xl font-bold gradient-text">
                   ${parseFloat(ticket.price).toFixed(2)}
+                  {isSeated && (
+                    <span className="text-sm font-normal text-muted-foreground ml-1">
+                      /seat
+                    </span>
+                  )}
                 </p>
               </div>
               <div className="h-px bg-white/6" />
-              {isReserved ? (
+              {isSeated ? (
+                /* Seated ticket — CTA navigates to seat map */
+                token ? (
+                  <Link
+                    href={`/tickets/${ticketId}/seats`}
+                    className={cn(
+                      buttonVariants(),
+                      "w-full gap-2 bg-primary hover:bg-primary/90 text-primary-foreground glow-violet"
+                    )}
+                  >
+                    <MapPin className="w-4 h-4" />
+                    Choose Seats
+                  </Link>
+                ) : (
+                  <Link
+                    href="/auth/signin"
+                    className={cn(
+                      buttonVariants(),
+                      "w-full gap-2 bg-primary hover:bg-primary/90 text-primary-foreground glow-violet"
+                    )}
+                  >
+                    Sign in to Purchase
+                  </Link>
+                )
+              ) : isReserved ? (
                 <Button disabled className="w-full" variant="outline">
                   Already Reserved
                 </Button>
               ) : token ? (
-                <PurchaseButton ticketId={ticketId} />
+                <PurchaseButton ticketId={ticketId} maxQuantity={gaMaxQuantity} />
               ) : (
                 <Link
                   href="/auth/signin"

@@ -50,6 +50,8 @@ const fetchTicketPageMock = vi.fn<() => Promise<TicketPage>>();
 vi.mock("@/app/actions/tickets", () => ({
   fetchTicketPage: (...args: unknown[]) => fetchTicketPageMock(...args as Parameters<typeof fetchTicketPageMock>),
   updateTicket: vi.fn(),
+  attachSeatingPlan: vi.fn(),
+  detachSeatingPlan: vi.fn(),
 }));
 
 const serverApiMock = vi.fn<() => Promise<Ticket>>();
@@ -80,6 +82,10 @@ vi.mock("@/components/purchase-button", () => ({
   ),
 }));
 
+vi.mock("@/components/attach-seating-plan-form", () => ({
+  AttachSeatingPlanForm: () => <div data-testid="attach-seating-plan-form" />,
+}));
+
 // lucide-react icons — render as bare spans to avoid SVG parse overhead
 vi.mock("lucide-react", () => ({
   Ticket: () => <span />,
@@ -91,6 +97,7 @@ vi.mock("lucide-react", () => ({
   ArrowLeft: () => <span />,
   User: () => <span />,
   ShieldCheck: () => <span />,
+  MapPin: () => <span />,
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
