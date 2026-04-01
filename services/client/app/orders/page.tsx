@@ -95,7 +95,7 @@ export default async function OrdersPage() {
                 <p className="font-semibold leading-snug line-clamp-2 text-sm">
                   {order.ticket.title}
                 </p>
-                <p className="text-xl font-bold">${order.ticket.price.toFixed(2)}</p>
+                <p className="text-xl font-bold">${parseFloat(order.ticket.price).toFixed(2)}</p>
               </div>
 
               {/* Status badge */}

@@ -58,16 +58,17 @@ export async function createTicket(
   formData: FormData
 ): Promise<TicketState> {
   const title = formData.get("title") as string;
-  const priceRaw = formData.get("price") as string;
-  const price = parseFloat(priceRaw);
+  const priceRaw = (formData.get("price") as string)?.trim();
+  const priceNum = parseFloat(priceRaw);
 
   if (!title?.trim()) return { error: "Title is required." };
-  if (isNaN(price) || price <= 0) return { error: "Price must be a positive number." };
+  if (!priceRaw || isNaN(priceNum) || priceNum <= 0) return { error: "Price must be a positive number." };
 
   const res = await fetch(`${base()}/api/tickets`, {
     method: "POST",
     headers: await authHeaders(),
-    body: JSON.stringify({ title: title.trim(), price }),
+    // ticket-service requires price as a decimal string (e.g. "25.00"), not a number
+    body: JSON.stringify({ title: title.trim(), price: priceRaw }),
   });
 
   if (!res.ok) {
@@ -86,16 +87,17 @@ export async function updateTicket(
   formData: FormData
 ): Promise<TicketState> {
   const title = formData.get("title") as string;
-  const priceRaw = formData.get("price") as string;
-  const price = parseFloat(priceRaw);
+  const priceRaw = (formData.get("price") as string)?.trim();
+  const priceNum = parseFloat(priceRaw);
 
   if (!title?.trim()) return { error: "Title is required." };
-  if (isNaN(price) || price <= 0) return { error: "Price must be a positive number." };
+  if (!priceRaw || isNaN(priceNum) || priceNum <= 0) return { error: "Price must be a positive number." };
 
   const res = await fetch(`${base()}/api/tickets/${ticketId}`, {
     method: "PUT",
     headers: await authHeaders(),
-    body: JSON.stringify({ title: title.trim(), price }),
+    // ticket-service requires price as a decimal string (e.g. "25.00"), not a number
+    body: JSON.stringify({ title: title.trim(), price: priceRaw }),
   });
 
   if (!res.ok) {

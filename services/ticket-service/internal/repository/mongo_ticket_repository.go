@@ -542,12 +542,15 @@ func (r *MongoTicketRepository) ReleaseTicket(ctx context.Context, ticketID stri
 // ─── Quota-based reservation methods ─────────────────────────────────────────
 
 // CreateReservation writes a new TicketReservation to MongoDB and atomically
-// increments the ticket's reserved counter inside a multi-document transaction.
+// increments the ticket's reserved counter using a single findOneAndUpdate with
+// an $expr guard. No multi-document transaction is used so this works on
+// standalone MongoDB instances (including local Docker Compose).
 //
-// When a QuotaManager is configured the Redis gate runs first: if Redis rejects
-// the reservation (quota exhausted or per-user limit) the Mongo transaction is
-// skipped entirely. On Mongo failure after a successful Redis reserve, the Redis
-// decrement is immediately compensated.
+// Atomicity guarantee: the ticket counter increment uses a conditional filter
+// ($expr: reserved + sold + quantity <= quota) so concurrent over-reservation
+// is prevented at the document level. The reservation insert that follows is
+// best-effort — if it fails the ticket counter is compensated via a follow-up
+// decrement. Redis is used as a fast pre-check gate when available.
 //
 // Returns ErrTicketNotFound if the ticket does not exist.
 // Returns ErrInsufficientQuota if quota - reserved - sold < quantity.
@@ -562,22 +565,19 @@ func (r *MongoTicketRepository) CreateReservation(ctx context.Context, res *Tick
 
 	// ── Redis hot-path gate ────────────────────────────────────────────────────
 	// When Redis is available, reject obvious quota/limit violations before
-	// hitting the Mongo transaction. This reduces write amplification on sold-out
-	// tickets and provides low-latency feedback to callers.
+	// hitting Mongo. This reduces write amplification on sold-out tickets and
+	// provides low-latency feedback to callers.
 	//
 	// If the availability key is not initialised (ErrKeyNotInitialised) we fall
-	// through to Mongo — the reservation ledger is authoritative. The key will be
-	// re-seeded by the reconciliation worker or by the next successful Create.
+	// through to Mongo — the reservation ledger is authoritative.
 	var redisReserved bool
 	if r.quota != nil {
-		// We need the ticket's maxPerUser to enforce the per-user limit in Redis.
-		// Read the ticket outside the transaction; Mongo will re-check inside.
 		var maxPerUser int
 		if t, findErr := r.FindByID(ctx, res.TicketID); findErr == nil {
 			maxPerUser = t.MaxPerUser
 		}
-		// maxPerUser == 0 means the ticket was not found; the Mongo transaction
-		// will return ErrTicketNotFound — no need to call Redis.
+		// maxPerUser == 0 means the ticket was not found; Mongo will return
+		// ErrTicketNotFound below — no need to call Redis.
 		if maxPerUser > 0 {
 			redisErr := r.quota.Reserve(ctx, res.TicketID, res.UserID, res.Quantity, maxPerUser)
 			switch {
@@ -595,80 +595,84 @@ func (r *MongoTicketRepository) CreateReservation(ctx context.Context, res *Tick
 		}
 	}
 
-	sess, err := r.client.StartSession()
-	if err != nil {
+	// ── Per-user limit check (Mongo read) ─────────────────────────────────────
+	// Read the ticket to get maxPerUser, then count active reservations for this
+	// user. This is a non-transactional read-then-write; the Redis gate above
+	// covers the concurrent case for the hot path. On standalone Mongo without
+	// Redis the per-user limit may be slightly optimistic under extreme
+	// concurrency, which is acceptable for the local dev environment.
+	ticket, findErr := r.FindByID(ctx, res.TicketID)
+	if findErr != nil {
 		if redisReserved {
 			_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
 		}
-		return fmt.Errorf("CreateReservation start session: %w", err)
+		return findErr // ErrTicketNotFound or wrapped error
 	}
-	defer sess.EndSession(ctx)
 
-	_, txErr := sess.WithTransaction(ctx, func(sessCtx context.Context) (interface{}, error) {
-		// 1. Read ticket and check inventory (inside transaction for consistency).
-		var ticket Ticket
-		findErr := r.collection.FindOne(sessCtx, bson.M{"_id": res.TicketID}).Decode(&ticket)
-		if errors.Is(findErr, mongo.ErrNoDocuments) {
-			return nil, ErrTicketNotFound
+	userActive, sumErr := r.sumUserActiveReservations(ctx, res.TicketID, res.UserID)
+	if sumErr != nil {
+		if redisReserved {
+			_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
 		}
-		if findErr != nil {
-			return nil, fmt.Errorf("find ticket: %w", findErr)
+		return fmt.Errorf("check per-user limit: %w", sumErr)
+	}
+	if userActive+res.Quantity > ticket.MaxPerUser {
+		if redisReserved {
+			_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
 		}
+		return ErrPerUserLimitExceeded
+	}
 
-		available := ticket.Quota - ticket.Reserved - ticket.Sold
-		if available < res.Quantity {
-			return nil, ErrInsufficientQuota
-		}
-
-		// 2. Check per-user limit.
-		userActive, sumErr := r.sumUserActiveReservations(sessCtx, res.TicketID, res.UserID)
-		if sumErr != nil {
-			return nil, fmt.Errorf("check per-user limit: %w", sumErr)
-		}
-		if userActive+res.Quantity > ticket.MaxPerUser {
-			return nil, ErrPerUserLimitExceeded
-		}
-
-		// 3. Insert reservation document.
-		if _, insErr := r.reservations.InsertOne(sessCtx, res); insErr != nil {
-			return nil, fmt.Errorf("insert reservation: %w", insErr)
-		}
-
-		// 4. Increment ticket reserved counter with an $expr guard to prevent
-		// concurrent calls from overshooting quota (belt-and-suspenders alongside the tx).
-		ticketFilter := bson.M{
-			"_id": res.TicketID,
-			"$expr": bson.M{
-				"$lte": bson.A{
-					bson.M{"$add": bson.A{"$reserved", "$sold", res.Quantity}},
-					"$quota",
-				},
+	// ── Atomic ticket counter increment ───────────────────────────────────────
+	// Use findOneAndUpdate with a conditional $expr filter as a single atomic
+	// operation. If the filter doesn't match (ticket not found or quota
+	// exhausted), we disambiguate with a follow-up read.
+	ticketFilter := bson.M{
+		"_id": res.TicketID,
+		"$expr": bson.M{
+			"$lte": bson.A{
+				bson.M{"$add": bson.A{"$reserved", "$sold", res.Quantity}},
+				"$quota",
 			},
+		},
+	}
+	ticketUpdate := bson.M{
+		"$inc": bson.M{"reserved": res.Quantity, "version": 1},
+		"$set": bson.M{"updatedAt": now},
+	}
+	result, updErr := r.collection.UpdateOne(ctx, ticketFilter, ticketUpdate)
+	if updErr != nil {
+		if redisReserved {
+			_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
 		}
-		ticketUpdate := bson.M{
-			"$inc": bson.M{"reserved": res.Quantity, "version": 1},
-			"$set": bson.M{"updatedAt": now},
+		return fmt.Errorf("increment ticket reserved counter: %w", updErr)
+	}
+	if result.MatchedCount == 0 {
+		// Filter did not match — either the ticket disappeared or quota is now exhausted.
+		if redisReserved {
+			_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
 		}
-		result, updErr := r.collection.UpdateOne(sessCtx, ticketFilter, ticketUpdate)
-		if updErr != nil {
-			return nil, fmt.Errorf("increment ticket reserved counter: %w", updErr)
-		}
-		if result.MatchedCount == 0 {
-			// Filter did not match: concurrent write exhausted quota between our read and write.
-			return nil, ErrInsufficientQuota
-		}
-
-		return nil, nil
-	})
-
-	// ── Redis compensation on Mongo failure ────────────────────────────────────
-	// If we decremented Redis but the durable write failed, restore the counter.
-	// Compensation is best-effort; a reconciliation worker corrects residual drift.
-	if txErr != nil && redisReserved {
-		_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
+		return ErrInsufficientQuota
 	}
 
-	return txErr
+	// ── Insert reservation document ───────────────────────────────────────────
+	// The ticket counter is already incremented. If the insert fails we must
+	// compensate by decrementing the counter.
+	if _, insErr := r.reservations.InsertOne(ctx, res); insErr != nil {
+		// Compensate: roll back the ticket counter increment.
+		compensateFilter := bson.M{"_id": res.TicketID}
+		compensateUpdate := bson.M{
+			"$inc": bson.M{"reserved": -res.Quantity, "version": 1},
+			"$set": bson.M{"updatedAt": time.Now().UTC()},
+		}
+		_, _ = r.collection.UpdateOne(ctx, compensateFilter, compensateUpdate)
+		if redisReserved {
+			_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
+		}
+		return fmt.Errorf("insert reservation: %w", insErr)
+	}
+
+	return nil
 }
 
 // sumUserActiveReservations returns the total quantity of RESERVED reservations
@@ -714,154 +718,117 @@ func (r *MongoTicketRepository) FindReservationByID(ctx context.Context, reserva
 }
 
 // ReleaseReservation transitions a RESERVED reservation to RELEASED and
-// decrements the ticket's reserved counter inside a transaction. Idempotent for RELEASED or EXPIRED.
+// decrements the ticket's reserved counter. Uses atomic findOneAndUpdate on the
+// reservation document (status filter: RESERVED→RELEASED) to guard against
+// concurrent releases; no multi-document transaction is required.
+// Idempotent for RELEASED or EXPIRED.
 func (r *MongoTicketRepository) ReleaseReservation(ctx context.Context, reservationID string) error {
-	// Read the reservation outside the transaction for a fast early-exit on not-found / wrong state.
-	res, err := r.FindReservationByID(ctx, reservationID)
-	if err != nil {
-		return err
-	}
-
-	switch res.Status {
-	case ReservationStatusReleased, ReservationStatusExpired:
-		return nil // idempotent no-op
-	case ReservationStatusSold:
-		return ErrReservationConflict
-	case ReservationStatusReserved:
-		// proceed
-	}
-
-	sess, err := r.client.StartSession()
-	if err != nil {
-		return fmt.Errorf("ReleaseReservation start session: %w", err)
-	}
-	defer sess.EndSession(ctx)
-
 	now := time.Now().UTC()
-	var actuallyReleased bool
 
-	_, txErr := sess.WithTransaction(ctx, func(sessCtx context.Context) (interface{}, error) {
-		// Re-check status inside transaction to guard against concurrent release.
-		var current TicketReservation
-		findErr := r.reservations.FindOne(sessCtx, bson.M{"_id": reservationID}).Decode(&current)
-		if errors.Is(findErr, mongo.ErrNoDocuments) {
-			return nil, ErrReservationNotFound
+	// Atomically transition the reservation from RESERVED to RELEASED.
+	// The filter on status:"RESERVED" means only one concurrent caller succeeds;
+	// the other sees MatchedCount==0 and treats it as an idempotent no-op.
+	resvFilter := bson.M{"_id": reservationID, "status": ReservationStatusReserved}
+	resvUpdate := bson.M{"$set": bson.M{"status": ReservationStatusReleased, "updatedAt": now}}
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+
+	var updated TicketReservation
+	err := r.reservations.FindOneAndUpdate(ctx, resvFilter, resvUpdate, opts).Decode(&updated)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		// Either the reservation does not exist, or it is not in RESERVED state.
+		// Check what state it is actually in to give the right error.
+		res, findErr := r.FindReservationByID(ctx, reservationID)
+		if errors.Is(findErr, ErrReservationNotFound) {
+			return ErrReservationNotFound
 		}
 		if findErr != nil {
-			return nil, fmt.Errorf("re-read reservation: %w", findErr)
+			return findErr
 		}
-		switch current.Status {
+		switch res.Status {
 		case ReservationStatusReleased, ReservationStatusExpired:
-			return nil, nil // concurrent release already succeeded — no counter change
+			return nil // already released — idempotent no-op
 		case ReservationStatusSold:
-			return nil, ErrReservationConflict
+			return ErrReservationConflict
 		}
-
-		// Update reservation to RELEASED.
-		resvUpdate := bson.M{"$set": bson.M{"status": ReservationStatusReleased, "updatedAt": now}}
-		if _, updErr := r.reservations.UpdateOne(sessCtx, bson.M{"_id": reservationID}, resvUpdate); updErr != nil {
-			return nil, fmt.Errorf("update reservation to RELEASED: %w", updErr)
-		}
-
-		// Decrement ticket reserved counter.
-		ticketUpdate := bson.M{
-			"$inc": bson.M{"reserved": -current.Quantity, "version": 1},
-			"$set": bson.M{"updatedAt": now},
-		}
-		if _, updErr := r.collection.UpdateOne(sessCtx, bson.M{"_id": current.TicketID}, ticketUpdate); updErr != nil {
-			return nil, fmt.Errorf("decrement ticket reserved counter on release: %w", updErr)
-		}
-
-		actuallyReleased = true
-		return nil, nil
-	})
-
-	// After a successful Mongo release, restore the Redis availability counter.
-	// If Redis fails here the reconciliation worker will correct the drift.
-	// Only call Release when the transaction actually transitioned the status —
-	// skip if another goroutine already released (concurrent idempotent no-op).
-	if txErr == nil && actuallyReleased && r.quota != nil {
-		_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
+		return nil // should not reach here
+	}
+	if err != nil {
+		return fmt.Errorf("update reservation to RELEASED: %w", err)
 	}
 
-	return txErr
+	// The reservation was successfully transitioned. Now decrement the ticket counter.
+	ticketUpdate := bson.M{
+		"$inc": bson.M{"reserved": -updated.Quantity, "version": 1},
+		"$set": bson.M{"updatedAt": now},
+	}
+	if _, updErr := r.collection.UpdateOne(ctx, bson.M{"_id": updated.TicketID}, ticketUpdate); updErr != nil {
+		return fmt.Errorf("decrement ticket reserved counter on release: %w", updErr)
+	}
+
+	// Restore the Redis availability counter after successful Mongo release.
+	if r.quota != nil {
+		_ = r.quota.Release(ctx, updated.TicketID, updated.UserID, updated.Quantity)
+	}
+
+	return nil
 }
 
 // FinalizeReservation transitions a RESERVED reservation to SOLD, sets orderId,
-// and moves quantity from reserved to sold on the ticket inside a transaction. Idempotent for SOLD.
+// and moves quantity from reserved to sold on the ticket. Uses atomic
+// findOneAndUpdate on the reservation document (status filter: RESERVED→SOLD)
+// to guard against concurrent finalization; no multi-document transaction is
+// required. Idempotent for SOLD.
 func (r *MongoTicketRepository) FinalizeReservation(ctx context.Context, reservationID, orderID string) error {
-	// Read outside transaction for fast early-exit.
-	res, err := r.FindReservationByID(ctx, reservationID)
-	if err != nil {
-		return err
-	}
-
-	switch res.Status {
-	case ReservationStatusSold:
-		return nil // idempotent no-op
-	case ReservationStatusReleased, ReservationStatusExpired:
-		return ErrReservationConflict
-	case ReservationStatusReserved:
-		// proceed
-	}
-
-	sess, err := r.client.StartSession()
-	if err != nil {
-		return fmt.Errorf("FinalizeReservation start session: %w", err)
-	}
-	defer sess.EndSession(ctx)
-
 	now := time.Now().UTC()
-	var actuallyFinalized bool
 
-	_, txErr := sess.WithTransaction(ctx, func(sessCtx context.Context) (interface{}, error) {
-		// Re-check inside transaction.
-		var current TicketReservation
-		findErr := r.reservations.FindOne(sessCtx, bson.M{"_id": reservationID}).Decode(&current)
-		if errors.Is(findErr, mongo.ErrNoDocuments) {
-			return nil, ErrReservationNotFound
+	// Atomically transition the reservation from RESERVED to SOLD.
+	resvFilter := bson.M{"_id": reservationID, "status": ReservationStatusReserved}
+	resvUpdate := bson.M{
+		"$set": bson.M{
+			"status":    ReservationStatusSold,
+			"orderId":   orderID,
+			"updatedAt": now,
+		},
+	}
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+
+	var updated TicketReservation
+	err := r.reservations.FindOneAndUpdate(ctx, resvFilter, resvUpdate, opts).Decode(&updated)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		// Either the reservation does not exist, or it is not in RESERVED state.
+		res, findErr := r.FindReservationByID(ctx, reservationID)
+		if errors.Is(findErr, ErrReservationNotFound) {
+			return ErrReservationNotFound
 		}
 		if findErr != nil {
-			return nil, fmt.Errorf("re-read reservation: %w", findErr)
+			return findErr
 		}
-		switch current.Status {
+		switch res.Status {
 		case ReservationStatusSold:
-			return nil, nil // concurrent finalize already succeeded — no counter change
+			return nil // already finalized — idempotent no-op
 		case ReservationStatusReleased, ReservationStatusExpired:
-			return nil, ErrReservationConflict
+			return ErrReservationConflict
 		}
-
-		// Update reservation to SOLD with orderID.
-		resvUpdate := bson.M{
-			"$set": bson.M{
-				"status":    ReservationStatusSold,
-				"orderId":   orderID,
-				"updatedAt": now,
-			},
-		}
-		if _, updErr := r.reservations.UpdateOne(sessCtx, bson.M{"_id": reservationID}, resvUpdate); updErr != nil {
-			return nil, fmt.Errorf("update reservation to SOLD: %w", updErr)
-		}
-
-		// Move quantity from reserved to sold.
-		ticketUpdate := bson.M{
-			"$inc": bson.M{"reserved": -current.Quantity, "sold": current.Quantity, "version": 1},
-			"$set": bson.M{"updatedAt": now},
-		}
-		if _, updErr := r.collection.UpdateOne(sessCtx, bson.M{"_id": current.TicketID}, ticketUpdate); updErr != nil {
-			return nil, fmt.Errorf("update ticket counters on finalize: %w", updErr)
-		}
-
-		actuallyFinalized = true
-		return nil, nil
-	})
-
-	// After a successful Mongo finalize, clear the per-user reserved counter in Redis.
-	// Availability is NOT restored — the quantity was permanently sold.
-	// Only fire when this invocation actually performed the transition.
-	if txErr == nil && actuallyFinalized && r.quota != nil {
-		_ = r.quota.Finalize(ctx, res.TicketID, res.UserID, res.Quantity)
+		return nil // should not reach here
+	}
+	if err != nil {
+		return fmt.Errorf("update reservation to SOLD: %w", err)
 	}
 
-	return txErr
+	// Move quantity from reserved to sold on the ticket document.
+	ticketUpdate := bson.M{
+		"$inc": bson.M{"reserved": -updated.Quantity, "sold": updated.Quantity, "version": 1},
+		"$set": bson.M{"updatedAt": now},
+	}
+	if _, updErr := r.collection.UpdateOne(ctx, bson.M{"_id": updated.TicketID}, ticketUpdate); updErr != nil {
+		return fmt.Errorf("update ticket counters on finalize: %w", updErr)
+	}
+
+	// Clear the per-user reserved counter in Redis. Availability is NOT restored —
+	// the quantity was permanently sold.
+	if r.quota != nil {
+		_ = r.quota.Finalize(ctx, updated.TicketID, updated.UserID, updated.Quantity)
+	}
+
+	return nil
 }

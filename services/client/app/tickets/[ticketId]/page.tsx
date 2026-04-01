@@ -71,7 +71,10 @@ export default async function TicketDetailPage({ params }: Props) {
   }
 
   const isOwner = currentUserId !== null && currentUserId === ticket.userId;
-  const isReserved = Boolean(ticket.orderId);
+  // GA flow: reservation tracked in ticket.reserved counter (ticket.orderId is legacy).
+  // A ticket is considered reserved when either the legacy orderId is set OR the
+  // quota-based reserved counter is > 0 (meaning at least one active reservation exists).
+  const isReserved = Boolean(ticket.orderId) || (ticket.reserved != null && ticket.reserved > 0);
   const updateAction = updateTicket.bind(null, ticketId);
 
   return (
@@ -113,7 +116,7 @@ export default async function TicketDetailPage({ params }: Props) {
           <div className="flex items-center gap-3">
             <Tag className="w-4 h-4 text-muted-foreground" />
             <span className="text-2xl font-bold gradient-text">
-              ${ticket.price.toFixed(2)}
+              ${parseFloat(ticket.price).toFixed(2)}
             </span>
           </div>
 
@@ -155,7 +158,7 @@ export default async function TicketDetailPage({ params }: Props) {
               <div className="flex flex-col gap-1">
                 <p className="text-sm text-muted-foreground">Total price</p>
                 <p className="text-3xl font-bold gradient-text">
-                  ${ticket.price.toFixed(2)}
+                  ${parseFloat(ticket.price).toFixed(2)}
                 </p>
               </div>
               <div className="h-px bg-white/6" />

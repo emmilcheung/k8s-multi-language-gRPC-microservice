@@ -121,7 +121,7 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
           <TicketIcon className="w-5 h-5 text-primary/80" />
         </div>
         <Badge className="bg-primary/15 text-primary border-primary/20 font-semibold text-sm px-2.5 py-0.5 shrink-0">
-          ${ticket.price.toFixed(2)}
+          ${parseFloat(ticket.price).toFixed(2)}
         </Badge>
       </div>
 
