@@ -463,7 +463,7 @@ Verification:
 
 ## CP-11 Venue Auto-Assign And Real-Time Delivery
 
-- [ ] Finish auto-assign strategy and SSE delivery path
+- [x] Finish auto-assign strategy and SSE delivery path
 
 Owner:
 
@@ -709,7 +709,7 @@ Use this section as lightweight scrum tracking.
 | CP-08 | [x] | @agent | PR #26 | Venue + plan CRUD repos, REST handlers, wired main.go; 10 unit + 1 integration tests pass |
 | CP-09 | [x] | @agent | PR #27 | Redis Lua hold/release scripts, SeatHoldHandler, hold sweeper; 18 unit + 5 integration tests pass |
 | CP-10 | [x] | @agent | PR #28 | Seated reservation gRPC RPCs + Kafka handlers + reservation ledger; 21 unit + 5 integration tests pass |
-| CP-11 | [ ] | TBD |  |  |
+| CP-11 | [x] | @agent | PR #29 | Auto-assign algorithm (row-based + cross-row fallback), AutoAssignAndReserve gRPC, SSE broadcaster + HTTP handler; 8 autoassign unit + 7 gRPC unit + 3 integration tests pass |
 | CP-12 | [ ] | TBD |  |  |
 | CP-13 | [ ] | TBD |  |  |
 | CP-14 | [ ] | TBD |  |  |
