@@ -59,11 +59,11 @@ func TestLoad_ShouldSucceed_WhenAllRequiredEnvVarsSet(t *testing.T) {
 func TestLoad_ShouldUseDefaults_WhenOptionalEnvVarsAbsent(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/venue_db")
 	t.Setenv("KAFKA_BROKERS", "localhost:9092")
-	os.Unsetenv("PORT")
-	os.Unsetenv("GRPC_PORT")
-	os.Unsetenv("APP_ENV")
-	os.Unsetenv("LOG_LEVEL")
-	os.Unsetenv("REDIS_URL")
+	require.NoError(t, os.Unsetenv("PORT"))
+	require.NoError(t, os.Unsetenv("GRPC_PORT"))
+	require.NoError(t, os.Unsetenv("APP_ENV"))
+	require.NoError(t, os.Unsetenv("LOG_LEVEL"))
+	require.NoError(t, os.Unsetenv("REDIS_URL"))
 
 	cfg, err := config.Load()
 	require.NoError(t, err)
