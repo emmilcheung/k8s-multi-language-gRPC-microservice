@@ -1,9 +1,9 @@
 # Platform Build Status Log
 
-> **Last Updated:** 2026-04-01 UTC  
-> **Current Phase:** Post-audit lint hardening (PR #16 open, awaiting review)  
-> **Overall Progress:** ~90% of full plan (all 75 audit items complete; lint/type hardening done; EKS not yet applied)  
-> **Git Status:** `main` is clean at `889e57b`. Branch `fix/audit-typescript-errors` has PR #16 open.
+> **Last Updated:** 2026-04-02 UTC  
+> **Current Phase:** venue-service infrastructure integration (Helm + local K8s)  
+> **Overall Progress:** ~92% of full plan (all 75 audit items complete; venue-service fully integrated into all infra layers; EKS not yet applied)  
+> **Git Status:** `main` is clean at `889e57b`. Feature branch `feat/venue-service-infra` in progress.
 
 ---
 
@@ -17,12 +17,13 @@
 | **order-service** | ✅ Complete | Java 21/Spring Boot 4, JPA, Flyway, Kafka, gRPC client |
 | **payment-service** | ✅ Complete | TypeScript/NestJS, Drizzle ORM, Kafka consumer/producer, 25 tests passing |
 | **expiration-service** | ✅ Complete | Go, asynq, Redis, Kafka |
+| **venue-service** | ✅ Complete | Go/Echo, PostgreSQL, gRPC server (port 50052), Kafka consumer; Helm subchart + local K8s wired |
 | **client** | ✅ Complete | Next.js 15 App Router, shadcn/ui, all pages, Server Actions |
 | **Kong API Gateway** | ✅ Complete | DB-less declarative config; JWT plugin (RS256); post-function sub→X-User-Id forwarding; startup migrations |
 | **E2E Playwright tests** | ✅ 18/18 passing | Auth, ticket CRUD, order lifecycle, payment via Kafka — against both Docker Compose and minikube |
 | **Docker Compose** | ✅ Running | `docker compose up --build` starts all services + infra |
 | **Local Kubernetes (minikube)** | ✅ Complete | `infra/local/setup.sh` — idempotent 7-step bootstrap; 18/18 E2E pass against minikube cluster |
-| **Helm umbrella chart** | ✅ Complete | `infra/helm/` with `values-local.yaml`; cp-kafka sub-chart (Confluent); Linkerd mTLS integration |
+| **Helm umbrella chart** | ✅ Complete | `infra/helm/` with `values-local.yaml`; cp-kafka sub-chart (Confluent); venue-service subchart; Linkerd mTLS integration |
 | **Terraform modules** | ✅ Scaffolded | vpc, eks, rds, elasticache, msk, kong modules + dev/staging/prod environments written; **not applied against real AWS** |
 | **CI/CD** | ✅ Partial | `.github/workflows/` — ci.yml, e2e.yml present and green (unit + integration + Trivy + Playwright); deploy stages not yet added |
 | **EKS deploy** | ⏭️ Pending | Terraform apply against real AWS deferred; local minikube is the active dev environment |
@@ -177,6 +178,31 @@
 - ✅ Linkerd mTLS: `config.linkerd.io/skip-outbound-ports: "9092"` on `ticketing` namespace (prevents Linkerd intercepting Kafka binary protocol); `skip-inbound-ports/skip-outbound-ports: "9093"` on cp-kafka pod template
 - ✅ Terraform modules scaffolded: vpc, eks, rds, elasticache, msk, kong — dev/staging/prod environments written (**not applied against real AWS**)
 - ✅ 18/18 Playwright E2E tests passing against minikube cluster
+
+---
+
+---
+
+### Milestone CP: venue-service Infrastructure Integration
+
+**Branch:** `feat/venue-service-infra` (in progress)
+
+**Deliverables:**
+- ✅ `infra/helm/charts/venue-service/` — full Helm subchart (Deployment, Service, HPA, PDB, NetworkPolicy, ServiceAccount)
+- ✅ `infra/helm/Chart.yaml` — venue-service + postgres-venue dependencies added
+- ✅ `infra/helm/values.yaml` — venue-service + postgres-venue production defaults
+- ✅ `infra/helm/values-local.yaml` — venue-service + postgres-venue minikube overrides
+- ✅ `infra/local/setup.sh` — venue-service image build + load, `venue-service-secrets` creation, helm `--set` flag
+- ✅ `infra/helm/Chart.lock` — regenerated via `helm dependency update` (4th Bitnami PostgreSQL pulled)
+- ✅ `README.md`, `PLAN.md`, `STATUS.md` — full venue-service documentation throughout
+
+**Key Details:**
+- HTTP port: **3003**, gRPC port: **50052**
+- Language: Go 1.23+ / Echo v4
+- Database: `venue_db` on dedicated `postgres-venue` PostgreSQL instance
+- Kafka consumer group: `venue-service`; produces `venue.seat.reserved`, `venue.seat.released`
+- In-cluster DNS: `ticketing-postgres-venue:5432`
+- Secrets: `venue-service-secrets` (DATABASE_URL, REDIS_URL, KAFKA_BROKERS)
 
 ---
 
