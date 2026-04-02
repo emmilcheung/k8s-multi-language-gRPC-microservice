@@ -127,6 +127,7 @@ services:
         paths:
           - ~/api/tickets$
           - ~/api/tickets/[^/]+$
+          - ~/api/tickets/[^/]+/seating-plan$
         methods: [POST, PUT, PATCH, DELETE]
         strip_path: false
         plugins:

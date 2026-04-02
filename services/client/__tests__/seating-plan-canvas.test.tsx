@@ -19,9 +19,9 @@ beforeAll(() => {
     disconnect() {}
   };
 
-  // React Flow also reads SVGElement.getTotalLength in some edge paths.
-  if (!SVGElement.prototype.getTotalLength) {
-    SVGElement.prototype.getTotalLength = () => 0;
+  // React Flow also reads SVGGeometryElement.getTotalLength in some edge paths.
+  if (!SVGGeometryElement.prototype.getTotalLength) {
+    SVGGeometryElement.prototype.getTotalLength = () => 0;
   }
 });
 

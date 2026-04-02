@@ -159,7 +159,7 @@ export async function attachSeatingPlan(
   if (!UUID_RE.test(planId)) return { error: "Seating plan ID must be a valid UUID." };
 
   const res = await fetch(`${base()}/api/tickets/${ticketId}/seating-plan`, {
-    method: "PATCH",
+    method: "PUT",
     headers: await authHeaders(),
     body: JSON.stringify({ seatingPlanId: planId }),
   });

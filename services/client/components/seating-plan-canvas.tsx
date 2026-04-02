@@ -215,7 +215,7 @@ function buildInitialNodes(
   layout: SeatingPlanCanvasProps["initialLayout"]
 ): Node<SectionNodeData>[] {
   return sections.map((section, idx) => {
-    const stored = layout?.nodes.find((n) => n.id === section.id);
+    const stored = (layout?.nodes ?? []).find((n) => n.id === section.id);
     return {
       id: section.id,
       type: "sectionNode",
@@ -238,7 +238,6 @@ export function SeatingPlanCanvas({
   isDraft,
 }: SeatingPlanCanvasProps) {
   // ── State ─────────────────────────────────────────────────────────────────
-
   // Row offsets are stored separately from RF nodes to avoid triggering RF
   // internal re-renders on every pointer-move during row drags.
   const [rowOffsetsMap, setRowOffsetsMap] = useState<
