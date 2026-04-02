@@ -223,6 +223,69 @@ services:
                 - |
                   {{JWT_SUB_LUA}}
 
+
+  # ── venue-service ─────────────────────────────────────────────────────────────
+  - name: venue-service
+    url: http://{{HOST_VENUE}}
+    connect_timeout: {{CONNECT_TIMEOUT_MS}}
+    read_timeout: {{READ_TIMEOUT_MS}}
+    write_timeout: {{WRITE_TIMEOUT_MS}}
+    routes:
+      # Public: read-only seating-plan access (availability, events SSE) — no JWT required
+      - name: venue-seating-plans-read
+        paths:
+          - ~/api/seating-plans/[^/]+$
+          - ~/api/seating-plans/[^/]+/availability$
+          - ~/api/seating-plans/[^/]+/events$
+          - ~/api/seating-plans/[^/]+/sections$
+          - ~/api/seating-plans/[^/]+/price-tiers$
+        methods: [GET]
+        strip_path: false
+
+      # Protected: create / update / activate seating plans and sections — JWT required
+      - name: venue-seating-plans-write
+        paths:
+          - ~/api/seating-plans$
+          - ~/api/seating-plans/[^/]+$
+          - ~/api/seating-plans/[^/]+/sections$
+          - ~/api/seating-plans/[^/]+/price-tiers$
+          - ~/api/seating-plans/[^/]+/attach-ticket$
+          - ~/api/seating-plans/[^/]+/activate$
+          - ~/api/seating-plans/[^/]+/holds$
+          - ~/api/seating-plans/[^/]+/holds/[^/]+$
+        methods: [POST, PUT, PATCH, DELETE]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      # Protected: venue management — JWT required for all operations
+      - name: venue-venues
+        paths:
+          - ~/api/venues$
+          - ~/api/venues/[^/]+$
+        methods: [GET, POST, PUT, DELETE]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
   # ── client (Next.js SSR) — catch-all, must be last ────────────────────────────
   # Kong matches routes by longest-prefix first; all /api/* routes above always
   # win.  The client route has a higher read/write timeout to accommodate SSR.

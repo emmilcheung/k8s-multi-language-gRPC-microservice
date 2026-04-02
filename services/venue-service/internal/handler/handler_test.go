@@ -71,6 +71,9 @@ func (s *stubPlanRepo) Update(ctx context.Context, p *repository.SeatingPlan) er
 func (s *stubPlanRepo) ListActivePlans(_ context.Context) ([]*repository.SeatingPlan, error) {
 	return nil, nil
 }
+func (s *stubPlanRepo) SaveLayout(_ context.Context, _, _ string, _ json.RawMessage) error {
+	return nil
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -9,6 +9,7 @@ HOST_TICKETS: ticketing-ticket-service.ticketing-staging.svc.cluster.local:3001
 HOST_ORDERS: ticketing-order-service.ticketing-staging.svc.cluster.local:8082
 HOST_PAYMENTS: ticketing-payment-service.ticketing-staging.svc.cluster.local:3002
 HOST_CLIENT: ticketing-client.ticketing-staging.svc.cluster.local:4000
+HOST_VENUE: ticketing-venue-service.ticketing-staging.svc.cluster.local:3003
 
 READ_TIMEOUT_MS: 30000
 WRITE_TIMEOUT_MS: 30000

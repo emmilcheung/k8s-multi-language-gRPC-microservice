@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -21,12 +22,12 @@ func NewPlanRepo(pool *pgxpool.Pool) *PlanRepo {
 }
 
 // Create inserts a new seating plan. On return, p.ID, p.Status, p.Version,
-// p.CreatedAt, and p.UpdatedAt are populated.
+// p.LayoutJSON, p.CreatedAt, and p.UpdatedAt are populated.
 func (r *PlanRepo) Create(ctx context.Context, p *repository.SeatingPlan) error {
 	const q = `
 		INSERT INTO seating_plans (venue_id, organizer_id, name, hold_ttl_sec, max_seats_per_order)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, status, version, created_at, updated_at`
+		RETURNING id, status, layout_json, version, created_at, updated_at`
 
 	holdTTL := p.HoldTTLSec
 	if holdTTL <= 0 {
@@ -39,21 +40,21 @@ func (r *PlanRepo) Create(ctx context.Context, p *repository.SeatingPlan) error 
 
 	return r.pool.QueryRow(ctx, q,
 		p.VenueID, p.OrganizerID, p.Name, holdTTL, maxSeats,
-	).Scan(&p.ID, &p.Status, &p.Version, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.Status, &p.LayoutJSON, &p.Version, &p.CreatedAt, &p.UpdatedAt)
 }
 
 // FindByID returns a seating plan by primary key.
 func (r *PlanRepo) FindByID(ctx context.Context, id string) (*repository.SeatingPlan, error) {
 	const q = `
 		SELECT id, venue_id, COALESCE(ticket_id::text, ''), organizer_id, name,
-		       status, hold_ttl_sec, max_seats_per_order, version, created_at, updated_at
+		       status, hold_ttl_sec, max_seats_per_order, layout_json, version, created_at, updated_at
 		FROM seating_plans
 		WHERE id = $1`
 
 	p := &repository.SeatingPlan{}
 	err := r.pool.QueryRow(ctx, q, id).Scan(
 		&p.ID, &p.VenueID, &p.TicketID, &p.OrganizerID, &p.Name,
-		&p.Status, &p.HoldTTLSec, &p.MaxSeatsPerOrder, &p.Version,
+		&p.Status, &p.HoldTTLSec, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version,
 		&p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
@@ -70,7 +71,7 @@ func (r *PlanRepo) FindByID(ctx context.Context, id string) (*repository.Seating
 func (r *PlanRepo) ListActivePlans(ctx context.Context) ([]*repository.SeatingPlan, error) {
 	const q = `
 		SELECT id, venue_id, COALESCE(ticket_id::text, ''), organizer_id, name,
-		       status, hold_ttl_sec, max_seats_per_order, version, created_at, updated_at
+		       status, hold_ttl_sec, max_seats_per_order, layout_json, version, created_at, updated_at
 		FROM seating_plans
 		WHERE status = 'active'
 		ORDER BY created_at ASC`
@@ -86,7 +87,7 @@ func (r *PlanRepo) ListActivePlans(ctx context.Context) ([]*repository.SeatingPl
 		p := &repository.SeatingPlan{}
 		if err := rows.Scan(
 			&p.ID, &p.VenueID, &p.TicketID, &p.OrganizerID, &p.Name,
-			&p.Status, &p.HoldTTLSec, &p.MaxSeatsPerOrder, &p.Version,
+			&p.Status, &p.HoldTTLSec, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version,
 			&p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -100,7 +101,7 @@ func (r *PlanRepo) ListActivePlans(ctx context.Context) ([]*repository.SeatingPl
 func (r *PlanRepo) ListByTicket(ctx context.Context, ticketID string) ([]*repository.SeatingPlan, error) {
 	const q = `
 		SELECT id, venue_id, COALESCE(ticket_id::text, ''), organizer_id, name,
-		       status, hold_ttl_sec, max_seats_per_order, version, created_at, updated_at
+		       status, hold_ttl_sec, max_seats_per_order, layout_json, version, created_at, updated_at
 		FROM seating_plans
 		WHERE ticket_id = $1
 		ORDER BY created_at DESC`
@@ -116,7 +117,7 @@ func (r *PlanRepo) ListByTicket(ctx context.Context, ticketID string) ([]*reposi
 		p := &repository.SeatingPlan{}
 		if err := rows.Scan(
 			&p.ID, &p.VenueID, &p.TicketID, &p.OrganizerID, &p.Name,
-			&p.Status, &p.HoldTTLSec, &p.MaxSeatsPerOrder, &p.Version,
+			&p.Status, &p.HoldTTLSec, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version,
 			&p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -221,5 +222,36 @@ func (r *PlanRepo) Update(ctx context.Context, p *repository.SeatingPlan) error 
 		return err
 	}
 	p.UpdatedAt = updatedAt
+	return nil
+}
+
+// SaveLayout persists a free-form layout_json blob for the given draft plan.
+// Only the owner may save the layout, and the plan must still be in 'draft' status.
+func (r *PlanRepo) SaveLayout(ctx context.Context, planID, organizerID string, layoutJSON json.RawMessage) error {
+	if len(layoutJSON) == 0 {
+		layoutJSON = json.RawMessage("{}")
+	}
+	const q = `
+		UPDATE seating_plans
+		SET layout_json = $1, updated_at = now()
+		WHERE id = $2 AND organizer_id = $3 AND status = 'draft'
+		RETURNING id`
+
+	var id string
+	err := r.pool.QueryRow(ctx, q, layoutJSON, planID, organizerID).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Could be not found, wrong organizer, or not in draft.
+			p, findErr := r.FindByID(ctx, planID)
+			if findErr != nil {
+				return findErr
+			}
+			if p.OrganizerID != organizerID {
+				return repository.ErrPlanNotFound // surface as 404, not 403
+			}
+			return repository.ErrPlanAlreadyActive // plan is not draft
+		}
+		return err
+	}
 	return nil
 }

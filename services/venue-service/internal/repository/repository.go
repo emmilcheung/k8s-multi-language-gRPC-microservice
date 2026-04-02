@@ -3,6 +3,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -86,9 +87,12 @@ type SeatingPlan struct {
 	Status           PlanStatus `db:"status"       json:"status"`
 	HoldTTLSec       int        `db:"hold_ttl_sec" json:"holdTtlSec"`
 	MaxSeatsPerOrder int        `db:"max_seats_per_order" json:"maxSeatsPerOrder"`
-	Version          int        `db:"version"      json:"version"`
-	CreatedAt        time.Time  `db:"created_at"   json:"createdAt"`
-	UpdatedAt        time.Time  `db:"updated_at"   json:"updatedAt"`
+	// LayoutJSON stores the 2-D canvas layout for the seating plan editor.
+	// It is a free-form JSON blob (section node positions + row offsets).
+	LayoutJSON json.RawMessage `db:"layout_json"  json:"layoutJson"`
+	Version    int             `db:"version"      json:"version"`
+	CreatedAt  time.Time       `db:"created_at"   json:"createdAt"`
+	UpdatedAt  time.Time       `db:"updated_at"   json:"updatedAt"`
 }
 
 // Section is a named group of seats inside a seating plan.
@@ -175,6 +179,9 @@ type PlanRepository interface {
 	AttachTicket(ctx context.Context, planID, ticketID string, expectedVersion int) error
 	Activate(ctx context.Context, planID string, expectedVersion int) error
 	Update(ctx context.Context, p *SeatingPlan) error
+	// SaveLayout persists the free-form layout_json blob for the given plan.
+	// Only allowed while the plan is in 'draft' status.
+	SaveLayout(ctx context.Context, planID, organizerID string, layoutJSON json.RawMessage) error
 }
 
 // SectionRepository manages section and seat CRUD inside a plan.

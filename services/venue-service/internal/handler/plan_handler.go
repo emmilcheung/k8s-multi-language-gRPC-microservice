@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -26,6 +27,7 @@ func (h *PlanHandler) RegisterRoutes(g *echo.Group) {
 	g.POST("", h.Create)
 	g.GET("/:id", h.Get)
 	g.PUT("/:id", h.Update)
+	g.PATCH("/:id/layout", h.SaveLayout)
 	g.POST("/:id/attach-ticket", h.AttachTicket)
 	g.POST("/:id/activate", h.Activate)
 }
@@ -263,6 +265,51 @@ func (h *PlanHandler) Activate(c echo.Context) error {
 	updated, err := h.planRepo.FindByID(c.Request().Context(), id)
 	if err != nil {
 		h.log.Error("plan activate re-fetch failed", zap.Error(err), zap.String("planId", id))
+		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+	}
+
+	return c.JSON(http.StatusOK, updated)
+}
+
+// saveLayoutRequest is the request body for PATCH /api/seating-plans/:id/layout.
+type saveLayoutRequest struct {
+	LayoutJSON json.RawMessage `json:"layoutJson"`
+}
+
+// SaveLayout handles PATCH /api/seating-plans/:id/layout.
+// Persists the free-form 2-D canvas layout blob for a draft seating plan.
+// Only the plan owner may call this endpoint and only while the plan is in draft.
+func (h *PlanHandler) SaveLayout(c echo.Context) error {
+	organizerID := c.Request().Header.Get("X-User-Id")
+	if organizerID == "" {
+		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	id := c.Param("id")
+
+	var req saveLayoutRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResponse("invalid request body"))
+	}
+	if len(req.LayoutJSON) == 0 {
+		return c.JSON(http.StatusUnprocessableEntity, errorResponse("layoutJson is required"))
+	}
+
+	if err := h.planRepo.SaveLayout(c.Request().Context(), id, organizerID, req.LayoutJSON); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrPlanNotFound):
+			return c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
+		case errors.Is(err, repository.ErrPlanAlreadyActive):
+			return c.JSON(http.StatusConflict, errorResponse("layout can only be saved while plan is in draft"))
+		default:
+			h.log.Error("plan save-layout failed", zap.Error(err), zap.String("planId", id))
+			return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+		}
+	}
+
+	updated, err := h.planRepo.FindByID(c.Request().Context(), id)
+	if err != nil {
+		h.log.Error("plan save-layout re-fetch failed", zap.Error(err), zap.String("planId", id))
 		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
 	}
 

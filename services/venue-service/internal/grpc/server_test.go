@@ -2,6 +2,7 @@ package grpcserver_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -122,6 +123,9 @@ func (n *nopPlanRepo) Activate(ctx context.Context, planID string, expectedVersi
 func (n *nopPlanRepo) Update(ctx context.Context, p *repository.SeatingPlan) error { return nil }
 func (n *nopPlanRepo) ListActivePlans(_ context.Context) ([]*repository.SeatingPlan, error) {
 	return nil, nil
+}
+func (n *nopPlanRepo) SaveLayout(_ context.Context, _, _ string, _ json.RawMessage) error {
+	return nil
 }
 
 // newTestServer creates a VenueGrpcServer with the given reservation repo stub.

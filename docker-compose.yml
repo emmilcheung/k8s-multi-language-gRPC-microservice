@@ -395,7 +395,7 @@ services:
       APP_ENV: development
       PORT: 3003
       GRPC_PORT: 50052
-      DATABASE_URL: postgresql://venue_user:venue_pass@postgres-venue:5432/venue_db
+      DATABASE_URL: postgresql://venue_user:venue_pass@postgres-venue:5432/venue_db?sslmode=disable
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: info

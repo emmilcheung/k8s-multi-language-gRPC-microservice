@@ -53,6 +53,18 @@ export interface TicketState {
   error?: string;
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Parse an optional positive integer from a FormData field. Returns undefined if blank. */
+function parseOptionalPositiveInt(raw: string | null): number | undefined {
+  if (!raw || raw.trim() === "") return undefined;
+  const n = parseInt(raw.trim(), 10);
+  if (!Number.isFinite(n) || n < 1) return undefined;
+  return n;
+}
+
+// ─── Mutations ────────────────────────────────────────────────────────────────
+
 export async function createTicket(
   _prev: TicketState,
   formData: FormData
@@ -60,20 +72,29 @@ export async function createTicket(
   const title = formData.get("title") as string;
   const priceRaw = (formData.get("price") as string)?.trim();
   const priceNum = parseFloat(priceRaw);
+  const quota = parseOptionalPositiveInt(formData.get("quota") as string | null);
+  const maxPerUser = parseOptionalPositiveInt(formData.get("maxPerUser") as string | null);
 
   if (!title?.trim()) return { error: "Title is required." };
   if (!priceRaw || isNaN(priceNum) || priceNum <= 0) return { error: "Price must be a positive number." };
+  if (maxPerUser !== undefined && quota !== undefined && maxPerUser > quota) {
+    return { error: "Max per buyer cannot exceed the total capacity." };
+  }
+
+  const reqBody: Record<string, unknown> = { title: title.trim(), price: priceRaw };
+  if (quota !== undefined) reqBody.quota = quota;
+  if (maxPerUser !== undefined) reqBody.maxPerUser = maxPerUser;
 
   const res = await fetch(`${base()}/api/tickets`, {
     method: "POST",
     headers: await authHeaders(),
     // ticket-service requires price as a decimal string (e.g. "25.00"), not a number
-    body: JSON.stringify({ title: title.trim(), price: priceRaw }),
+    body: JSON.stringify(reqBody),
   });
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error?.message ?? "Failed to create ticket." };
+    const errBody = await res.json().catch(() => ({}));
+    return { error: errBody?.error?.message ?? "Failed to create ticket." };
   }
 
   const ticket = await res.json();
@@ -89,20 +110,29 @@ export async function updateTicket(
   const title = formData.get("title") as string;
   const priceRaw = (formData.get("price") as string)?.trim();
   const priceNum = parseFloat(priceRaw);
+  const quota = parseOptionalPositiveInt(formData.get("quota") as string | null);
+  const maxPerUser = parseOptionalPositiveInt(formData.get("maxPerUser") as string | null);
 
   if (!title?.trim()) return { error: "Title is required." };
   if (!priceRaw || isNaN(priceNum) || priceNum <= 0) return { error: "Price must be a positive number." };
+  if (maxPerUser !== undefined && quota !== undefined && maxPerUser > quota) {
+    return { error: "Max per buyer cannot exceed the total capacity." };
+  }
+
+  const reqBody: Record<string, unknown> = { title: title.trim(), price: priceRaw };
+  if (quota !== undefined) reqBody.quota = quota;
+  if (maxPerUser !== undefined) reqBody.maxPerUser = maxPerUser;
 
   const res = await fetch(`${base()}/api/tickets/${ticketId}`, {
     method: "PUT",
     headers: await authHeaders(),
     // ticket-service requires price as a decimal string (e.g. "25.00"), not a number
-    body: JSON.stringify({ title: title.trim(), price: priceRaw }),
+    body: JSON.stringify(reqBody),
   });
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error?.message ?? "Failed to update ticket." };
+    const errBody = await res.json().catch(() => ({}));
+    return { error: errBody?.error?.message ?? "Failed to update ticket." };
   }
 
   revalidatePath(`/tickets/${ticketId}`);

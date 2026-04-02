@@ -81,7 +81,10 @@ export default async function TicketDetailPage({ params }: Props) {
   const updateAction = updateTicket.bind(null, ticketId);
 
   // GA max-per-order: use ticket.quota if available, capped at 10, default 1.
-  const gaMaxQuantity = ticket.quota ? Math.min(ticket.quota, 10) : 1;
+  // GA max-per-order: honour maxPerUser if set; fall back to quota cap at 10; default 1.
+  const gaMaxQuantity = ticket.quota
+    ? Math.min(ticket.maxPerUser ?? ticket.quota, Math.min(ticket.quota, 10))
+    : 1;
 
   return (
     <div className="flex flex-col gap-8 max-w-4xl mx-auto">
@@ -145,6 +148,31 @@ export default async function TicketDetailPage({ params }: Props) {
               Secure purchase
             </span>
           </div>
+
+          {/* GA quota availability bar */}
+          {ticket.quota != null && ticket.quota > 1 && (
+            <div className="flex flex-col gap-2 pt-1">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Availability</span>
+                <span className="font-medium">
+                  {Math.max(0, ticket.quota - (ticket.reserved ?? 0) - (ticket.sold ?? 0))} / {ticket.quota} remaining
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-primary/70 transition-all"
+                  style={{
+                    width: `${Math.min(100, (((ticket.reserved ?? 0) + (ticket.sold ?? 0)) / ticket.quota) * 100)}%`,
+                  }}
+                />
+              </div>
+              {ticket.maxPerUser != null && ticket.maxPerUser > 1 && (
+                <p className="text-xs text-muted-foreground">
+                  Max {ticket.maxPerUser} per order
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right — action panel */}
@@ -157,6 +185,8 @@ export default async function TicketDetailPage({ params }: Props) {
                   action={updateAction}
                   defaultTitle={ticket.title}
                   defaultPrice={ticket.price}
+                  defaultQuota={ticket.quota}
+                  defaultMaxPerUser={ticket.maxPerUser}
                   submitLabel="Update Ticket"
                 />
               ) : (

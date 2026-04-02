@@ -16,6 +16,8 @@ export interface Ticket {
   reserved?: number;
   quota?: number;
   sold?: number;
+  /** Maximum units a single buyer can reserve per order */
+  maxPerUser?: number;
   /** CP-13: optional seating plan UUID — if set, this is a seated ticket */
   seatingPlanId?: string | null;
   version: number;
@@ -53,6 +55,20 @@ export interface Section {
   capacity: number;
 }
 
+/** Per-section node entry in the seating plan layout JSON blob. */
+export interface LayoutNode {
+  /** Matches a Section.id — used to correlate canvas position with the section record. */
+  id: string;
+  position: { x: number; y: number };
+  data: {
+    /**
+     * rowOffsets maps row index (stringified) → x-pixel offset relative to the
+     * section node's origin.  Used to stagger/curve rows in SEATED sections.
+     */
+    rowOffsets?: Record<string, number>;
+  };
+}
+
 /** A seating plan from venue-service GET /api/seating-plans/:id */
 export interface SeatingPlan {
   id: string;
@@ -63,6 +79,14 @@ export interface SeatingPlan {
   status: "draft" | "active" | "inactive";
   holdTtlSec: number;
   maxSeatsPerOrder: number;
+  /**
+   * layoutJson is the persisted canvas state for the drag-and-drop seating plan editor.
+   * Populated by PATCH /api/seating-plans/:id/layout.
+   */
+  layoutJson?: {
+    nodes: LayoutNode[];
+    viewport?: { x: number; y: number; zoom: number };
+  };
   version: number;
   sections?: Section[];
 }

@@ -2,6 +2,7 @@ package reconciler_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -34,6 +35,9 @@ func (s *stubPlanRepo) ListActivePlans(_ context.Context) ([]*repository.Seating
 func (s *stubPlanRepo) AttachTicket(_ context.Context, _, _ string, _ int) error  { return nil }
 func (s *stubPlanRepo) Activate(_ context.Context, _ string, _ int) error         { return nil }
 func (s *stubPlanRepo) Update(_ context.Context, _ *repository.SeatingPlan) error { return nil }
+func (s *stubPlanRepo) SaveLayout(_ context.Context, _, _ string, _ json.RawMessage) error {
+	return nil
+}
 
 // stubSectionLister is a minimal in-memory SectionLister for unit tests.
 type stubSectionLister struct {
