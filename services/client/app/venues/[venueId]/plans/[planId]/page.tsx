@@ -6,11 +6,12 @@ import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
-import { createSection } from "@/app/actions/venues";
+import { createSection, activatePlan } from "@/app/actions/venues";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { SectionForm } from "@/components/section-form";
 import { SeatingPlanCanvas } from "@/components/seating-plan-canvas";
+import { ActivatePlanButton } from "@/components/activate-plan-button";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -54,6 +55,8 @@ export default async function PlanDetailPage({ params }: Props) {
 
   // Bind planId + venueId into the createSection Server Action.
   const addSectionAction = createSection.bind(null, planId, venueId);
+  // Bind planId + venueId into the activatePlan Server Action.
+  const activatePlanAction = activatePlan.bind(null, planId, venueId);
 
   const isDraft = plan.status === "draft";
 
@@ -153,14 +156,14 @@ export default async function PlanDetailPage({ params }: Props) {
                 <div className="flex-1 min-w-0">
                   <p className="font-medium truncate">{s.name}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {s.sectionType} · {s.rowCount}R × {s.seatsPerRow}C · {s.capacity} seats
+                    {s.type.toUpperCase()} · {s.rowCount}R × {s.columnCount}C
                   </p>
                 </div>
-                <Badge className={s.sectionType === "SEATED"
+                <Badge className={s.type === "seated"
                   ? "bg-primary/15 text-primary border-primary/20 text-xs"
                   : "bg-muted/40 text-muted-foreground border-muted/20 text-xs"
                 }>
-                  {s.sectionType}
+                  {s.type.toUpperCase()}
                 </Badge>
               </div>
             ))}
@@ -168,13 +171,24 @@ export default async function PlanDetailPage({ params }: Props) {
         )}
       </div>
 
-      {/* Activate hint */}
+      {/* Activate section */}
       {isDraft && sections.length > 0 && !plan.ticketId && (
         <div className="glass rounded-2xl p-5 flex flex-col gap-2 border border-yellow-500/20">
           <p className="font-semibold text-sm text-yellow-400">Ready to activate?</p>
           <p className="text-xs text-muted-foreground">
-            First attach this plan to a ticket using the Plan ID above, then activate it via the ticket detail page.
+            First attach this plan to a ticket using the Plan ID above, then return here to activate.
           </p>
+        </div>
+      )}
+      {isDraft && sections.length > 0 && !!plan.ticketId && (
+        <div className="glass rounded-2xl p-5 flex flex-col gap-3 border border-emerald-500/20">
+          <div className="flex flex-col gap-1">
+            <p className="font-semibold text-sm text-emerald-400">Activate this plan</p>
+            <p className="text-xs text-muted-foreground">
+              Once activated, the layout is locked and seats become available for purchase. This cannot be undone.
+            </p>
+          </div>
+          <ActivatePlanButton action={activatePlanAction} />
         </div>
       )}
     </div>

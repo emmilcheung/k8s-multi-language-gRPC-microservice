@@ -20,7 +20,7 @@ beforeAll(() => {
   };
 
   // React Flow also reads SVGGeometryElement.getTotalLength in some edge paths.
-  if (!SVGGeometryElement.prototype.getTotalLength) {
+  if (typeof SVGGeometryElement !== "undefined" && !SVGGeometryElement.prototype.getTotalLength) {
     SVGGeometryElement.prototype.getTotalLength = () => 0;
   }
 });
@@ -35,19 +35,17 @@ vi.mock("@/app/actions/venues", () => ({
 const seatedSection: Section = {
   id: "sec-1",
   name: "Orchestra",
-  sectionType: "SEATED",
+  type: "seated",
   rowCount: 3,
-  seatsPerRow: 10,
-  capacity: 30,
+  columnCount: 10,
 };
 
 const gaSection: Section = {
   id: "sec-2",
   name: "General Admission",
-  sectionType: "GA",
+  type: "ga",
   rowCount: 0,
-  seatsPerRow: 0,
-  capacity: 200,
+  columnCount: 200,
 };
 
 // ── Tests ──────────────────────────────────────────────────────────────────────

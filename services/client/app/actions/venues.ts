@@ -180,6 +180,10 @@ export async function createSection(
     return { error: "Row count and column count must each be at least 1 for seated sections." };
   }
 
+  if (type === "ga" && columnCount < 1) {
+    return { error: "GA sections must have a capacity of at least 1." };
+  }
+
   const res = await fetch(`${base()}/api/seating-plans/${planId}/sections`, {
     method: "POST",
     headers: await authHeaders(),
@@ -223,4 +227,36 @@ export async function saveLayout(
   }
 
   return {};
+}
+
+/**
+ * Activates a draft seating plan.
+ * POST /api/seating-plans/:planId/activate — Kong → venue-service.
+ *
+ * Pre-conditions (enforced by the service):
+ *   - Plan must be in "draft" status.
+ *   - Plan must have a ticketId set.
+ *   - Plan must have at least one section.
+ */
+export async function activatePlan(
+  planId: string,
+  venueId: string,
+  _prev: PlanState,
+  _formData: FormData
+): Promise<PlanState> {
+  if (!planId) return { error: "planId is required." };
+
+  const res = await fetch(`${base()}/api/seating-plans/${planId}/activate`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({}),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { error: body?.error ?? "Failed to activate plan." };
+  }
+
+  revalidatePath(`/venues/${venueId}/plans/${planId}`);
+  redirect(`/venues/${venueId}/plans/${planId}`);
 }

@@ -48,11 +48,13 @@ export interface AvailabilitySnapshot {
 /** A seat section from venue-service GET /api/seating-plans/:id */
 export interface Section {
   id: string;
+  planId?: string;
   name: string;
-  sectionType: "SEATED" | "GA";
+  /** Matches the API field "type": "seated" | "ga" (lowercase). */
+  type: "seated" | "ga";
   rowCount: number;
-  seatsPerRow: number;
-  capacity: number;
+  /** For seated sections: number of columns per row. For GA sections: total capacity. */
+  columnCount: number;
 }
 
 /** Per-section node entry in the seating plan layout JSON blob. */

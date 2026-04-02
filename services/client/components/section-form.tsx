@@ -124,11 +124,24 @@ export function SectionForm({ action }: SectionFormProps) {
           </div>
         )}
 
-        {/* GA: row and column count hidden (server validates 0 for GA) */}
+        {/* GA: capacity input (maps to columnCount); rowCount is hidden 0 */}
         {sectionType === "ga" && (
           <>
             <input type="hidden" name="rowCount" value="0" />
-            <input type="hidden" name="columnCount" value="0" />
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="columnCount" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Capacity
+              </Label>
+              <Input
+                id="columnCount"
+                name="columnCount"
+                type="number"
+                min="1"
+                step="1"
+                required
+                placeholder="500"
+              />
+            </div>
           </>
         )}
 

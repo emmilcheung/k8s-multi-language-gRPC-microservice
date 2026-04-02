@@ -246,14 +246,14 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
     // fall back to iterating the snapshot in insertion order if needed.
     const seatEntries = Object.entries(availability?.seatMap ?? {});
 
-    // Build rows × seatsPerRow grid by index, filling seat IDs from the map.
-    const totalSeats = activeSection.rowCount * activeSection.seatsPerRow;
+    // Build rows × columnCount grid by index, filling seat IDs from the map.
+    const totalSeats = activeSection.rowCount * activeSection.columnCount;
     const relevantSeats = seatEntries.slice(0, totalSeats);
 
     for (let r = 0; r < activeSection.rowCount; r++) {
       const row: SeatCell[] = [];
-      for (let s = 0; s < activeSection.seatsPerRow; s++) {
-        const idx = r * activeSection.seatsPerRow + s;
+      for (let s = 0; s < activeSection.columnCount; s++) {
+        const idx = r * activeSection.columnCount + s;
         if (idx >= relevantSeats.length) break;
         const [id, entry] = relevantSeats[idx];
         row.push({
@@ -291,7 +291,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
               )}
             >
               {sec.name}
-              <span className="ml-1.5 text-xs opacity-60">{sec.sectionType}</span>
+              <span className="ml-1.5 text-xs opacity-60">{sec.type.toUpperCase()}</span>
             </button>
           ))}
         </div>
@@ -383,7 +383,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
           ) : (
             <div
               className="grid gap-1 overflow-auto"
-              style={{ gridTemplateColumns: `repeat(${activeSection?.seatsPerRow ?? 10}, minmax(28px, 1fr))` }}
+              style={{ gridTemplateColumns: `repeat(${activeSection?.columnCount ?? 10}, minmax(28px, 1fr))` }}
             >
               {grid.flat().map((seat) => {
                 const isSelected = selectedIds.has(seat.id);

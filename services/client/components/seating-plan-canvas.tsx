@@ -60,7 +60,7 @@ const SectionNode = React.memo(function SectionNode({
   data,
 }: NodeProps<Node<SectionNodeData>>) {
   const { section, isDraft, rowOffsets, onRowOffsetChange } = data;
-  const isSeated = section.sectionType === "SEATED";
+  const isSeated = section.type === "seated";
 
   // ── Per-row drag state ────────────────────────────────────────────────────
   const rowDragRef = useRef<{
@@ -119,7 +119,7 @@ const SectionNode = React.memo(function SectionNode({
             {rowLabel}
           </span>
           <div className="flex gap-px">
-            {Array.from({ length: section.seatsPerRow }, (_, j) => (
+            {Array.from({ length: section.columnCount }, (_, j) => (
               <div
                 key={j}
                 className="w-3.5 h-3.5 rounded-sm bg-primary/30 ring-1 ring-primary/20"
@@ -132,7 +132,7 @@ const SectionNode = React.memo(function SectionNode({
   }, [
     isSeated,
     section.rowCount,
-    section.seatsPerRow,
+    section.columnCount,
     rowOffsets,
     isDraft,
     handleRowPointerDown,
@@ -167,7 +167,7 @@ const SectionNode = React.memo(function SectionNode({
             : "bg-violet-500/15 text-violet-300 border-violet-500/20"
         )}
       >
-        {section.sectionType}
+        {section.type.toUpperCase()}
       </Badge>
 
       {isSeated ? (
@@ -175,15 +175,15 @@ const SectionNode = React.memo(function SectionNode({
       ) : (
         <div className="flex items-center justify-center rounded-lg bg-violet-500/15 ring-1 ring-violet-500/20 h-14 mt-1">
           <p className="text-xs text-violet-300 font-medium">
-            {section.capacity} seats (GA)
-          </p>
+              {section.columnCount > 0 ? `${section.columnCount} seats (GA)` : "GA"}
+            </p>
         </div>
       )}
 
       <p className="text-[10px] text-muted-foreground mt-2 text-right">
         {isSeated
-          ? `${section.rowCount}R × ${section.seatsPerRow}C`
-          : `${section.capacity} cap`}
+          ? `${section.rowCount}R × ${section.columnCount}C`
+          : section.columnCount > 0 ? `${section.columnCount} cap` : "GA"}
       </p>
     </div>
   );
