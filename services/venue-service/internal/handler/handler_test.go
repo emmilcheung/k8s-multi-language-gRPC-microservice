@@ -44,6 +44,7 @@ func (s *stubVenueRepo) Ping(_ context.Context) error { return nil }
 type stubPlanRepo struct {
 	createFn       func(ctx context.Context, p *repository.SeatingPlan) error
 	findByIDFn     func(ctx context.Context, id string) (*repository.SeatingPlan, error)
+	listByVenueFn  func(ctx context.Context, venueID, organizerID string) ([]*repository.SeatingPlan, error)
 	listByTicketFn func(ctx context.Context, ticketID string) ([]*repository.SeatingPlan, error)
 	attachTicketFn func(ctx context.Context, planID, ticketID string, version int) error
 	activateFn     func(ctx context.Context, planID string, version int) error
@@ -55,6 +56,12 @@ func (s *stubPlanRepo) Create(ctx context.Context, p *repository.SeatingPlan) er
 }
 func (s *stubPlanRepo) FindByID(ctx context.Context, id string) (*repository.SeatingPlan, error) {
 	return s.findByIDFn(ctx, id)
+}
+func (s *stubPlanRepo) ListByVenue(ctx context.Context, venueID, organizerID string) ([]*repository.SeatingPlan, error) {
+	if s.listByVenueFn != nil {
+		return s.listByVenueFn(ctx, venueID, organizerID)
+	}
+	return nil, nil
 }
 func (s *stubPlanRepo) ListByTicket(ctx context.Context, ticketID string) ([]*repository.SeatingPlan, error) {
 	return s.listByTicketFn(ctx, ticketID)

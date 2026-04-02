@@ -24,6 +24,7 @@ func NewPlanHandler(planRepo repository.PlanRepository, log *zap.Logger) *PlanHa
 
 // RegisterRoutes attaches seating plan routes to the given Echo group.
 func (h *PlanHandler) RegisterRoutes(g *echo.Group) {
+	g.GET("", h.List)
 	g.POST("", h.Create)
 	g.GET("/:id", h.Get)
 	g.PUT("/:id", h.Update)
@@ -56,6 +57,33 @@ type attachTicketRequest struct {
 // activatePlanRequest is the request body for activating a plan.
 type activatePlanRequest struct {
 	ExpectedVersion int `json:"expectedVersion"`
+}
+
+// List handles GET /api/seating-plans?venueId=<venueId>.
+// Returns all seating plans belonging to the authenticated organizer for the given venue.
+func (h *PlanHandler) List(c echo.Context) error {
+	organizerID := c.Request().Header.Get("X-User-Id")
+	if organizerID == "" {
+		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	venueID := c.QueryParam("venueId")
+	if venueID == "" {
+		return c.JSON(http.StatusUnprocessableEntity, errorResponse("venueId query parameter is required"))
+	}
+
+	plans, err := h.planRepo.ListByVenue(c.Request().Context(), venueID, organizerID)
+	if err != nil {
+		h.log.Error("plan list failed", zap.Error(err), zap.String("venueId", venueID))
+		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+	}
+
+	// Always return an array, never null.
+	if plans == nil {
+		plans = []*repository.SeatingPlan{}
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{"plans": plans})
 }
 
 // Create handles POST /api/seating-plans.

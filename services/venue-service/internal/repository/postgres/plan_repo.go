@@ -66,6 +66,37 @@ func (r *PlanRepo) FindByID(ctx context.Context, id string) (*repository.Seating
 	return p, nil
 }
 
+// ListByVenue returns all seating plans for the given venue belonging to the organizer,
+// ordered newest-first.
+func (r *PlanRepo) ListByVenue(ctx context.Context, venueID, organizerID string) ([]*repository.SeatingPlan, error) {
+	const q = `
+		SELECT id, venue_id, COALESCE(ticket_id::text, ''), organizer_id, name,
+		       status, hold_ttl_sec, max_seats_per_order, layout_json, version, created_at, updated_at
+		FROM seating_plans
+		WHERE venue_id = $1 AND organizer_id = $2
+		ORDER BY created_at DESC`
+
+	rows, err := r.pool.Query(ctx, q, venueID, organizerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var plans []*repository.SeatingPlan
+	for rows.Next() {
+		p := &repository.SeatingPlan{}
+		if err := rows.Scan(
+			&p.ID, &p.VenueID, &p.TicketID, &p.OrganizerID, &p.Name,
+			&p.Status, &p.HoldTTLSec, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version,
+			&p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		plans = append(plans, p)
+	}
+	return plans, rows.Err()
+}
+
 // ListActivePlans returns all seating plans with status = 'active'.
 // Used by the Redis reconciler to re-seed seat state after a Redis flush.
 func (r *PlanRepo) ListActivePlans(ctx context.Context) ([]*repository.SeatingPlan, error) {

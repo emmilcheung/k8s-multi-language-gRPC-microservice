@@ -26,6 +26,9 @@ func (s *stubPlanRepo) Create(_ context.Context, _ *repository.SeatingPlan) erro
 func (s *stubPlanRepo) FindByID(_ context.Context, _ string) (*repository.SeatingPlan, error) {
 	return nil, repository.ErrPlanNotFound
 }
+func (s *stubPlanRepo) ListByVenue(_ context.Context, _, _ string) ([]*repository.SeatingPlan, error) {
+	return nil, nil
+}
 func (s *stubPlanRepo) ListByTicket(_ context.Context, _ string) ([]*repository.SeatingPlan, error) {
 	return nil, nil
 }

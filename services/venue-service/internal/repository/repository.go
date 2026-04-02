@@ -174,6 +174,7 @@ type VenueRepository interface {
 type PlanRepository interface {
 	Create(ctx context.Context, p *SeatingPlan) error
 	FindByID(ctx context.Context, id string) (*SeatingPlan, error)
+	ListByVenue(ctx context.Context, venueID, organizerID string) ([]*SeatingPlan, error)
 	ListByTicket(ctx context.Context, ticketID string) ([]*SeatingPlan, error)
 	ListActivePlans(ctx context.Context) ([]*SeatingPlan, error)
 	AttachTicket(ctx context.Context, planID, ticketID string, expectedVersion int) error

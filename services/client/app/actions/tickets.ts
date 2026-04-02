@@ -158,6 +158,15 @@ export async function attachSeatingPlan(
   if (!planId) return { error: "Seating plan ID is required." };
   if (!UUID_RE.test(planId)) return { error: "Seating plan ID must be a valid UUID." };
 
+  // Verify the seating plan exists and belongs to the caller before linking it.
+  const planRes = await fetch(`${base()}/api/seating-plans/${planId}`, {
+    method: "GET",
+    headers: await authHeaders(),
+  });
+  if (!planRes.ok) {
+    return { error: "Seating plan not found or you do not have access to it." };
+  }
+
   const res = await fetch(`${base()}/api/tickets/${ticketId}/seating-plan`, {
     method: "PUT",
     headers: await authHeaders(),
