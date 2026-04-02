@@ -251,6 +251,7 @@ services:
           - ~/api/seating-plans/[^/]+/price-tiers$
           - ~/api/seating-plans/[^/]+/attach-ticket$
           - ~/api/seating-plans/[^/]+/activate$
+          - ~/api/seating-plans/[^/]+/layout$
           - ~/api/seating-plans/[^/]+/holds$
           - ~/api/seating-plans/[^/]+/holds/[^/]+$
         methods: [POST, PUT, PATCH, DELETE]
