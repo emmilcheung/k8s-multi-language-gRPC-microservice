@@ -4,7 +4,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { base, authHeaders } from "@/lib/server-utils";
-import type { SeatingPlan } from "@/lib/types";
+import type { SeatingPlan, PriceTier, VenueSection } from "@/lib/types";
 
 // ─── Venue types ─────────────────────────────────────────────────────────────
 
@@ -94,6 +94,90 @@ export async function createVenue(
   redirect(`/venues/${venue.id}`);
 }
 
+// ─── Venue section template mutations ────────────────────────────────────────
+
+/**
+ * Fetches the template sections for a venue.
+ * GET /api/venues/:venueId/sections — Kong → venue-service.
+ */
+export async function fetchVenueSections(venueId: string): Promise<VenueSection[]> {
+  const res = await fetch(`${base()}/api/venues/${venueId}/sections`, {
+    cache: "no-store",
+    headers: await authHeaders(),
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data?.sections ?? []) as VenueSection[];
+}
+
+/**
+ * Adds a template section to a venue.
+ * POST /api/venues/:venueId/sections — Kong → venue-service.
+ */
+export async function createVenueSection(
+  venueId: string,
+  _prev: VenueState,
+  formData: FormData
+): Promise<VenueState> {
+  const name = (formData.get("name") as string)?.trim();
+  const type = (formData.get("type") as string)?.trim();
+  const rowCountRaw = (formData.get("rowCount") as string)?.trim();
+  const columnCountRaw = (formData.get("columnCount") as string)?.trim();
+
+  if (!name) return { error: "Section name is required." };
+  if (type !== "seated" && type !== "ga") return { error: "Type must be 'seated' or 'ga'." };
+
+  const rowCount = rowCountRaw ? parseInt(rowCountRaw, 10) : 0;
+  const columnCount = columnCountRaw ? parseInt(columnCountRaw, 10) : 0;
+
+  if (type === "seated" && (rowCount < 1 || columnCount < 1)) {
+    return { error: "Seated sections require at least 1 row and 1 column." };
+  }
+  if (type === "ga" && columnCount < 1) {
+    return { error: "GA sections require capacity >= 1." };
+  }
+
+  const res = await fetch(`${base()}/api/venues/${venueId}/sections`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({ name, type, rowCount, columnCount }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { error: body?.error ?? "Failed to add section." };
+  }
+
+  revalidatePath(`/venues/${venueId}`);
+  redirect(`/venues/${venueId}`);
+}
+
+/**
+ * Removes a template section from a venue.
+ * DELETE /api/venues/:venueId/sections/:sectionId — Kong → venue-service.
+ *
+ * Designed for `.bind(null, venueId, sectionId)` so it becomes a form action.
+ */
+export async function deleteVenueSection(
+  venueId: string,
+  sectionId: string,
+  _prev: VenueState,
+  _formData: FormData
+): Promise<VenueState> {
+  const res = await fetch(`${base()}/api/venues/${venueId}/sections/${sectionId}`, {
+    method: "DELETE",
+    headers: await authHeaders(),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { error: body?.error ?? "Failed to remove section." };
+  }
+
+  revalidatePath(`/venues/${venueId}`);
+  redirect(`/venues/${venueId}`);
+}
+
 // ─── Seating plan mutations ───────────────────────────────────────────────────
 
 /**
@@ -118,6 +202,24 @@ export async function fetchPlansByVenue(venueId: string): Promise<SeatingPlan[]>
   // API returns { plans: [...] } or array directly
   if (Array.isArray(data)) return data as SeatingPlan[];
   return (data?.plans ?? []) as SeatingPlan[];
+}
+
+/**
+ * Fetches all seating plans the organizer has created across all their venues.
+ * Calls GET /api/venues to get the list of venues, then GET /api/seating-plans?venueId=X
+ * for each venue and merges the results.
+ *
+ * Used by the ticket detail page to populate the "Attach seating plan" dropdown.
+ */
+export async function fetchAllMyPlans(): Promise<SeatingPlan[]> {
+  const venues = await fetchMyVenues();
+  if (venues.length === 0) return [];
+
+  const perVenue = await Promise.all(
+    venues.map((v) => fetchPlansByVenue(v.id))
+  );
+
+  return perVenue.flat();
 }
 
 /**
@@ -156,6 +258,53 @@ export async function createSeatingPlan(
 }
 
 /**
+ * Fetches all price tiers for a seating plan.
+ * GET /api/seating-plans/:planId/price-tiers — Kong → venue-service.
+ */
+export async function fetchPriceTiers(planId: string): Promise<PriceTier[]> {
+  const res = await fetch(`${base()}/api/seating-plans/${planId}/price-tiers`, {
+    cache: "no-store",
+    headers: await authHeaders(),
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data?.priceTiers ?? []) as PriceTier[];
+}
+
+/**
+ * Creates a price tier inside a seating plan.
+ * POST /api/seating-plans/:planId/price-tiers — Kong → venue-service.
+ */
+export async function createPriceTier(
+  planId: string,
+  venueId: string,
+  _prev: PlanState,
+  formData: FormData
+): Promise<PlanState> {
+  const name = (formData.get("tierName") as string)?.trim();
+  const price = (formData.get("tierPrice") as string)?.trim();
+
+  if (!name) return { error: "Price tier name is required." };
+  if (!price || isNaN(parseFloat(price)) || parseFloat(price) < 0) {
+    return { error: "Price must be a valid non-negative number." };
+  }
+
+  const res = await fetch(`${base()}/api/seating-plans/${planId}/price-tiers`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({ name, price }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { error: body?.error ?? "Failed to create price tier." };
+  }
+
+  revalidatePath(`/venues/${venueId}/plans/${planId}`);
+  redirect(`/venues/${venueId}/plans/${planId}`);
+}
+
+/**
  * Creates a section inside a seating plan.
  * POST /api/seating-plans/:planId/sections — Kong → venue-service.
  */
@@ -169,6 +318,7 @@ export async function createSection(
   const type = (formData.get("type") as string)?.trim();
   const rowCountRaw = (formData.get("rowCount") as string)?.trim();
   const columnCountRaw = (formData.get("columnCount") as string)?.trim();
+  const priceTierId = (formData.get("priceTierId") as string)?.trim() ?? "";
 
   if (!name) return { error: "Section name is required." };
   if (type !== "seated" && type !== "ga") return { error: "Type must be 'seated' or 'ga'." };
@@ -187,7 +337,7 @@ export async function createSection(
   const res = await fetch(`${base()}/api/seating-plans/${planId}/sections`, {
     method: "POST",
     headers: await authHeaders(),
-    body: JSON.stringify({ name, type, rowCount, columnCount }),
+    body: JSON.stringify({ name, type, rowCount, columnCount, priceTierId }),
   });
 
   if (!res.ok) {
@@ -227,6 +377,33 @@ export async function saveLayout(
   }
 
   return {};
+}
+
+/**
+ * Deactivates an active seating plan, stopping new purchases.
+ * POST /api/seating-plans/:planId/deactivate — Kong → venue-service.
+ */
+export async function deactivatePlan(
+  planId: string,
+  venueId: string,
+  _prev: PlanState,
+  _formData: FormData
+): Promise<PlanState> {
+  if (!planId) return { error: "planId is required." };
+
+  const res = await fetch(`${base()}/api/seating-plans/${planId}/deactivate`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({}),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { error: body?.error ?? "Failed to deactivate plan." };
+  }
+
+  revalidatePath(`/venues/${venueId}/plans/${planId}`);
+  redirect(`/venues/${venueId}/plans/${planId}`);
 }
 
 /**
