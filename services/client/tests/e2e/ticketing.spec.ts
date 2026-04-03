@@ -174,9 +174,22 @@ test.describe("tickets", () => {
     await expect(page.getByRole("heading", { level: 1 })).toContainText(title);
     await expect(page.getByText("$75.00").first()).toBeVisible();
 
-    // Ticket card appears on home page
-    await page.goto("/");
-    await expect(page.getByText(title)).toBeVisible();
+    // Ticket card appears on home page.
+    // Poll in case the ISR fetch cache hasn't been busted yet, and wait for the
+    // "Available Tickets" heading so RSC streaming finishes before we check the title.
+    await expect
+      .poll(
+        async () => {
+          await page.goto("/");
+          await page
+            .getByRole("heading", { name: /available tickets/i })
+            .waitFor({ timeout: 5000 })
+            .catch(() => {});
+          return page.getByText(title).isVisible();
+        },
+        { timeout: 15000, intervals: [2000, 3000] }
+      )
+      .toBe(true);
   });
 
   test("seller sees edit form on own ticket, not purchase button", async ({ page }) => {
@@ -374,14 +387,25 @@ test.describe("orders", () => {
   test("ticket shows 'Already Reserved' after order is created", async ({ page }) => {
     const { ticketUrl } = await setupPurchase(page);
 
-    // The ticket detail page is server-rendered: it reads ticket.orderId from ticket-service.
-    // ticket-service receives the orderId via Kafka (orders.order.created), which has variable
+    // The ticket detail page is server-rendered: it reads ticket.reserved from ticket-service.
+    // ticket-service receives the reservation via Kafka (orders.order.created), which has variable
     // propagation latency. We poll by reloading the page until the reservation is reflected,
     // rather than relying on a single load within a fixed timeout.
+    //
+    // IMPORTANT: Next.js App Router streams RSC content after the initial HTML.
+    // page.goto() resolves (load event) before streaming completes — the loading.tsx
+    // skeleton is served first, and the real content (with the button) arrives later.
+    // We must wait for the h1 heading (absent in the skeleton) before checking the button.
     await expect
       .poll(
         async () => {
           await page.goto(ticketUrl);
+          // Wait for streaming RSC content to replace the loading skeleton.
+          // The h1 heading only appears in the real page, not the skeleton.
+          await page
+            .getByRole("heading", { level: 1 })
+            .waitFor({ timeout: 5000 })
+            .catch(() => {});
           return page.getByRole("button", { name: /already reserved/i }).isVisible();
         },
         { timeout: 30000, intervals: [2000, 3000, 5000] }
@@ -430,35 +454,62 @@ test.describe("seating plan", () => {
 
     await createTicket(page, `Seating Plan Test ${Date.now()}`, "50.00");
 
-    // The AttachSeatingPlanForm is only rendered for the ticket owner.
-    // It contains a "Seating Plan" heading (p.font-semibold) and an "Attach Seating Plan" button.
+    // AttachSeatingPlanForm is only rendered for the ticket owner.
+    // With no draft plans created yet the organiser is guided to the venue manager.
     await expect(page.getByText("Seating Plan").first()).toBeVisible();
+    await expect(page.getByText(/no draft seating plans/i)).toBeVisible();
     await expect(
-      page.getByRole("button", { name: /attach seating plan/i })
+      page.getByRole("link", { name: /go to venue manager/i })
     ).toBeVisible();
-    // The label for the plan ID input must be present
-    await expect(page.getByLabel("Seating Plan ID")).toBeVisible();
   });
 
-  test("attach seating plan form shows error for unknown plan UUID", async ({ page }) => {
-    const email = uniqueEmail("org-attach-err");
+  test("organizer can create a plan and attach it to a ticket", async ({ page }) => {
+    const email = uniqueEmail("org-attach");
     await signup(page, email);
 
-    await createTicket(page, `Attach Error Test ${Date.now()}`, "30.00");
+    // 1. Create a venue
+    await page.goto("/venues/new");
+    await page.getByLabel(/venue name/i).fill("Attach Test Venue");
+    await page.getByLabel(/total capacity/i).fill("200");
+    await page.getByLabel(/timezone/i).fill("America/New_York");
+    await page.getByRole("button", { name: /create venue/i }).click();
+    await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
 
-    // The input has a UUID pattern attribute — remove it so the fake UUID can be submitted
-    await page.locator('#planId').evaluate((el: HTMLInputElement) => {
-      el.removeAttribute("required");
-      el.removeAttribute("pattern");
-    });
+    // 2. Add a venue layout section
+    await page.getByLabel(/section name/i).fill("Floor A");
+    // rowCount and columnCount fields appear when type=seated (the default)
+    await page.locator('#vs-rows').fill("5");
+    await page.locator('#vs-cols').fill("10");
+    await page.getByRole("button", { name: /add section/i }).click();
+    await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
+    await expect(page.getByText("Floor A")).toBeVisible();
 
-    const fakeUUID = "00000000-0000-0000-0000-000000000000";
-    await page.getByLabel("Seating Plan ID").fill(fakeUUID);
+    // 3. Create a seating plan for this venue
+    await page.getByRole("link", { name: /new plan/i }).click();
+    await page.waitForURL(/\/venues\/[0-9a-f-]+\/plans\/new$/);
+    await page.getByLabel(/plan name/i).fill("April Show Plan");
+    await page.getByRole("button", { name: /create seating plan/i }).click();
+    await page.waitForURL(/\/venues\/[0-9a-f-]+\/plans\/[0-9a-f-]+$/);
+
+    // Plan auto-provisions sections from the venue template
+    await expect(page.getByText("Floor A")).toBeVisible();
+
+    // 4. Create a ticket and navigate to its detail page
+    await createTicket(page, `Attach Test ${Date.now()}`, "55.00");
+
+    // 5. The seating plan panel now shows the plan in the dropdown
+    await expect(page.getByText("Seating Plan").first()).toBeVisible();
+    await expect(page.locator('#planId')).toBeVisible();
+
+    // 6. Select the plan and attach it (there should be exactly one non-disabled option)
+    await page.locator('#planId').selectOption({ index: 1 });
     await page.getByRole("button", { name: /attach seating plan/i }).click();
 
-    // Server action returns an error; AttachSeatingPlanForm renders it in role="alert"
-    const alert = page.locator('[role="alert"]:not([id="__next-route-announcer__"])');
-    await expect(alert).toBeVisible({ timeout: 10000 });
+    // 7. After redirect, the panel shows the attached plan ID and a Detach button
+    await expect(page.getByText(/attached plan/i)).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.getByRole("button", { name: /detach seating plan/i })
+    ).toBeVisible();
   });
 
   test("GA ticket with default quota does not show quantity stepper", async ({ page }) => {

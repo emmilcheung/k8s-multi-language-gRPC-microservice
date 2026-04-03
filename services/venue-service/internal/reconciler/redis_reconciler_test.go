@@ -37,6 +37,7 @@ func (s *stubPlanRepo) ListActivePlans(_ context.Context) ([]*repository.Seating
 }
 func (s *stubPlanRepo) AttachTicket(_ context.Context, _, _ string, _ int) error  { return nil }
 func (s *stubPlanRepo) Activate(_ context.Context, _ string, _ int) error         { return nil }
+func (s *stubPlanRepo) Deactivate(_ context.Context, _, _ string) error           { return nil }
 func (s *stubPlanRepo) Update(_ context.Context, _ *repository.SeatingPlan) error { return nil }
 func (s *stubPlanRepo) SaveLayout(_ context.Context, _, _ string, _ json.RawMessage) error {
 	return nil

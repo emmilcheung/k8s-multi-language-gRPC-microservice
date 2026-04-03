@@ -51,17 +51,17 @@ func TestHold_ShouldSupportHoldAndReleaseCycle(t *testing.T) {
 	// ── Availability snapshot reflects HELD status ────────────────────────────
 	snap, err := mgr.GetAvailability(ctx, planID)
 	require.NoError(t, err)
-	assert.Equal(t, "HELD", snap.SeatMap[seatIDs[0]])
-	assert.Equal(t, "HELD", snap.SeatMap[seatIDs[1]])
-	assert.Equal(t, "AVAILABLE", snap.SeatMap[seatIDs[2]])
+	assert.Equal(t, "held", snap.SeatMap[seatIDs[0]].Status)
+	assert.Equal(t, "held", snap.SeatMap[seatIDs[1]].Status)
+	assert.Equal(t, "available", snap.SeatMap[seatIDs[2]].Status)
 
 	// ── Release hold ──────────────────────────────────────────────────────────
 	require.NoError(t, mgr.ReleaseHold(ctx, planID, userID, seatIDs[:2]))
 
 	snap2, err := mgr.GetAvailability(ctx, planID)
 	require.NoError(t, err)
-	assert.Equal(t, "AVAILABLE", snap2.SeatMap[seatIDs[0]], "seat should be available after release")
-	assert.Equal(t, "AVAILABLE", snap2.SeatMap[seatIDs[1]], "seat should be available after release")
+	assert.Equal(t, "available", snap2.SeatMap[seatIDs[0]].Status, "seat should be available after release")
+	assert.Equal(t, "available", snap2.SeatMap[seatIDs[1]].Status, "seat should be available after release")
 
 	// ── User 2 can now hold the released seats ────────────────────────────────
 	result2, err := mgr.HoldSeats(ctx, planID, user2ID, sessionID, seatIDs[:1])
@@ -155,8 +155,8 @@ func TestHold_ShouldSweepExpiredHolds(t *testing.T) {
 
 	snap, err := mgr.GetAvailability(ctx, planID)
 	require.NoError(t, err)
-	assert.Equal(t, "AVAILABLE", snap.SeatMap[seatIDs[0]],
-		"seat should be AVAILABLE after sweep")
+	assert.Equal(t, "available", snap.SeatMap[seatIDs[0]].Status,
+		"seat should be available after sweep")
 }
 
 // TestHold_ConcurrentHoldContention verifies that only one of N concurrent

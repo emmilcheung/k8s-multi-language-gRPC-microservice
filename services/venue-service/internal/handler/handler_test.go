@@ -78,9 +78,83 @@ func (s *stubPlanRepo) Update(ctx context.Context, p *repository.SeatingPlan) er
 func (s *stubPlanRepo) ListActivePlans(_ context.Context) ([]*repository.SeatingPlan, error) {
 	return nil, nil
 }
+func (s *stubPlanRepo) Deactivate(_ context.Context, _, _ string) error { return nil }
 func (s *stubPlanRepo) SaveLayout(_ context.Context, _, _ string, _ json.RawMessage) error {
 	return nil
 }
+
+// stubSectionRepo satisfies repository.SectionRepository; override methods as needed.
+type stubSectionRepo struct {
+	listByPlanFn func(ctx context.Context, planID string) ([]*repository.Section, error)
+}
+
+func (s *stubSectionRepo) CreateSection(_ context.Context, _ *repository.Section) error { return nil }
+func (s *stubSectionRepo) FindSectionByID(_ context.Context, _ string) (*repository.Section, error) {
+	return nil, repository.ErrSectionNotFound
+}
+func (s *stubSectionRepo) ListSectionsByPlan(ctx context.Context, planID string) ([]*repository.Section, error) {
+	if s.listByPlanFn != nil {
+		return s.listByPlanFn(ctx, planID)
+	}
+	return nil, nil
+}
+func (s *stubSectionRepo) UpsertSeat(_ context.Context, _ *repository.Seat) error { return nil }
+func (s *stubSectionRepo) BulkInsertSeats(_ context.Context, _, _, _, _ string, _, _ int) error {
+	return nil
+}
+func (s *stubSectionRepo) ProvisionFromVenue(_ context.Context, _, _ string) (int, error) {
+	return 0, nil
+}
+func (s *stubSectionRepo) FindSeatsBySection(_ context.Context, _ string) ([]*repository.Seat, error) {
+	return nil, nil
+}
+func (s *stubSectionRepo) FindSeatsByIDs(_ context.Context, _ []string) ([]*repository.Seat, error) {
+	return nil, nil
+}
+func (s *stubSectionRepo) GetAvailableSeatsInSection(_ context.Context, _ string) ([]*repository.Seat, error) {
+	return nil, nil
+}
+func (s *stubSectionRepo) HoldSeats(_ context.Context, _ []string, _ string, _ time.Time) error {
+	return nil
+}
+func (s *stubSectionRepo) ReleaseHold(_ context.Context, _ []string, _ string) error  { return nil }
+func (s *stubSectionRepo) ReserveSeats(_ context.Context, _ []string, _ string) error { return nil }
+func (s *stubSectionRepo) ReleaseReservedSeats(_ context.Context, _ []string) error   { return nil }
+func (s *stubSectionRepo) SellSeats(_ context.Context, _ []string) error              { return nil }
+
+// nopSectionRepo satisfies repository.SectionRepository with no-ops.
+type nopSectionRepo struct{}
+
+func (n *nopSectionRepo) CreateSection(_ context.Context, _ *repository.Section) error { return nil }
+func (n *nopSectionRepo) FindSectionByID(_ context.Context, _ string) (*repository.Section, error) {
+	return nil, repository.ErrSectionNotFound
+}
+func (n *nopSectionRepo) ListSectionsByPlan(_ context.Context, _ string) ([]*repository.Section, error) {
+	return nil, nil
+}
+func (n *nopSectionRepo) UpsertSeat(_ context.Context, _ *repository.Seat) error { return nil }
+func (n *nopSectionRepo) BulkInsertSeats(_ context.Context, _, _, _, _ string, _, _ int) error {
+	return nil
+}
+func (n *nopSectionRepo) ProvisionFromVenue(_ context.Context, _, _ string) (int, error) {
+	return 0, nil
+}
+func (n *nopSectionRepo) FindSeatsBySection(_ context.Context, _ string) ([]*repository.Seat, error) {
+	return nil, nil
+}
+func (n *nopSectionRepo) FindSeatsByIDs(_ context.Context, _ []string) ([]*repository.Seat, error) {
+	return nil, nil
+}
+func (n *nopSectionRepo) GetAvailableSeatsInSection(_ context.Context, _ string) ([]*repository.Seat, error) {
+	return nil, nil
+}
+func (n *nopSectionRepo) HoldSeats(_ context.Context, _ []string, _ string, _ time.Time) error {
+	return nil
+}
+func (n *nopSectionRepo) ReleaseHold(_ context.Context, _ []string, _ string) error  { return nil }
+func (n *nopSectionRepo) ReserveSeats(_ context.Context, _ []string, _ string) error { return nil }
+func (n *nopSectionRepo) ReleaseReservedSeats(_ context.Context, _ []string) error   { return nil }
+func (n *nopSectionRepo) SellSeats(_ context.Context, _ []string) error              { return nil }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -181,6 +255,56 @@ func TestVenueHandler_Get_ShouldReturn404_WhenNotFound(t *testing.T) {
 
 // ── PlanHandler tests ─────────────────────────────────────────────────────────
 
+func TestPlanHandler_Get_ShouldReturn200_WithSections(t *testing.T) {
+	plan := &repository.SeatingPlan{
+		ID:          "plan-1",
+		VenueID:     "venue-1",
+		OrganizerID: "organizer-1",
+		Name:        "Test Plan",
+		Status:      repository.PlanStatusDraft,
+		LayoutJSON:  json.RawMessage(`{"nodes":[]}`),
+	}
+	sectionList := []*repository.Section{{
+		ID:          "section-1",
+		PlanID:      "plan-1",
+		Name:        "Floor A",
+		Type:        repository.SectionTypeSeated,
+		RowCount:    5,
+		ColumnCount: 10,
+	}}
+
+	planStub := &stubPlanRepo{
+		findByIDFn: func(_ context.Context, id string) (*repository.SeatingPlan, error) {
+			return plan, nil
+		},
+	}
+	sectionStub := &stubSectionRepo{
+		listByPlanFn: func(_ context.Context, planID string) ([]*repository.Section, error) {
+			return sectionList, nil
+		},
+	}
+
+	h := handler.NewPlanHandler(planStub, sectionStub, zap.NewNop())
+	e := newEcho()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/seating-plans/plan-1", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("plan-1")
+
+	require.NoError(t, h.Get(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp repository.SeatingPlan
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "plan-1", resp.ID)
+	assert.Equal(t, "Test Plan", resp.Name)
+	assert.JSONEq(t, string(plan.LayoutJSON), string(resp.LayoutJSON))
+	assert.Len(t, resp.Sections, 1)
+	assert.Equal(t, "Floor A", resp.Sections[0].Name)
+}
+
 func TestPlanHandler_Activate_ShouldReturn422_WhenNotAttached(t *testing.T) {
 	planStub := &stubPlanRepo{
 		findByIDFn: func(_ context.Context, id string) (*repository.SeatingPlan, error) {
@@ -196,7 +320,7 @@ func TestPlanHandler_Activate_ShouldReturn422_WhenNotAttached(t *testing.T) {
 		},
 	}
 
-	h := handler.NewPlanHandler(planStub, zap.NewNop())
+	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/activate",
@@ -228,7 +352,7 @@ func TestPlanHandler_Activate_ShouldReturn422_WhenNoSections(t *testing.T) {
 		},
 	}
 
-	h := handler.NewPlanHandler(planStub, zap.NewNop())
+	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/activate",
@@ -260,7 +384,7 @@ func TestPlanHandler_Activate_ShouldReturn409_WhenAlreadyActive(t *testing.T) {
 		},
 	}
 
-	h := handler.NewPlanHandler(planStub, zap.NewNop())
+	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/activate",
@@ -291,7 +415,7 @@ func TestPlanHandler_AttachTicket_ShouldReturn409_WhenVersionConflict(t *testing
 		},
 	}
 
-	h := handler.NewPlanHandler(planStub, zap.NewNop())
+	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/attach-ticket",
@@ -319,7 +443,7 @@ func TestPlanHandler_AttachTicket_ShouldReturn403_WhenNotOwner(t *testing.T) {
 		},
 	}
 
-	h := handler.NewPlanHandler(planStub, zap.NewNop())
+	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/attach-ticket",
@@ -336,7 +460,7 @@ func TestPlanHandler_AttachTicket_ShouldReturn403_WhenNotOwner(t *testing.T) {
 }
 
 func TestPlanHandler_Create_ShouldReturn422_WhenVenueIDMissing(t *testing.T) {
-	h := handler.NewPlanHandler(&stubPlanRepo{}, zap.NewNop())
+	h := handler.NewPlanHandler(&stubPlanRepo{}, &nopSectionRepo{}, zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans",
@@ -503,8 +627,8 @@ func TestSeatHoldHandler_GetAvailability_ShouldReturn200_WhenValid(t *testing.T)
 		availabilityFn: func(_ context.Context, planID string) (*hold.AvailabilitySnapshot, error) {
 			return &hold.AvailabilitySnapshot{
 				PlanID:  planID,
-				SeatMap: map[string]string{"seat-1": "AVAILABLE"},
-				Counts:  map[string]int{"AVAILABLE": 1},
+				SeatMap: map[string]hold.SeatEntry{"seat-1": {Status: "available", SectionID: "sec-1"}},
+				Counts:  map[string]int{"available": 1},
 			}, nil
 		},
 	}
@@ -523,7 +647,7 @@ func TestSeatHoldHandler_GetAvailability_ShouldReturn200_WhenValid(t *testing.T)
 	var resp hold.AvailabilitySnapshot
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, "plan-1", resp.PlanID)
-	assert.Equal(t, "AVAILABLE", resp.SeatMap["seat-1"])
+	assert.Equal(t, "available", resp.SeatMap["seat-1"].Status)
 }
 
 func TestSeatHoldHandler_GetAvailability_ShouldReturn404_WhenPlanNotFound(t *testing.T) {

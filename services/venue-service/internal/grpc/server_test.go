@@ -78,6 +78,12 @@ func (n *nopSectionRepo) ListSectionsByPlan(ctx context.Context, planID string) 
 	return nil, nil
 }
 func (n *nopSectionRepo) UpsertSeat(ctx context.Context, seat *repository.Seat) error { return nil }
+func (n *nopSectionRepo) BulkInsertSeats(ctx context.Context, sectionID, planID, sectionType, priceTierID string, rowCount, columnCount int) error {
+	return nil
+}
+func (n *nopSectionRepo) ProvisionFromVenue(_ context.Context, _, _ string) (int, error) {
+	return 0, nil
+}
 func (n *nopSectionRepo) FindSeatsBySection(ctx context.Context, sectionID string) ([]*repository.Seat, error) {
 	return nil, nil
 }
@@ -123,6 +129,7 @@ func (n *nopPlanRepo) AttachTicket(ctx context.Context, planID, ticketID string,
 func (n *nopPlanRepo) Activate(ctx context.Context, planID string, expectedVersion int) error {
 	return nil
 }
+func (n *nopPlanRepo) Deactivate(_ context.Context, _, _ string) error                       { return nil }
 func (n *nopPlanRepo) Update(ctx context.Context, p *repository.SeatingPlan) error { return nil }
 func (n *nopPlanRepo) ListActivePlans(_ context.Context) ([]*repository.SeatingPlan, error) {
 	return nil, nil
