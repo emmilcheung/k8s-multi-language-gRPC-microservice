@@ -152,6 +152,7 @@ services:
       - name: orders-collection
         paths:
           - ~/api/orders$
+          - ~/api/orders/seated$
         methods: [GET, POST]
         strip_path: false
         plugins:
@@ -253,6 +254,8 @@ services:
           - ~/api/seating-plans/[^/]+/attach-ticket$
           - ~/api/seating-plans/[^/]+/activate$
           - ~/api/seating-plans/[^/]+/layout$
+          - ~/api/seating-plans/[^/]+/seats/hold$
+          - ~/api/seating-plans/[^/]+/seats/release$
           - ~/api/seating-plans/[^/]+/holds$
           - ~/api/seating-plans/[^/]+/holds/[^/]+$
         methods: [POST, PUT, PATCH, DELETE]
@@ -287,11 +290,31 @@ services:
                 - |
                   {{JWT_SUB_LUA}}
 
+      # Protected: catch-all for nested plan write paths not listed explicitly above
+      - name: venue-seating-plans-nested-write
+        paths:
+          - ~/api/seating-plans/[^/]+(/.*)?$
+        methods: [POST,PUT,PATCH,DELETE]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
       # Protected: venue management — JWT required for all operations
       - name: venue-venues
         paths:
           - ~/api/venues$
           - ~/api/venues/[^/]+$
+          - ~/api/venues/[^/]+/sections$
+          - ~/api/venues/[^/]+/sections/[^/]+$
         methods: [GET, POST, PUT, DELETE]
         strip_path: false
         plugins:
