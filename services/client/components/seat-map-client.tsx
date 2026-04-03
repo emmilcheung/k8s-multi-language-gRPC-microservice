@@ -14,7 +14,7 @@
 // Security: userId is NEVER sent from this component — it is derived server-side
 // from the Kong-injected X-User-Id header.
 
-import { useState, useEffect, useCallback, useTransition, useRef } from "react";
+import { useState, useEffect, useCallback, useTransition, useRef, useMemo } from "react";
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +27,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { SeatingPlan, AvailabilitySnapshot, SeatStatus, Section } from "@/lib/types";
+import type { SeatingPlan, AvailabilitySnapshot, SeatStatus, Section, PriceTier } from "@/lib/types";
 import {
   holdSeats,
   releaseSeats,
@@ -73,13 +73,14 @@ interface Props {
   plan: SeatingPlan;
   initialAvailability: AvailabilitySnapshot | null;
   basePrice: string;
+  priceTiers?: PriceTier[];
 }
 
 // ─── component ────────────────────────────────────────────────────────────────
 
 const INITIAL_ORDER_STATE: SeatedOrderState = {};
 
-export function SeatMapClient({ ticketId, planId, plan, initialAvailability, basePrice }: Props) {
+export function SeatMapClient({ ticketId, planId, plan, initialAvailability, basePrice, priceTiers = [] }: Props) {
   // Seat availability state.
   const [availability, setAvailability] = useState<AvailabilitySnapshot | null>(initialAvailability);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -90,9 +91,12 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
   const [heldIds, setHeldIds] = useState<Set<string>>(new Set());
   // Hold expiry timestamp.
   const [holdExpiresAt, setHoldExpiresAt] = useState<string | null>(null);
+  // Live countdown seconds remaining (null = no active hold).
+  const [holdSecondsLeft, setHoldSecondsLeft] = useState<number | null>(null);
+  const [holdJustExpired, setHoldJustExpired] = useState(false);
 
   // Section tab selection.
-  const sections: Section[] = plan.sections ?? [];
+  const sections: Section[] = useMemo(() => plan.sections ?? [], [plan.sections]);
   const [activeSectionIdx, setActiveSectionIdx] = useState(0);
   const activeSection: Section | undefined = sections[activeSectionIdx];
 
@@ -140,27 +144,73 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
     }
   }, [initialAvailability, fetchAvailability]);
 
-  // Subscribe to SSE stream for live updates.
+  // Safety-net polling in case SSE heartbeats/events are missed.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void fetchAvailability();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [fetchAvailability]);
+
+  // Subscribe to SSE stream for live updates with exponential-backoff reconnection.
   useEffect(() => {
     const kongUrl = process.env.NEXT_PUBLIC_KONG_URL ?? "http://localhost:8000";
-    const es = new EventSource(`${kongUrl}/api/seating-plans/${planId}/events`);
+    let es: EventSource | null = null;
+    let retryDelay = 1000; // ms — doubles on each failure, capped at 30s
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let unmounted = false;
 
-    es.onmessage = () => {
-      // Any message means seats changed — re-fetch the full snapshot.
-      void fetchAvailability();
+    const connect = () => {
+      if (unmounted) return;
+      es = new EventSource(`${kongUrl}/api/seating-plans/${planId}/events`);
+
+      es.onmessage = () => {
+        retryDelay = 1000; // reset backoff on successful message
+        void fetchAvailability();
+      };
+
+      es.addEventListener("heartbeat", () => {
+        retryDelay = 1000; // reset backoff on heartbeat
+      });
+
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        if (!unmounted) {
+          retryTimer = setTimeout(() => {
+            retryDelay = Math.min(retryDelay * 2, 30_000);
+            connect();
+          }, retryDelay);
+        }
+      };
     };
 
-    es.addEventListener("heartbeat", () => {
-      // Heartbeat: no action needed, connection is alive.
-    });
+    connect();
 
-    es.onerror = () => {
-      // SSE error: stop reconnecting silently; the buyer can use the refresh button.
-      es.close();
+    return () => {
+      unmounted = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      es?.close();
     };
-
-    return () => es.close();
   }, [planId, fetchAvailability]);
+
+  // ── hold countdown timer ──────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!holdExpiresAt) {
+      setHoldSecondsLeft(null);
+      return;
+    }
+
+    const tick = () => {
+      const secs = Math.max(0, Math.round((new Date(holdExpiresAt).getTime() - Date.now()) / 1000));
+      setHoldSecondsLeft(secs);
+    };
+
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [holdExpiresAt]);
 
   // ── seat selection helpers ────────────────────────────────────────────────
 
@@ -174,6 +224,13 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
 
   const toggleSeat = (seatId: string) => {
     if (!isSeatSelectable(seatId)) return;
+    if (!selectedIds.has(seatId) && selectedIds.size >= plan.maxSeatsPerOrder) {
+      setHoldError(`You can select up to ${plan.maxSeatsPerOrder} seats per order.`);
+      return;
+    }
+
+    if (holdJustExpired) setHoldJustExpired(false);
+
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(seatId)) {
@@ -190,6 +247,17 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
   const prevSelectedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    if (holdExpiresAt && holdSecondsLeft === 0) {
+      setHoldJustExpired(true);
+      setSelectedIds(new Set());
+      setHeldIds(new Set());
+      setHoldExpiresAt(null);
+      prevSelectedRef.current = new Set();
+      void fetchAvailability();
+    }
+  }, [holdExpiresAt, holdSecondsLeft, fetchAvailability]);
+
+  useEffect(() => {
     const prev = prevSelectedRef.current;
     const current = selectedIds;
 
@@ -203,6 +271,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
         const result = await holdSeats(planId, toHold, sessionIdRef.current);
         if (result.error) {
           setHoldError(result.error);
+          void fetchAvailability();
           // Revert selection for seats that couldn't be held.
           setSelectedIds((prev) => {
             const next = new Set(prev);
@@ -216,6 +285,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
             return next;
           });
           if (result.expiresAt) setHoldExpiresAt(result.expiresAt);
+          setHoldJustExpired(false);
           setHoldError(null);
         }
       });
@@ -241,24 +311,31 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
     if (!activeSection) return [];
 
     const rows: SeatCell[][] = [];
-    // Derive seat IDs from availability keys that belong to this section.
-    // Seat IDs are typically formatted as "<sectionId>-R<row>-S<seat>" but we
-    // fall back to iterating the snapshot in insertion order if needed.
-    const seatEntries = Object.entries(availability?.seatMap ?? {});
+    // Filter availability entries to only those belonging to the active section.
+    const seatEntries = Object.entries(availability?.seatMap ?? {}).filter(
+      ([, entry]) => entry.sectionId === activeSection.id
+    );
 
-    // Build rows × columnCount grid by index, filling seat IDs from the map.
-    const totalSeats = activeSection.rowCount * activeSection.columnCount;
+    // If active section is GA, rowCount may be 0 in data model; treat as single row.
+    const isGA = activeSection.type === "ga";
+    const rowCount = isGA ? 1 : activeSection.rowCount;
+    const columnCount = isGA
+      ? Math.max(1, seatEntries.length)
+      : activeSection.columnCount;
+
+    // Build rows × columnCount grid by index, filling seat IDs from filtered entries.
+    const totalSeats = rowCount * columnCount;
     const relevantSeats = seatEntries.slice(0, totalSeats);
 
-    for (let r = 0; r < activeSection.rowCount; r++) {
+    for (let r = 0; r < rowCount; r++) {
       const row: SeatCell[] = [];
-      for (let s = 0; s < activeSection.columnCount; s++) {
-        const idx = r * activeSection.columnCount + s;
+      for (let s = 0; s < columnCount; s++) {
+        const idx = r * columnCount + s;
         if (idx >= relevantSeats.length) break;
         const [id, entry] = relevantSeats[idx];
         row.push({
           id,
-          label: `R${r + 1}S${s + 1}`,
+          label: isGA ? `GA${idx + 1}` : `R${r + 1}S${s + 1}`,
           status: entry.status,
         });
       }
@@ -269,8 +346,39 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
 
   const grid = buildGrid();
 
+  // Build a flat seatId → label map for the sidebar display.
+  const seatLabelMap = useMemo<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    grid.forEach((row) => row.forEach((cell) => { map[cell.id] = cell.label; }));
+    return map;
+  }, [grid]);
+
+  // Build sectionId → price string map from price tiers.
+  const sectionPriceMap = useMemo<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    for (const section of sections) {
+      if (section.priceTierId) {
+        const tier = priceTiers.find((t) => t.id === section.priceTierId);
+        if (tier) map[section.id] = tier.price;
+      }
+    }
+    return map;
+  }, [sections, priceTiers]);
+
+  /** Price for a single seat in the active section (falls back to basePrice). */
+  const activeSectionPrice = activeSection
+    ? parseFloat(sectionPriceMap[activeSection.id] ?? basePrice)
+    : parseFloat(basePrice);
+
   const selectedArray = [...selectedIds];
-  const totalPrice = selectedArray.length * parseFloat(basePrice);
+  // Total price: per-seat price from its section (look up sectionId via availability map).
+  const totalPrice = selectedArray.reduce((sum, seatId) => {
+    const sectionId = availability?.seatMap[seatId]?.sectionId;
+    const price = sectionId
+      ? parseFloat(sectionPriceMap[sectionId] ?? basePrice)
+      : parseFloat(basePrice);
+    return sum + price;
+  }, 0);
 
   // ── render ────────────────────────────────────────────────────────────────
 
@@ -292,6 +400,9 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
             >
               {sec.name}
               <span className="ml-1.5 text-xs opacity-60">{sec.type.toUpperCase()}</span>
+              {sectionPriceMap[sec.id] && (
+                <span className="ml-1 text-xs opacity-80">${parseFloat(sectionPriceMap[sec.id]).toFixed(2)}</span>
+              )}
             </button>
           ))}
         </div>
@@ -383,7 +494,13 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
           ) : (
             <div
               className="grid gap-1 overflow-auto"
-              style={{ gridTemplateColumns: `repeat(${activeSection?.columnCount ?? 10}, minmax(28px, 1fr))` }}
+              style={{
+                gridTemplateColumns: `repeat(${
+                  activeSection?.type === "ga"
+                    ? Math.max(1, grid[0]?.length ?? 1)
+                    : activeSection?.columnCount ?? 10
+                }, minmax(28px, 1fr))`,
+              }}
             >
               {grid.flat().map((seat) => {
                 const isSelected = selectedIds.has(seat.id);
@@ -394,7 +511,11 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
                     title={`${seat.label} — ${STATUS_LABEL[status]}`}
                     aria-pressed={isSelected}
                     aria-label={`Seat ${seat.label} ${STATUS_LABEL[status]}`}
-                    disabled={!isSeatSelectable(seat.id) || autoAssignMode}
+                    disabled={
+                      !isSeatSelectable(seat.id) ||
+                      autoAssignMode ||
+                      (!isSelected && selectedArray.length >= plan.maxSeatsPerOrder)
+                    }
                     onClick={() => toggleSeat(seat.id)}
                     className={cn(
                       "h-7 w-full rounded-sm border text-[9px] font-mono transition-colors",
@@ -443,7 +564,10 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
                     min={1}
                     max={plan.maxSeatsPerOrder}
                     value={autoQuantity}
-                    onChange={(e) => setAutoQuantity(parseInt(e.target.value, 10) || 1)}
+                    onChange={(e) => {
+                      const parsed = parseInt(e.target.value, 10) || 1;
+                      setAutoQuantity(Math.min(Math.max(parsed, 1), plan.maxSeatsPerOrder));
+                    }}
                   />
                   <p className="text-xs text-muted-foreground">
                     Up to {plan.maxSeatsPerOrder} per order
@@ -454,7 +578,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Estimated total</span>
                   <span className="font-bold gradient-text">
-                    ${(autoQuantity * parseFloat(basePrice)).toFixed(2)}
+                    ${(autoQuantity * activeSectionPrice).toFixed(2)}
                   </span>
                 </div>
 
@@ -485,9 +609,49 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
                   : `${selectedArray.length} seat${selectedArray.length > 1 ? "s" : ""} selected`}
               </p>
 
-              {holdExpiresAt && selectedArray.length > 0 && (
-                <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-xs w-fit">
-                  Hold expires {new Date(holdExpiresAt).toLocaleTimeString()}
+              {selectedArray.length >= plan.maxSeatsPerOrder && (
+                <p className="text-xs text-amber-400/90">
+                  Max seats per order reached ({plan.maxSeatsPerOrder}).
+                </p>
+              )}
+
+              {holdJustExpired && (
+                <div
+                  role="alert"
+                  className="flex flex-col gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2.5"
+                >
+                  <span>Your seat hold expired. Choose seats again to continue.</span>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => {
+                        setHoldJustExpired(false);
+                        void fetchAvailability();
+                      }}
+                    >
+                      Refresh seats
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setHoldJustExpired(false)}
+                    >
+                      Dismiss
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {holdExpiresAt && selectedArray.length > 0 && holdSecondsLeft !== null && (
+                <Badge className={`text-xs w-fit border ${
+                  holdSecondsLeft <= 30
+                    ? "bg-red-500/15 text-red-400 border-red-500/30"
+                    : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                }`}>
+                  Hold expires in {holdSecondsLeft}s
                 </Badge>
               )}
 
@@ -495,7 +659,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
                 <ul className="flex flex-col gap-1">
                   {selectedArray.map((id) => (
                     <li key={id} className="flex items-center justify-between text-xs">
-                      <span className="font-mono text-muted-foreground">{id.slice(0, 8)}…</span>
+                      <span className="font-mono text-muted-foreground">{seatLabelMap[id] ?? id.slice(0, 8) + "…"}</span>
                       <button
                         onClick={() => toggleSeat(id)}
                         className="text-muted-foreground hover:text-destructive transition-colors"

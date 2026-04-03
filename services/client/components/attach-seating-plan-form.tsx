@@ -2,34 +2,43 @@
 // components/attach-seating-plan-form.tsx — Organizer panel for attaching /
 // detaching a seating plan to/from a ticket.
 //
-// The organizer enters the seating plan UUID (obtained from venue-service after
-// creating a draft plan) and clicks "Attach".  If a plan is already attached,
-// a "Detach" button lets them remove it.
+// When no plan is attached the organizer selects from a dropdown of their draft
+// plans (fetched server-side by the ticket detail page via fetchAllMyPlans()).
+// If no plans exist they can navigate to the venue manager to create one.
 //
-// All mutations go through Server Actions in app/actions/tickets.ts, which call
-// the ticket-service attach/detach endpoints via Kong.
+// All mutations go through Server Actions in app/actions/tickets.ts.
 
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MapPin, Unlink, Loader2, AlertCircle, CheckCircle } from "lucide-react";
+import { MapPin, Unlink, Loader2, AlertCircle, CheckCircle, ExternalLink } from "lucide-react";
 import { attachSeatingPlan, detachSeatingPlan } from "@/app/actions/tickets";
 import type { TicketState } from "@/app/actions/tickets";
+import type { SeatingPlan } from "@/lib/types";
+import Link from "next/link";
 
 interface AttachSeatingPlanFormProps {
   ticketId: string;
   currentPlanId: string | null;
+  /** All plans for the organizer — active ones are shown in the dropdown */
+  availablePlans?: SeatingPlan[];
 }
 
 const initialState: TicketState = {};
 
-export function AttachSeatingPlanForm({ ticketId, currentPlanId }: AttachSeatingPlanFormProps) {
+export function AttachSeatingPlanForm({
+  ticketId,
+  currentPlanId,
+  availablePlans = [],
+}: AttachSeatingPlanFormProps) {
   const boundAttach = attachSeatingPlan.bind(null, ticketId);
   const boundDetach = detachSeatingPlan.bind(null, ticketId);
 
   const [attachState, attachAction, attachPending] = useActionState(boundAttach, initialState);
   const [detachState, detachAction, detachPending] = useActionState(boundDetach, initialState);
+
+  // Only show active plans — draft plans are not yet ready, inactive are closed
+  const activePlans = availablePlans.filter((p) => p.status === "active");
 
   return (
     <div className="glass rounded-2xl p-6 flex flex-col gap-4">
@@ -77,11 +86,25 @@ export function AttachSeatingPlanForm({ ticketId, currentPlanId }: AttachSeating
             </Button>
           </form>
         </div>
-      ) : (
-        /* No plan attached — show attach form */
+      ) : activePlans.length === 0 ? (
+        /* No active plans available — guide the organizer to activate one */
         <div className="flex flex-col gap-3">
           <p className="text-xs text-muted-foreground">
-            Create a seating plan in the venue manager, then paste its ID here to attach it.
+            You have no active seating plans. Create and activate one in the venue manager first.
+          </p>
+          <Link
+            href="/venues"
+            className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            Go to Venue Manager
+          </Link>
+        </div>
+      ) : (
+        /* Active plans available — show dropdown */
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-muted-foreground">
+            Select an active seating plan to attach to this ticket.
           </p>
 
           {attachState?.error && (
@@ -96,25 +119,31 @@ export function AttachSeatingPlanForm({ ticketId, currentPlanId }: AttachSeating
 
           <form action={attachAction} className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="planId" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Seating Plan ID
+              <Label
+                htmlFor="planId"
+                className="text-xs font-medium text-muted-foreground uppercase tracking-wider"
+              >
+                Seating Plan
               </Label>
-              <Input
+              <select
                 id="planId"
                 name="planId"
-                type="text"
                 required
-                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                pattern="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                title="Must be a valid UUID"
-              />
+                defaultValue=""
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              >
+                <option value="" disabled>
+                  Select a plan…
+                </option>
+                {activePlans.map((plan) => (
+                  <option key={plan.id} value={plan.id}>
+                    {plan.name} ({plan.id.slice(0, 8)}…)
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <Button
-              type="submit"
-              className="w-full gap-2"
-              disabled={attachPending}
-            >
+            <Button type="submit" className="w-full gap-2" disabled={attachPending}>
               {attachPending ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />

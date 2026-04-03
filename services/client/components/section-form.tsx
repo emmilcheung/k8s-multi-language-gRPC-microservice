@@ -7,16 +7,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Grid3X3, AlertCircle, Loader2, Plus } from "lucide-react";
 import type { PlanState } from "@/app/actions/venues";
+import type { PriceTier } from "@/lib/types";
 
 interface SectionFormProps {
   action: (_prev: PlanState, formData: FormData) => Promise<PlanState>;
+  tiers?: PriceTier[];
 }
 
 const initialState: PlanState = {};
 
-export function SectionForm({ action }: SectionFormProps) {
+export function SectionForm({ action, tiers = [] }: SectionFormProps) {
   const [state, formAction, pending] = useActionState(action, initialState);
   const [sectionType, setSectionType] = useState<"seated" | "ga">("seated");
+  const [selectedTierId, setSelectedTierId] = useState("");
 
   return (
     <div className="glass rounded-2xl p-6 flex flex-col gap-5">
@@ -144,6 +147,26 @@ export function SectionForm({ action }: SectionFormProps) {
             </div>
           </>
         )}
+
+        {/* Price tier selector */}
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Price tier
+          </Label>
+          <input type="hidden" name="priceTierId" value={selectedTierId} />
+          <select
+            value={selectedTierId}
+            onChange={(e) => setSelectedTierId(e.target.value)}
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="">— Use ticket default price —</option>
+            {tiers.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name} (${parseFloat(t.price).toFixed(2)})
+              </option>
+            ))}
+          </select>
+        </div>
 
         <Button
           type="submit"

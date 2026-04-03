@@ -31,12 +31,8 @@ export async function fetchTicketPage(after: string | null): Promise<TicketPage>
   url.searchParams.set("limit", String(PAGE_SIZE));
   if (after) url.searchParams.set("after", after);
 
-  // Public endpoint — no auth cookie required. Use ISR caching via the
-  // Next.js fetch cache (revalidate: 10 s) so repeated "Load more" calls on
-  // the same cursor hit the cache rather than the upstream.
-  const res = await fetch(url.toString(), {
-    next: { revalidate: 10 },
-  });
+  // Public endpoint — no auth cookie required.
+  const res = await fetch(url.toString(), { cache: "no-store" });
 
   if (!res.ok) {
     // Non-fatal: return empty page so the UI degrades gracefully.
@@ -44,7 +40,11 @@ export async function fetchTicketPage(after: string | null): Promise<TicketPage>
   }
 
   const all: Ticket[] = await res.json();
-  const cursor = all.length > 0 ? all[all.length - 1].id : null;
+  // Compound cursor: "<createdAtUnixMilli>:<id>" matches the backend EncodeCursor format.
+  const lastTicket = all.length > 0 ? all[all.length - 1] : null;
+  const cursor = lastTicket?.createdAt
+    ? `${new Date(lastTicket.createdAt).getTime()}:${lastTicket.id}`
+    : (lastTicket?.id ?? null);
   const hasMore = all.length === PAGE_SIZE;
   return { tickets: all, cursor, hasMore };
 }
@@ -158,7 +158,7 @@ export async function attachSeatingPlan(
   if (!planId) return { error: "Seating plan ID is required." };
   if (!UUID_RE.test(planId)) return { error: "Seating plan ID must be a valid UUID." };
 
-  // Verify the seating plan exists and belongs to the caller before linking it.
+  // 1. Verify the seating plan exists and belongs to the caller before linking it.
   const planRes = await fetch(`${base()}/api/seating-plans/${planId}`, {
     method: "GET",
     headers: await authHeaders(),
@@ -166,7 +166,9 @@ export async function attachSeatingPlan(
   if (!planRes.ok) {
     return { error: "Seating plan not found or you do not have access to it." };
   }
+  const plan = await planRes.json();
 
+  // 2. Tell ticket-service about the plan (sets seatingPlanId on the ticket).
   const res = await fetch(`${base()}/api/tickets/${ticketId}/seating-plan`, {
     method: "PUT",
     headers: await authHeaders(),
@@ -176,6 +178,21 @@ export async function attachSeatingPlan(
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     return { error: body?.error?.message ?? "Failed to attach seating plan." };
+  }
+
+  // 3. Tell venue-service about the ticket (sets ticketId on the plan).
+  //    This is required so the activate button becomes visible on the plan page.
+  const attachRes = await fetch(`${base()}/api/seating-plans/${planId}/attach-ticket`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({ ticketId, expectedVersion: plan.version ?? 0 }),
+  });
+
+  if (!attachRes.ok) {
+    // Non-fatal: ticket-service link succeeded. Log but don't block the redirect.
+    // The organizer can still activate via the plan page after refreshing.
+    const body = await attachRes.json().catch(() => ({}));
+    console.warn("[attachSeatingPlan] venue-service attach-ticket failed:", body?.error);
   }
 
   revalidatePath(`/tickets/${ticketId}`);

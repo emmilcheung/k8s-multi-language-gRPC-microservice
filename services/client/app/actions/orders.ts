@@ -194,7 +194,9 @@ export async function holdSeats(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    return { error: body?.error?.message ?? "Failed to hold seats." };
+    // venue-service returns { error: "string" }, not { error: { message: "..." } }
+    const msg = typeof body?.error === "string" ? body.error : (body?.error?.message ?? "Failed to hold seats.");
+    return { error: msg };
   }
 
   const data = await res.json() as { held: string[]; expiresAt: string };

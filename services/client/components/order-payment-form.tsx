@@ -16,6 +16,17 @@ interface OrderPaymentFormProps {
 
 const initialState: OrderState = {};
 
+function formatUtcDateTime(value: string): string {
+  const d = new Date(value);
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const min = String(d.getUTCMinutes()).padStart(2, "0");
+  const ss = String(d.getUTCSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss} UTC`;
+}
+
 export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFormProps) {
   const boundPay = submitPayment.bind(null, orderId, amount);
   const boundCancel = cancelOrder.bind(null, orderId);
@@ -51,7 +62,7 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
         <span>
           Order expires:{" "}
           <span className="text-amber-400/90 font-medium">
-            {new Date(expiresAt).toLocaleString()}
+            {formatUtcDateTime(expiresAt)}
           </span>
         </span>
       </div>
