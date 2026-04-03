@@ -233,16 +233,24 @@ services:
     read_timeout: {{READ_TIMEOUT_MS}}
     write_timeout: {{WRITE_TIMEOUT_MS}}
     routes:
-      # Public: read-only seating-plan access (availability, events SSE) — no JWT required
+      # Public: read-only seating-plan access (availability, sections, tiers) — no JWT required
       - name: venue-seating-plans-read
         paths:
           - ~/api/seating-plans/[^/]+$
           - ~/api/seating-plans/[^/]+/availability$
-          - ~/api/seating-plans/[^/]+/events$
           - ~/api/seating-plans/[^/]+/sections$
           - ~/api/seating-plans/[^/]+/price-tiers$
         methods: [GET]
         strip_path: false
+        plugins:
+          - name: cors
+            config:
+              origins: ["*"]
+              methods: [GET, OPTIONS]
+              headers: [Content-Type, Authorization]
+              exposed_headers: [X-Request-Id]
+              max_age: 3600
+              credentials: false
 
       # Protected: create / update / activate seating plans and sections — JWT required
       - name: venue-seating-plans-write
@@ -328,6 +336,43 @@ services:
               access:
                 - |
                   {{JWT_SUB_LUA}}
+
+  # ── venue-service SSE — dedicated service with long read timeout ─────────────
+  # A separate service entry is required because Kong timeouts are per-service, not
+  # per-route. The regular venue-service uses READ_TIMEOUT_MS (10 s), which is
+  # shorter than the SSE heartbeat interval and would terminate the stream.
+  # The post-function disables nginx proxy buffering so heartbeat frames are
+  # flushed immediately to the browser instead of being held in Kong's buffer.
+  - name: venue-service-sse
+    url: http://{{HOST_VENUE}}
+    connect_timeout: {{CONNECT_TIMEOUT_MS}}
+    read_timeout: {{SSE_READ_TIMEOUT_MS}}
+    write_timeout: {{SSE_READ_TIMEOUT_MS}}
+    routes:
+      - name: venue-seating-plans-sse
+        paths:
+          - ~/api/seating-plans/[^/]+/events$
+        methods: [GET]
+        strip_path: false
+        plugins:
+          - name: cors
+            config:
+              origins: ["*"]
+              methods: [GET, OPTIONS]
+              headers: [Content-Type]
+              exposed_headers: [X-Request-Id]
+              max_age: 3600
+              credentials: false
+          - name: post-function
+            config:
+              header_filter:
+                - |
+                  -- Force X-Accel-Buffering: no on SSE responses so nginx does
+                  -- not buffer the stream. The upstream already sets this header
+                  -- but Kong may strip or override it before nginx checks it.
+                  -- Setting it here in header_filter ensures nginx sees it on
+                  -- every response from this route (K-SSE-01).
+                  ngx.header["X-Accel-Buffering"] = "no"
 
   # ── client (Next.js SSR) — catch-all, must be last ────────────────────────────
   # Kong matches routes by longest-prefix first; all /api/* routes above always
