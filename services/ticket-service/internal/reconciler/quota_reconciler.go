@@ -127,7 +127,8 @@ func (r *Reconciler) Run(ctx context.Context) error {
 			// Last page — no more tickets.
 			break
 		}
-		cursor = page[len(page)-1].ID
+		last := page[len(page)-1]
+		cursor = repository.EncodeCursor(last.CreatedAt, last.ID)
 	}
 
 	return nil

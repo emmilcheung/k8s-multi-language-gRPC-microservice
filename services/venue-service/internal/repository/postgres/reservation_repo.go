@@ -221,9 +221,15 @@ func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []
 	// 1. Lock seats and fetch status + snapshotted price in one pass.
 	//    FOR UPDATE OF s prevents concurrent reservations for the same seats.
 	const lockQ = `
-		SELECT s.id, s.section_id, s.seat_label, s.status, pt.price::text
+		SELECT s.id,
+		       s.section_id,
+		       s.seat_label,
+		       s.status,
+		       COALESCE(seat_pt.price::text, section_pt.price::text, '0') AS price
 		FROM   seats s
-		JOIN   price_tiers pt ON pt.id = s.price_tier_id
+		LEFT JOIN price_tiers seat_pt ON seat_pt.id = s.price_tier_id
+		LEFT JOIN sections sec ON sec.id = s.section_id
+		LEFT JOIN price_tiers section_pt ON section_pt.id = sec.price_tier_id
 		WHERE  s.id = ANY($1)
 		FOR UPDATE OF s`
 

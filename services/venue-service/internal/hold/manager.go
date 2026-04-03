@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/acme/venue-service/internal/repository"
@@ -48,12 +49,18 @@ type HoldResult struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
+// SeatEntry is a single entry in the AvailabilitySnapshot seat map.
+type SeatEntry struct {
+	Status    string `json:"status"`    // lowercase: "available", "held", "reserved", etc.
+	SectionID string `json:"sectionId"` // section this seat belongs to
+}
+
 // AvailabilitySnapshot is the return type for GetAvailability.
 type AvailabilitySnapshot struct {
-	PlanID   string            `json:"planId"`
-	SeatMap  map[string]string `json:"seatMap"`
-	Counts   map[string]int    `json:"counts"`
-	CachedAt time.Time         `json:"cachedAt"`
+	PlanID   string               `json:"planId"`
+	SeatMap  map[string]SeatEntry `json:"seatMap"`
+	Counts   map[string]int       `json:"counts"`
+	CachedAt time.Time            `json:"cachedAt"`
 }
 
 // ExtendedSectionRepo extends SectionRepository with methods needed only
@@ -210,7 +217,7 @@ func (m *Manager) GetAvailability(ctx context.Context, planID string) (*Availabi
 
 	snap := &AvailabilitySnapshot{
 		PlanID:   planID,
-		SeatMap:  make(map[string]string),
+		SeatMap:  make(map[string]SeatEntry),
 		Counts:   make(map[string]int),
 		CachedAt: time.Now().UTC(),
 	}
@@ -222,7 +229,7 @@ func (m *Manager) GetAvailability(ctx context.Context, planID string) (*Availabi
 		}
 
 		for _, seat := range seats {
-			status := string(seat.Status)
+			status := strings.ToLower(string(seat.Status))
 
 			// If Redis is available and the seat appears HELD in PostgreSQL,
 			// check whether the hold TTL has already expired in Redis.
@@ -232,11 +239,11 @@ func (m *Manager) GetAvailability(ctx context.Context, planID string) (*Availabi
 				metaKey := holdMetaKey(planID, seat.ID)
 				exists, rErr := m.redis.Exists(ctx, metaKey).Result()
 				if rErr == nil && exists == 0 {
-					status = string(repository.SeatStatusAvailable)
+					status = strings.ToLower(string(repository.SeatStatusAvailable))
 				}
 			}
 
-			snap.SeatMap[seat.ID] = status
+			snap.SeatMap[seat.ID] = SeatEntry{Status: status, SectionID: sec.ID}
 			snap.Counts[status]++
 		}
 	}

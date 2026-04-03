@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/acme/ticket-service/internal/cache"
@@ -12,6 +14,24 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
+
+// EncodeCursor encodes a (createdAt, id) pair as a compound cursor string.
+func EncodeCursor(createdAt time.Time, id string) string {
+	return fmt.Sprintf("%d:%s", createdAt.UnixMilli(), id)
+}
+
+// parseCursor decodes a compound cursor produced by EncodeCursor.
+func parseCursor(after string) (ms int64, id string, ok bool) {
+	idx := strings.IndexByte(after, ':')
+	if idx < 1 {
+		return 0, "", false
+	}
+	ms, err := strconv.ParseInt(after[:idx], 10, 64)
+	if err != nil {
+		return 0, "", false
+	}
+	return ms, after[idx+1:], true
+}
 
 // Ticket is the domain model stored in MongoDB.
 //
@@ -99,10 +119,11 @@ var ErrSeatingPlanAlreadyAttached = errors.New("ticket already has an attached s
 var ErrOwnership = errors.New("caller does not own this ticket")
 
 // PaginationParams controls cursor-based pagination for FindAll.
-// After is an opaque cursor — the _id of the last ticket seen on the previous page.
+// After is an opaque compound cursor of the form "<createdAtUnixMilli>:<id>"
+// representing the last ticket seen on the previous page (newest-first order).
 // Limit is the maximum number of tickets to return (capped at 100; 0 means 20).
 type PaginationParams struct {
-	After string // exclusive lower bound (cursor); empty = start from beginning
+	After string // compound cursor "<unixMilli>:<id>"; empty = start from beginning
 	Limit int    // max results per page
 }
 
@@ -110,7 +131,7 @@ type PaginationParams struct {
 type TicketRepository interface {
 	Create(ctx context.Context, t *Ticket) error
 	FindByID(ctx context.Context, id string) (*Ticket, error)
-	// FindAll returns a page of tickets ordered by _id ascending.
+	// FindAll returns a page of tickets ordered by createdAt descending (newest first).
 	// Pass a zero-value PaginationParams for the first page with defaults.
 	FindAll(ctx context.Context, p PaginationParams) ([]*Ticket, error)
 	Update(ctx context.Context, t *Ticket) error
@@ -429,8 +450,9 @@ func (r *MongoTicketRepository) FindByID(ctx context.Context, id string) (*Ticke
 	return &t, nil
 }
 
-// FindAll returns a page of tickets ordered by _id ascending.
-// p.After is the last _id seen (exclusive cursor); p.Limit caps results (max 100, default 20).
+// FindAll returns a page of tickets ordered by createdAt descending (newest first).
+// p.After is a compound cursor "<createdAtUnixMilli>:<id>" from the last ticket seen.
+// p.Limit caps results (max 100, default 20).
 func (r *MongoTicketRepository) FindAll(ctx context.Context, p PaginationParams) ([]*Ticket, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -442,11 +464,17 @@ func (r *MongoTicketRepository) FindAll(ctx context.Context, p PaginationParams)
 
 	filter := bson.M{}
 	if p.After != "" {
-		filter = bson.M{"_id": bson.M{"$gt": p.After}}
+		if ms, id, ok := parseCursor(p.After); ok {
+			cursorTime := time.UnixMilli(ms).UTC()
+			filter = bson.M{"$or": bson.A{
+				bson.M{"createdAt": bson.M{"$lt": cursorTime}},
+				bson.M{"createdAt": cursorTime, "_id": bson.M{"$lt": id}},
+			}}
+		}
 	}
 
 	opts := options.Find().
-		SetSort(bson.D{{Key: "_id", Value: 1}}).
+		SetSort(bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}).
 		SetLimit(int64(limit))
 
 	cursor, err := r.collection.Find(ctx, filter, opts)
