@@ -165,20 +165,20 @@ func (r *PlanRepo) AttachTicket(ctx context.Context, planID, ticketID string, ex
 	const q = `
 		UPDATE seating_plans
 		SET ticket_id = $1, updated_at = now()
-		WHERE id = $2 AND version = $3 AND status = 'draft'
+		WHERE id = $2 AND version = $3 AND status IN ('draft', 'active')
 		RETURNING id`
 
 	var id string
 	err := r.pool.QueryRow(ctx, q, ticketID, planID, expectedVersion).Scan(&id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Disambiguate: was it a version conflict or active plan?
+			// Disambiguate: version conflict or inactive plan?
 			p, findErr := r.FindByID(ctx, planID)
 			if findErr != nil {
 				return findErr
 			}
-			if p.Status != repository.PlanStatusDraft {
-				return repository.ErrPlanAlreadyActive
+			if p.Status == repository.PlanStatusInactive {
+				return repository.ErrPlanNotActive
 			}
 			return repository.ErrVersionConflict
 		}
@@ -203,9 +203,6 @@ func (r *PlanRepo) Activate(ctx context.Context, planID string, expectedVersion 
 	if p.Status == repository.PlanStatusActive {
 		return repository.ErrPlanAlreadyActive
 	}
-	if p.TicketID == "" {
-		return repository.ErrPlanNotAttached
-	}
 
 	// Check at least one section exists.
 	var sectionCount int
@@ -229,6 +226,39 @@ func (r *PlanRepo) Activate(ctx context.Context, planID string, expectedVersion 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return repository.ErrVersionConflict
+		}
+		return err
+	}
+	return nil
+}
+
+// Deactivate transitions an active seating plan to inactive status.
+// Only the plan owner may deactivate, and the plan must currently be active.
+// Returns ErrPlanNotFound if the plan does not exist or is not owned by organizerID.
+// Returns ErrPlanNotActive if the plan is not currently active.
+func (r *PlanRepo) Deactivate(ctx context.Context, planID, organizerID string) error {
+	p, err := r.FindByID(ctx, planID)
+	if err != nil {
+		return err
+	}
+	if p.OrganizerID != organizerID {
+		return repository.ErrPlanNotFound // surface as 404 to prevent probing
+	}
+	if p.Status != repository.PlanStatusActive {
+		return repository.ErrPlanNotActive
+	}
+
+	const q = `
+		UPDATE seating_plans
+		SET status = 'inactive', updated_at = now()
+		WHERE id = $1 AND organizer_id = $2 AND status = 'active'
+		RETURNING id`
+
+	var id string
+	err = r.pool.QueryRow(ctx, q, planID, organizerID).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return repository.ErrPlanNotActive
 		}
 		return err
 	}

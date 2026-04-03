@@ -112,8 +112,9 @@ func main() {
 	}
 	defer producer.Close()
 
-	// Repositories — wired in CP-08.
+	// Repositories.
 	venueRepo := pgrepo.NewVenueRepo(pool)
+	venueSectionRepo := pgrepo.NewVenueSectionRepo(pool)
 	planRepo := pgrepo.NewPlanRepo(pool)
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	priceTierRepo := pgrepo.NewPriceTierRepo(pool)
@@ -200,7 +201,10 @@ func main() {
 	venueHandler := handler.NewVenueHandler(venueRepo, log)
 	venueHandler.RegisterRoutes(api.Group("/venues"))
 
-	planHandler := handler.NewPlanHandler(planRepo, log)
+	venueSectionHandler := handler.NewVenueSectionHandler(venueRepo, venueSectionRepo, log)
+	venueSectionHandler.RegisterRoutes(api.Group("/venues/:venueId"))
+
+	planHandler := handler.NewPlanHandler(planRepo, sectionRepo, log)
 	planHandler.RegisterRoutes(api.Group("/seating-plans"))
 
 	sectionHandler := handler.NewSectionHandler(planRepo, sectionRepo, priceTierRepo, log)

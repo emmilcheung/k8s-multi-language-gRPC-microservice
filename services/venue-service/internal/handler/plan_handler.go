@@ -13,13 +13,14 @@ import (
 
 // PlanHandler handles seating plan lifecycle endpoints.
 type PlanHandler struct {
-	planRepo repository.PlanRepository
-	log      *zap.Logger
+	planRepo    repository.PlanRepository
+	sectionRepo repository.SectionRepository
+	log         *zap.Logger
 }
 
 // NewPlanHandler creates a new PlanHandler.
-func NewPlanHandler(planRepo repository.PlanRepository, log *zap.Logger) *PlanHandler {
-	return &PlanHandler{planRepo: planRepo, log: log}
+func NewPlanHandler(planRepo repository.PlanRepository, sectionRepo repository.SectionRepository, log *zap.Logger) *PlanHandler {
+	return &PlanHandler{planRepo: planRepo, sectionRepo: sectionRepo, log: log}
 }
 
 // RegisterRoutes attaches seating plan routes to the given Echo group.
@@ -31,6 +32,7 @@ func (h *PlanHandler) RegisterRoutes(g *echo.Group) {
 	g.PATCH("/:id/layout", h.SaveLayout)
 	g.POST("/:id/attach-ticket", h.AttachTicket)
 	g.POST("/:id/activate", h.Activate)
+	g.POST("/:id/deactivate", h.Deactivate)
 }
 
 // createPlanRequest is the request body for creating a seating plan.
@@ -117,6 +119,15 @@ func (h *PlanHandler) Create(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
 	}
 
+	// Auto-provision sections from the venue template.
+	// This is best-effort: if the venue has no template sections yet the plan
+	// remains empty and the organiser must define venue sections first.
+	if _, provErr := h.sectionRepo.ProvisionFromVenue(c.Request().Context(), p.ID, req.VenueID); provErr != nil {
+		h.log.Warn("plan auto-provision failed (plan created, sections missing)",
+			zap.Error(provErr), zap.String("planId", p.ID), zap.String("venueId", req.VenueID))
+		// Do not fail the request — plan creation succeeded.
+	}
+
 	return c.JSON(http.StatusCreated, p)
 }
 
@@ -132,6 +143,13 @@ func (h *PlanHandler) Get(c echo.Context) error {
 		h.log.Error("plan get failed", zap.Error(err), zap.String("planId", id))
 		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
 	}
+
+	sections, err := h.sectionRepo.ListSectionsByPlan(c.Request().Context(), id)
+	if err != nil {
+		h.log.Error("plan get sections failed", zap.Error(err), zap.String("planId", id))
+		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+	}
+	p.Sections = sections
 
 	return c.JSON(http.StatusOK, p)
 }
@@ -211,8 +229,8 @@ func (h *PlanHandler) AttachTicket(c echo.Context) error {
 		switch {
 		case errors.Is(err, repository.ErrPlanNotFound):
 			return c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
-		case errors.Is(err, repository.ErrPlanAlreadyActive):
-			return c.JSON(http.StatusConflict, errorResponse("plan is already active"))
+		case errors.Is(err, repository.ErrPlanNotActive):
+			return c.JSON(http.StatusConflict, errorResponse("cannot attach ticket to an inactive plan"))
 		case errors.Is(err, repository.ErrVersionConflict):
 			return c.JSON(http.StatusConflict, errorResponse("version conflict: plan was modified concurrently"))
 		default:
@@ -293,6 +311,37 @@ func (h *PlanHandler) Activate(c echo.Context) error {
 	updated, err := h.planRepo.FindByID(c.Request().Context(), id)
 	if err != nil {
 		h.log.Error("plan activate re-fetch failed", zap.Error(err), zap.String("planId", id))
+		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+	}
+
+	return c.JSON(http.StatusOK, updated)
+}
+
+// Deactivate handles POST /api/seating-plans/:id/deactivate.
+// Transitions an active plan to inactive, stopping new seat holds and purchases.
+func (h *PlanHandler) Deactivate(c echo.Context) error {
+	organizerID := c.Request().Header.Get("X-User-Id")
+	if organizerID == "" {
+		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	id := c.Param("id")
+
+	if err := h.planRepo.Deactivate(c.Request().Context(), id, organizerID); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrPlanNotFound):
+			return c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
+		case errors.Is(err, repository.ErrPlanNotActive):
+			return c.JSON(http.StatusConflict, errorResponse("plan is not active"))
+		default:
+			h.log.Error("plan deactivate failed", zap.Error(err), zap.String("planId", id))
+			return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+		}
+	}
+
+	updated, err := h.planRepo.FindByID(c.Request().Context(), id)
+	if err != nil {
+		h.log.Error("plan deactivate re-fetch failed", zap.Error(err), zap.String("planId", id))
 		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
 	}
 

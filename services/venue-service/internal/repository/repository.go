@@ -18,6 +18,7 @@ var (
 	ErrReservationNotFound = errors.New("seat reservation not found")
 
 	ErrPlanAlreadyActive      = errors.New("seating plan is already active")
+	ErrPlanNotActive          = errors.New("seating plan is not active")
 	ErrPlanNotAttached        = errors.New("seating plan is not attached to a ticket")
 	ErrPlanHasNoSections      = errors.New("seating plan has no purchasable sections")
 	ErrSeatNotAvailable       = errors.New("one or more seats are not available")
@@ -32,9 +33,9 @@ var (
 type PlanStatus string
 
 const (
-	PlanStatusDraft  PlanStatus = "draft"
-	PlanStatusActive PlanStatus = "active"
-	PlanStatusClosed PlanStatus = "closed"
+	PlanStatusDraft    PlanStatus = "draft"
+	PlanStatusActive   PlanStatus = "active"
+	PlanStatusInactive PlanStatus = "inactive"
 )
 
 type SeatStatus string
@@ -90,21 +91,40 @@ type SeatingPlan struct {
 	// LayoutJSON stores the 2-D canvas layout for the seating plan editor.
 	// It is a free-form JSON blob (section node positions + row offsets).
 	LayoutJSON json.RawMessage `db:"layout_json"  json:"layoutJson"`
+	Sections   []*Section      `json:"sections,omitempty"`
 	Version    int             `db:"version"      json:"version"`
 	CreatedAt  time.Time       `db:"created_at"   json:"createdAt"`
 	UpdatedAt  time.Time       `db:"updated_at"   json:"updatedAt"`
 }
 
+// VenueSection is a reusable seating layout template attached to a venue.
+// It defines the physical structure (rows, columns, capacity) but carries no
+// inventory state.  When a seating plan is provisioned for an event, each
+// VenueSection is cloned into a plan-scoped Section with its own seat rows.
+type VenueSection struct {
+	ID           string      `db:"id"            json:"id"`
+	VenueID      string      `db:"venue_id"      json:"venueId"`
+	Name         string      `db:"name"          json:"name"`
+	Type         SectionType `db:"type"          json:"type"`
+	RowCount     int         `db:"row_count"     json:"rowCount"`
+	ColumnCount  int         `db:"column_count"  json:"columnCount"`
+	PositionJSON string      `db:"position_json" json:"positionJson"` // raw JSON blob for canvas placement
+	DisplayOrder int         `db:"display_order" json:"displayOrder"`
+	CreatedAt    time.Time   `db:"created_at"    json:"createdAt"`
+	UpdatedAt    time.Time   `db:"updated_at"    json:"updatedAt"`
+}
+
 // Section is a named group of seats inside a seating plan.
 type Section struct {
-	ID          string      `db:"id"           json:"id"`
-	PlanID      string      `db:"plan_id"      json:"planId"`
-	Name        string      `db:"name"         json:"name"`
-	Type        SectionType `db:"type"         json:"type"`
-	RowCount    int         `db:"row_count"    json:"rowCount"`
-	ColumnCount int         `db:"column_count" json:"columnCount"`
-	CreatedAt   time.Time   `db:"created_at"   json:"createdAt"`
-	UpdatedAt   time.Time   `db:"updated_at"   json:"updatedAt"`
+	ID          string      `db:"id"              json:"id"`
+	PlanID      string      `db:"plan_id"         json:"planId"`
+	Name        string      `db:"name"            json:"name"`
+	Type        SectionType `db:"type"            json:"type"`
+	RowCount    int         `db:"row_count"       json:"rowCount"`
+	ColumnCount int         `db:"column_count"    json:"columnCount"`
+	PriceTierID string      `db:"price_tier_id"   json:"priceTierId,omitempty"`
+	CreatedAt   time.Time   `db:"created_at"      json:"createdAt"`
+	UpdatedAt   time.Time   `db:"updated_at"      json:"updatedAt"`
 }
 
 // PriceTier defines a named price level within a seating plan.
@@ -161,6 +181,15 @@ type SeatReservationItem struct {
 
 // ── Repository interfaces ─────────────────────────────────────────────────────
 
+// VenueSectionRepository manages the seating layout template for a venue.
+type VenueSectionRepository interface {
+	Create(ctx context.Context, vs *VenueSection) error
+	FindByID(ctx context.Context, id string) (*VenueSection, error)
+	ListByVenue(ctx context.Context, venueID string) ([]*VenueSection, error)
+	Update(ctx context.Context, vs *VenueSection) error
+	Delete(ctx context.Context, id, venueID string) error
+}
+
 // VenueRepository manages venue CRUD.
 type VenueRepository interface {
 	Create(ctx context.Context, v *Venue) error
@@ -179,6 +208,7 @@ type PlanRepository interface {
 	ListActivePlans(ctx context.Context) ([]*SeatingPlan, error)
 	AttachTicket(ctx context.Context, planID, ticketID string, expectedVersion int) error
 	Activate(ctx context.Context, planID string, expectedVersion int) error
+	Deactivate(ctx context.Context, planID, organizerID string) error
 	Update(ctx context.Context, p *SeatingPlan) error
 	// SaveLayout persists the free-form layout_json blob for the given plan.
 	// Only allowed while the plan is in 'draft' status.
@@ -191,6 +221,17 @@ type SectionRepository interface {
 	FindSectionByID(ctx context.Context, id string) (*Section, error)
 	ListSectionsByPlan(ctx context.Context, planID string) ([]*Section, error)
 	UpsertSeat(ctx context.Context, seat *Seat) error
+
+	// ProvisionFromVenue clones venue_sections for venueID into plan-scoped sections
+	// and bulk-generates seat rows for each.  Idempotent: does nothing if the plan
+	// already has sections.  Returns the number of sections cloned.
+	ProvisionFromVenue(ctx context.Context, planID, venueID string) (int, error)
+
+	// BulkInsertSeats auto-generates seat rows for a newly created section.
+	// For seated sections it generates rowCount × columnCount seats labelled R{r}S{c}.
+	// For GA sections it generates columnCount capacity-marker seats labelled GA{i}.
+	// priceTierID is optional; pass "" to leave price_tier_id NULL.
+	BulkInsertSeats(ctx context.Context, sectionID, planID, sectionType, priceTierID string, rowCount, columnCount int) error
 	FindSeatsBySection(ctx context.Context, sectionID string) ([]*Seat, error)
 	FindSeatsByIDs(ctx context.Context, seatIDs []string) ([]*Seat, error)
 	GetAvailableSeatsInSection(ctx context.Context, sectionID string) ([]*Seat, error)

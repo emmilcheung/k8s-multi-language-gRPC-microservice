@@ -54,6 +54,7 @@ type createSectionRequest struct {
 	Type        string `json:"type"`
 	RowCount    int    `json:"rowCount"`
 	ColumnCount int    `json:"columnCount"`
+	PriceTierID string `json:"priceTierId"` // optional; "" = use ticket default price
 }
 
 // createPriceTierRequest is the request body for creating a price tier.
@@ -84,7 +85,7 @@ func (h *SectionHandler) CreateSection(c echo.Context) error {
 		return c.JSON(http.StatusForbidden, errorResponse("not the plan owner"))
 	}
 	if plan.Status != repository.PlanStatusDraft {
-		return c.JSON(http.StatusConflict, errorResponse("cannot add sections to an active or closed plan"))
+		return c.JSON(http.StatusConflict, errorResponse("cannot add sections to an active or inactive plan"))
 	}
 
 	var req createSectionRequest
@@ -104,10 +105,21 @@ func (h *SectionHandler) CreateSection(c echo.Context) error {
 		Type:        repository.SectionType(req.Type),
 		RowCount:    req.RowCount,
 		ColumnCount: req.ColumnCount,
+		PriceTierID: req.PriceTierID,
 	}
 
 	if err := h.sectionRepo.CreateSection(c.Request().Context(), s); err != nil {
 		h.log.Error("section create failed", zap.Error(err), zap.String("planId", planID))
+		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+	}
+
+	// Auto-generate seat rows for the new section.
+	if err := h.sectionRepo.BulkInsertSeats(
+		c.Request().Context(),
+		s.ID, planID, req.Type, req.PriceTierID, req.RowCount, req.ColumnCount,
+	); err != nil {
+		h.log.Error("section seat generation failed", zap.Error(err),
+			zap.String("sectionId", s.ID), zap.String("planId", planID))
 		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
 	}
 
@@ -161,7 +173,7 @@ func (h *SectionHandler) CreatePriceTier(c echo.Context) error {
 		return c.JSON(http.StatusForbidden, errorResponse("not the plan owner"))
 	}
 	if plan.Status != repository.PlanStatusDraft {
-		return c.JSON(http.StatusConflict, errorResponse("cannot add price tiers to an active or closed plan"))
+		return c.JSON(http.StatusConflict, errorResponse("cannot add price tiers to an active or inactive plan"))
 	}
 
 	var req createPriceTierRequest

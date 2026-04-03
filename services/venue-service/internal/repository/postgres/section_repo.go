@@ -2,7 +2,9 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/acme/venue-service/internal/repository"
@@ -23,22 +25,134 @@ func NewSectionRepo(pool *pgxpool.Pool) *SectionRepo {
 // CreateSection inserts a new section. On return, s.ID, s.CreatedAt, s.UpdatedAt are populated.
 func (r *SectionRepo) CreateSection(ctx context.Context, s *repository.Section) error {
 	const q = `
-		INSERT INTO sections (plan_id, name, type, row_count, column_count)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO sections (plan_id, name, type, row_count, column_count, price_tier_id)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::uuid)
 		RETURNING id, created_at, updated_at`
-	return r.pool.QueryRow(ctx, q, s.PlanID, s.Name, s.Type, s.RowCount, s.ColumnCount).
+	return r.pool.QueryRow(ctx, q, s.PlanID, s.Name, s.Type, s.RowCount, s.ColumnCount, s.PriceTierID).
 		Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
 }
 
-// FindSectionByID returns a section by primary key.
+// BulkInsertSeats auto-generates seat rows for a newly created section using a
+// pgx batch to avoid N round-trips. priceTierID is optional; pass "" for NULL.
+func (r *SectionRepo) BulkInsertSeats(ctx context.Context, sectionID, planID, sectionType, priceTierID string, rowCount, columnCount int) error {
+	const q = `
+		INSERT INTO seats (section_id, plan_id, seat_label, row_label, column_number, price_tier_id, attributes)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::uuid, $7)`
+
+	batch := &pgx.Batch{}
+
+	switch sectionType {
+	case string(repository.SectionTypeSeated):
+		for r := 1; r <= rowCount; r++ {
+			for c := 1; c <= columnCount; c++ {
+				label := fmt.Sprintf("R%dS%d", r, c)
+				rowLabel := fmt.Sprintf("R%d", r)
+				batch.Queue(q, sectionID, planID, label, rowLabel, c, priceTierID, "{}")
+			}
+		}
+	case string(repository.SectionTypeGA):
+		for i := 1; i <= columnCount; i++ {
+			label := fmt.Sprintf("GA%d", i)
+			batch.Queue(q, sectionID, planID, label, "GA", i, priceTierID, "{}")
+		}
+	default:
+		return fmt.Errorf("unknown section type: %s", sectionType)
+	}
+
+	if batch.Len() == 0 {
+		return nil
+	}
+
+	br := r.pool.SendBatch(ctx, batch)
+	defer br.Close()
+
+	for i := 0; i < batch.Len(); i++ {
+		if _, err := br.Exec(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ProvisionFromVenue clones venue template sections into plan-scoped sections and
+// generates seat rows for each.  Idempotent: returns (0, nil) if the plan already
+// has sections.  Returns the count of sections provisioned.
+func (r *SectionRepo) ProvisionFromVenue(ctx context.Context, planID, venueID string) (int, error) {
+	// Check idempotency: if plan already has sections, do nothing.
+	var existing int
+	if err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM sections WHERE plan_id = $1`, planID,
+	).Scan(&existing); err != nil {
+		return 0, err
+	}
+	if existing > 0 {
+		return 0, nil
+	}
+
+	// Fetch venue template sections ordered by display_order.
+	const vsQ = `
+		SELECT id, name, type, row_count, column_count
+		FROM   venue_sections
+		WHERE  venue_id = $1
+		ORDER  BY display_order, created_at`
+
+	rows, err := r.pool.Query(ctx, vsQ, venueID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	type templateSection struct {
+		id          string
+		name        string
+		sectionType string
+		rowCount    int
+		colCount    int
+	}
+	var templates []templateSection
+	for rows.Next() {
+		var ts templateSection
+		if err := rows.Scan(&ts.id, &ts.name, &ts.sectionType, &ts.rowCount, &ts.colCount); err != nil {
+			return 0, err
+		}
+		templates = append(templates, ts)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	if len(templates) == 0 {
+		return 0, nil
+	}
+
+	// Clone each template section into the plan.
+	for _, ts := range templates {
+		s := &repository.Section{
+			PlanID:      planID,
+			Name:        ts.name,
+			Type:        repository.SectionType(ts.sectionType),
+			RowCount:    ts.rowCount,
+			ColumnCount: ts.colCount,
+		}
+		if err := r.CreateSection(ctx, s); err != nil {
+			return 0, fmt.Errorf("provision section %q: %w", ts.name, err)
+		}
+		if err := r.BulkInsertSeats(ctx, s.ID, planID, ts.sectionType, "", ts.rowCount, ts.colCount); err != nil {
+			return 0, fmt.Errorf("provision seats for section %q: %w", ts.name, err)
+		}
+	}
+
+	return len(templates), nil
+}
+
 func (r *SectionRepo) FindSectionByID(ctx context.Context, id string) (*repository.Section, error) {
 	const q = `
-		SELECT id, plan_id, name, type, row_count, column_count, created_at, updated_at
+		SELECT id, plan_id, name, type, row_count, column_count, COALESCE(price_tier_id::text, ''), created_at, updated_at
 		FROM sections
 		WHERE id = $1`
 	s := &repository.Section{}
 	err := r.pool.QueryRow(ctx, q, id).
-		Scan(&s.ID, &s.PlanID, &s.Name, &s.Type, &s.RowCount, &s.ColumnCount, &s.CreatedAt, &s.UpdatedAt)
+		Scan(&s.ID, &s.PlanID, &s.Name, &s.Type, &s.RowCount, &s.ColumnCount, &s.PriceTierID, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, repository.ErrSectionNotFound
@@ -51,7 +165,7 @@ func (r *SectionRepo) FindSectionByID(ctx context.Context, id string) (*reposito
 // ListSectionsByPlan returns all sections for a seating plan.
 func (r *SectionRepo) ListSectionsByPlan(ctx context.Context, planID string) ([]*repository.Section, error) {
 	const q = `
-		SELECT id, plan_id, name, type, row_count, column_count, created_at, updated_at
+		SELECT id, plan_id, name, type, row_count, column_count, COALESCE(price_tier_id::text, ''), created_at, updated_at
 		FROM sections
 		WHERE plan_id = $1
 		ORDER BY created_at ASC`
@@ -64,7 +178,7 @@ func (r *SectionRepo) ListSectionsByPlan(ctx context.Context, planID string) ([]
 	var sections []*repository.Section
 	for rows.Next() {
 		s := &repository.Section{}
-		if err := rows.Scan(&s.ID, &s.PlanID, &s.Name, &s.Type, &s.RowCount, &s.ColumnCount, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.PlanID, &s.Name, &s.Type, &s.RowCount, &s.ColumnCount, &s.PriceTierID, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		sections = append(sections, s)
@@ -317,14 +431,20 @@ func (r *SectionRepo) scanSeats(ctx context.Context, q string, arg any) ([]*repo
 	var seats []*repository.Seat
 	for rows.Next() {
 		s := &repository.Seat{}
+		var priceTierID sql.NullString
 		if err := rows.Scan(
-			&s.ID, &s.SectionID, &s.PlanID, &s.PriceTierID,
+			&s.ID, &s.SectionID, &s.PlanID, &priceTierID,
 			&s.SeatLabel, &s.RowLabel, &s.ColumnNumber,
 			&s.Status, &s.HeldBy, &s.HeldUntil,
 			&s.Attributes, &s.Version,
 			&s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
 			return nil, err
+		}
+		if priceTierID.Valid {
+			s.PriceTierID = priceTierID.String
+		} else {
+			s.PriceTierID = ""
 		}
 		seats = append(seats, s)
 	}
