@@ -323,6 +323,8 @@ services:
       TICKET_SERVICE_GRPC_HOST: ticket-service
       TICKET_SERVICE_GRPC_PORT: "50051"
       TICKET_SERVICE_GRPC_DEADLINE_MS: "5000"
+      VENUE_SERVICE_GRPC_HOST: venue-service
+      VENUE_SERVICE_GRPC_PORT: "50052"
     depends_on:
       postgres-orders:
         condition: service_healthy

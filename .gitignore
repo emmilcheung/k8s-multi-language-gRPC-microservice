@@ -33,6 +33,7 @@ go.sum.local
 *.test
 coverage.out
 *.cover
+.playwright-mcp
 
 # Local Kubernetes secret env files (contain real passwords — never commit)
 infra/local/secrets/*.env
