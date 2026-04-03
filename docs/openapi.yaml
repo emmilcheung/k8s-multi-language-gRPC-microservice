@@ -1,0 +1,1799 @@
+openapi: "3.0.3"
+info:
+  title: Ticketing Platform API
+  version: "1.0.0"
+  description: |
+    Polyglot microservices ticketing platform.
+    All routes are proxied through **Kong API Gateway** (default: `http://localhost:8000`).
+
+    ## Authentication
+    Protected endpoints require a valid RS256 JWT in the `token` **cookie** (set by `POST /api/users/signin`).
+    Kong validates the token and injects the user's ID as the `X-User-Id` request header before
+    forwarding to the upstream service. Clients never need to set `X-User-Id` directly.
+
+    ## Ticket types
+    | Type | Description |
+    |---|---|
+    | **GA** (General Admission) | Quota-based inventory, no seat assignment |
+    | **MANUAL_SEATED** | Buyer picks specific seats on the seat map |
+    | **AUTO_ASSIGN_SEATED** | System assigns best-available seats in a section |
+
+servers:
+  - url: http://localhost:8000
+    description: Local Kong gateway
+
+tags:
+  - name: auth
+    description: Authentication and session management (auth-service)
+  - name: tickets
+    description: Ticket catalogue and organizer management (ticket-service)
+  - name: venues
+    description: Venue management (venue-service)
+  - name: seating-plans
+    description: Seating plan lifecycle, sections, price tiers, and availability (venue-service)
+  - name: seats
+    description: Seat holds, releases, and real-time availability (venue-service)
+  - name: orders
+    description: Order lifecycle — GA and seated flows (order-service)
+  - name: payments
+    description: Payment creation and lookup (payment-service)
+
+# ── Security schemes ──────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: token
+      description: RS256 JWT issued by `POST /api/users/signin`.
+
+  # ── Shared schemas ────────────────────────────────────────────────────────────
+  schemas:
+
+    # ── Error ─────────────────────────────────────────────────────────────────
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "seating plan not found"
+
+    # ── Auth ──────────────────────────────────────────────────────────────────
+    SignUpRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: "organizer@example.com"
+        password:
+          type: string
+          minLength: 8
+          example: "s3cur3P@ss"
+
+    SignInRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    CurrentUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+
+    # ── Ticket ────────────────────────────────────────────────────────────────
+    Ticket:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: "Taylor Swift: Eras Tour Night 1"
+        price:
+          type: string
+          description: Decimal string, e.g. "149.99"
+          example: "149.99"
+        userId:
+          type: string
+          format: uuid
+          description: Organizer's user ID
+        seatingPlanId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Attached seating plan ID; null for GA tickets
+        quota:
+          type: integer
+          description: Total GA inventory (null for seated tickets)
+        reserved:
+          type: integer
+          description: Currently reserved count (GA)
+        sold:
+          type: integer
+          description: Sold count (GA)
+        maxPerUser:
+          type: integer
+          description: Max tickets per buyer
+        version:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateTicketRequest:
+      type: object
+      required: [title, price]
+      properties:
+        title:
+          type: string
+          maxLength: 200
+          example: "Taylor Swift: Eras Tour Night 1"
+        price:
+          type: string
+          description: Decimal string with up to 4 decimal places
+          example: "149.99"
+        quota:
+          type: integer
+          minimum: 1
+          description: Required for GA tickets; omit for seated-only
+        maxPerUser:
+          type: integer
+          minimum: 1
+          description: Per-buyer purchase limit
+
+    UpdateTicketRequest:
+      type: object
+      required: [title, price]
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        price:
+          type: string
+        quota:
+          type: integer
+          minimum: 1
+        maxPerUser:
+          type: integer
+          minimum: 1
+
+    AttachSeatingPlanRequest:
+      type: object
+      required: [seatingPlanId]
+      properties:
+        seatingPlanId:
+          type: string
+          format: uuid
+
+    # ── Venue ─────────────────────────────────────────────────────────────────
+    Venue:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizerId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Asia World Expo Arena"
+        capacity:
+          type: integer
+          example: 14000
+        timezone:
+          type: string
+          example: "Asia/Hong_Kong"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateVenueRequest:
+      type: object
+      required: [name, capacity, timezone]
+      properties:
+        name:
+          type: string
+          example: "Asia World Expo Arena"
+        capacity:
+          type: integer
+          minimum: 1
+        timezone:
+          type: string
+          example: "Asia/Hong_Kong"
+
+    # ── Venue Section (Template) ───────────────────────────────────────────────
+    VenueSection:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        venueId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Orchestra Left"
+        type:
+          type: string
+          enum: [seated, ga]
+          description: |
+            - **seated**: fixed seats with row/column grid (rowCount × columnCount seats)
+            - **ga**: general admission capacity block
+        rowCount:
+          type: integer
+          description: Number of rows (seated sections only)
+          example: 20
+        columnCount:
+          type: integer
+          description: Seats per row for seated; capacity for GA
+          example: 30
+        displayOrder:
+          type: integer
+          description: Order in which sections are displayed
+          example: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateVenueSectionRequest:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+          example: "Orchestra Left"
+        type:
+          type: string
+          enum: [seated, ga]
+        rowCount:
+          type: integer
+          minimum: 1
+          description: Required for seated sections
+        columnCount:
+          type: integer
+          minimum: 1
+          description: Required for both types (capacity for GA)
+        displayOrder:
+          type: integer
+          description: Display order among venue sections
+          example: 0
+
+    # ── Seating Plan ──────────────────────────────────────────────────────────
+    SeatingPlan:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        venueId:
+          type: string
+          format: uuid
+        ticketId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Null until attached to a ticket
+        organizerId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Main Floor — Concert"
+        status:
+          type: string
+          enum: [draft, active, inactive]
+          description: |
+            - **draft**: layout being designed; seats not purchasable
+            - **active**: open for purchase; layout is locked
+            - **inactive**: closed to new purchases
+        holdTtlSec:
+          type: integer
+          description: Seconds a seat hold is valid before auto-release
+          example: 900
+        maxSeatsPerOrder:
+          type: integer
+          description: Maximum seats a single buyer may purchase in one order
+          example: 6
+        layoutJson:
+          type: object
+          nullable: true
+          description: Free-form 2D canvas layout blob (React Flow node positions + row offsets)
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/Section"
+          description: Populated only when fetching a plan with embedded sections
+        version:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateSeatingPlanRequest:
+      type: object
+      required: [venueId, name]
+      properties:
+        venueId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Main Floor — Concert"
+        holdTtlSec:
+          type: integer
+          default: 600
+          minimum: 1
+          description: Seat hold TTL in seconds
+        maxSeatsPerOrder:
+          type: integer
+          default: 10
+          minimum: 1
+
+    UpdateSeatingPlanRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        holdTtlSec:
+          type: integer
+          minimum: 1
+        maxSeatsPerOrder:
+          type: integer
+          minimum: 1
+
+    SaveLayoutRequest:
+      type: object
+      required: [layoutJson]
+      properties:
+        layoutJson:
+          type: object
+          description: |
+            Free-form canvas blob. Expected structure:
+            ```json
+            {
+              "nodes": [
+                {
+                  "id": "<sectionId>",
+                  "position": { "x": 100, "y": 50 },
+                  "data": { "rowOffsets": { "0": 10, "1": 5 } }
+                }
+              ]
+            }
+            ```
+
+    AttachTicketRequest:
+      type: object
+      required: [ticketId]
+      properties:
+        ticketId:
+          type: string
+          format: uuid
+        expectedVersion:
+          type: integer
+          description: Optimistic concurrency version; defaults to current version if omitted
+
+    # ── Section ───────────────────────────────────────────────────────────────
+    Section:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        planId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Orchestra Left"
+        type:
+          type: string
+          enum: [seated, ga]
+          description: |
+            - **seated**: fixed seats with row/column grid (rowCount × columnCount seats generated)
+            - **ga**: general admission capacity block (columnCount = capacity)
+        rowCount:
+          type: integer
+          description: Number of rows (seated sections only)
+          example: 20
+        columnCount:
+          type: integer
+          description: Seats per row for seated sections; capacity for GA sections
+          example: 30
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateSectionRequest:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+          example: "Orchestra Left"
+        type:
+          type: string
+          enum: [seated, ga]
+        rowCount:
+          type: integer
+          minimum: 1
+          description: Required for seated sections
+        columnCount:
+          type: integer
+          minimum: 1
+          description: Required for both types (capacity for GA)
+
+    # ── Price Tier ────────────────────────────────────────────────────────────
+    PriceTier:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        planId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Floor"
+        price:
+          type: string
+          description: Decimal string, e.g. "200.00"
+          example: "200.00"
+        createdAt:
+          type: string
+          format: date-time
+
+    CreatePriceTierRequest:
+      type: object
+      required: [name, price]
+      properties:
+        name:
+          type: string
+          example: "Floor"
+        price:
+          type: string
+          description: Decimal string
+          example: "200.00"
+
+    # ── Availability ──────────────────────────────────────────────────────────
+    AvailabilitySnapshot:
+      type: object
+      properties:
+        planId:
+          type: string
+          format: uuid
+        seatMap:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: [available, held, reserved, sold, blocked]
+              sectionId:
+                type: string
+                format: uuid
+          example:
+            "550e8400-e29b-41d4-a716-446655440001":
+              status: available
+              sectionId: "550e8400-e29b-41d4-a716-446655440002"
+        counts:
+          type: object
+          properties:
+            available:
+              type: integer
+            held:
+              type: integer
+            reserved:
+              type: integer
+            sold:
+              type: integer
+            blocked:
+              type: integer
+        cachedAt:
+          type: string
+          format: date-time
+
+    HoldSeatsRequest:
+      type: object
+      required: [seatIds, sessionId]
+      properties:
+        seatIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          maxItems: 50
+          description: Seat IDs to hold. All must be available.
+        sessionId:
+          type: string
+          format: uuid
+          description: Buyer session ID for correlating holds within a checkout session
+
+    HoldSeatsResponse:
+      type: object
+      properties:
+        held:
+          type: array
+          items:
+            type: string
+            format: uuid
+        expiresAt:
+          type: string
+          format: date-time
+
+    ReleaseSeatsRequest:
+      type: object
+      required: [seatIds]
+      properties:
+        seatIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    # ── Order ─────────────────────────────────────────────────────────────────
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [CREATED, PAYMENT_PENDING, PAYMENT_CAPTURED, CANCELLED, EXPIRED]
+        orderType:
+          type: string
+          enum: [GA, MANUAL_SEATED, AUTO_ASSIGN_SEATED]
+        ticket:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            title:
+              type: string
+            price:
+              type: number
+              format: double
+        planId:
+          type: string
+          format: uuid
+          nullable: true
+        reservationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Venue-service reservation ID for seated orders
+        quantity:
+          type: integer
+        seats:
+          type: array
+          description: Populated for seated orders
+          items:
+            type: object
+            properties:
+              seatId:
+                type: string
+                format: uuid
+              sectionId:
+                type: string
+                format: uuid
+              seatLabel:
+                type: string
+                example: "R3S7"
+              price:
+                type: string
+        expiresAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateGAOrderRequest:
+      type: object
+      required: [ticketId]
+      properties:
+        ticketId:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          default: 1
+
+    CreateSeatedOrderRequest:
+      type: object
+      required: [ticketId, planId]
+      properties:
+        ticketId:
+          type: string
+          format: uuid
+        planId:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          default: 1
+        seatIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            **MANUAL_SEATED flow** — provide held seat IDs. `quantity` must equal `seatIds.length`.
+            Omit `sectionId` when using this flow.
+        sectionId:
+          type: string
+          format: uuid
+          description: |
+            **AUTO_ASSIGN_SEATED flow** — section to pick seats from. System assigns
+            the best available contiguous block. Omit `seatIds` when using this flow.
+        attendees:
+          type: array
+          description: Optional per-seat attendee names
+          items:
+            type: object
+            required: [seatId, name]
+            properties:
+              seatId:
+                type: string
+                format: uuid
+              name:
+                type: string
+
+    # ── Payment ───────────────────────────────────────────────────────────────
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          description: Amount in smallest currency unit (cents)
+        currency:
+          type: string
+          default: "usd"
+        status:
+          type: string
+          enum: [PENDING, CAPTURED, FAILED]
+        createdAt:
+          type: string
+          format: date-time
+
+    CreatePaymentRequest:
+      type: object
+      required: [orderId, amount, token]
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          description: Amount in smallest currency unit (cents), e.g. 14999 for $149.99
+          example: 14999
+        currency:
+          type: string
+          default: "usd"
+          example: "usd"
+        token:
+          type: string
+          description: Stripe payment method token (use "pm_card_visa" in dev/test)
+          example: "pm_card_visa"
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+paths:
+
+  # ════════════════════════════════════════════════════════
+  # AUTH SERVICE
+  # ════════════════════════════════════════════════════════
+
+  /api/users/signup:
+    post:
+      tags: [auth]
+      summary: Register a new account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignUpRequest"
+      responses:
+        "201":
+          description: Account created. Sets `token` cookie.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  currentUser:
+                    $ref: "#/components/schemas/CurrentUser"
+        "400":
+          description: Validation error or email already in use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/users/signin:
+    post:
+      tags: [auth]
+      summary: Sign in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignInRequest"
+      responses:
+        "200":
+          description: Authenticated. Sets `token` cookie.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  currentUser:
+                    $ref: "#/components/schemas/CurrentUser"
+        "400":
+          description: Invalid credentials
+
+  /api/users/signout:
+    post:
+      tags: [auth]
+      summary: Sign out (clears token cookie)
+      responses:
+        "200":
+          description: Signed out
+
+  /api/users/currentuser:
+    get:
+      tags: [auth]
+      summary: Get the authenticated user
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current user info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  currentUser:
+                    $ref: "#/components/schemas/CurrentUser"
+        "401":
+          description: Not authenticated
+
+  /api/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Refresh access token using refresh-token cookie
+      responses:
+        "200":
+          description: New token set in cookie
+        "401":
+          description: Refresh token invalid or expired
+
+  /.well-known/jwks.json:
+    get:
+      tags: [auth]
+      summary: JWKS endpoint (Kong uses this to verify RS256 tokens)
+      responses:
+        "200":
+          description: JSON Web Key Set
+
+  # ════════════════════════════════════════════════════════
+  # TICKET SERVICE
+  # ════════════════════════════════════════════════════════
+
+  /api/tickets:
+    get:
+      tags: [tickets]
+      summary: List tickets (cursor-based pagination)
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: after
+          in: query
+          description: Cursor — last ticket ID from the previous page
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Array of tickets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Ticket"
+
+    post:
+      tags: [tickets]
+      summary: Create a ticket (organizer only)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTicketRequest"
+      responses:
+        "201":
+          description: Ticket created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "400":
+          description: Validation error
+        "401":
+          description: Not authenticated
+
+  /api/tickets/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [tickets]
+      summary: Get a single ticket
+      responses:
+        "200":
+          description: Ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "404":
+          description: Not found
+
+    put:
+      tags: [tickets]
+      summary: Update a ticket (owner only)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTicketRequest"
+      responses:
+        "200":
+          description: Updated ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "403":
+          description: Not the owner
+        "404":
+          description: Not found
+        "409":
+          description: Ticket is reserved (cannot edit) or version conflict
+
+  /api/tickets/{id}/seating-plan:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    put:
+      tags: [tickets]
+      summary: Attach a seating plan to a ticket (owner only)
+      description: |
+        Attaches a draft seating plan to the ticket, converting it from GA to seated mode.
+        Also calls `POST /api/seating-plans/:planId/attach-ticket` on venue-service to record the link bidirectionally.
+        The plan must be in `draft` status.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachSeatingPlanRequest"
+      responses:
+        "200":
+          description: Ticket with seatingPlanId set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "400":
+          description: Invalid seating plan ID
+        "403":
+          description: Not the ticket owner
+        "404":
+          description: Ticket or seating plan not found
+        "409":
+          description: Plan is already attached elsewhere or version conflict
+
+    delete:
+      tags: [tickets]
+      summary: Detach seating plan (owner only)
+      description: Reverts the ticket to GA mode. Only allowed while no orders are in progress.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Ticket with seatingPlanId cleared
+        "403":
+          description: Not the owner
+        "404":
+          description: Not found
+
+  # ════════════════════════════════════════════════════════
+  # VENUE SERVICE — Venues
+  # ════════════════════════════════════════════════════════
+
+  /api/venues:
+    get:
+      tags: [venues]
+      summary: List organizer's venues
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: List of venues owned by the authenticated organizer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  venues:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Venue"
+
+    post:
+      tags: [venues]
+      summary: Create a venue
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVenueRequest"
+      responses:
+        "201":
+          description: Venue created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Venue"
+
+  /api/venues/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [venues]
+      summary: Get a venue
+      responses:
+        "200":
+          description: Venue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Venue"
+        "404":
+          description: Not found
+
+    put:
+      tags: [venues]
+      summary: Update a venue (owner only)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVenueRequest"
+      responses:
+        "200":
+          description: Updated venue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Venue"
+
+  # ════════════════════════════════════════════════════════
+  # VENUE SERVICE — Venue Sections (Templates)
+  # ════════════════════════════════════════════════════════
+
+  /api/venues/{venueId}/sections:
+    parameters:
+      - name: venueId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [venues]
+      summary: List venue section templates
+      description: |
+        Fetches reusable section templates for a venue.
+        These templates are used to provision sections into seating plans
+        via the ProvisionFromVenue flow.
+      responses:
+        "200":
+          description: List of venue section templates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sections:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/VenueSection"
+        "404":
+          description: Venue not found
+
+    post:
+      tags: [venues]
+      summary: Create a venue section template (owner only)
+      description: |
+        Adds a reusable section template to a venue.
+        When a seating plan is created for this venue, these templates
+        can be provisioned into the plan as plan-scoped sections.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVenueSectionRequest"
+      responses:
+        "201":
+          description: Section template created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VenueSection"
+        "404":
+          description: Venue not found
+
+  # ════════════════════════════════════════════════════════
+  # VENUE SERVICE — Seating Plans
+  # ════════════════════════════════════════════════════════
+
+  /api/seating-plans:
+    get:
+      tags: [seating-plans]
+      summary: List seating plans for a venue (organizer only)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: venueId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: List of seating plans for the venue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plans:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SeatingPlan"
+        "422":
+          description: venueId query parameter missing
+
+    post:
+      tags: [seating-plans]
+      summary: Create a seating plan (draft)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSeatingPlanRequest"
+      responses:
+        "201":
+          description: Seating plan created in draft status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeatingPlan"
+
+  /api/seating-plans/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [seating-plans]
+      summary: Get a seating plan (public)
+      responses:
+        "200":
+          description: Seating plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeatingPlan"
+        "404":
+          description: Not found
+
+    put:
+      tags: [seating-plans]
+      summary: Update plan metadata (name, holdTtlSec, maxSeatsPerOrder — owner only)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSeatingPlanRequest"
+      responses:
+        "200":
+          description: Updated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeatingPlan"
+
+  /api/seating-plans/{id}/layout:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    patch:
+      tags: [seating-plans]
+      summary: Save canvas layout (draft plans only, owner only)
+      description: Persists section node positions and row offsets from the drag-and-drop canvas editor.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveLayoutRequest"
+      responses:
+        "200":
+          description: Updated plan with new layoutJson
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeatingPlan"
+        "404":
+          description: Plan not found
+        "409":
+          description: Plan is not in draft status
+
+  /api/seating-plans/{id}/attach-ticket:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      tags: [seating-plans]
+      summary: Associate a ticket with this plan (owner only)
+      description: |
+        Sets `ticketId` on the seating plan, enabling the activate button.
+        Usually called automatically by the client when the organizer attaches a plan
+        from the ticket detail page.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachTicketRequest"
+      responses:
+        "200":
+          description: Updated plan with ticketId set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeatingPlan"
+        "409":
+          description: Plan is already active or version conflict
+
+  /api/seating-plans/{id}/activate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      tags: [seating-plans]
+      summary: Activate a draft plan (owner only)
+      description: |
+        Transitions the plan from `draft` → `active`.
+        **Pre-conditions:**
+        - Plan must have a `ticketId` set (via attach-ticket)
+        - Plan must have at least one section
+        - Plan must be in `draft` status
+
+        Once activated, the layout is locked and seats become purchasable.
+      security:
+        - cookieAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedVersion:
+                  type: integer
+                  description: Optional OCC version guard
+      responses:
+        "200":
+          description: Activated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeatingPlan"
+        "409":
+          description: Plan already active, no sections, not attached to ticket, or version conflict
+        "422":
+          description: Precondition not met
+
+  /api/seating-plans/{id}/deactivate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      tags: [seating-plans]
+      summary: Deactivate an active plan (owner only)
+      description: |
+        Transitions the plan from `active` → `inactive`.
+        Stops new seat holds and purchases. Existing confirmed orders are unaffected.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Deactivated plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeatingPlan"
+        "404":
+          description: Plan not found
+        "409":
+          description: Plan is not currently active
+
+  # ════════════════════════════════════════════════════════
+  # VENUE SERVICE — Sections
+  # ════════════════════════════════════════════════════════
+
+  /api/seating-plans/{planId}/sections:
+    parameters:
+      - name: planId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [seating-plans]
+      summary: List sections in a plan (public)
+      responses:
+        "200":
+          description: List of sections
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sections:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Section"
+
+    post:
+      tags: [seating-plans]
+      summary: Add a section to a draft plan (owner only)
+      description: |
+        Creates a named section and auto-generates seats:
+        - **seated**: generates `rowCount × columnCount` seats labelled `R{r}S{c}`
+        - **ga**: generates `columnCount` capacity-marker seats labelled `GA{i}`
+
+        Only allowed while the plan is in `draft` status.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSectionRequest"
+      responses:
+        "201":
+          description: Section created (seats auto-generated)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Section"
+        "409":
+          description: Plan is not in draft status
+
+  # ════════════════════════════════════════════════════════
+  # VENUE SERVICE — Price Tiers
+  # ════════════════════════════════════════════════════════
+
+  /api/seating-plans/{planId}/price-tiers:
+    parameters:
+      - name: planId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [seating-plans]
+      summary: List price tiers for a plan (public)
+      responses:
+        "200":
+          description: List of price tiers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  priceTiers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PriceTier"
+
+    post:
+      tags: [seating-plans]
+      summary: Create a price tier (owner only, draft plans only)
+      description: |
+        Price tiers allow different sections to have different prices
+        (e.g. Floor = HKD 1,280 / Upper Tier = HKD 680).
+        After creating tiers, assign seats to a tier via seat management.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePriceTierRequest"
+      responses:
+        "201":
+          description: Price tier created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceTier"
+        "409":
+          description: Plan is not in draft status
+
+  # ════════════════════════════════════════════════════════
+  # VENUE SERVICE — Seat Holds
+  # ════════════════════════════════════════════════════════
+
+  /api/seating-plans/{planId}/seats/hold:
+    parameters:
+      - name: planId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      tags: [seats]
+      summary: Hold seats (active plans only, authenticated)
+      description: |
+        Atomically transitions the given seats from `available` → `held`.
+        Holds expire after `plan.holdTtlSec` seconds and are released automatically
+        by the sweeper goroutine.
+
+        **Session scope:** all holds for a checkout session share the same `sessionId`.
+        Calling hold again with the same sessionId extends the TTL.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HoldSeatsRequest"
+      responses:
+        "200":
+          description: Seats successfully held
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HoldSeatsResponse"
+        "409":
+          description: One or more seats are not available or plan is not active
+        "422":
+          description: seatIds or sessionId missing
+
+  /api/seating-plans/{planId}/seats/release:
+    parameters:
+      - name: planId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      tags: [seats]
+      summary: Release held seats (authenticated)
+      description: Transitions `held` → `available` for seats held by the calling user.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReleaseSeatsRequest"
+      responses:
+        "200":
+          description: Seats released
+        "422":
+          description: seatIds missing
+
+  /api/seating-plans/{planId}/availability:
+    parameters:
+      - name: planId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [seats]
+      summary: Get seat availability snapshot (public)
+      description: |
+        Returns a point-in-time snapshot of all seats in the plan.
+        Clients should subscribe to the SSE stream (`/events`) to receive incremental
+        updates rather than polling this endpoint.
+      responses:
+        "200":
+          description: Availability snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvailabilitySnapshot"
+
+  /api/seating-plans/{planId}/events:
+    parameters:
+      - name: planId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [seats]
+      summary: Real-time seat change stream (SSE, public)
+      description: |
+        Opens a persistent `text/event-stream` (Server-Sent Events) connection.
+        The server pushes a JSON event each time a seat's status changes.
+
+        **Event format:**
+        ```
+        data: {"seatId": "<uuid>", "status": "held|reserved|sold|available", "userId": "<uuid>"}
+        ```
+
+        **Heartbeat** (every 15s, prevents proxy timeout):
+        ```
+        : heartbeat
+        ```
+
+        Clients should re-fetch `/availability` on each event to get the full
+        updated snapshot. On connection error, reconnect with exponential backoff.
+      responses:
+        "200":
+          description: SSE stream established
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  # ════════════════════════════════════════════════════════
+  # ORDER SERVICE
+  # ════════════════════════════════════════════════════════
+
+  /api/orders:
+    get:
+      tags: [orders]
+      summary: List the authenticated user's orders
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: List of orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
+
+    post:
+      tags: [orders]
+      summary: Create a GA order
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGAOrderRequest"
+      responses:
+        "201":
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          description: Validation error or ticket not available
+
+  /api/orders/seated:
+    post:
+      tags: [orders]
+      summary: Create a seated order (MANUAL_SEATED or AUTO_ASSIGN_SEATED)
+      description: |
+        Supports two sub-flows determined by the request body:
+
+        **MANUAL_SEATED** — buyer has already held specific seats:
+        ```json
+        {
+          "ticketId": "...",
+          "planId": "...",
+          "quantity": 2,
+          "seatIds": ["seat-a", "seat-b"]
+        }
+        ```
+
+        **AUTO_ASSIGN_SEATED** — system picks best available seats in a section:
+        ```json
+        {
+          "ticketId": "...",
+          "planId": "...",
+          "sectionId": "...",
+          "quantity": 2
+        }
+        ```
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSeatedOrderRequest"
+      responses:
+        "201":
+          description: Seated order created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          description: |
+            Validation error. Common causes:
+            - `quantity` does not match `seatIds.length` (MANUAL_SEATED)
+            - `sectionId` missing for AUTO_ASSIGN_SEATED
+            - `planId` missing for seated flows
+        "409":
+          description: Seats no longer available
+
+  /api/orders/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [orders]
+      summary: Get an order
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "403":
+          description: Not the order owner
+        "404":
+          description: Not found
+
+    delete:
+      tags: [orders]
+      summary: Cancel an order
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Cancelled order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "403":
+          description: Not the order owner
+        "409":
+          description: Order is in a terminal state (cannot cancel)
+
+  # ════════════════════════════════════════════════════════
+  # PAYMENT SERVICE
+  # ════════════════════════════════════════════════════════
+
+  /api/payments:
+    post:
+      tags: [payments]
+      summary: Charge a payment for an order
+      description: |
+        Submits a payment for a `CREATED` order.
+        In dev/test, use Stripe test token `"pm_card_visa"`.
+        On success, publishes `payments.payment.captured` to Kafka which transitions
+        the order to `PAYMENT_CAPTURED`.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePaymentRequest"
+      responses:
+        "201":
+          description: Payment captured
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment:
+                    $ref: "#/components/schemas/Payment"
+        "400":
+          description: Validation error
+
+  /api/payments/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [payments]
+      summary: Get a payment by ID
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Payment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payment:
+                    $ref: "#/components/schemas/Payment"
+        "403":
+          description: Not the payment owner
+        "404":
+          description: Not found
