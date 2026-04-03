@@ -3,9 +3,10 @@
 import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { fetchVenue, fetchPlansByVenue } from "@/app/actions/venues";
+import { fetchVenue, fetchPlansByVenue, fetchVenueSections, createVenueSection, deleteVenueSection } from "@/app/actions/venues";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
+import { VenueSectionForm } from "@/components/venue-section-form";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -40,12 +41,21 @@ export default async function VenueDetailPage({ params }: Props) {
 
   const { venueId } = await params;
 
-  const [venue, plans] = await Promise.all([
+  const [venue, plans, venueSections] = await Promise.all([
     fetchVenue(venueId),
     fetchPlansByVenue(venueId),
+    fetchVenueSections(venueId),
   ]);
 
   if (!venue) notFound();
+
+  const addSectionAction = createVenueSection.bind(null, venueId);
+  // Pre-bind a delete action for each section server-side so no factory function is
+  // passed to the Client Component (plain functions cannot cross the server/client boundary).
+  const sectionsWithActions = venueSections.map((s) => ({
+    section: s,
+    deleteAction: deleteVenueSection.bind(null, venueId, s.id),
+  }));
 
   return (
     <div className="flex flex-col gap-8 max-w-4xl mx-auto">
@@ -86,13 +96,19 @@ export default async function VenueDetailPage({ params }: Props) {
         </div>
       </div>
 
+      {/* Venue layout template */}
+      <VenueSectionForm
+        addAction={addSectionAction}
+        sections={sectionsWithActions}
+      />
+
       {/* Seating Plans */}
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between gap-4">
           <div>
             <h2 className="text-xl font-semibold">Seating Plans</h2>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Create a seating plan to define sections, seat layouts, and attach to a ticket.
+              Each plan is a per-event seat inventory, auto-provisioned from the venue layout above.
             </p>
           </div>
           <Link

@@ -22,6 +22,12 @@ import {
 
 export const metadata = { title: "My Orders — Ticketing" };
 
+function orderTotal(order: Order): number {
+  const seatTotal = (order.seats ?? []).reduce((sum, seat) => sum + parseFloat(seat.price), 0);
+  if (seatTotal > 0) return seatTotal;
+  return parseFloat(order.ticket.price) * Math.max(1, order.quantity ?? 1);
+}
+
 const STATUS_ICON: Record<Order["status"], React.ReactNode> = {
   created: <CircleDot className="w-3.5 h-3.5" />,
   awaiting_payment: <Clock className="w-3.5 h-3.5" />,
@@ -95,7 +101,7 @@ export default async function OrdersPage() {
                 <p className="font-semibold leading-snug line-clamp-2 text-sm">
                   {order.ticket.title}
                 </p>
-                <p className="text-xl font-bold">${parseFloat(order.ticket.price).toFixed(2)}</p>
+                <p className="text-xl font-bold">${orderTotal(order).toFixed(2)}</p>
               </div>
 
               {/* Status badge */}

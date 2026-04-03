@@ -7,7 +7,9 @@ import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
-import type { Ticket, SeatingPlan, AvailabilitySnapshot } from "@/lib/types";
+import { base } from "@/lib/server-utils";
+import type { Ticket, SeatingPlan, AvailabilitySnapshot, PriceTier } from "@/lib/types";
+import { fetchPriceTiers } from "@/app/actions/venues";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { ArrowLeft } from "lucide-react";
@@ -83,16 +85,18 @@ export default async function SeatsPage({ params }: Props) {
     );
   }
 
-  // Fetch initial availability snapshot (server-side for first paint).
+  // Fetch initial availability snapshot + price tiers (server-side for first paint).
   let initialAvailability: AvailabilitySnapshot | null = null;
+  let priceTiers: PriceTier[] = [];
   try {
-    const apiBase = (process.env.INTERNAL_API_URL ?? "http://localhost:8080").replace(/\/$/, "");
-    const availRes = await fetch(`${apiBase}/api/seating-plans/${planId}/availability`, {
-      cache: "no-store",
-    });
+    const apiBase = base();
+    const [availRes] = await Promise.all([
+      fetch(`${apiBase}/api/seating-plans/${planId}/availability`, { cache: "no-store" }),
+    ]);
     if (availRes.ok) {
       initialAvailability = await availRes.json() as AvailabilitySnapshot;
     }
+    priceTiers = await fetchPriceTiers(planId);
   } catch {
     // Non-fatal — client will re-fetch.
   }
@@ -123,6 +127,7 @@ export default async function SeatsPage({ params }: Props) {
         plan={plan}
         initialAvailability={initialAvailability}
         basePrice={ticket.price}
+        priceTiers={priceTiers}
       />
     </div>
   );

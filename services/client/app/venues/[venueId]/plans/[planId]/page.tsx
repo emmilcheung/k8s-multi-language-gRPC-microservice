@@ -6,12 +6,13 @@ import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
-import { createSection, activatePlan } from "@/app/actions/venues";
+import { activatePlan, deactivatePlan, createPriceTier, fetchPriceTiers } from "@/app/actions/venues";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
-import { SectionForm } from "@/components/section-form";
 import { SeatingPlanCanvas } from "@/components/seating-plan-canvas";
 import { ActivatePlanButton } from "@/components/activate-plan-button";
+import { DeactivatePlanButton } from "@/components/deactivate-plan-button";
+import { PriceTierForm } from "@/components/price-tier-form";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -21,7 +22,7 @@ import {
   ChevronRight,
   Grid3X3,
 } from "lucide-react";
-import type { SeatingPlan, Section } from "@/lib/types";
+import type { SeatingPlan, Section, PriceTier } from "@/lib/types";
 
 interface Props {
   params: Promise<{ venueId: string; planId: string }>;
@@ -42,10 +43,12 @@ export default async function PlanDetailPage({ params }: Props) {
 
   let plan: SeatingPlan;
   let sectionsData: { sections: Section[] };
+  let tiers: PriceTier[] = [];
   try {
-    [plan, sectionsData] = await Promise.all([
+    [plan, sectionsData, tiers] = await Promise.all([
       serverApi<SeatingPlan>(`/api/seating-plans/${planId}`),
       serverApi<{ sections: Section[] }>(`/api/seating-plans/${planId}/sections`),
+      fetchPriceTiers(planId),
     ]);
   } catch {
     notFound();
@@ -53,12 +56,15 @@ export default async function PlanDetailPage({ params }: Props) {
 
   const sections = sectionsData?.sections ?? [];
 
-  // Bind planId + venueId into the createSection Server Action.
-  const addSectionAction = createSection.bind(null, planId, venueId);
+  // Bind planId + venueId into the createPriceTier Server Action.
+  const addTierAction = createPriceTier.bind(null, planId, venueId);
   // Bind planId + venueId into the activatePlan Server Action.
   const activatePlanAction = activatePlan.bind(null, planId, venueId);
+  // Bind planId + venueId into the deactivatePlan Server Action.
+  const deactivatePlanAction = deactivatePlan.bind(null, planId, venueId);
 
   const isDraft = plan.status === "draft";
+  const isActive = plan.status === "active";
 
   return (
     <div className="flex flex-col gap-8 max-w-5xl mx-auto">
@@ -107,15 +113,20 @@ export default async function PlanDetailPage({ params }: Props) {
           )}
         </div>
 
-        {/* Plan ID — for use in "Attach seating plan" form on ticket detail */}
+        {/* Plan ID — for reference / debugging */}
         <div className="bg-white/4 rounded-xl px-3 py-2 flex flex-col gap-0.5">
           <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Plan ID</p>
           <p className="font-mono text-sm text-foreground break-all">{plan.id}</p>
           <p className="text-xs text-muted-foreground">
-            Copy this ID to attach the plan to a ticket via the ticket&apos;s detail page.
+            Activate this plan first, then attach it to a ticket from the ticket&apos;s detail page using the &ldquo;Seating Plan&rdquo; panel.
           </p>
         </div>
       </div>
+
+      {/* Price tier management — draft plans only */}
+      {isDraft && (
+        <PriceTierForm action={addTierAction} tiers={tiers} />
+      )}
 
       {/* Canvas — interactive for draft, read-only list for active/inactive */}
       <div className="flex flex-col gap-4">
@@ -123,21 +134,37 @@ export default async function PlanDetailPage({ params }: Props) {
           <h2 className="text-xl font-semibold">Sections</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isDraft
-              ? "Drag sections to arrange the venue layout. Row strips inside seated sections can be dragged horizontally to stagger them."
+              ? sections.length > 0
+                ? "Sections are auto-provisioned from the venue template. Each event has its own independent seat inventory."
+                : "Define the venue layout template first — sections are then auto-provisioned per event."
               : "The seating plan layout is locked once activated."}
           </p>
         </div>
 
-        {isDraft ? (
-          /* ── Draft: full interactive canvas + add-section form ── */
-          <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
-            <SeatingPlanCanvas
-              planId={planId}
-              sections={sections}
-              initialLayout={plan.layoutJson}
-              isDraft
-            />
-            <SectionForm action={addSectionAction} />
+        {isDraft && sections.length > 0 ? (
+          /* ── Draft with sections: canvas for layout preview ── */
+          <SeatingPlanCanvas
+            planId={planId}
+            sections={sections}
+            initialLayout={plan.layoutJson}
+            isDraft
+          />
+        ) : isDraft && sections.length === 0 ? (
+          /* ── Draft but no sections yet: guide organiser to venue template ── */
+          <div className="glass rounded-2xl p-8 flex flex-col items-center gap-4 text-center border border-yellow-500/20">
+            <Grid3X3 className="w-10 h-10 text-muted-foreground" />
+            <div>
+              <p className="font-semibold text-sm text-yellow-400">No sections provisioned yet</p>
+              <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+                Define the seating layout on the venue page first. Sections are automatically cloned into this plan when the venue template is set up.
+              </p>
+            </div>
+            <a
+              href={`/venues/${venueId}`}
+              className="text-sm text-primary underline underline-offset-2"
+            >
+              Set up venue layout →
+            </a>
           </div>
         ) : sections.length === 0 ? (
           /* ── No sections at all ── */
@@ -148,47 +175,54 @@ export default async function PlanDetailPage({ params }: Props) {
         ) : (
           /* ── Active/inactive: static read-only list ── */
           <div className="flex flex-col gap-3">
-            {sections.map((s) => (
-              <div key={s.id} className="glass rounded-2xl p-4 flex items-center gap-4">
-                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 ring-1 ring-primary/20 shrink-0">
-                  <Grid3X3 className="w-4 h-4 text-primary" />
+            {sections.map((s) => {
+              const tier = tiers.find((t) => t.id === s.priceTierId);
+              return (
+                <div key={s.id} className="glass rounded-2xl p-4 flex items-center gap-4">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 ring-1 ring-primary/20 shrink-0">
+                    <Grid3X3 className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{s.name}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {s.type.toUpperCase()} · {s.rowCount}R × {s.columnCount}C
+                      {tier && ` · ${tier.name} $${parseFloat(tier.price).toFixed(2)}`}
+                    </p>
+                  </div>
+                  <Badge className={s.type === "seated"
+                    ? "bg-primary/15 text-primary border-primary/20 text-xs"
+                    : "bg-muted/40 text-muted-foreground border-muted/20 text-xs"
+                  }>
+                    {s.type.toUpperCase()}
+                  </Badge>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{s.name}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {s.type.toUpperCase()} · {s.rowCount}R × {s.columnCount}C
-                  </p>
-                </div>
-                <Badge className={s.type === "seated"
-                  ? "bg-primary/15 text-primary border-primary/20 text-xs"
-                  : "bg-muted/40 text-muted-foreground border-muted/20 text-xs"
-                }>
-                  {s.type.toUpperCase()}
-                </Badge>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
 
       {/* Activate section */}
-      {isDraft && sections.length > 0 && !plan.ticketId && (
-        <div className="glass rounded-2xl p-5 flex flex-col gap-2 border border-yellow-500/20">
-          <p className="font-semibold text-sm text-yellow-400">Ready to activate?</p>
-          <p className="text-xs text-muted-foreground">
-            First attach this plan to a ticket using the Plan ID above, then return here to activate.
-          </p>
-        </div>
-      )}
-      {isDraft && sections.length > 0 && !!plan.ticketId && (
+      {isDraft && sections.length > 0 && (
         <div className="glass rounded-2xl p-5 flex flex-col gap-3 border border-emerald-500/20">
           <div className="flex flex-col gap-1">
             <p className="font-semibold text-sm text-emerald-400">Activate this plan</p>
             <p className="text-xs text-muted-foreground">
-              Once activated, the layout is locked and seats become available for purchase. This cannot be undone.
+              Once activated, the layout is locked and the plan can be attached to tickets for purchase.
             </p>
           </div>
           <ActivatePlanButton action={activatePlanAction} />
+        </div>
+      )}
+      {isActive && (
+        <div className="glass rounded-2xl p-5 flex flex-col gap-3 border border-destructive/20">
+          <div className="flex flex-col gap-1">
+            <p className="font-semibold text-sm text-destructive">Deactivate this plan</p>
+            <p className="text-xs text-muted-foreground">
+              Stops new seat holds and purchases. Existing confirmed orders are unaffected.
+            </p>
+          </div>
+          <DeactivatePlanButton action={deactivatePlanAction} />
         </div>
       )}
     </div>

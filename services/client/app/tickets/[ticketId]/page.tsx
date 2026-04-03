@@ -15,6 +15,7 @@ import { TicketForm } from "@/components/ticket-form";
 import { PurchaseButton } from "@/components/purchase-button";
 import { AttachSeatingPlanForm } from "@/components/attach-seating-plan-form";
 import { updateTicket } from "@/app/actions/tickets";
+import { fetchAllMyPlans } from "@/app/actions/venues";
 import {
   ArrowLeft,
   Ticket as TicketIcon,
@@ -79,6 +80,10 @@ export default async function TicketDetailPage({ params }: Props) {
   // quota-based reserved counter is > 0 (meaning at least one active reservation exists).
   const isReserved = !isSeated && (Boolean(ticket.orderId) || (ticket.reserved != null && ticket.reserved > 0));
   const updateAction = updateTicket.bind(null, ticketId);
+
+  // Fetch the organizer's draft plans server-side (only needed for the owner panel).
+  // On failure (e.g. venue-service down) we degrade gracefully to an empty list.
+  const availablePlans = isOwner ? await fetchAllMyPlans().catch(() => []) : [];
 
   // GA max-per-order: use ticket.quota if available, capped at 10, default 1.
   // GA max-per-order: honour maxPerUser if set; fall back to quota cap at 10; default 1.
@@ -201,6 +206,7 @@ export default async function TicketDetailPage({ params }: Props) {
               <AttachSeatingPlanForm
                 ticketId={ticketId}
                 currentPlanId={ticket.seatingPlanId ?? null}
+                availablePlans={availablePlans}
               />
             </div>
           ) : (

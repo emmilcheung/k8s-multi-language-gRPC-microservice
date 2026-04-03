@@ -44,6 +44,12 @@ const STEP_ORDER: Record<Order["status"], number> = {
   complete: 2,
 };
 
+function orderTotal(order: Order): number {
+  const seatTotal = (order.seats ?? []).reduce((sum, seat) => sum + parseFloat(seat.price), 0);
+  if (seatTotal > 0) return seatTotal;
+  return parseFloat(order.ticket.price) * Math.max(1, order.quantity ?? 1);
+}
+
 export default async function OrderDetailPage({ params }: Props) {
   const { orderId } = await params;
 
@@ -62,6 +68,7 @@ export default async function OrderDetailPage({ params }: Props) {
   const canPay = order.status === "awaiting_payment" || order.status === "created";
   const currentStep = STEP_ORDER[order.status];
   const isCancelled = order.status === "cancelled";
+  const amount = orderTotal(order);
 
   return (
     <div className="flex flex-col gap-8 max-w-4xl mx-auto">
@@ -163,7 +170,7 @@ export default async function OrderDetailPage({ params }: Props) {
               <div className="flex flex-col gap-0.5">
                 <p className="text-xs text-muted-foreground uppercase tracking-wider">Amount</p>
                 <p className="text-2xl font-bold gradient-text">
-                  ${parseFloat(order.ticket.price).toFixed(2)}
+                  ${amount.toFixed(2)}
                 </p>
               </div>
             </div>
@@ -198,7 +205,7 @@ export default async function OrderDetailPage({ params }: Props) {
         {canPay && (
           <OrderPaymentForm
             orderId={order.id}
-            amount={parseFloat(order.ticket.price)}
+            amount={amount}
             expiresAt={order.expiresAt}
           />
         )}
