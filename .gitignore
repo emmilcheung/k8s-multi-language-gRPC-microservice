@@ -57,3 +57,6 @@ docker-compose.override.yml.local
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude
+./claude/settings.local.json
