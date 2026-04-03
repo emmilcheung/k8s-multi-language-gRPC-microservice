@@ -6,7 +6,7 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
-import type { Ticket } from "@/lib/types";
+import type { Ticket, SeatingPlan, PriceTier } from "@/lib/types";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,8 +14,9 @@ import { cn } from "@/lib/utils";
 import { TicketForm } from "@/components/ticket-form";
 import { PurchaseButton } from "@/components/purchase-button";
 import { AttachSeatingPlanForm } from "@/components/attach-seating-plan-form";
+import { SeatingPlanPreview } from "@/components/seating-plan-preview";
 import { updateTicket } from "@/app/actions/tickets";
-import { fetchAllMyPlans } from "@/app/actions/venues";
+import { fetchAllMyPlans, fetchPriceTiers } from "@/app/actions/venues";
 import {
   ArrowLeft,
   Ticket as TicketIcon,
@@ -81,9 +82,24 @@ export default async function TicketDetailPage({ params }: Props) {
   const isReserved = !isSeated && (Boolean(ticket.orderId) || (ticket.reserved != null && ticket.reserved > 0));
   const updateAction = updateTicket.bind(null, ticketId);
 
-  // Fetch the organizer's draft plans server-side (only needed for the owner panel).
+  // Fetch the organizer's plans server-side (only needed for the owner panel).
   // On failure (e.g. venue-service down) we degrade gracefully to an empty list.
   const availablePlans = isOwner ? await fetchAllMyPlans().catch(() => []) : [];
+
+  // When a plan is already attached, fetch its full details (sections included)
+  // so the organizer can see a read-only preview of what is attached.
+  let attachedPlan: SeatingPlan | null = null;
+  let attachedPlanTiers: PriceTier[] = [];
+  if (isOwner && ticket.seatingPlanId) {
+    try {
+      [attachedPlan, attachedPlanTiers] = await Promise.all([
+        serverApi<SeatingPlan>(`/api/seating-plans/${ticket.seatingPlanId}`),
+        fetchPriceTiers(ticket.seatingPlanId),
+      ]);
+    } catch {
+      // Non-fatal — preview is hidden, attach form still functional.
+    }
+  }
 
   // GA max-per-order: use ticket.quota if available, capped at 10, default 1.
   // GA max-per-order: honour maxPerUser if set; fall back to quota cap at 10; default 1.
@@ -208,6 +224,10 @@ export default async function TicketDetailPage({ params }: Props) {
                 currentPlanId={ticket.seatingPlanId ?? null}
                 availablePlans={availablePlans}
               />
+              {/* Read-only preview of the attached seating plan */}
+              {attachedPlan && (
+                <SeatingPlanPreview plan={attachedPlan} priceTiers={attachedPlanTiers} />
+              )}
             </div>
           ) : (
             /* Buyer: purchase or sign-in */

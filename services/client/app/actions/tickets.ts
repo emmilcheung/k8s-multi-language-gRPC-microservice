@@ -131,8 +131,11 @@ export async function updateTicket(
   });
 
   if (!res.ok) {
+    if (res.status === 401) redirect("/auth/signin");
     const errBody = await res.json().catch(() => ({}));
-    return { error: errBody?.error?.message ?? "Failed to update ticket." };
+    // ticket-service: { error: { message: "..." } }; Kong: { message: "..." }
+    const errMsg = errBody?.error?.message ?? errBody?.message ?? "Failed to update ticket.";
+    return { error: errMsg };
   }
 
   revalidatePath(`/tickets/${ticketId}`);

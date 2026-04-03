@@ -123,7 +123,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
 
   const fetchAvailability = useCallback(async () => {
     try {
-      const kongUrl = process.env.NEXT_PUBLIC_KONG_URL ?? "http://localhost:8000";
+      const kongUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
       const res = await fetch(`${kongUrl}/api/seating-plans/${planId}/availability`, {
         cache: "no-store",
       });
@@ -154,7 +154,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
 
   // Subscribe to SSE stream for live updates with exponential-backoff reconnection.
   useEffect(() => {
-    const kongUrl = process.env.NEXT_PUBLIC_KONG_URL ?? "http://localhost:8000";
+    const kongUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
     let es: EventSource | null = null;
     let retryDelay = 1000; // ms — doubles on each failure, capped at 30s
     let retryTimer: ReturnType<typeof setTimeout> | null = null;

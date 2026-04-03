@@ -455,9 +455,9 @@ test.describe("seating plan", () => {
     await createTicket(page, `Seating Plan Test ${Date.now()}`, "50.00");
 
     // AttachSeatingPlanForm is only rendered for the ticket owner.
-    // With no draft plans created yet the organiser is guided to the venue manager.
+    // With no active plans created yet the organiser is guided to the venue manager.
     await expect(page.getByText("Seating Plan").first()).toBeVisible();
-    await expect(page.getByText(/no draft seating plans/i)).toBeVisible();
+    await expect(page.getByText(/no active seating plans/i)).toBeVisible();
     await expect(
       page.getByRole("link", { name: /go to venue manager/i })
     ).toBeVisible();
@@ -494,10 +494,14 @@ test.describe("seating plan", () => {
     // Plan auto-provisions sections from the venue template
     await expect(page.getByText("Floor A")).toBeVisible();
 
+    // 3b. Activate the plan so it appears in the attach dropdown
+    await page.getByRole("button", { name: /activate/i }).click();
+    await expect(page.getByText(/active/i).first()).toBeVisible({ timeout: 10000 });
+
     // 4. Create a ticket and navigate to its detail page
     await createTicket(page, `Attach Test ${Date.now()}`, "55.00");
 
-    // 5. The seating plan panel now shows the plan in the dropdown
+    // 5. The seating plan panel now shows the active plan in the dropdown
     await expect(page.getByText("Seating Plan").first()).toBeVisible();
     await expect(page.locator('#planId')).toBeVisible();
 
