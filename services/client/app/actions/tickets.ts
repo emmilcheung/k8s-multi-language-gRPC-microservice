@@ -29,6 +29,7 @@ const PAGE_SIZE = 20;
 export async function fetchTicketPage(after: string | null): Promise<TicketPage> {
   const url = new URL(`${base()}/api/tickets`);
   url.searchParams.set("limit", String(PAGE_SIZE));
+  url.searchParams.set("available", "true");
   if (after) url.searchParams.set("after", after);
 
   // Public endpoint — no auth cookie required.

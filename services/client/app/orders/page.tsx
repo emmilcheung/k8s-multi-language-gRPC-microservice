@@ -7,6 +7,7 @@ import Link from "next/link";
 import { serverApi } from "@/lib/api";
 import type { Order } from "@/lib/types";
 import { STATUS_LABEL, STATUS_BADGE, STATUS_BORDER } from "@/lib/order-status";
+import { calculateOrderTotal } from "@/lib/order-utils";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -21,12 +22,6 @@ import {
 } from "lucide-react";
 
 export const metadata = { title: "My Orders — Ticketing" };
-
-function orderTotal(order: Order): number {
-  const seatTotal = (order.seats ?? []).reduce((sum, seat) => sum + parseFloat(seat.price), 0);
-  if (seatTotal > 0) return seatTotal;
-  return parseFloat(order.ticket.price) * Math.max(1, order.quantity ?? 1);
-}
 
 const STATUS_ICON: Record<Order["status"], React.ReactNode> = {
   created: <CircleDot className="w-3.5 h-3.5" />,
@@ -101,7 +96,7 @@ export default async function OrdersPage() {
                 <p className="font-semibold leading-snug line-clamp-2 text-sm">
                   {order.ticket.title}
                 </p>
-                <p className="text-xl font-bold">${orderTotal(order).toFixed(2)}</p>
+                <p className="text-xl font-bold">${calculateOrderTotal(order).toFixed(2)}</p>
               </div>
 
               {/* Status badge */}

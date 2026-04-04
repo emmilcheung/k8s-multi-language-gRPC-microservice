@@ -7,6 +7,7 @@ import Link from "next/link";
 import { serverApi } from "@/lib/api";
 import type { Order } from "@/lib/types";
 import { STATUS_LABEL, STATUS_BADGE } from "@/lib/order-status";
+import { calculateOrderTotal } from "@/lib/order-utils";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { OrderPaymentForm } from "@/components/order-payment-form";
@@ -44,12 +45,6 @@ const STEP_ORDER: Record<Order["status"], number> = {
   complete: 2,
 };
 
-function orderTotal(order: Order): number {
-  const seatTotal = (order.seats ?? []).reduce((sum, seat) => sum + parseFloat(seat.price), 0);
-  if (seatTotal > 0) return seatTotal;
-  return parseFloat(order.ticket.price) * Math.max(1, order.quantity ?? 1);
-}
-
 export default async function OrderDetailPage({ params }: Props) {
   const { orderId } = await params;
 
@@ -68,7 +63,7 @@ export default async function OrderDetailPage({ params }: Props) {
   const canPay = order.status === "awaiting_payment" || order.status === "created";
   const currentStep = STEP_ORDER[order.status];
   const isCancelled = order.status === "cancelled";
-  const amount = orderTotal(order);
+  const amount = calculateOrderTotal(order);
 
   return (
     <div className="flex flex-col gap-8 max-w-4xl mx-auto">

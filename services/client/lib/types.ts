@@ -20,6 +20,18 @@ export interface Ticket {
   maxPerUser?: number;
   /** CP-13: optional seating plan UUID — if set, this is a seated ticket */
   seatingPlanId?: string | null;
+  /** WS3: Ticket type: "GA", "SEATED_MANUAL", or "SEATED_AUTO" */
+  ticketType?: string;
+  /** WS8: Optional event metadata including start date */
+  event?: {
+    title: string;
+    description?: string;
+    startsAt: string;
+    endsAt?: string;
+    imageUrl?: string;
+    venueName?: string;
+    venueAddress?: string;
+  };
   version: number;
   createdAt?: string;
 }
