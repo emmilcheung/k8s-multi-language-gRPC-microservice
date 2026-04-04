@@ -12,9 +12,7 @@ import {
   NotFoundException,
   ForbiddenException,
   Req,
-  RawBodyRequest,
 } from '@nestjs/common';
-import type { Request } from 'express';
 import { PaymentsService } from './payments.service';
 import { ChargeDto } from './payments.dto';
 
@@ -59,7 +57,7 @@ export class PaymentsController {
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
   async stripeWebhook(
-    @Req() req: RawBodyRequest<Request>,
+    @Req() req: { rawBody?: Buffer; body?: unknown },
     @Headers('stripe-signature') sig: string | undefined,
   ): Promise<{ received: boolean }> {
     if (!sig) {
@@ -67,7 +65,7 @@ export class PaymentsController {
         error: { code: 'MISSING_SIGNATURE', message: 'stripe-signature header is required' },
       });
     }
-    const rawBody: Buffer = req.rawBody ?? Buffer.from(JSON.stringify(req.body as unknown));
+    const rawBody: Buffer = req.rawBody ?? Buffer.from(JSON.stringify(req.body));
     const event = this.paymentsService.constructWebhookEvent(rawBody, sig);
     await this.paymentsService.handleStripeEvent(event);
     return { received: true };

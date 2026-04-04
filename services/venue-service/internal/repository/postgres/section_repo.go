@@ -64,7 +64,7 @@ func (r *SectionRepo) BulkInsertSeats(ctx context.Context, sectionID, planID, se
 	}
 
 	br := r.pool.SendBatch(ctx, batch)
-	defer br.Close()
+	defer br.Close() //nolint:errcheck
 
 	for i := 0; i < batch.Len(); i++ {
 		if _, err := br.Exec(); err != nil {

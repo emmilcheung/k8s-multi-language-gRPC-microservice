@@ -178,7 +178,7 @@ func main() {
 	if err != nil {
 		log.Fatal("failed to connect to ticket-service", zap.Error(err))
 	}
-	defer ticketConn.Close()
+	defer ticketConn.Close() //nolint:errcheck
 	ticketClient := ticketsv1.NewTicketServiceClient(ticketConn)
 
 	// gRPC server — wired with real repos in CP-08.
