@@ -15,11 +15,13 @@ import (
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
+	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	echofx "github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	tcmongo "github.com/testcontainers/testcontainers-go/modules/mongodb"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 // noopPublisher satisfies service.EventPublisher without requiring a real Kafka broker.
@@ -31,6 +33,29 @@ func (p *noopPublisher) PublishTicketCreated(_ context.Context, _ kafka.TicketEv
 }
 func (p *noopPublisher) PublishTicketUpdated(_ context.Context, _ kafka.TicketEventData) error {
 	return nil
+}
+
+// stubVenueClient is a stub for venue-service gRPC client used in tests
+type stubVenueClient struct{}
+
+func (*stubVenueClient) ReserveHeldSeats(context.Context, *venuev1.ReserveHeldSeatsRequest, ...grpc.CallOption) (*venuev1.ReserveHeldSeatsResponse, error) {
+	return nil, nil
+}
+
+func (*stubVenueClient) AutoAssignAndReserve(context.Context, *venuev1.AutoAssignAndReserveRequest, ...grpc.CallOption) (*venuev1.AutoAssignAndReserveResponse, error) {
+	return nil, nil
+}
+
+func (*stubVenueClient) ReleaseSeatReservation(context.Context, *venuev1.ReleaseSeatReservationRequest, ...grpc.CallOption) (*venuev1.ReleaseSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*stubVenueClient) FinalizeSeatReservation(context.Context, *venuev1.FinalizeSeatReservationRequest, ...grpc.CallOption) (*venuev1.FinalizeSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*stubVenueClient) GetSeatingPlan(context.Context, *venuev1.GetSeatingPlanRequest, ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error) {
+	return nil, nil
 }
 
 // setupTestServer starts a real MongoDB via Testcontainers, wires the full Echo stack,
@@ -53,7 +78,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, func()) {
 	require.NoError(t, err, "failed to create mongo repository")
 
 	log := zap.NewNop()
-	svc := service.NewTicketService(repo, &noopPublisher{}, log)
+	svc := service.NewTicketService(repo, &noopPublisher{}, log, &stubVenueClient{})
 
 	e := echofx.New()
 	e.HideBanner = true

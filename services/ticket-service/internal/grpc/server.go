@@ -46,16 +46,29 @@ func (s *TicketGrpcServer) GetTicket(ctx context.Context, req *v1.GetTicketReque
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 
-	return &v1.GetTicketResponse{
-		TicketId:  ticket.ID,
-		Title:     ticket.Title,
-		Price:     ticket.Price,
-		UserId:    ticket.UserID,
-		OrderId:   ticket.OrderID,
-		Version:   int64(ticket.Version),
-		CreatedAt: timestamppb.New(ticket.CreatedAt),
-		UpdatedAt: timestamppb.New(ticket.UpdatedAt),
-	}, nil
+	resp := &v1.GetTicketResponse{
+		TicketId:   ticket.ID,
+		Title:      ticket.Title,
+		Price:      ticket.Price,
+		UserId:     ticket.UserID,
+		OrderId:    ticket.OrderID,
+		Version:    int64(ticket.Version),
+		CreatedAt:  timestamppb.New(ticket.CreatedAt),
+		UpdatedAt:  timestamppb.New(ticket.UpdatedAt),
+		TicketType: ticket.TicketType, // WS3: populated when ticket is attached to seating plan
+	}
+	// WS8: Populate event data if present
+	if ticket.Event != nil {
+		resp.EventTitle = ticket.Event.Title
+		resp.EventStartsAt = timestamppb.New(ticket.Event.StartsAt)
+		if ticket.Event.EndsAt != nil {
+			resp.EventEndsAt = timestamppb.New(*ticket.Event.EndsAt)
+		}
+		resp.EventImageUrl = ticket.Event.ImageURL
+		resp.VenueName = ticket.Event.VenueName
+		resp.VenueAddress = ticket.Event.VenueAddress
+	}
+	return resp, nil
 }
 
 // ValidateTicketAvailability checks whether a ticket exists and is not already reserved.

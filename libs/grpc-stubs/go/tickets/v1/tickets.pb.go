@@ -81,6 +81,13 @@ type GetTicketResponse struct {
 	Sold          int32                  `protobuf:"varint,11,opt,name=sold,proto3" json:"sold,omitempty"`
 	MaxPerUser    int32                  `protobuf:"varint,12,opt,name=max_per_user,json=maxPerUser,proto3" json:"max_per_user,omitempty"`
 	SeatingPlanId string                 `protobuf:"bytes,13,opt,name=seating_plan_id,json=seatingPlanId,proto3" json:"seating_plan_id,omitempty"`
+	EventTitle    string                 `protobuf:"bytes,14,opt,name=event_title,json=eventTitle,proto3" json:"event_title,omitempty"` // WS8: event metadata
+	EventStartsAt *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=event_starts_at,json=eventStartsAt,proto3" json:"event_starts_at,omitempty"`
+	EventEndsAt   *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=event_ends_at,json=eventEndsAt,proto3" json:"event_ends_at,omitempty"`
+	EventImageUrl string                 `protobuf:"bytes,17,opt,name=event_image_url,json=eventImageUrl,proto3" json:"event_image_url,omitempty"`
+	VenueName     string                 `protobuf:"bytes,18,opt,name=venue_name,json=venueName,proto3" json:"venue_name,omitempty"`
+	VenueAddress  string                 `protobuf:"bytes,19,opt,name=venue_address,json=venueAddress,proto3" json:"venue_address,omitempty"`
+	TicketType    string                 `protobuf:"bytes,20,opt,name=ticket_type,json=ticketType,proto3" json:"ticket_type,omitempty"` // WS3: "GA" | "SEATED_MANUAL" | "SEATED_AUTO"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -202,6 +209,55 @@ func (x *GetTicketResponse) GetMaxPerUser() int32 {
 func (x *GetTicketResponse) GetSeatingPlanId() string {
 	if x != nil {
 		return x.SeatingPlanId
+	}
+	return ""
+}
+
+func (x *GetTicketResponse) GetEventTitle() string {
+	if x != nil {
+		return x.EventTitle
+	}
+	return ""
+}
+
+func (x *GetTicketResponse) GetEventStartsAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EventStartsAt
+	}
+	return nil
+}
+
+func (x *GetTicketResponse) GetEventEndsAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EventEndsAt
+	}
+	return nil
+}
+
+func (x *GetTicketResponse) GetEventImageUrl() string {
+	if x != nil {
+		return x.EventImageUrl
+	}
+	return ""
+}
+
+func (x *GetTicketResponse) GetVenueName() string {
+	if x != nil {
+		return x.VenueName
+	}
+	return ""
+}
+
+func (x *GetTicketResponse) GetVenueAddress() string {
+	if x != nil {
+		return x.VenueAddress
+	}
+	return ""
+}
+
+func (x *GetTicketResponse) GetTicketType() string {
+	if x != nil {
+		return x.TicketType
 	}
 	return ""
 }

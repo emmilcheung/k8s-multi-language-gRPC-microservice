@@ -82,4 +82,5 @@ message GetSeatingPlanResponse {
   string plan_id = 1;
   string ticket_id = 2;
   string status = 3;
+  string assignment_mode = 4; // "manual" or "auto"
 }

@@ -33,6 +33,20 @@ func parseCursor(after string) (ms int64, id string, ok bool) {
 	return ms, after[idx+1:], true
 }
 
+// TicketEvent is the event sub-document stored within a Ticket, containing event metadata.
+// This denormalized structure allows sellers to associate every ticket with event details
+// that buyers see on listings and in order confirmations without requiring cross-service joins.
+// WS8: Event metadata added to support ticketing platform revamp.
+type TicketEvent struct {
+	Title        string     `bson:"title"`                   // e.g. "Taylor Swift – Eras Tour"
+	Description  string     `bson:"description,omitempty"`   // optional event description
+	StartsAt     time.Time  `bson:"starts_at"`               // required; event start time
+	EndsAt       *time.Time `bson:"ends_at,omitempty"`       // optional; event end time
+	ImageURL     string     `bson:"image_url,omitempty"`     // optional; event poster/banner
+	VenueName    string     `bson:"venue_name,omitempty"`    // denormalized from venue-service
+	VenueAddress string     `bson:"venue_address,omitempty"` // denormalized from venue-service
+}
+
 // Ticket is the domain model stored in MongoDB.
 //
 // Quota fields were added as part of the N-seat quota enhancement (CP-02).
@@ -43,20 +57,26 @@ func parseCursor(after string) (ms int64, id string, ok bool) {
 // SeatingPlanID (CP-13): when non-empty the ticket is a "seated" ticket linked
 // to a venue-service seating plan. Seated tickets bypass the GA quota path —
 // inventory is managed by the venue-service seat reservation instead.
+//
+// TicketType (WS3): denormalizes the assignment mode from the linked seating plan.
+// Valid values: "GA", "SEATED_MANUAL", "SEATED_AUTO". Empty string on create;
+// populated when ticket is attached to a plan.
 type Ticket struct {
-	ID            string    `bson:"_id"`
-	Title         string    `bson:"title"`
-	Price         string    `bson:"price"` // decimal string; migrated from float64
-	UserID        string    `bson:"userId"`
-	OrderID       string    `bson:"orderId,omitempty"`       // deprecated: kept for backward compat during migration
-	SeatingPlanID string    `bson:"seatingPlanId,omitempty"` // CP-13: venue seating plan UUID; empty = GA ticket
-	Quota         int       `bson:"quota"`                   // total available inventory (GA tickets only)
-	Reserved      int       `bson:"reserved"`                // currently held by active reservations
-	Sold          int       `bson:"sold"`                    // permanently sold units
-	MaxPerUser    int       `bson:"maxPerUser"`              // per-user purchase cap
-	Version       int       `bson:"version"`
-	CreatedAt     time.Time `bson:"createdAt"`
-	UpdatedAt     time.Time `bson:"updatedAt"`
+	ID            string       `bson:"_id"`
+	Title         string       `bson:"title"`
+	Price         string       `bson:"price"` // decimal string; migrated from float64
+	UserID        string       `bson:"userId"`
+	OrderID       string       `bson:"orderId,omitempty"`       // deprecated: kept for backward compat during migration
+	SeatingPlanID string       `bson:"seatingPlanId,omitempty"` // CP-13: venue seating plan UUID; empty = GA ticket
+	TicketType    string       `bson:"ticket_type,omitempty"`   // WS3: "GA" | "SEATED_MANUAL" | "SEATED_AUTO"
+	Quota         int          `bson:"quota"`                   // total available inventory (GA tickets only)
+	Reserved      int          `bson:"reserved"`                // currently held by active reservations
+	Sold          int          `bson:"sold"`                    // permanently sold units
+	MaxPerUser    int          `bson:"maxPerUser"`              // per-user purchase cap
+	Version       int          `bson:"version"`
+	CreatedAt     time.Time    `bson:"createdAt"`
+	UpdatedAt     time.Time    `bson:"updatedAt"`
+	Event         *TicketEvent `bson:"event,omitempty"` // WS8: nullable; old tickets have nil
 }
 
 // ReservationStatus represents the lifecycle state of a TicketReservation.

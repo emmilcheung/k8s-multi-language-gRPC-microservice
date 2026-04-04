@@ -364,9 +364,10 @@ func (s *VenueGrpcServer) GetSeatingPlan(ctx context.Context, req *venuev1.GetSe
 	}
 
 	return &venuev1.GetSeatingPlanResponse{
-		PlanId:   plan.ID,
-		TicketId: plan.TicketID,
-		Status:   string(plan.Status),
+		PlanId:         plan.ID,
+		TicketId:       plan.TicketID,
+		Status:         string(plan.Status),
+		AssignmentMode: plan.AssignmentMode,
 	}, nil
 }
 

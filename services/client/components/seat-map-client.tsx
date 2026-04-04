@@ -74,13 +74,15 @@ interface Props {
   initialAvailability: AvailabilitySnapshot | null;
   basePrice: string;
   priceTiers?: PriceTier[];
+  /** From the seating plan: "manual" or "auto" */
+  assignmentMode?: "manual" | "auto";
 }
 
 // ─── component ────────────────────────────────────────────────────────────────
 
 const INITIAL_ORDER_STATE: SeatedOrderState = {};
 
-export function SeatMapClient({ ticketId, planId, plan, initialAvailability, basePrice, priceTiers = [] }: Props) {
+export function SeatMapClient({ ticketId, planId, plan, initialAvailability, basePrice, priceTiers = [], assignmentMode = "manual" }: Props) {
   // Seat availability state.
   const [availability, setAvailability] = useState<AvailabilitySnapshot | null>(initialAvailability);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -100,8 +102,8 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
   const [activeSectionIdx, setActiveSectionIdx] = useState(0);
   const activeSection: Section | undefined = sections[activeSectionIdx];
 
-  // Auto-assign mode toggle.
-  const [autoAssignMode, setAutoAssignMode] = useState(false);
+  // Auto-assign mode is now determined by the plan, not buyer choice.
+  const isAutoAssignMode = assignmentMode === "auto";
   const [autoQuantity, setAutoQuantity] = useState(1);
 
   // Session ID — used by venue-service to correlate holds.
@@ -408,23 +410,13 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
         </div>
       )}
 
-      {/* Auto-assign toggle */}
+      {/* Mode indicator (no toggle — determined by seller's plan) */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          {autoAssignMode
-            ? "Best available seats will be automatically selected."
+          {isAutoAssignMode
+            ? "Best available seats will be automatically selected for you."
             : "Click seats on the map to select them manually."}
         </p>
-        <button
-          onClick={() => {
-            setAutoAssignMode((v) => !v);
-            setSelectedIds(new Set());
-          }}
-          className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors"
-        >
-          <Shuffle className="w-3.5 h-3.5" />
-          {autoAssignMode ? "Switch to manual" : "Best available"}
-        </button>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
@@ -513,7 +505,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
                     aria-label={`Seat ${seat.label} ${STATUS_LABEL[status]}`}
                     disabled={
                       !isSeatSelectable(seat.id) ||
-                      autoAssignMode ||
+                      isAutoAssignMode ||
                       (!isSelected && selectedArray.length >= plan.maxSeatsPerOrder)
                     }
                     onClick={() => toggleSeat(seat.id)}
@@ -533,7 +525,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
         {/* Sidebar */}
         <div className="flex flex-col gap-4">
           {/* Selection summary / auto-assign panel */}
-          {autoAssignMode ? (
+          {isAutoAssignMode ? (
             <div className="glass rounded-2xl p-6 flex flex-col gap-4">
               <p className="font-semibold text-sm">Auto-assign seats</p>
               <p className="text-xs text-muted-foreground">

@@ -21,12 +21,15 @@ import (
 	"github.com/acme/ticket-service/internal/service"
 	"github.com/acme/ticket-service/internal/tracing"
 	"github.com/acme/ticket-service/pkg/logger"
+	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
@@ -110,8 +113,17 @@ func main() {
 	defer consumerCancel()
 	go orderConsumer.Start(consumerCtx)
 
+	// WS3: Venue-service gRPC client for fetching seating plan assignment mode
+	venueConn, err := grpc.Dial(cfg.VenueServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatal("failed to dial venue-service", zap.Error(err), zap.String("addr", cfg.VenueServiceAddr))
+	}
+	defer venueConn.Close() //nolint:errcheck
+	venueClient := venuev1.NewVenueServiceClient(venueConn)
+	log.Info("connected to venue-service", zap.String("addr", cfg.VenueServiceAddr))
+
 	// Business logic service
-	svc := service.NewTicketService(ticketRepo, producer, log)
+	svc := service.NewTicketService(ticketRepo, producer, log, venueClient)
 
 	// gRPC server — runs alongside HTTP in a separate goroutine
 	grpcCtx, grpcCancel := context.WithCancel(context.Background())

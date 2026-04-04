@@ -72,23 +72,48 @@ export async function createTicket(
   const title = formData.get("title") as string;
   const priceRaw = (formData.get("price") as string)?.trim();
   const priceNum = parseFloat(priceRaw);
+  const ticketType = (formData.get("ticketType") as string | null) ?? "";
+  const seatingPlanId = (formData.get("seatingPlanId") as string | null) ?? "";
+  const pricingMode = (formData.get("pricingMode") as string | null) ?? "single";
+
+  // GA-specific
   const quota = parseOptionalPositiveInt(formData.get("quota") as string | null);
   const maxPerUser = parseOptionalPositiveInt(formData.get("maxPerUser") as string | null);
 
+  // Seated-specific
+  const maxSeatsPerOrder = parseOptionalPositiveInt(formData.get("maxSeatsPerOrder") as string | null);
+
   if (!title?.trim()) return { error: "Title is required." };
   if (!priceRaw || isNaN(priceNum) || priceNum <= 0) return { error: "Price must be a positive number." };
-  if (maxPerUser !== undefined && quota !== undefined && maxPerUser > quota) {
-    return { error: "Max per buyer cannot exceed the total capacity." };
+
+  // Validation for GA
+  if (ticketType === "GA") {
+    if (maxPerUser !== undefined && quota !== undefined && maxPerUser > quota) {
+      return { error: "Max per buyer cannot exceed the total capacity." };
+    }
   }
 
+  // Validation for Seated
+  if (ticketType.startsWith("SEATED")) {
+    if (!seatingPlanId) return { error: "Seating plan ID is required." };
+    if (!UUID_RE.test(seatingPlanId)) return { error: "Seating plan ID must be a valid UUID." };
+  }
+
+  // Create the base ticket
   const reqBody: Record<string, unknown> = { title: title.trim(), price: priceRaw };
-  if (quota !== undefined) reqBody.quota = quota;
-  if (maxPerUser !== undefined) reqBody.maxPerUser = maxPerUser;
+
+  if (ticketType === "GA") {
+    if (quota !== undefined) reqBody.quota = quota;
+    if (maxPerUser !== undefined) reqBody.maxPerUser = maxPerUser;
+  } else if (ticketType.startsWith("SEATED")) {
+    // For seated tickets, quota is 0 (managed by venue-service)
+    reqBody.quota = 0;
+    if (maxSeatsPerOrder !== undefined) reqBody.maxPerUser = maxSeatsPerOrder;
+  }
 
   const res = await fetch(`${base()}/api/tickets`, {
     method: "POST",
     headers: await authHeaders(),
-    // ticket-service requires price as a decimal string (e.g. "25.00"), not a number
     body: JSON.stringify(reqBody),
   });
 
@@ -98,6 +123,34 @@ export async function createTicket(
   }
 
   const ticket = await res.json();
+
+  // WS3: If seating plan, attach it now
+  if (ticketType.startsWith("SEATED") && seatingPlanId) {
+    const attachRes = await fetch(`${base()}/api/tickets/${ticket.id}/seating-plan`, {
+      method: "PUT",
+      headers: await authHeaders(),
+      body: JSON.stringify({ seatingPlanId }),
+    });
+
+    if (!attachRes.ok) {
+      const errBody = await attachRes.json().catch(() => ({}));
+      // Non-fatal: ticket was created but plan attachment failed
+      console.warn("[createTicket] seating plan attachment failed:", errBody?.error);
+      // Continue to redirect anyway
+    }
+
+    // Also attach ticket to plan in venue-service
+    const planAttachRes = await fetch(`${base()}/api/seating-plans/${seatingPlanId}/attach-ticket`, {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ ticketId: ticket.id }),
+    });
+
+    if (!planAttachRes.ok) {
+      console.warn("[createTicket] venue-service attach failed, continuing...");
+    }
+  }
+
   revalidatePath("/");
   redirect(`/tickets/${ticket.id}`);
 }

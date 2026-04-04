@@ -110,6 +110,8 @@ export interface SeatingPlan {
   status: "draft" | "active" | "inactive";
   holdTtlSec: number;
   maxSeatsPerOrder: number;
+  /** Seller's choice of seat assignment mode: "manual" or "auto" */
+  assignmentMode?: "manual" | "auto";
   /**
    * layoutJson is the persisted canvas state for the drag-and-drop seating plan editor.
    * Populated by PATCH /api/seating-plans/:id/layout.

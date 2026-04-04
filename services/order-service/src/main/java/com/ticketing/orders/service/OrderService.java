@@ -149,6 +149,9 @@ public class OrderService {
      *       {@code AutoAssignAndReserve} on venue-service which picks the best seats.</li>
      * </ul>
      *
+     * <p>WS4: validates that the order type matches the plan's assignment mode.
+     * The seller's mode choice is inviolable — buyers cannot override it.
+     *
      * <p>If the gRPC call succeeds but the DB transaction fails, a best-effort compensation
      * call to {@code ReleaseSeatReservation} is made so seats are not held indefinitely.
      */
@@ -162,8 +165,22 @@ public class OrderService {
         UUID reservationId = UUID.randomUUID();
         Instant reservationExpiresAt = Instant.now().plus(expirationMinutes + 1, ChronoUnit.MINUTES);
 
+        // WS4: Fetch plan and validate assignment mode matches the order type.
+        String planId = request.getPlanId();
+        var planResponse = venueServiceClient.getSeatingPlan(planId);
+        String assignmentMode = planResponse.getAssignmentMode();
+
+        if ("auto".equals(assignmentMode) && orderType == OrderType.MANUAL_SEATED) {
+            throw new BadRequestException(
+                    "This seating plan uses automatic assignment. Do not provide explicit seat IDs.");
+        }
+
+        if ("manual".equals(assignmentMode) && orderType == OrderType.AUTO_ASSIGN_SEATED) {
+            throw new BadRequestException(
+                    "This seating plan requires manual seat selection. Use the manual flow with specific seat IDs.");
+        }
+
         if (orderType == OrderType.MANUAL_SEATED) {
-            String planId = request.getPlanId();
             List<String> seatIds = request.getSeatIds();
 
             ReserveHeldSeatsResponse reserveResponse = venueServiceClient.reserveHeldSeats(
@@ -188,7 +205,6 @@ public class OrderService {
         }
 
         // AUTO_ASSIGN_SEATED
-        String planId = request.getPlanId();
         String sectionId = request.getSectionId();
 
         AutoAssignAndReserveResponse assignResponse = venueServiceClient.autoAssignAndReserve(

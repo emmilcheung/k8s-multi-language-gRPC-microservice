@@ -38,6 +38,27 @@ public class VenueServiceClient {
         this.stub = stub;
     }
 
+    // ── Plan metadata ────────────────────────────────────────────────────────
+
+    /**
+     * Fetches seating plan metadata including assignment mode.
+     * Used for validation before order creation.
+     *
+     * @param planId seating plan UUID (string form)
+     * @return plan response with assignment mode
+     */
+    public GetSeatingPlanResponse getSeatingPlan(String planId) {
+        try {
+            GetSeatingPlanRequest request = GetSeatingPlanRequest.newBuilder()
+                    .setPlanId(planId)
+                    .build();
+            return stub.withDeadlineAfter(WRITE_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .getSeatingPlan(request);
+        } catch (StatusRuntimeException e) {
+            throw mapVenueGrpcStatus(e, "GetSeatingPlan");
+        }
+    }
+
     // ── Manual-seated path ────────────────────────────────────────────────────
 
     /**

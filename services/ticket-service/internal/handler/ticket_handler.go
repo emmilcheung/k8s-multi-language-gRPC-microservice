@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/acme/ticket-service/internal/repository"
@@ -33,11 +34,22 @@ func NewTicketHandler(svc *service.TicketService, log *zap.Logger) *TicketHandle
 
 // createTicketRequest is the request body for POST /api/tickets.
 // Price is a decimal string to avoid IEEE 754 precision drift on purchase paths.
+// Event is optional; if provided, startsAt is required.
+// WS8: Event metadata support.
 type createTicketRequest struct {
 	Title      string `json:"title"`
 	Price      string `json:"price"`
 	Quota      int    `json:"quota"`
 	MaxPerUser int    `json:"maxPerUser"`
+	Event      *struct {
+		Title       string     `json:"title"`
+		Description string     `json:"description,omitempty"`
+		StartsAt    time.Time  `json:"startsAt"`
+		EndsAt      *time.Time `json:"endsAt,omitempty"`
+		ImageURL    string     `json:"imageUrl,omitempty"`
+		VenueName   string     `json:"venueName,omitempty"`
+		VenueAddress string     `json:"venueAddress,omitempty"`
+	} `json:"event,omitempty"`
 }
 
 // updateTicketRequest is the request body for PUT /api/tickets/:id.
@@ -47,6 +59,8 @@ type updateTicketRequest struct {
 }
 
 // ticketResponse is the JSON response shape for a ticket.
+// WS8: Event is nullable to support legacy tickets without event metadata.
+// WS3: TicketType denormalizes assignment mode from linked seating plan.
 type ticketResponse struct {
 	ID            string `json:"id"`
 	Title         string `json:"title"`
@@ -54,6 +68,7 @@ type ticketResponse struct {
 	UserID        string `json:"userId"`
 	OrderID       string `json:"orderId,omitempty"`
 	SeatingPlanID string `json:"seatingPlanId,omitempty"`
+	TicketType    string `json:"ticketType,omitempty"`
 	Quota         int    `json:"quota"`
 	Reserved      int    `json:"reserved"`
 	Sold          int    `json:"sold"`
@@ -61,16 +76,26 @@ type ticketResponse struct {
 	Version       int    `json:"version"`
 	CreatedAt     string `json:"createdAt"`
 	UpdatedAt     string `json:"updatedAt"`
+	Event         *struct {
+		Title       string `json:"title"`
+		Description string `json:"description,omitempty"`
+		StartsAt    string `json:"startsAt"`
+		EndsAt      *string `json:"endsAt,omitempty"`
+		ImageURL    string `json:"imageUrl,omitempty"`
+		VenueName   string `json:"venueName,omitempty"`
+		VenueAddress string `json:"venueAddress,omitempty"`
+	} `json:"event,omitempty"`
 }
 
 func toResponse(t *repository.Ticket) ticketResponse {
-	return ticketResponse{
+	resp := ticketResponse{
 		ID:            t.ID,
 		Title:         t.Title,
 		Price:         t.Price,
 		UserID:        t.UserID,
 		OrderID:       t.OrderID,
 		SeatingPlanID: t.SeatingPlanID,
+		TicketType:    t.TicketType,
 		Quota:         t.Quota,
 		Reserved:      t.Reserved,
 		Sold:          t.Sold,
@@ -79,6 +104,32 @@ func toResponse(t *repository.Ticket) ticketResponse {
 		CreatedAt:     t.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:     t.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
+	// WS8: Convert event if present
+	if t.Event != nil {
+		endsAt := (*string)(nil)
+		if t.Event.EndsAt != nil {
+			s := t.Event.EndsAt.Format("2006-01-02T15:04:05Z")
+			endsAt = &s
+		}
+		resp.Event = &struct {
+			Title        string `json:"title"`
+			Description  string `json:"description,omitempty"`
+			StartsAt     string `json:"startsAt"`
+			EndsAt       *string `json:"endsAt,omitempty"`
+			ImageURL     string `json:"imageUrl,omitempty"`
+			VenueName    string `json:"venueName,omitempty"`
+			VenueAddress string `json:"venueAddress,omitempty"`
+		}{
+			Title:        t.Event.Title,
+			Description:  t.Event.Description,
+			StartsAt:     t.Event.StartsAt.Format("2006-01-02T15:04:05Z"),
+			EndsAt:       endsAt,
+			ImageURL:     t.Event.ImageURL,
+			VenueName:    t.Event.VenueName,
+			VenueAddress: t.Event.VenueAddress,
+		}
+	}
+	return resp
 }
 
 // validatePrice checks that price is a non-negative decimal string with up to 15 integer
@@ -128,12 +179,27 @@ func (h *TicketHandler) Create(c echo.Context) error {
 		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "Request validation failed", details)
 	}
 
+	// WS8: Map event data if provided
+	var eventData *repository.TicketEvent
+	if req.Event != nil {
+		eventData = &repository.TicketEvent{
+			Title:        req.Event.Title,
+			Description:  req.Event.Description,
+			StartsAt:     req.Event.StartsAt,
+			EndsAt:       req.Event.EndsAt,
+			ImageURL:     req.Event.ImageURL,
+			VenueName:    req.Event.VenueName,
+			VenueAddress: req.Event.VenueAddress,
+		}
+	}
+
 	ticket, err := h.svc.CreateTicket(c.Request().Context(), service.CreateTicketInput{
 		Title:      req.Title,
 		Price:      normPrice,
 		UserID:     userID,
 		Quota:      req.Quota,
 		MaxPerUser: req.MaxPerUser,
+		Event:      eventData,
 	})
 	if err != nil {
 		h.log.Error("create ticket failed", zap.Error(err))

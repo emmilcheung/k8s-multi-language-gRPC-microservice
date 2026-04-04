@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/repository"
+	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"go.uber.org/zap"
 )
 
@@ -19,12 +21,15 @@ type EventPublisher interface {
 
 // CreateTicketInput is the validated input for creating a ticket.
 // Price is a decimal string (e.g. "9.99") — no float64 to avoid precision drift.
+// Event is optional; if provided, StartsAt is required.
+// WS8: Event metadata denormalization.
 type CreateTicketInput struct {
 	Title      string
 	Price      string
 	UserID     string
 	Quota      int // defaults to 1 if 0
 	MaxPerUser int // defaults to 1 if 0
+	Event      *repository.TicketEvent
 }
 
 // UpdateTicketInput is the validated input for updating a ticket.
@@ -53,27 +58,35 @@ var ErrUnauthorized = errors.New("not authorised to modify this ticket")
 
 // TicketService contains the business logic for managing tickets.
 type TicketService struct {
-	repo      repository.TicketRepository
-	publisher EventPublisher
-	log       *zap.Logger
+	repo             repository.TicketRepository
+	publisher        EventPublisher
+	log              *zap.Logger
+	venueServiceClient venuev1.VenueServiceClient // WS3: fetch seating plan assignment mode
 }
 
 // NewTicketService creates a new TicketService with the given dependencies.
-func NewTicketService(repo repository.TicketRepository, publisher EventPublisher, log *zap.Logger) *TicketService {
-	return &TicketService{repo: repo, publisher: publisher, log: log}
+func NewTicketService(repo repository.TicketRepository, publisher EventPublisher, log *zap.Logger, venueClient venuev1.VenueServiceClient) *TicketService {
+	return &TicketService{repo: repo, publisher: publisher, log: log, venueServiceClient: venueClient}
 }
 
 // CreateTicket creates a new ticket and publishes a ticket.created event.
 // The DB write is the source of truth; Kafka publish is fire-and-forget in a goroutine.
 // If the publish fails, the error is logged at ERROR level (R-05: observable, not silent)
 // but the gRPC call still returns success — ticket is already durably saved.
+// Event validation: if Event is provided, StartsAt must not be zero.
 func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInput) (*repository.Ticket, error) {
+	// WS8: Validate event if provided
+	if input.Event != nil && input.Event.StartsAt.IsZero() {
+		return nil, errors.New("event.startsAt is required")
+	}
+
 	ticket := &repository.Ticket{
 		Title:      input.Title,
 		Price:      input.Price,
 		UserID:     input.UserID,
 		Quota:      input.Quota,
 		MaxPerUser: input.MaxPerUser,
+		Event:      input.Event,
 	}
 
 	if err := s.repo.Create(ctx, ticket); err != nil {
@@ -90,6 +103,22 @@ func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInpu
 		Price:   ticket.Price,
 		UserID:  ticket.UserID,
 		Version: ticket.Version,
+	}
+	// WS8: Include event metadata if present
+	if ticket.Event != nil {
+		var endsAt string
+		if ticket.Event.EndsAt != nil {
+			endsAt = ticket.Event.EndsAt.Format(time.RFC3339)
+		}
+		eventData.Event = &kafka.EventData{
+			Title:        ticket.Event.Title,
+			Description:  ticket.Event.Description,
+			StartsAt:     ticket.Event.StartsAt.Format(time.RFC3339),
+			EndsAt:       endsAt,
+			ImageURL:     ticket.Event.ImageURL,
+			VenueName:    ticket.Event.VenueName,
+			VenueAddress: ticket.Event.VenueAddress,
+		}
 	}
 	go func() {
 		if err := s.publisher.PublishTicketCreated(context.Background(), eventData); err != nil {
@@ -153,6 +182,22 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 		SeatingPlanID: ticket.SeatingPlanID,
 		Version:       ticket.Version,
 	}
+	// WS8: Include event metadata if present
+	if ticket.Event != nil {
+		var endsAt string
+		if ticket.Event.EndsAt != nil {
+			endsAt = ticket.Event.EndsAt.Format(time.RFC3339)
+		}
+		eventData.Event = &kafka.EventData{
+			Title:        ticket.Event.Title,
+			Description:  ticket.Event.Description,
+			StartsAt:     ticket.Event.StartsAt.Format(time.RFC3339),
+			EndsAt:       endsAt,
+			ImageURL:     ticket.Event.ImageURL,
+			VenueName:    ticket.Event.VenueName,
+			VenueAddress: ticket.Event.VenueAddress,
+		}
+	}
 	go func() {
 		if err := s.publisher.PublishTicketUpdated(context.Background(), eventData); err != nil {
 			s.log.Error("failed to publish ticket.updated event", zap.Error(err), zap.String("ticketId", eventData.ID))
@@ -166,11 +211,35 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 // After attachment the ticket is "seated": the GA quota reservation path (ReserveQuota gRPC)
 // will refuse to reserve seats for it, directing callers to the venue-service path instead.
 //
+// WS3: Fetches the seating plan's assignmentMode from venue-service and denormalizes it
+// as ticketType ("SEATED_MANUAL" or "SEATED_AUTO") on the ticket.
+//
 // Validations performed here:
 //   - ticketID and planID must be non-empty (format validated by the HTTP handler)
 //   - ownership enforced in the repository layer (ErrOwnership → ErrUnauthorized)
 //   - plan-already-attached detected atomically in the repository layer
 func (s *TicketService) AttachSeatingPlan(ctx context.Context, input AttachSeatingPlanInput) (*repository.Ticket, error) {
+	// WS3: Fetch the seating plan from venue-service to get assignmentMode
+	planResp, err := s.venueServiceClient.GetSeatingPlan(ctx, &venuev1.GetSeatingPlanRequest{
+		PlanId: input.PlanID,
+	})
+	if err != nil {
+		s.log.Error("failed to fetch seating plan from venue-service", zap.Error(err), zap.String("planId", input.PlanID))
+		return nil, fmt.Errorf("fetch seating plan: %w", err)
+	}
+
+	// Determine ticketType based on assignmentMode
+	var ticketType string
+	switch planResp.AssignmentMode {
+	case "auto":
+		ticketType = "SEATED_AUTO"
+	case "manual":
+		ticketType = "SEATED_MANUAL"
+	default:
+		s.log.Warn("unknown assignment mode from venue-service", zap.String("mode", planResp.AssignmentMode))
+		ticketType = ""
+	}
+
 	if err := s.repo.AttachSeatingPlan(ctx, input.TicketID, input.PlanID, input.UserID); err != nil {
 		switch {
 		case errors.Is(err, repository.ErrOwnership):
@@ -185,9 +254,16 @@ func (s *TicketService) AttachSeatingPlan(ctx context.Context, input AttachSeati
 		return nil, fmt.Errorf("fetch ticket after attach: %w", err)
 	}
 
+	// WS3: Set the ticketType on the ticket
+	ticket.TicketType = ticketType
+	if err := s.repo.Update(ctx, ticket); err != nil {
+		return nil, fmt.Errorf("update ticket type: %w", err)
+	}
+
 	s.log.Info("seating plan attached",
 		zap.String("ticketId", ticket.ID),
 		zap.String("seatingPlanId", ticket.SeatingPlanID),
+		zap.String("ticketType", ticket.TicketType),
 		zap.String("userId", input.UserID),
 	)
 

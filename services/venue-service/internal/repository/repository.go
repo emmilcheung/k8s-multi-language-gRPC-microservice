@@ -80,23 +80,25 @@ type Venue struct {
 // SeatingPlan links a set of sections to a specific ticket.
 // ticket_id is nullable during draft creation and required before activation.
 type SeatingPlan struct {
-	ID             string     `db:"id"          json:"id"`
-	VenueID        string     `db:"venue_id"    json:"venueId"`
-	TicketID       string     `db:"ticket_id"   json:"ticketId"` // empty until attached
-	OrganizerID    string     `db:"organizer_id" json:"organizerId"`
-	Name           string     `db:"name"         json:"name"`
-	Status         PlanStatus `db:"status"       json:"status"`
+	ID               string     `db:"id"               json:"id"`
+	VenueID          string     `db:"venue_id"         json:"venueId"`
+	TicketID         string     `db:"ticket_id"        json:"ticketId"` // empty until attached
+	OrganizerID      string     `db:"organizer_id"     json:"organizerId"`
+	Name             string     `db:"name"             json:"name"`
+	Status           PlanStatus `db:"status"           json:"status"`
 	MaxSeatsPerOrder int        `db:"max_seats_per_order" json:"maxSeatsPerOrder"`
 	// LayoutJSON stores the 2-D canvas layout for the seating plan editor.
 	// It is a free-form JSON blob (section node positions + row offsets).
-	LayoutJSON json.RawMessage `db:"layout_json"  json:"layoutJson"`
-	Sections   []*Section      `json:"sections,omitempty"`
+	LayoutJSON   json.RawMessage `db:"layout_json"      json:"layoutJson"`
+	AssignmentMode string         `db:"assignment_mode"  json:"assignmentMode"` // "manual" or "auto"
+	PricingMode    string         `db:"pricing_mode"     json:"pricingMode"`    // "single", "section", or "seat"
+	Sections     []*Section      `json:"sections,omitempty"`
 	// TotalCapacity is the computed sum of all section capacities (rowCount * columnCount).
 	// Populated when sections are loaded.
-	TotalCapacity int        `json:"totalCapacity"` // computed, not persisted
-	Version       int        `db:"version"         json:"version"`
-	CreatedAt     time.Time  `db:"created_at"   json:"createdAt"`
-	UpdatedAt     time.Time  `db:"updated_at"   json:"updatedAt"`
+	TotalCapacity int       `json:"totalCapacity"` // computed, not persisted
+	Version       int       `db:"version"         json:"version"`
+	CreatedAt     time.Time `db:"created_at"      json:"createdAt"`
+	UpdatedAt     time.Time `db:"updated_at"      json:"updatedAt"`
 }
 
 // VenueSection is a reusable seating layout template attached to a venue.

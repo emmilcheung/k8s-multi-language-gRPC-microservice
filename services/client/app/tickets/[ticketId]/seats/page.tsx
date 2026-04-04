@@ -128,6 +128,7 @@ export default async function SeatsPage({ params }: Props) {
         initialAvailability={initialAvailability}
         basePrice={ticket.price}
         priceTiers={priceTiers}
+        assignmentMode={plan.assignmentMode ?? "manual"}
       />
     </div>
   );

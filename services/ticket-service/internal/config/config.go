@@ -11,14 +11,15 @@ import (
 // Config holds all configuration for ticket-service.
 // All fields are validated at startup — the service refuses to start if anything is missing.
 type Config struct {
-	Env          string
-	Port         int
-	GrpcPort     int
-	LogLevel     string
-	MongoURI     string
-	MongoDB      string
-	KafkaBrokers []string
-	RedisURL     string
+	Env               string
+	Port              int
+	GrpcPort          int
+	LogLevel          string
+	MongoURI          string
+	MongoDB           string
+	KafkaBrokers      []string
+	RedisURL          string
+	VenueServiceAddr  string // WS3: gRPC address of venue-service (e.g. "localhost:9091")
 }
 
 // Load reads configuration from environment variables and validates all required fields.
@@ -55,19 +56,22 @@ func Load() (*Config, error) {
 	}
 	kafkaBrokers := splitAndTrim(kafkaBrokersStr)
 
+	venueServiceAddr := getEnv("VENUE_SERVICE_ADDR", "localhost:9091")
+
 	if len(errs) > 0 {
 		return nil, errors.New(strings.Join(errs, "; "))
 	}
 
 	return &Config{
-		Env:          env,
-		Port:         port,
-		GrpcPort:     grpcPort,
-		LogLevel:     logLevel,
-		MongoURI:     mongoURI,
-		MongoDB:      mongoDB,
-		KafkaBrokers: kafkaBrokers,
-		RedisURL:     redisURL,
+		Env:              env,
+		Port:             port,
+		GrpcPort:         grpcPort,
+		LogLevel:         logLevel,
+		MongoURI:         mongoURI,
+		MongoDB:          mongoDB,
+		KafkaBrokers:     kafkaBrokers,
+		RedisURL:         redisURL,
+		VenueServiceAddr: venueServiceAddr,
 	}, nil
 }
 

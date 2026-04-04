@@ -635,6 +635,7 @@ type GetSeatingPlanResponse struct {
 	PlanId        string                 `protobuf:"bytes,1,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
 	TicketId      string                 `protobuf:"bytes,2,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"`
 	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	AssignmentMode string                `protobuf:"bytes,4,opt,name=assignment_mode,json=assignmentMode,proto3" json:"assignment_mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -686,6 +687,13 @@ func (x *GetSeatingPlanResponse) GetTicketId() string {
 func (x *GetSeatingPlanResponse) GetStatus() string {
 	if x != nil {
 		return x.Status
+	}
+	return ""
+}
+
+func (x *GetSeatingPlanResponse) GetAssignmentMode() string {
+	if x != nil {
+		return x.AssignmentMode
 	}
 	return ""
 }

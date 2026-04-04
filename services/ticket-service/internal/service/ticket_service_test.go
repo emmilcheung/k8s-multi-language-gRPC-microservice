@@ -9,9 +9,11 @@ import (
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
+	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 // --- Mock repository ---
@@ -212,8 +214,32 @@ func (m *mockPublisher) PublishTicketUpdated(_ context.Context, data kafka.Ticke
 
 // --- Tests ---
 
+// mockVenueClient is a stub for venue-service gRPC client
+type mockVenueClient struct{}
+
+func (*mockVenueClient) ReserveHeldSeats(context.Context, *venuev1.ReserveHeldSeatsRequest, ...grpc.CallOption) (*venuev1.ReserveHeldSeatsResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClient) AutoAssignAndReserve(context.Context, *venuev1.AutoAssignAndReserveRequest, ...grpc.CallOption) (*venuev1.AutoAssignAndReserveResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClient) ReleaseSeatReservation(context.Context, *venuev1.ReleaseSeatReservationRequest, ...grpc.CallOption) (*venuev1.ReleaseSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClient) FinalizeSeatReservation(context.Context, *venuev1.FinalizeSeatReservationRequest, ...grpc.CallOption) (*venuev1.FinalizeSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClient) GetSeatingPlan(context.Context, *venuev1.GetSeatingPlanRequest, ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error) {
+	return nil, nil
+}
+
 func newSvc(repo repository.TicketRepository, pub service.EventPublisher) *service.TicketService {
-	return service.NewTicketService(repo, pub, zap.NewNop())
+	// For tests, we provide a no-op venue client since most tests don't attach plans
+	return service.NewTicketService(repo, pub, zap.NewNop(), &mockVenueClient{})
 }
 
 func TestCreateTicket_ShouldCreateTicketAndPublishEvent(t *testing.T) {

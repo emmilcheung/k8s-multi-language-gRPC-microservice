@@ -38,13 +38,27 @@ type CloudEvent struct {
 // Price is a decimal string to match the quota-based ticket model (no float drift).
 // SeatingPlanID (CP-13): non-empty for seated tickets; consumers use this to route
 // inventory management to the venue-service path.
+// Event (WS8): optional event metadata for event-ticketing association.
 type TicketEventData struct {
-	ID            string `json:"id"`
-	Title         string `json:"title"`
-	Price         string `json:"price"`
-	UserID        string `json:"userId"`
-	SeatingPlanID string `json:"seatingPlanId,omitempty"`
-	Version       int    `json:"version"`
+	ID            string      `json:"id"`
+	Title         string      `json:"title"`
+	Price         string      `json:"price"`
+	UserID        string      `json:"userId"`
+	SeatingPlanID string      `json:"seatingPlanId,omitempty"`
+	Version       int         `json:"version"`
+	Event         *EventData  `json:"event,omitempty"` // WS8: nullable event metadata
+}
+
+// EventData is the event metadata payload in Kafka events.
+// WS8: Denormalized event information for consumption by order-service and other services.
+type EventData struct {
+	Title        string `json:"title,omitempty"`
+	Description  string `json:"description,omitempty"`
+	StartsAt     string `json:"startsAt"` // ISO 8601 timestamp
+	EndsAt       string `json:"endsAt,omitempty"`
+	ImageURL     string `json:"imageUrl,omitempty"`
+	VenueName    string `json:"venueName,omitempty"`
+	VenueAddress string `json:"venueAddress,omitempty"`
 }
 
 // Producer wraps the Confluent Kafka producer with structured event publishing.
