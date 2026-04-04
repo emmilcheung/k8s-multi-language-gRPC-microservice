@@ -114,7 +114,7 @@ func main() {
 	go orderConsumer.Start(consumerCtx)
 
 	// WS3: Venue-service gRPC client for fetching seating plan assignment mode
-	venueConn, err := grpc.Dial(cfg.VenueServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	venueConn, err := grpc.NewClient(cfg.VenueServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatal("failed to dial venue-service", zap.Error(err), zap.String("addr", cfg.VenueServiceAddr))
 	}

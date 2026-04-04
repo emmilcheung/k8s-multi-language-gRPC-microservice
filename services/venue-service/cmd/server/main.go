@@ -32,6 +32,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
@@ -171,7 +172,7 @@ func main() {
 	// Create gRPC client to ticket-service for GetTicket calls.
 	ticketConn, err := grpc.NewClient(
 		cfg.TicketServiceURL,
-		grpc.WithInsecure(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10*1024*1024)),
 	)
 	if err != nil {

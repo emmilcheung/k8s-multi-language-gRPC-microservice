@@ -214,23 +214,29 @@ export class PaymentsService {
     this.logger.info({ type: event.type }, 'Stripe webhook received');
     switch (event.type) {
       case 'payment_intent.succeeded': {
-        const pi = event.data.object as Stripe.PaymentIntent;
+        const pi = event.data.object;
         const paymentId = pi.metadata?.paymentId;
         if (paymentId) {
           await this.completeStripePayment(paymentId, pi.id);
         } else {
-          this.logger.warn({ intentId: pi.id }, 'payment_intent.succeeded: missing paymentId in metadata');
+          this.logger.warn(
+            { intentId: pi.id },
+            'payment_intent.succeeded: missing paymentId in metadata',
+          );
         }
         break;
       }
       case 'payment_intent.payment_failed': {
-        const pf = event.data.object as Stripe.PaymentIntent;
+        const pf = event.data.object;
         const paymentId = pf.metadata?.paymentId;
         const reason = pf.last_payment_error?.message ?? 'Payment failed';
         if (paymentId) {
           await this.failStripePayment(paymentId, reason);
         } else {
-          this.logger.warn({ intentId: pf.id }, 'payment_intent.payment_failed: missing paymentId in metadata');
+          this.logger.warn(
+            { intentId: pf.id },
+            'payment_intent.payment_failed: missing paymentId in metadata',
+          );
         }
         break;
       }
