@@ -302,6 +302,16 @@ func (h *PlanHandler) Activate(c echo.Context) error {
 		h.log.Error("plan activate sections lookup failed", zap.Error(err), zap.String("planId", id))
 		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
 	}
+
+	// Validate that GA sections only exist in single-price plans.
+	if existing.PricingMode != "single" {
+		for _, section := range sections {
+			if section.Type == repository.SectionTypeGA {
+				return c.JSON(http.StatusBadRequest, errorResponse("GA sections are not allowed in section/seat pricing plans. Create a separate GA ticket instead."))
+			}
+		}
+	}
+
 	totalCapacity := 0
 	for _, section := range sections {
 		totalCapacity += section.RowCount * section.ColumnCount
@@ -395,6 +405,12 @@ func (h *PlanHandler) SaveLayout(c echo.Context) error {
 	}
 	if len(req.LayoutJSON) == 0 {
 		return c.JSON(http.StatusUnprocessableEntity, errorResponse("layoutJson is required"))
+	}
+
+	// Validate layout size to prevent storage exhaustion attacks.
+	const maxLayoutSize = 1_048_576 // 1 MB
+	if len(req.LayoutJSON) > maxLayoutSize {
+		return c.JSON(http.StatusUnprocessableEntity, errorResponse("layout JSON exceeds 1 MB limit"))
 	}
 
 	if err := h.planRepo.SaveLayout(c.Request().Context(), id, organizerID, req.LayoutJSON); err != nil {

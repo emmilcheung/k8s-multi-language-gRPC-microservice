@@ -33,6 +33,7 @@ type createVenueRequest struct {
 	Name     string `json:"name"`
 	Capacity int    `json:"capacity"`
 	Timezone string `json:"timezone"`
+	Address  *string `json:"address"`
 }
 
 // updateVenueRequest is the request body for updating a venue.
@@ -40,6 +41,7 @@ type updateVenueRequest struct {
 	Name     string `json:"name"`
 	Capacity int    `json:"capacity"`
 	Timezone string `json:"timezone"`
+	Address  *string `json:"address"`
 }
 
 // Create handles POST /api/venues.
@@ -64,11 +66,17 @@ func (h *VenueHandler) Create(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, errorResponse("timezone is required"))
 	}
 
+	address := ""
+	if req.Address != nil {
+		address = *req.Address
+	}
+
 	v := &repository.Venue{
 		OrganizerID: organizerID,
 		Name:        req.Name,
 		Capacity:    req.Capacity,
 		Timezone:    req.Timezone,
+		Address:     address,
 	}
 
 	if err := h.repo.Create(c.Request().Context(), v); err != nil {
@@ -141,12 +149,18 @@ func (h *VenueHandler) Update(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, errorResponse("timezone is required"))
 	}
 
+	address := ""
+	if req.Address != nil {
+		address = *req.Address
+	}
+
 	v := &repository.Venue{
 		ID:          id,
 		OrganizerID: organizerID,
 		Name:        req.Name,
 		Capacity:    req.Capacity,
 		Timezone:    req.Timezone,
+		Address:     address,
 	}
 
 	if err := h.repo.Update(c.Request().Context(), v); err != nil {

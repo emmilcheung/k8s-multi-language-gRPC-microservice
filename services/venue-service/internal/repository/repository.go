@@ -73,6 +73,7 @@ type Venue struct {
 	Name        string    `db:"name"         json:"name"`
 	Capacity    int       `db:"capacity"     json:"capacity"`
 	Timezone    string    `db:"timezone"     json:"timezone"`
+	Address     string    `db:"address"      json:"address"`
 	CreatedAt   time.Time `db:"created_at"   json:"createdAt"`
 	UpdatedAt   time.Time `db:"updated_at"   json:"updatedAt"`
 }
