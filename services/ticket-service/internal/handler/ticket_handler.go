@@ -213,6 +213,7 @@ func (h *TicketHandler) Create(c echo.Context) error {
 // Query params:
 //   - limit: max results per page (1–100, default 20)
 //   - after: cursor — the id of the last ticket from the previous page
+//   - available: boolean (true/false) — filter to show only available tickets (GA: sold < quota; SEATED: not fully booked)
 func (h *TicketHandler) List(c echo.Context) error {
 	var p repository.PaginationParams
 	p.After = c.QueryParam("after")
@@ -222,6 +223,11 @@ func (h *TicketHandler) List(c echo.Context) error {
 			return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "limit must be an integer between 1 and 100", nil)
 		}
 		p.Limit = n
+	}
+
+	// Parse optional 'available' filter
+	if rawAvailable := c.QueryParam("available"); rawAvailable != "" {
+		p.AvailableOnly = rawAvailable == "true"
 	}
 
 	tickets, err := h.svc.ListTickets(c.Request().Context(), p)

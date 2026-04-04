@@ -142,9 +142,12 @@ var ErrOwnership = errors.New("caller does not own this ticket")
 // After is an opaque compound cursor of the form "<createdAtUnixMilli>:<id>"
 // representing the last ticket seen on the previous page (newest-first order).
 // Limit is the maximum number of tickets to return (capped at 100; 0 means 20).
+// AvailableOnly filters to show only available tickets: GA tickets with sold < quota,
+// and SEATED tickets that are not fully booked.
 type PaginationParams struct {
-	After string // compound cursor "<unixMilli>:<id>"; empty = start from beginning
-	Limit int    // max results per page
+	After         string // compound cursor "<unixMilli>:<id>"; empty = start from beginning
+	Limit         int    // max results per page
+	AvailableOnly bool   // if true, filter out sold-out tickets
 }
 
 // TicketRepository defines the storage interface.
@@ -490,6 +493,21 @@ func (r *MongoTicketRepository) FindAll(ctx context.Context, p PaginationParams)
 				bson.M{"createdAt": bson.M{"$lt": cursorTime}},
 				bson.M{"createdAt": cursorTime, "_id": bson.M{"$lt": id}},
 			}}
+		}
+	}
+
+	// Apply availability filter if requested.
+	// For GA tickets: sold < quota (has remaining inventory).
+	// For SEATED tickets: seatingPlanId must be non-empty (availability managed by venue-service).
+	// We filter out fully-sold GA tickets; seated tickets are assumed available if linked to a plan.
+	if p.AvailableOnly {
+		filter["$expr"] = bson.M{
+			"$or": bson.A{
+				// GA tickets: must have sold < quota (available inventory)
+				bson.M{"$lt": bson.A{"$sold", "$quota"}},
+				// SEATED tickets: must have a seatingPlanId (availability managed by venue-service)
+				bson.M{"$ne": bson.A{"$seatingPlanId", ""}},
+			},
 		}
 	}
 

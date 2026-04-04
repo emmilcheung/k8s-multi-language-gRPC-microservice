@@ -217,24 +217,32 @@ func (m *mockPublisher) PublishTicketUpdated(_ context.Context, data kafka.Ticke
 // mockVenueClient is a stub for venue-service gRPC client
 type mockVenueClient struct{}
 
-func (*mockVenueClient) ReserveHeldSeats(context.Context, *venuev1.ReserveHeldSeatsRequest, ...grpc.CallOption) (*venuev1.ReserveHeldSeatsResponse, error) {
+func (*mockVenueClient) ReserveHeldSeats(_ context.Context, _ *venuev1.ReserveHeldSeatsRequest, _ ...grpc.CallOption) (*venuev1.ReserveHeldSeatsResponse, error) {
 	return nil, nil
 }
 
-func (*mockVenueClient) AutoAssignAndReserve(context.Context, *venuev1.AutoAssignAndReserveRequest, ...grpc.CallOption) (*venuev1.AutoAssignAndReserveResponse, error) {
+func (*mockVenueClient) AutoAssignAndReserve(_ context.Context, _ *venuev1.AutoAssignAndReserveRequest, _ ...grpc.CallOption) (*venuev1.AutoAssignAndReserveResponse, error) {
 	return nil, nil
 }
 
-func (*mockVenueClient) ReleaseSeatReservation(context.Context, *venuev1.ReleaseSeatReservationRequest, ...grpc.CallOption) (*venuev1.ReleaseSeatReservationResponse, error) {
+func (*mockVenueClient) ReleaseSeatReservation(_ context.Context, _ *venuev1.ReleaseSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.ReleaseSeatReservationResponse, error) {
 	return nil, nil
 }
 
-func (*mockVenueClient) FinalizeSeatReservation(context.Context, *venuev1.FinalizeSeatReservationRequest, ...grpc.CallOption) (*venuev1.FinalizeSeatReservationResponse, error) {
+func (*mockVenueClient) FinalizeSeatReservation(_ context.Context, _ *venuev1.FinalizeSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.FinalizeSeatReservationResponse, error) {
 	return nil, nil
 }
 
-func (*mockVenueClient) GetSeatingPlan(context.Context, *venuev1.GetSeatingPlanRequest, ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error) {
-	return nil, nil
+func (*mockVenueClient) GetSeatingPlan(_ context.Context, req *venuev1.GetSeatingPlanRequest, _ ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error) {
+	// Mock: return a plan with assignment_mode set based on plan ID (for testing)
+	assignmentMode := "manual" // default to manual
+	if req.PlanId == "auto-plan" {
+		assignmentMode = "auto"
+	}
+	return &venuev1.GetSeatingPlanResponse{
+		PlanId:         req.PlanId,
+		AssignmentMode: assignmentMode,
+	}, nil
 }
 
 func newSvc(repo repository.TicketRepository, pub service.EventPublisher) *service.TicketService {

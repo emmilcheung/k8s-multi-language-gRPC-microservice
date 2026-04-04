@@ -38,24 +38,28 @@ func (p *noopPublisher) PublishTicketUpdated(_ context.Context, _ kafka.TicketEv
 // stubVenueClient is a stub for venue-service gRPC client used in tests
 type stubVenueClient struct{}
 
-func (*stubVenueClient) ReserveHeldSeats(context.Context, *venuev1.ReserveHeldSeatsRequest, ...grpc.CallOption) (*venuev1.ReserveHeldSeatsResponse, error) {
+func (*stubVenueClient) ReserveHeldSeats(_ context.Context, _ *venuev1.ReserveHeldSeatsRequest, _ ...grpc.CallOption) (*venuev1.ReserveHeldSeatsResponse, error) {
 	return nil, nil
 }
 
-func (*stubVenueClient) AutoAssignAndReserve(context.Context, *venuev1.AutoAssignAndReserveRequest, ...grpc.CallOption) (*venuev1.AutoAssignAndReserveResponse, error) {
+func (*stubVenueClient) AutoAssignAndReserve(_ context.Context, _ *venuev1.AutoAssignAndReserveRequest, _ ...grpc.CallOption) (*venuev1.AutoAssignAndReserveResponse, error) {
 	return nil, nil
 }
 
-func (*stubVenueClient) ReleaseSeatReservation(context.Context, *venuev1.ReleaseSeatReservationRequest, ...grpc.CallOption) (*venuev1.ReleaseSeatReservationResponse, error) {
+func (*stubVenueClient) ReleaseSeatReservation(_ context.Context, _ *venuev1.ReleaseSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.ReleaseSeatReservationResponse, error) {
 	return nil, nil
 }
 
-func (*stubVenueClient) FinalizeSeatReservation(context.Context, *venuev1.FinalizeSeatReservationRequest, ...grpc.CallOption) (*venuev1.FinalizeSeatReservationResponse, error) {
+func (*stubVenueClient) FinalizeSeatReservation(_ context.Context, _ *venuev1.FinalizeSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.FinalizeSeatReservationResponse, error) {
 	return nil, nil
 }
 
-func (*stubVenueClient) GetSeatingPlan(context.Context, *venuev1.GetSeatingPlanRequest, ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error) {
-	return nil, nil
+func (*stubVenueClient) GetSeatingPlan(_ context.Context, req *venuev1.GetSeatingPlanRequest, _ ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error) {
+	// Stub: return a plan with manual assignment mode by default
+	return &venuev1.GetSeatingPlanResponse{
+		PlanId:         req.PlanId,
+		AssignmentMode: "manual",
+	}, nil
 }
 
 // setupTestServer starts a real MongoDB via Testcontainers, wires the full Echo stack,

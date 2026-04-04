@@ -59,9 +59,9 @@ func (r *CachingTicketRepository) FindByID(ctx context.Context, id string) (*Tic
 }
 
 func (r *CachingTicketRepository) FindAll(ctx context.Context, p PaginationParams) ([]*Ticket, error) {
-	// Cache is only used for the default first-page request (no cursor, default limit).
-	// Paginated pages beyond the first are fetched directly from the DB.
-	useCache := p.After == "" && (p.Limit <= 0 || p.Limit == 20)
+	// Cache is only used for the default first-page request (no cursor, default limit, no filter).
+	// Paginated pages beyond the first, filtered requests, or custom limits are fetched directly from the DB.
+	useCache := p.After == "" && (p.Limit <= 0 || p.Limit == 20) && !p.AvailableOnly
 
 	if useCache {
 		if data, err := r.cache.GetList(ctx); err != nil {
