@@ -322,7 +322,7 @@ func TestPlanHandler_Get_ShouldReturn200_WithSections(t *testing.T) {
 	assert.Equal(t, "Floor A", resp.Sections[0].Name)
 }
 
-func TestPlanHandler_Activate_ShouldReturn422_WhenNotAttached(t *testing.T) {
+func TestPlanHandler_Activate_ShouldReturn200_WhenNotAttached(t *testing.T) {
 	planStub := &stubPlanRepo{
 		findByIDFn: func(_ context.Context, id string) (*repository.SeatingPlan, error) {
 			return &repository.SeatingPlan{
@@ -333,11 +333,24 @@ func TestPlanHandler_Activate_ShouldReturn422_WhenNotAttached(t *testing.T) {
 			}, nil
 		},
 		activateFn: func(_ context.Context, _ string, _ int) error {
-			return repository.ErrPlanNotAttached
+			return nil
 		},
 	}
 
-	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, zap.NewNop())
+	sectionStub := &stubSectionRepo{
+		listByPlanFn: func(_ context.Context, planID string) ([]*repository.Section, error) {
+			return []*repository.Section{{
+				ID:          "section-1",
+				PlanID:      planID,
+				Name:        "Floor A",
+				Type:        repository.SectionTypeSeated,
+				RowCount:    1,
+				ColumnCount: 1,
+			}}, nil
+		},
+	}
+
+	h := handler.NewPlanHandler(planStub, sectionStub, zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/activate",
@@ -350,7 +363,7 @@ func TestPlanHandler_Activate_ShouldReturn422_WhenNotAttached(t *testing.T) {
 	c.SetParamValues("plan-1")
 
 	require.NoError(t, h.Activate(c))
-	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestPlanHandler_Activate_ShouldReturn422_WhenNoSections(t *testing.T) {

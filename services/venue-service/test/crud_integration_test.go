@@ -135,10 +135,13 @@ func TestCRUD_ShouldSupportFullVenuePlanLifecycle(t *testing.T) {
 	require.Len(t, tiers, 1)
 	assert.Equal(t, "75.00", tiers[0].Price)
 
-	// ── Step 5: activate without ticket should fail ──────────────────────────
-	err = planRepo.Activate(ctx, p.ID, p.Version)
-	assert.ErrorIs(t, err, repository.ErrPlanNotAttached,
-		"activate without ticket should return ErrPlanNotAttached")
+	// ── Step 5: activate without ticket should succeed ───────────────────────
+	require.NoError(t, planRepo.Activate(ctx, p.ID, p.Version))
+
+	activatedPlan, err := planRepo.FindByID(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, repository.PlanStatusActive, activatedPlan.Status)
+	assert.Empty(t, activatedPlan.TicketID, "ticket_id should still be empty after activation")
 
 	// ── Step 6: attach ticket ────────────────────────────────────────────────
 	require.NoError(t, planRepo.AttachTicket(ctx, p.ID, ticketID, p.Version))
@@ -152,10 +155,8 @@ func TestCRUD_ShouldSupportFullVenuePlanLifecycle(t *testing.T) {
 	assert.ErrorIs(t, err, repository.ErrVersionConflict,
 		"attach with wrong version should return ErrVersionConflict")
 
-	// ── Step 8: activate plan ────────────────────────────────────────────────
-	require.NoError(t, planRepo.Activate(ctx, p.ID, attachedPlan.Version))
-
-	activatedPlan, err := planRepo.FindByID(ctx, p.ID)
+	// ── Step 8: active plan remains active after attach ───────────────────────
+	activatedPlan, err = planRepo.FindByID(ctx, p.ID)
 	require.NoError(t, err)
 	assert.Equal(t, repository.PlanStatusActive, activatedPlan.Status)
 

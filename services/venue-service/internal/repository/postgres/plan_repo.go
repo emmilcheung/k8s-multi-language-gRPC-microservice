@@ -194,8 +194,7 @@ func (r *PlanRepo) AttachTicket(ctx context.Context, planID, ticketID string, ex
 }
 
 // Activate transitions a seating plan from draft to active.
-// Validates that ticket_id is set and that at least one section exists.
-// Returns ErrPlanNotAttached if ticket_id is null.
+// Validates that at least one section exists.
 // Returns ErrPlanHasNoSections if no sections exist.
 // Returns ErrPlanAlreadyActive if already active.
 // Returns ErrVersionConflict on optimistic concurrency failure.
@@ -208,11 +207,6 @@ func (r *PlanRepo) Activate(ctx context.Context, planID string, expectedVersion 
 
 	if p.Status == repository.PlanStatusActive {
 		return repository.ErrPlanAlreadyActive
-	}
-
-	// Check ticket is attached.
-	if p.TicketID == "" {
-		return repository.ErrPlanNotAttached
 	}
 
 	// Check at least one section exists.

@@ -37,19 +37,19 @@ func (h *PlanHandler) RegisterRoutes(g *echo.Group) {
 
 // createPlanRequest is the request body for creating a seating plan.
 type createPlanRequest struct {
-	VenueID        string `json:"venueId"`
-	Name           string `json:"name"`
+	VenueID          string `json:"venueId"`
+	Name             string `json:"name"`
 	MaxSeatsPerOrder int    `json:"maxSeatsPerOrder"`
-	AssignmentMode string `json:"assignmentMode"`
-	PricingMode    string `json:"pricingMode"`
+	AssignmentMode   string `json:"assignmentMode"`
+	PricingMode      string `json:"pricingMode"`
 }
 
 // updatePlanRequest is the request body for updating a seating plan.
 type updatePlanRequest struct {
-	Name           string `json:"name"`
+	Name             string `json:"name"`
 	MaxSeatsPerOrder int    `json:"maxSeatsPerOrder"`
-	AssignmentMode string `json:"assignmentMode"`
-	PricingMode    string `json:"pricingMode"`
+	AssignmentMode   string `json:"assignmentMode"`
+	PricingMode      string `json:"pricingMode"`
 }
 
 // attachTicketRequest is the request body for attaching a ticket to a plan.
@@ -109,12 +109,12 @@ func (h *PlanHandler) Create(c echo.Context) error {
 	}
 
 	p := &repository.SeatingPlan{
-		VenueID:        req.VenueID,
-		OrganizerID:    organizerID,
-		Name:           req.Name,
+		VenueID:          req.VenueID,
+		OrganizerID:      organizerID,
+		Name:             req.Name,
 		MaxSeatsPerOrder: req.MaxSeatsPerOrder,
-		AssignmentMode: req.AssignmentMode,
-		PricingMode:    req.PricingMode,
+		AssignmentMode:   req.AssignmentMode,
+		PricingMode:      req.PricingMode,
 	}
 
 	if err := h.planRepo.Create(c.Request().Context(), p); err != nil {
@@ -331,8 +331,6 @@ func (h *PlanHandler) Activate(c echo.Context) error {
 			return c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
 		case errors.Is(err, repository.ErrPlanAlreadyActive):
 			return c.JSON(http.StatusConflict, errorResponse("plan is already active"))
-		case errors.Is(err, repository.ErrPlanNotAttached):
-			return c.JSON(http.StatusUnprocessableEntity, errorResponse("plan must be attached to a ticket before activation"))
 		case errors.Is(err, repository.ErrPlanHasNoSections):
 			return c.JSON(http.StatusUnprocessableEntity, errorResponse("plan must have at least one section before activation"))
 		case errors.Is(err, repository.ErrVersionConflict):

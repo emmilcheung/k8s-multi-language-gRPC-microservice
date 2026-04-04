@@ -430,7 +430,6 @@ export async function deactivatePlan(
  *
  * Pre-conditions (enforced by the service):
  *   - Plan must be in "draft" status.
- *   - Plan must have a ticketId set.
  *   - Plan must have at least one section.
  */
 export async function activatePlan(
