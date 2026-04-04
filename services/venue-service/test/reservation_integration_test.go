@@ -7,12 +7,37 @@ import (
 
 	grpcserver "github.com/acme/venue-service/internal/grpc"
 	pgrepo "github.com/acme/venue-service/internal/repository/postgres"
+	ticketsv1 "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1"
 	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// stubTicketClient is a simple stub for TicketServiceClient that returns a default price.
+type stubTicketClient struct{}
+
+func (s *stubTicketClient) GetTicket(ctx context.Context, in *ticketsv1.GetTicketRequest, opts ...grpc.CallOption) (*ticketsv1.GetTicketResponse, error) {
+	return &ticketsv1.GetTicketResponse{Price: "100.00"}, nil
+}
+
+func (s *stubTicketClient) ValidateTicketAvailability(ctx context.Context, in *ticketsv1.ValidateTicketRequest, opts ...grpc.CallOption) (*ticketsv1.ValidateTicketResponse, error) {
+	return &ticketsv1.ValidateTicketResponse{}, nil
+}
+
+func (s *stubTicketClient) ReserveQuota(ctx context.Context, in *ticketsv1.ReserveQuotaRequest, opts ...grpc.CallOption) (*ticketsv1.ReserveQuotaResponse, error) {
+	return &ticketsv1.ReserveQuotaResponse{}, nil
+}
+
+func (s *stubTicketClient) ReleaseReservation(ctx context.Context, in *ticketsv1.ReleaseReservationRequest, opts ...grpc.CallOption) (*ticketsv1.ReleaseReservationResponse, error) {
+	return &ticketsv1.ReleaseReservationResponse{}, nil
+}
+
+func (s *stubTicketClient) FinalizeReservation(ctx context.Context, in *ticketsv1.FinalizeReservationRequest, opts ...grpc.CallOption) (*ticketsv1.FinalizeReservationResponse, error) {
+	return &ticketsv1.FinalizeReservationResponse{}, nil
+}
 
 // TestReservation_ShouldReserveHeldSeats_WhenSeatsAreAvailable verifies the
 // happy-path: ReserveHeldSeats locks AVAILABLE seats, creates the reservation
@@ -29,7 +54,7 @@ func TestReservation_ShouldReserveHeldSeats_WhenSeatsAreAvailable(t *testing.T) 
 	reservationRepo := pgrepo.NewReservationRepo(pool)
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	planRepo := pgrepo.NewPlanRepo(pool)
-	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, zap.NewNop())
+	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, &stubTicketClient{}, zap.NewNop())
 
 	const (
 		ticketID      = "00000000-0000-0000-0000-000000000002"
@@ -79,7 +104,7 @@ func TestReservation_ShouldBeIdempotent_WhenReserveHeldSeatsCalledTwice(t *testi
 	reservationRepo := pgrepo.NewReservationRepo(pool)
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	planRepo := pgrepo.NewPlanRepo(pool)
-	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, zap.NewNop())
+	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, &stubTicketClient{}, zap.NewNop())
 
 	const (
 		ticketID      = "00000000-0000-0000-0000-000000000002"
@@ -121,7 +146,7 @@ func TestReservation_ShouldRelease_WhenReleaseSeatReservationCalled(t *testing.T
 	reservationRepo := pgrepo.NewReservationRepo(pool)
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	planRepo := pgrepo.NewPlanRepo(pool)
-	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, zap.NewNop())
+	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, &stubTicketClient{}, zap.NewNop())
 
 	const (
 		ticketID      = "00000000-0000-0000-0000-000000000002"
@@ -180,7 +205,7 @@ func TestReservation_ShouldFinalize_WhenFinalizeSeatReservationCalled(t *testing
 	reservationRepo := pgrepo.NewReservationRepo(pool)
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	planRepo := pgrepo.NewPlanRepo(pool)
-	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, zap.NewNop())
+	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, &stubTicketClient{}, zap.NewNop())
 
 	const (
 		ticketID      = "00000000-0000-0000-0000-000000000002"
@@ -226,7 +251,7 @@ func TestAutoAssign_ShouldAutoAssignAndReserve_WhenSeatsAvailable(t *testing.T) 
 	reservationRepo := pgrepo.NewReservationRepo(pool)
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	planRepo := pgrepo.NewPlanRepo(pool)
-	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, zap.NewNop())
+	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, &stubTicketClient{}, zap.NewNop())
 
 	const (
 		ticketID      = "00000000-0000-0000-0000-000000000002"
@@ -281,7 +306,7 @@ func TestAutoAssign_ShouldBeIdempotent_WhenCalledTwice(t *testing.T) {
 	reservationRepo := pgrepo.NewReservationRepo(pool)
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	planRepo := pgrepo.NewPlanRepo(pool)
-	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, zap.NewNop())
+	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, &stubTicketClient{}, zap.NewNop())
 
 	const (
 		ticketID      = "00000000-0000-0000-0000-000000000002"
@@ -327,7 +352,7 @@ func TestAutoAssign_ShouldReturnSuccessFalse_WhenNotEnoughSeats(t *testing.T) {
 	reservationRepo := pgrepo.NewReservationRepo(pool)
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	planRepo := pgrepo.NewPlanRepo(pool)
-	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, zap.NewNop())
+	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, &stubTicketClient{}, zap.NewNop())
 
 	const (
 		ticketID      = "00000000-0000-0000-0000-000000000002"
@@ -376,7 +401,7 @@ func TestReservation_ShouldRejectDuplicateSeatReservation_WhenSeatsAlreadyReserv
 	reservationRepo := pgrepo.NewReservationRepo(pool)
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	planRepo := pgrepo.NewPlanRepo(pool)
-	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, zap.NewNop())
+	srv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, &stubTicketClient{}, zap.NewNop())
 
 	const (
 		ticketID       = "00000000-0000-0000-0000-000000000002"

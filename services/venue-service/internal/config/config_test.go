@@ -45,6 +45,7 @@ func TestLoad_ShouldSucceed_WhenAllRequiredEnvVarsSet(t *testing.T) {
 	t.Setenv("APP_ENV", "test")
 	t.Setenv("LOG_LEVEL", "debug")
 	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("TICKET_SERVICE_URL", "localhost:50051")
 
 	cfg, err := config.Load()
 	require.NoError(t, err)
@@ -59,6 +60,7 @@ func TestLoad_ShouldSucceed_WhenAllRequiredEnvVarsSet(t *testing.T) {
 func TestLoad_ShouldUseDefaults_WhenOptionalEnvVarsAbsent(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/venue_db")
 	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	t.Setenv("TICKET_SERVICE_URL", "localhost:50051")
 	require.NoError(t, os.Unsetenv("PORT"))
 	require.NoError(t, os.Unsetenv("GRPC_PORT"))
 	require.NoError(t, os.Unsetenv("APP_ENV"))

@@ -84,6 +84,7 @@ type Manager struct {
 	sectionRepo ExtendedSectionRepo
 	planRepo    repository.PlanRepository
 	log         *zap.Logger
+	holdTTL     time.Duration
 
 	// broadcaster is used for in-process SSE fan-out when Redis is unavailable.
 	// It may be nil.
@@ -92,16 +93,22 @@ type Manager struct {
 
 // NewManager creates a new hold Manager.
 // redisClient may be nil; in that case all operations fall through to PostgreSQL only.
+// holdTTL is the duration for which held seats are reserved (e.g., 600*time.Second for 10 minutes).
 func NewManager(
 	redisClient *redis.Client,
 	sectionRepo ExtendedSectionRepo,
 	planRepo repository.PlanRepository,
+	holdTTL time.Duration,
 	log *zap.Logger,
 ) *Manager {
+	if holdTTL <= 0 {
+		holdTTL = 600 * time.Second // default 10 minutes
+	}
 	return &Manager{
 		redis:       redisClient,
 		sectionRepo: sectionRepo,
 		planRepo:    planRepo,
+		holdTTL:     holdTTL,
 		log:         log,
 	}
 }
@@ -150,10 +157,7 @@ func (m *Manager) HoldSeats(ctx context.Context, planID, userID, sessionID strin
 		return nil, ErrPlanNotActive
 	}
 
-	ttl := time.Duration(plan.HoldTTLSec) * time.Second
-	if ttl <= 0 {
-		ttl = 600 * time.Second
-	}
+	ttl := m.holdTTL
 	expiresAt := time.Now().UTC().Add(ttl)
 
 	if m.redis != nil {

@@ -8,10 +8,12 @@ import (
 
 	grpcserver "github.com/acme/venue-service/internal/grpc"
 	"github.com/acme/venue-service/internal/repository"
+	ticketsv1 "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1"
 	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -22,7 +24,7 @@ import (
 // stubReservationRepo is a configurable in-memory stub for ReservationRepository.
 type stubReservationRepo struct {
 	findByIDFn          func(ctx context.Context, id string) (*repository.SeatReservation, error)
-	atomicReserveAndFn  func(ctx context.Context, seatIDs []string, r *repository.SeatReservation) error
+	atomicReserveAndFn  func(ctx context.Context, seatIDs []string, r *repository.SeatReservation, ticketBasePrice string) error
 	releaseReservFn     func(ctx context.Context, reservationID, reason string) error
 	finalizeReservFn    func(ctx context.Context, reservationID, orderID string) error
 	createReservationFn func(ctx context.Context, r *repository.SeatReservation) error
@@ -35,9 +37,9 @@ func (s *stubReservationRepo) FindReservationByID(ctx context.Context, id string
 	return nil, repository.ErrReservationNotFound
 }
 
-func (s *stubReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []string, r *repository.SeatReservation) error {
+func (s *stubReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []string, r *repository.SeatReservation, ticketBasePrice string) error {
 	if s.atomicReserveAndFn != nil {
-		return s.atomicReserveAndFn(ctx, seatIDs, r)
+		return s.atomicReserveAndFn(ctx, seatIDs, r, ticketBasePrice)
 	}
 	return nil
 }
@@ -110,6 +112,29 @@ func (n *nopSectionRepo) ReleaseReservedSeats(ctx context.Context, seatIDs []str
 }
 func (n *nopSectionRepo) SellSeats(ctx context.Context, seatIDs []string) error { return nil }
 
+// nopTicketClient is a stub for TicketServiceClient (not used in these tests).
+type nopTicketClient struct{}
+
+func (n *nopTicketClient) GetTicket(ctx context.Context, in *ticketsv1.GetTicketRequest, opts ...grpc.CallOption) (*ticketsv1.GetTicketResponse, error) {
+	return &ticketsv1.GetTicketResponse{}, nil
+}
+
+func (n *nopTicketClient) ValidateTicketAvailability(ctx context.Context, in *ticketsv1.ValidateTicketRequest, opts ...grpc.CallOption) (*ticketsv1.ValidateTicketResponse, error) {
+	return &ticketsv1.ValidateTicketResponse{}, nil
+}
+
+func (n *nopTicketClient) ReserveQuota(ctx context.Context, in *ticketsv1.ReserveQuotaRequest, opts ...grpc.CallOption) (*ticketsv1.ReserveQuotaResponse, error) {
+	return &ticketsv1.ReserveQuotaResponse{}, nil
+}
+
+func (n *nopTicketClient) ReleaseReservation(ctx context.Context, in *ticketsv1.ReleaseReservationRequest, opts ...grpc.CallOption) (*ticketsv1.ReleaseReservationResponse, error) {
+	return &ticketsv1.ReleaseReservationResponse{}, nil
+}
+
+func (n *nopTicketClient) FinalizeReservation(ctx context.Context, in *ticketsv1.FinalizeReservationRequest, opts ...grpc.CallOption) (*ticketsv1.FinalizeReservationResponse, error) {
+	return &ticketsv1.FinalizeReservationResponse{}, nil
+}
+
 // nopPlanRepo satisfies PlanRepository with no-ops.
 type nopPlanRepo struct{}
 
@@ -140,12 +165,12 @@ func (n *nopPlanRepo) SaveLayout(_ context.Context, _, _ string, _ json.RawMessa
 
 // newTestServer creates a VenueGrpcServer with the given reservation repo stub.
 func newTestServer(rr repository.ReservationRepository) *grpcserver.VenueGrpcServer {
-	return grpcserver.NewVenueGrpcServer(rr, &nopSectionRepo{}, &nopPlanRepo{}, zap.NewNop())
+	return grpcserver.NewVenueGrpcServer(rr, &nopSectionRepo{}, &nopPlanRepo{}, &nopTicketClient{}, zap.NewNop())
 }
 
 // newTestServerWithSection creates a VenueGrpcServer with a configurable section repo.
 func newTestServerWithSection(rr repository.ReservationRepository, sr repository.SectionRepository) *grpcserver.VenueGrpcServer {
-	return grpcserver.NewVenueGrpcServer(rr, sr, &nopPlanRepo{}, zap.NewNop())
+	return grpcserver.NewVenueGrpcServer(rr, sr, &nopPlanRepo{}, &nopTicketClient{}, zap.NewNop())
 }
 
 // ── ReserveHeldSeats tests ────────────────────────────────────────────────────
@@ -249,7 +274,7 @@ func TestReserveHeldSeats_ShouldSucceed_WhenSeatsAreReservable(t *testing.T) {
 		findByIDFn: func(_ context.Context, _ string) (*repository.SeatReservation, error) {
 			return nil, repository.ErrReservationNotFound
 		},
-		atomicReserveAndFn: func(_ context.Context, seatIDs []string, r *repository.SeatReservation) error {
+		atomicReserveAndFn: func(_ context.Context, seatIDs []string, r *repository.SeatReservation, _ string) error {
 			r.Items = []repository.SeatReservationItem{
 				{ReservationID: r.ID, SeatID: seatIDs[0], SectionID: "sec-1", Price: "75.00", SeatLabel: "B2"},
 			}
@@ -280,7 +305,7 @@ func TestReserveHeldSeats_ShouldReturnUnavailableSeats_WhenSeatsNotReservable(t 
 		findByIDFn: func(_ context.Context, _ string) (*repository.SeatReservation, error) {
 			return nil, repository.ErrReservationNotFound
 		},
-		atomicReserveAndFn: func(_ context.Context, _ []string, _ *repository.SeatReservation) error {
+		atomicReserveAndFn: func(_ context.Context, _ []string, _ *repository.SeatReservation, _ string) error {
 			return repository.ErrSeatNotAvailable
 		},
 	}
@@ -303,7 +328,7 @@ func TestReserveHeldSeats_ShouldReturnInternal_WhenAtomicReserveFails(t *testing
 		findByIDFn: func(_ context.Context, _ string) (*repository.SeatReservation, error) {
 			return nil, repository.ErrReservationNotFound
 		},
-		atomicReserveAndFn: func(_ context.Context, _ []string, _ *repository.SeatReservation) error {
+		atomicReserveAndFn: func(_ context.Context, _ []string, _ *repository.SeatReservation, _ string) error {
 			return assert.AnError
 		},
 	}
@@ -337,7 +362,7 @@ func TestReserveHeldSeats_ShouldReturnSuccess_WhenConcurrentDuplicateDetected(t 
 			// Second call (reload after duplicate): found.
 			return &repository.SeatReservation{ID: id, Status: repository.ReservationStatusReserved, Items: items}, nil
 		},
-		atomicReserveAndFn: func(_ context.Context, _ []string, _ *repository.SeatReservation) error {
+		atomicReserveAndFn: func(_ context.Context, _ []string, _ *repository.SeatReservation, _ string) error {
 			return repository.ErrReservationAlreadyDone
 		},
 	}
@@ -581,7 +606,7 @@ func TestAutoAssignAndReserve_ShouldSucceed_WhenSeatsAvailable(t *testing.T) {
 		findByIDFn: func(_ context.Context, _ string) (*repository.SeatReservation, error) {
 			return nil, repository.ErrReservationNotFound
 		},
-		atomicReserveAndFn: func(_ context.Context, seatIDs []string, r *repository.SeatReservation) error {
+		atomicReserveAndFn: func(_ context.Context, seatIDs []string, r *repository.SeatReservation, _ string) error {
 			for _, id := range seatIDs {
 				r.Items = append(r.Items, repository.SeatReservationItem{
 					ReservationID: r.ID, SeatID: id, SectionID: "sec-1", Price: "50.00", SeatLabel: id,
@@ -645,7 +670,7 @@ func TestAutoAssignAndReserve_ShouldReturnSuccessFalse_WhenRaceConditionOnReserv
 		findByIDFn: func(_ context.Context, _ string) (*repository.SeatReservation, error) {
 			return nil, repository.ErrReservationNotFound
 		},
-		atomicReserveAndFn: func(_ context.Context, _ []string, _ *repository.SeatReservation) error {
+		atomicReserveAndFn: func(_ context.Context, _ []string, _ *repository.SeatReservation, _ string) error {
 			return repository.ErrSeatNotAvailable // concurrent reservation took the seats
 		},
 	}
@@ -676,7 +701,7 @@ func TestAutoAssignAndReserve_ShouldReturnInternal_WhenAtomicReserveFails(t *tes
 		findByIDFn: func(_ context.Context, _ string) (*repository.SeatReservation, error) {
 			return nil, repository.ErrReservationNotFound
 		},
-		atomicReserveAndFn: func(_ context.Context, _ []string, _ *repository.SeatReservation) error {
+		atomicReserveAndFn: func(_ context.Context, _ []string, _ *repository.SeatReservation, _ string) error {
 			return assert.AnError
 		},
 	}

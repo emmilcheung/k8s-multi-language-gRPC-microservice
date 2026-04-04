@@ -27,9 +27,11 @@ import (
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	ticketsv1 "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 func main() {
@@ -124,7 +126,9 @@ func main() {
 	svc := service.NewVenueService(reservationRepo, sectionRepo, log)
 
 	// Hold manager — Redis hot path + PostgreSQL fallback.
-	holdMgr := hold.NewManager(redisClient, sectionRepo, planRepo, log)
+	// holdTTL determines how long seats are reserved during the hold phase.
+	holdTTL := time.Duration(cfg.HoldTTLSec) * time.Second
+	holdMgr := hold.NewManager(redisClient, sectionRepo, planRepo, holdTTL, log)
 
 	// SSE broadcaster — real-time seat state fan-out to connected clients.
 	// Uses Redis pub/sub when Redis is available; falls through to in-process fan-out.
@@ -164,8 +168,20 @@ func main() {
 	defer consumerCancel()
 	go orderConsumer.Start(consumerCtx)
 
+	// Create gRPC client to ticket-service for GetTicket calls.
+	ticketConn, err := grpc.NewClient(
+		cfg.TicketServiceURL,
+		grpc.WithInsecure(),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10*1024*1024)),
+	)
+	if err != nil {
+		log.Fatal("failed to connect to ticket-service", zap.Error(err))
+	}
+	defer ticketConn.Close()
+	ticketClient := ticketsv1.NewTicketServiceClient(ticketConn)
+
 	// gRPC server — wired with real repos in CP-08.
-	grpcSrv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, log)
+	grpcSrv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, ticketClient, log)
 	grpcCtx, grpcCancel := context.WithCancel(context.Background())
 	defer grpcCancel()
 	grpcAddr := fmt.Sprintf(":%d", cfg.GrpcPort)

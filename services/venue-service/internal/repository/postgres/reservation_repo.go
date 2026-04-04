@@ -211,7 +211,10 @@ func (r *ReservationRepo) FinalizeReservation(ctx context.Context, reservationID
 //
 // r.ID must be pre-populated by the caller (the reservationId from the gRPC
 // request).  r.Items is populated with snapshotted seat data on success.
-func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []string, res *repository.SeatReservation) error {
+//
+// ticketBasePrice is the ticket's base price (decimal string, e.g. "25.50").
+// It is used as the final COALESCE fallback if no seat or section price tier is assigned.
+func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []string, res *repository.SeatReservation, ticketBasePrice string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -220,12 +223,13 @@ func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []
 
 	// 1. Lock seats and fetch status + snapshotted price in one pass.
 	//    FOR UPDATE OF s prevents concurrent reservations for the same seats.
+	//    Price resolution: seat tier > section tier > ticket base price.
 	const lockQ = `
 		SELECT s.id,
 		       s.section_id,
 		       s.seat_label,
 		       s.status,
-		       COALESCE(seat_pt.price::text, section_pt.price::text, '0') AS price
+		       COALESCE(seat_pt.price::text, section_pt.price::text, $2) AS price
 		FROM   seats s
 		LEFT JOIN price_tiers seat_pt ON seat_pt.id = s.price_tier_id
 		LEFT JOIN sections sec ON sec.id = s.section_id
@@ -241,7 +245,7 @@ func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []
 		price     string
 	}
 
-	rows, err := tx.Query(ctx, lockQ, seatIDs)
+	rows, err := tx.Query(ctx, lockQ, seatIDs, ticketBasePrice)
 	if err != nil {
 		return err
 	}

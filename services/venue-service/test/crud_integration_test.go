@@ -92,7 +92,6 @@ func TestCRUD_ShouldSupportFullVenuePlanLifecycle(t *testing.T) {
 		VenueID:          v.ID,
 		OrganizerID:      organizerID,
 		Name:             "Main Floor",
-		HoldTTLSec:       300,
 		MaxSeatsPerOrder: 4,
 	}
 	require.NoError(t, planRepo.Create(ctx, p))

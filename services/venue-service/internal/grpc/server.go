@@ -10,6 +10,7 @@ import (
 	"github.com/acme/venue-service/internal/autoassign"
 	"github.com/acme/venue-service/internal/repository"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
+	ticketsv1 "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1"
 	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
@@ -26,6 +27,7 @@ type VenueGrpcServer struct {
 	reservationRepo repository.ReservationRepository
 	sectionRepo     repository.SectionRepository
 	planRepo        repository.PlanRepository
+	ticketClient    ticketsv1.TicketServiceClient
 	log             *zap.Logger
 }
 
@@ -34,12 +36,14 @@ func NewVenueGrpcServer(
 	reservationRepo repository.ReservationRepository,
 	sectionRepo repository.SectionRepository,
 	planRepo repository.PlanRepository,
+	ticketClient ticketsv1.TicketServiceClient,
 	log *zap.Logger,
 ) *VenueGrpcServer {
 	return &VenueGrpcServer{
 		reservationRepo: reservationRepo,
 		sectionRepo:     sectionRepo,
 		planRepo:        planRepo,
+		ticketClient:    ticketClient,
 		log:             log,
 	}
 }
@@ -98,8 +102,17 @@ func (s *VenueGrpcServer) ReserveHeldSeats(ctx context.Context, req *venuev1.Res
 		// spanning multiple sections; it is captured per-item.
 	}
 
+	// Fetch ticket price from ticket-service for price fallback resolution.
+	ticketResp, err := s.ticketClient.GetTicket(ctx, &ticketsv1.GetTicketRequest{TicketId: req.TicketId})
+	if err != nil {
+		s.log.Error("ReserveHeldSeats: GetTicket failed", zap.Error(err),
+			zap.String("ticketId", req.TicketId))
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+
 	// Atomic: lock seats, transition HELD/AVAILABLE → RESERVED, write ledger.
-	if err := s.reservationRepo.AtomicReserveAndCreate(ctx, req.SeatIds, res); err != nil {
+	// ticketResp.Price is passed for price fallback resolution.
+	if err := s.reservationRepo.AtomicReserveAndCreate(ctx, req.SeatIds, res, ticketResp.Price); err != nil {
 		switch err {
 		case repository.ErrSeatNotAvailable:
 			// Return success=false with the full list so the caller can inspect.
@@ -217,8 +230,17 @@ func (s *VenueGrpcServer) AutoAssignAndReserve(ctx context.Context, req *venuev1
 		ExpiresAt: expiresAt,
 	}
 
+	// Fetch ticket price from ticket-service for price fallback resolution.
+	ticketResp, err := s.ticketClient.GetTicket(ctx, &ticketsv1.GetTicketRequest{TicketId: req.TicketId})
+	if err != nil {
+		s.log.Error("AutoAssignAndReserve: GetTicket failed", zap.Error(err),
+			zap.String("ticketId", req.TicketId))
+		return nil, status.Error(codes.Internal, "internal error")
+	}
+
 	// Atomic: lock seats, transition AVAILABLE → RESERVED, write ledger.
-	if err := s.reservationRepo.AtomicReserveAndCreate(ctx, chosenSeatIDs, res); err != nil {
+	// ticketResp.Price is passed for price fallback resolution.
+	if err := s.reservationRepo.AtomicReserveAndCreate(ctx, chosenSeatIDs, res, ticketResp.Price); err != nil {
 		switch err {
 		case repository.ErrSeatNotAvailable:
 			// Race condition — seats were taken between query and reserve.

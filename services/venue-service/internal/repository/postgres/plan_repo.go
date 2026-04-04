@@ -25,21 +25,17 @@ func NewPlanRepo(pool *pgxpool.Pool) *PlanRepo {
 // p.LayoutJSON, p.CreatedAt, and p.UpdatedAt are populated.
 func (r *PlanRepo) Create(ctx context.Context, p *repository.SeatingPlan) error {
 	const q = `
-		INSERT INTO seating_plans (venue_id, organizer_id, name, hold_ttl_sec, max_seats_per_order)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO seating_plans (venue_id, organizer_id, name, max_seats_per_order)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id, status, layout_json, version, created_at, updated_at`
 
-	holdTTL := p.HoldTTLSec
-	if holdTTL <= 0 {
-		holdTTL = 600
-	}
 	maxSeats := p.MaxSeatsPerOrder
 	if maxSeats <= 0 {
 		maxSeats = 10
 	}
 
 	return r.pool.QueryRow(ctx, q,
-		p.VenueID, p.OrganizerID, p.Name, holdTTL, maxSeats,
+		p.VenueID, p.OrganizerID, p.Name, maxSeats,
 	).Scan(&p.ID, &p.Status, &p.LayoutJSON, &p.Version, &p.CreatedAt, &p.UpdatedAt)
 }
 
@@ -47,14 +43,14 @@ func (r *PlanRepo) Create(ctx context.Context, p *repository.SeatingPlan) error 
 func (r *PlanRepo) FindByID(ctx context.Context, id string) (*repository.SeatingPlan, error) {
 	const q = `
 		SELECT id, venue_id, COALESCE(ticket_id::text, ''), organizer_id, name,
-		       status, hold_ttl_sec, max_seats_per_order, layout_json, version, created_at, updated_at
+		       status, max_seats_per_order, layout_json, version, created_at, updated_at
 		FROM seating_plans
 		WHERE id = $1`
 
 	p := &repository.SeatingPlan{}
 	err := r.pool.QueryRow(ctx, q, id).Scan(
 		&p.ID, &p.VenueID, &p.TicketID, &p.OrganizerID, &p.Name,
-		&p.Status, &p.HoldTTLSec, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version,
+		&p.Status, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version,
 		&p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
@@ -71,7 +67,7 @@ func (r *PlanRepo) FindByID(ctx context.Context, id string) (*repository.Seating
 func (r *PlanRepo) ListByVenue(ctx context.Context, venueID, organizerID string) ([]*repository.SeatingPlan, error) {
 	const q = `
 		SELECT id, venue_id, COALESCE(ticket_id::text, ''), organizer_id, name,
-		       status, hold_ttl_sec, max_seats_per_order, layout_json, version, created_at, updated_at
+		       status, max_seats_per_order, layout_json, version, created_at, updated_at
 		FROM seating_plans
 		WHERE venue_id = $1 AND organizer_id = $2
 		ORDER BY created_at DESC`
@@ -87,7 +83,7 @@ func (r *PlanRepo) ListByVenue(ctx context.Context, venueID, organizerID string)
 		p := &repository.SeatingPlan{}
 		if err := rows.Scan(
 			&p.ID, &p.VenueID, &p.TicketID, &p.OrganizerID, &p.Name,
-			&p.Status, &p.HoldTTLSec, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version,
+			&p.Status, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version,
 			&p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -118,7 +114,7 @@ func (r *PlanRepo) ListActivePlans(ctx context.Context) ([]*repository.SeatingPl
 		p := &repository.SeatingPlan{}
 		if err := rows.Scan(
 			&p.ID, &p.VenueID, &p.TicketID, &p.OrganizerID, &p.Name,
-			&p.Status, &p.HoldTTLSec, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version,
+			&p.Status, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version,
 			&p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -148,7 +144,7 @@ func (r *PlanRepo) ListByTicket(ctx context.Context, ticketID string) ([]*reposi
 		p := &repository.SeatingPlan{}
 		if err := rows.Scan(
 			&p.ID, &p.VenueID, &p.TicketID, &p.OrganizerID, &p.Name,
-			&p.Status, &p.HoldTTLSec, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version,
+			&p.Status, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version,
 			&p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -202,6 +198,11 @@ func (r *PlanRepo) Activate(ctx context.Context, planID string, expectedVersion 
 
 	if p.Status == repository.PlanStatusActive {
 		return repository.ErrPlanAlreadyActive
+	}
+
+	// Check ticket is attached.
+	if p.TicketID == "" {
+		return repository.ErrPlanNotAttached
 	}
 
 	// Check at least one section exists.
@@ -265,16 +266,16 @@ func (r *PlanRepo) Deactivate(ctx context.Context, planID, organizerID string) e
 	return nil
 }
 
-// Update persists name, hold_ttl_sec, and max_seats_per_order changes.
+// Update persists name and max_seats_per_order changes.
 // The caller must supply the current version; the update is rejected on mismatch.
 func (r *PlanRepo) Update(ctx context.Context, p *repository.SeatingPlan) error {
 	const q = `
 		UPDATE seating_plans
-		SET name = $1, hold_ttl_sec = $2, max_seats_per_order = $3, updated_at = now()
-		WHERE id = $4 AND organizer_id = $5
+		SET name = $1, max_seats_per_order = $2, updated_at = now()
+		WHERE id = $3 AND organizer_id = $4
 		RETURNING updated_at`
 	var updatedAt time.Time
-	err := r.pool.QueryRow(ctx, q, p.Name, p.HoldTTLSec, p.MaxSeatsPerOrder, p.ID, p.OrganizerID).
+	err := r.pool.QueryRow(ctx, q, p.Name, p.MaxSeatsPerOrder, p.ID, p.OrganizerID).
 		Scan(&updatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

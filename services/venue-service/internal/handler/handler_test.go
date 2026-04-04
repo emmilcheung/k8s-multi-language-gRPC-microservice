@@ -156,6 +156,23 @@ func (n *nopSectionRepo) ReserveSeats(_ context.Context, _ []string, _ string) e
 func (n *nopSectionRepo) ReleaseReservedSeats(_ context.Context, _ []string) error   { return nil }
 func (n *nopSectionRepo) SellSeats(_ context.Context, _ []string) error              { return nil }
 
+// sectionRepoWithCapacity returns sections with non-zero capacity.
+type sectionRepoWithCapacity struct {
+	*nopSectionRepo
+}
+
+func (s *sectionRepoWithCapacity) ListSectionsByPlan(_ context.Context, _ string) ([]*repository.Section, error) {
+	return []*repository.Section{
+		{
+			ID:          "section-1",
+			Name:        "Main",
+			Type:        repository.SectionTypeSeated,
+			RowCount:    10,
+			ColumnCount: 10,
+		},
+	}, nil
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func newEcho() *echo.Echo {
@@ -384,7 +401,7 @@ func TestPlanHandler_Activate_ShouldReturn409_WhenAlreadyActive(t *testing.T) {
 		},
 	}
 
-	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, zap.NewNop())
+	h := handler.NewPlanHandler(planStub, &sectionRepoWithCapacity{&nopSectionRepo{}}, zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/activate",

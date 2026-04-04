@@ -80,21 +80,23 @@ type Venue struct {
 // SeatingPlan links a set of sections to a specific ticket.
 // ticket_id is nullable during draft creation and required before activation.
 type SeatingPlan struct {
-	ID               string     `db:"id"          json:"id"`
-	VenueID          string     `db:"venue_id"    json:"venueId"`
-	TicketID         string     `db:"ticket_id"   json:"ticketId"` // empty until attached
-	OrganizerID      string     `db:"organizer_id" json:"organizerId"`
-	Name             string     `db:"name"         json:"name"`
-	Status           PlanStatus `db:"status"       json:"status"`
-	HoldTTLSec       int        `db:"hold_ttl_sec" json:"holdTtlSec"`
+	ID             string     `db:"id"          json:"id"`
+	VenueID        string     `db:"venue_id"    json:"venueId"`
+	TicketID       string     `db:"ticket_id"   json:"ticketId"` // empty until attached
+	OrganizerID    string     `db:"organizer_id" json:"organizerId"`
+	Name           string     `db:"name"         json:"name"`
+	Status         PlanStatus `db:"status"       json:"status"`
 	MaxSeatsPerOrder int        `db:"max_seats_per_order" json:"maxSeatsPerOrder"`
 	// LayoutJSON stores the 2-D canvas layout for the seating plan editor.
 	// It is a free-form JSON blob (section node positions + row offsets).
 	LayoutJSON json.RawMessage `db:"layout_json"  json:"layoutJson"`
 	Sections   []*Section      `json:"sections,omitempty"`
-	Version    int             `db:"version"      json:"version"`
-	CreatedAt  time.Time       `db:"created_at"   json:"createdAt"`
-	UpdatedAt  time.Time       `db:"updated_at"   json:"updatedAt"`
+	// TotalCapacity is the computed sum of all section capacities (rowCount * columnCount).
+	// Populated when sections are loaded.
+	TotalCapacity int        `json:"totalCapacity"` // computed, not persisted
+	Version       int        `db:"version"         json:"version"`
+	CreatedAt     time.Time  `db:"created_at"   json:"createdAt"`
+	UpdatedAt     time.Time  `db:"updated_at"   json:"updatedAt"`
 }
 
 // VenueSection is a reusable seating layout template attached to a venue.
@@ -268,11 +270,13 @@ type ReservationRepository interface {
 	//
 	// r.ID must be pre-populated by the caller (the caller-supplied reservationId).
 	// r.Items is populated with the snapshotted seat data (label, price) on success.
+	// ticketBasePrice is the ticket's base price (decimal string, e.g. "25.50"),
+	// used as the final fallback if no seat or section price tier is assigned.
 	//
 	// Returns ErrSeatNotAvailable if any seat cannot be reserved (wrong status or
 	// not found).  Returns ErrReservationAlreadyDone if r.ID already exists in the
 	// ledger (idempotency guard under concurrent retries).
-	AtomicReserveAndCreate(ctx context.Context, seatIDs []string, r *SeatReservation) error
+	AtomicReserveAndCreate(ctx context.Context, seatIDs []string, r *SeatReservation, ticketBasePrice string) error
 
 	// ReleaseReservation transitions RESERVED → RELEASED and restores seats to AVAILABLE.
 	// Idempotent: RELEASED reservations return success.

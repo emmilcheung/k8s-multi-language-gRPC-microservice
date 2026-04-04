@@ -2,7 +2,7 @@
 // components/order-payment-form.tsx — Stub "Pay Now" Client Component.
 // Glass card with large amount display, lock icon security note, two action buttons.
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Lock, AlertCircle, CreditCard, Loader2, X, Clock } from "lucide-react";
 import { submitPayment, cancelOrder } from "@/app/actions/orders";
@@ -27,6 +27,13 @@ function formatUtcDateTime(value: string): string {
   return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss} UTC`;
 }
 
+function formatTimeRemaining(seconds: number): string {
+  if (seconds <= 0) return "0:00";
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
 export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFormProps) {
   const boundPay = submitPayment.bind(null, orderId, amount);
   const boundCancel = cancelOrder.bind(null, orderId);
@@ -37,8 +44,25 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
     initialState
   );
 
+  const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
+
+  // Calculate remaining time on mount and update every second
+  useEffect(() => {
+    const updateCountdown = () => {
+      const now = new Date().getTime();
+      const expiresAtTime = new Date(expiresAt).getTime();
+      const remaining = Math.ceil((expiresAtTime - now) / 1000);
+      setSecondsRemaining(Math.max(0, remaining));
+    };
+
+    updateCountdown(); // Set initial value immediately
+    const interval = setInterval(updateCountdown, 1000);
+    return () => clearInterval(interval);
+  }, [expiresAt]);
+
   const isPending = payPending || cancelPending;
   const error = payState?.error ?? cancelState?.error;
+  const isTimeRunningOut = secondsRemaining !== null && secondsRemaining < 60;
 
   return (
     <div className="glass rounded-2xl w-full p-8 flex flex-col gap-6">
@@ -56,15 +80,28 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
 
       <div className="h-px bg-white/6" />
 
-      {/* Expiry */}
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Clock className="w-4 h-4 shrink-0 text-amber-400/70" />
-        <span>
-          Order expires:{" "}
-          <span className="text-amber-400/90 font-medium">
+      {/* Expiry with countdown */}
+      <div className="flex items-center gap-3 text-sm">
+        <Clock
+          className={`w-4 h-4 shrink-0 transition-colors ${
+            isTimeRunningOut ? "text-red-400/70" : "text-amber-400/70"
+          }`}
+        />
+        <div className="flex flex-col gap-1">
+          <span className="text-muted-foreground">Order expires in:</span>
+          {secondsRemaining !== null && (
+            <span
+              className={`font-mono font-bold text-base transition-colors ${
+                isTimeRunningOut ? "text-red-400/90" : "text-amber-400/90"
+              }`}
+            >
+              {formatTimeRemaining(secondsRemaining)}
+            </span>
+          )}
+          <span className="text-xs text-muted-foreground">
             {formatUtcDateTime(expiresAt)}
           </span>
-        </span>
+        </div>
       </div>
 
       {/* Error */}

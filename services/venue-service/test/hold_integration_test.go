@@ -31,7 +31,7 @@ func TestHold_ShouldSupportHoldAndReleaseCycle(t *testing.T) {
 
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	planRepo := pgrepo.NewPlanRepo(pool)
-	mgr := hold.NewManager(nil /* Redis disabled */, sectionRepo, planRepo, zap.NewNop())
+	mgr := hold.NewManager(nil /* Redis disabled */, sectionRepo, planRepo, 600*time.Second, zap.NewNop())
 
 	const userID = "00000000-0000-0000-0000-000000000010"
 	const sessionID = "session-abc"
@@ -102,7 +102,7 @@ func TestHold_ShouldRejectHoldOnInactivePlan(t *testing.T) {
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	planRepo := pgrepo.NewPlanRepo(pool)
 	venueRepo := pgrepo.NewVenueRepo(pool)
-	mgr := hold.NewManager(nil, sectionRepo, planRepo, zap.NewNop())
+	mgr := hold.NewManager(nil, sectionRepo, planRepo, 600*time.Second, zap.NewNop())
 
 	// Create venue + draft plan (NOT activated).
 	v := &repository.Venue{
@@ -117,7 +117,6 @@ func TestHold_ShouldRejectHoldOnInactivePlan(t *testing.T) {
 		VenueID:          v.ID,
 		OrganizerID:      "00000000-0000-0000-0000-000000000001",
 		Name:             "Draft Plan",
-		HoldTTLSec:       60,
 		MaxSeatsPerOrder: 4,
 	}
 	require.NoError(t, planRepo.Create(ctx, p))
@@ -139,7 +138,7 @@ func TestHold_ShouldSweepExpiredHolds(t *testing.T) {
 
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	planRepo := pgrepo.NewPlanRepo(pool)
-	mgr := hold.NewManager(nil, sectionRepo, planRepo, zap.NewNop())
+	mgr := hold.NewManager(nil, sectionRepo, planRepo, 600*time.Second, zap.NewNop())
 
 	const userID = "00000000-0000-0000-0000-000000000010"
 
@@ -172,7 +171,7 @@ func TestHold_ConcurrentHoldContention(t *testing.T) {
 
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	planRepo := pgrepo.NewPlanRepo(pool)
-	mgr := hold.NewManager(nil, sectionRepo, planRepo, zap.NewNop())
+	mgr := hold.NewManager(nil, sectionRepo, planRepo, 600*time.Second, zap.NewNop())
 
 	// 10 concurrent users each try to hold the same single seat.
 	const concurrency = 10
@@ -276,7 +275,6 @@ func setupHoldFixture(t *testing.T, ctx context.Context) (*pgxpool.Pool, string,
 		VenueID:          v.ID,
 		OrganizerID:      organizerID,
 		Name:             "Hold Test Plan",
-		HoldTTLSec:       600,
 		MaxSeatsPerOrder: 4,
 	}
 	require.NoError(t, planRepo.Create(ctx, p))

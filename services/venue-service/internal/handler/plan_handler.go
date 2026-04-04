@@ -39,14 +39,12 @@ func (h *PlanHandler) RegisterRoutes(g *echo.Group) {
 type createPlanRequest struct {
 	VenueID          string `json:"venueId"`
 	Name             string `json:"name"`
-	HoldTTLSec       int    `json:"holdTtlSec"`
 	MaxSeatsPerOrder int    `json:"maxSeatsPerOrder"`
 }
 
 // updatePlanRequest is the request body for updating a seating plan.
 type updatePlanRequest struct {
 	Name             string `json:"name"`
-	HoldTTLSec       int    `json:"holdTtlSec"`
 	MaxSeatsPerOrder int    `json:"maxSeatsPerOrder"`
 }
 
@@ -110,7 +108,6 @@ func (h *PlanHandler) Create(c echo.Context) error {
 		VenueID:          req.VenueID,
 		OrganizerID:      organizerID,
 		Name:             req.Name,
-		HoldTTLSec:       req.HoldTTLSec,
 		MaxSeatsPerOrder: req.MaxSeatsPerOrder,
 	}
 
@@ -151,6 +148,13 @@ func (h *PlanHandler) Get(c echo.Context) error {
 	}
 	p.Sections = sections
 
+	// Compute total capacity: sum of (rowCount * columnCount) for all sections.
+	totalCapacity := 0
+	for _, section := range sections {
+		totalCapacity += section.RowCount * section.ColumnCount
+	}
+	p.TotalCapacity = totalCapacity
+
 	return c.JSON(http.StatusOK, p)
 }
 
@@ -175,7 +179,6 @@ func (h *PlanHandler) Update(c echo.Context) error {
 		ID:               id,
 		OrganizerID:      organizerID,
 		Name:             req.Name,
-		HoldTTLSec:       req.HoldTTLSec,
 		MaxSeatsPerOrder: req.MaxSeatsPerOrder,
 	}
 
@@ -283,6 +286,20 @@ func (h *PlanHandler) Activate(c echo.Context) error {
 	}
 	if existing.OrganizerID != organizerID {
 		return c.JSON(http.StatusForbidden, errorResponse("not the plan owner"))
+	}
+
+	// Validate that plan has at least one seat: compute total capacity.
+	sections, err := h.sectionRepo.ListSectionsByPlan(c.Request().Context(), id)
+	if err != nil {
+		h.log.Error("plan activate sections lookup failed", zap.Error(err), zap.String("planId", id))
+		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+	}
+	totalCapacity := 0
+	for _, section := range sections {
+		totalCapacity += section.RowCount * section.ColumnCount
+	}
+	if totalCapacity == 0 {
+		return c.JSON(http.StatusUnprocessableEntity, errorResponse("plan must have at least one seat before activation"))
 	}
 
 	version := req.ExpectedVersion
