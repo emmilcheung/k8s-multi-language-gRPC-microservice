@@ -765,7 +765,7 @@ jobs:
           done
 
       - name: Start Kong and all application services
-        run: docker compose up -d kong auth-service ticket-service order-service payment-service expiration-service
+        run: docker compose up -d kong auth-service ticket-service venue-service order-service payment-service expiration-service
 
       - name: Wait for services to pass health checks
         run: |
@@ -777,7 +777,7 @@ jobs:
           timeout 360 bash -c "
             while true; do
               all_healthy=true
-              for service in auth-service ticket-service order-service payment-service expiration-service; do
+              for service in auth-service ticket-service venue-service order-service payment-service expiration-service; do
                 status=\$(docker inspect \$(docker compose ps -q \$service 2>/dev/null) --format='{{.State.Health.Status}}' 2>/dev/null || echo 'not-started')
                 if [ \"\$status\" != 'healthy' ]; then
                   all_healthy=false
