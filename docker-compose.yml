@@ -401,6 +401,7 @@ services:
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: info
+      TICKET_SERVICE_URL: ticket-service:50051
     depends_on:
       postgres-venue:
         condition: service_healthy
