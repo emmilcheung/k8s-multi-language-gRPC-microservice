@@ -195,6 +195,81 @@ export class PaymentsService {
   }
 
   /**
+   * Verify a Stripe webhook payload and return the parsed event.
+   * Throws if the signature is invalid or STRIPE_WEBHOOK_SECRET is not configured.
+   */
+  constructWebhookEvent(payload: Buffer | string, sig: string): Stripe.Event {
+    const secret = this.config.get<string>('STRIPE_WEBHOOK_SECRET');
+    if (!secret) {
+      throw new Error('STRIPE_WEBHOOK_SECRET is not configured');
+    }
+    return this.stripe.webhooks.constructEvent(payload, sig, secret);
+  }
+
+  /**
+   * Route a verified Stripe event to the appropriate handler.
+   * Unknown event types are logged and ignored (Stripe sends many event types).
+   */
+  async handleStripeEvent(event: Stripe.Event): Promise<void> {
+    this.logger.info({ type: event.type }, 'Stripe webhook received');
+    switch (event.type) {
+      case 'payment_intent.succeeded': {
+        const pi = event.data.object as Stripe.PaymentIntent;
+        const paymentId = pi.metadata?.paymentId;
+        if (paymentId) {
+          await this.completeStripePayment(paymentId, pi.id);
+        } else {
+          this.logger.warn({ intentId: pi.id }, 'payment_intent.succeeded: missing paymentId in metadata');
+        }
+        break;
+      }
+      case 'payment_intent.payment_failed': {
+        const pf = event.data.object as Stripe.PaymentIntent;
+        const paymentId = pf.metadata?.paymentId;
+        const reason = pf.last_payment_error?.message ?? 'Payment failed';
+        if (paymentId) {
+          await this.failStripePayment(paymentId, reason);
+        } else {
+          this.logger.warn({ intentId: pf.id }, 'payment_intent.payment_failed: missing paymentId in metadata');
+        }
+        break;
+      }
+      default:
+        this.logger.info({ type: event.type }, 'Stripe event ignored (not handled)');
+    }
+  }
+
+  /**
+   * Mark a payment FAILED and write a payments.payment.failed outbox event.
+   * This causes order-service to cancel the order and release any seat holds.
+   */
+  async failStripePayment(paymentId: string, reason: string): Promise<void> {
+    const payment = await this.paymentsRepo.findById(paymentId);
+    if (!payment) {
+      this.logger.warn({ paymentId }, 'failStripePayment: payment not found — skipping');
+      return;
+    }
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(payments)
+        .set({ status: PAYMENT_STATUS.FAILED, updatedAt: new Date() })
+        .where(eq(payments.id, paymentId));
+
+      await tx.insert(outbox).values(
+        this.buildOutboxRow('payments.payment.failed', payment.orderId, {
+          orderId: payment.orderId,
+          paymentId,
+          userId: payment.userId,
+          reason,
+        }),
+      );
+    });
+
+    this.logger.warn({ paymentId, reason }, 'Payment marked FAILED — outbox entry written');
+  }
+
+  /**
    * Complete a real Stripe payment and publish the outbox event atomically.
    * Called from the Stripe webhook handler once a PaymentIntent is confirmed.
    */

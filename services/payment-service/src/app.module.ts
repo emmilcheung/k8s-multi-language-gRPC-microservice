@@ -15,6 +15,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   DATABASE_URL: z.string(),
   STRIPE_SECRET_KEY: z.string(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(), // required in production; optional for local dev/mock mode
   KAFKA_BROKERS: z.string(),
 });
 

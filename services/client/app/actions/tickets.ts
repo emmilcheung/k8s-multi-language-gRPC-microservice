@@ -85,7 +85,30 @@ export async function createTicket(
   const maxSeatsPerOrder = parseOptionalPositiveInt(formData.get("maxSeatsPerOrder") as string | null);
 
   if (!title?.trim()) return { error: "Title is required." };
-  if (!priceRaw || isNaN(priceNum) || priceNum <= 0) return { error: "Price must be a positive number." };
+  // Seat pricing: price is configured per-seat in the plan editor, not on the ticket.
+  if (pricingMode !== "seat") {
+    if (!priceRaw || isNaN(priceNum) || priceNum <= 0) return { error: "Price must be a positive number." };
+  }
+
+  // Event metadata
+  let startsAt = (formData.get("startsAt") as string)?.trim() || null;
+  let endsAt = (formData.get("endsAt") as string)?.trim() || null;
+
+  // Convert datetime-local format (YYYY-MM-DDTHH:mm) to RFC3339 ISO 8601 (YYYY-MM-DDTHH:mm:ssZ)
+  // Go's time.Time JSON unmarshaler expects RFC3339 format
+  if (startsAt && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(startsAt)) {
+    startsAt += ':00Z'; // Add :00Z to make RFC3339 format that Go can parse
+  }
+  if (endsAt && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(endsAt)) {
+    endsAt += ':00Z';
+  }
+  const eventTitle = (formData.get("eventTitle") as string)?.trim() || null;
+  const eventDescription = (formData.get("eventDescription") as string)?.trim() || null;
+  const eventImageUrl = (formData.get("eventImageUrl") as string)?.trim() || null;
+  const venueName = (formData.get("venueName") as string)?.trim() || null;
+  const venueAddress = (formData.get("venueAddress") as string)?.trim() || null;
+
+  if (!startsAt) return { error: "Event start date/time is required." };
 
   // Validation for GA
   if (ticketType === "GA") {
@@ -101,7 +124,9 @@ export async function createTicket(
   }
 
   // Create the base ticket
-  const reqBody: Record<string, unknown> = { title: title.trim(), price: priceRaw };
+  // Seat pricing: send "0" as placeholder — actual price comes from per-seat plan configuration.
+  const effectivePrice = pricingMode === "seat" ? "0" : priceRaw;
+  const reqBody: Record<string, unknown> = { title: title.trim(), price: effectivePrice };
 
   if (ticketType === "GA") {
     if (quota !== undefined) reqBody.quota = quota;
@@ -111,6 +136,17 @@ export async function createTicket(
     reqBody.quota = 0;
     if (maxSeatsPerOrder !== undefined) reqBody.maxPerUser = maxSeatsPerOrder;
   }
+
+  // Attach event sub-document — backend TicketEvent struct already handles this
+  reqBody.event = {
+    startsAt,
+    ...(eventTitle && { title: eventTitle }),
+    ...(endsAt && { endsAt }),
+    ...(eventDescription && { description: eventDescription }),
+    ...(eventImageUrl && { imageUrl: eventImageUrl }),
+    ...(venueName && { venueName }),
+    ...(venueAddress && { venueAddress }),
+  };
 
   const res = await fetch(`${base()}/api/tickets`, {
     method: "POST",

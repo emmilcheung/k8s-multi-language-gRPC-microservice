@@ -87,10 +87,11 @@ Best for: Running test suites across multiple services simultaneously
 Manager:
   1. Identify which services were modified
   2. Dispatch one worker per service test suite (parallel)
-  3. Collect all results
-  4. Triage failures: worker-fixable vs manager-decision required
-  5. Dispatch fix workers for mechanical failures
-  6. Re-run failed suites
+  3. Echo / Print which worker handling which suite for easy tracking
+  4. Collect all results
+  5. Triage failures: worker-fixable vs manager-decision required
+  6. Dispatch fix workers for mechanical failures
+  7. Re-run failed suites
 ```
 
 ### Pattern 4 — Review Gate

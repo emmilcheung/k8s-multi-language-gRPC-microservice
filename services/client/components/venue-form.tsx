@@ -5,7 +5,7 @@ import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Building2, Users, Globe, AlertCircle, Loader2, CheckCircle } from "lucide-react";
+import { Building2, Users, Globe, MapPin, AlertCircle, Loader2, CheckCircle } from "lucide-react";
 import type { VenueState } from "@/app/actions/venues";
 
 // Common timezones for the dropdown (typed as plain input for simplicity)
@@ -30,6 +30,7 @@ interface VenueFormProps {
   defaultName?: string;
   defaultCapacity?: number;
   defaultTimezone?: string;
+  defaultAddress?: string;
   submitLabel?: string;
 }
 
@@ -40,6 +41,7 @@ export function VenueForm({
   defaultName = "",
   defaultCapacity,
   defaultTimezone = "America/New_York",
+  defaultAddress = "",
   submitLabel = "Create Venue",
 }: VenueFormProps) {
   const [state, formAction, pending] = useActionState(action, initialState);
@@ -133,6 +135,27 @@ export function VenueForm({
           </div>
           <p className="text-xs text-muted-foreground">
             IANA timezone name (e.g. America/New_York, Europe/London).
+          </p>
+        </div>
+
+        {/* Address */}
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="address" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Address
+          </Label>
+          <div className="relative">
+            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <Input
+              id="address"
+              name="address"
+              type="text"
+              placeholder="123 Main St, New York, NY 10001"
+              defaultValue={defaultAddress}
+              className="pl-9"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Street address shown on ticket listings and event pages.
           </p>
         </div>
 

@@ -631,13 +631,14 @@ func (x *GetSeatingPlanRequest) GetPlanId() string {
 }
 
 type GetSeatingPlanResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PlanId        string                 `protobuf:"bytes,1,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
-	TicketId      string                 `protobuf:"bytes,2,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"`
-	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
-	AssignmentMode string                `protobuf:"bytes,4,opt,name=assignment_mode,json=assignmentMode,proto3" json:"assignment_mode,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	PlanId         string                 `protobuf:"bytes,1,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
+	TicketId       string                 `protobuf:"bytes,2,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"`
+	Status         string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	AssignmentMode string                 `protobuf:"bytes,4,opt,name=assignment_mode,json=assignmentMode,proto3" json:"assignment_mode,omitempty"`
+	PricingMode    string                 `protobuf:"bytes,5,opt,name=pricing_mode,json=pricingMode,proto3" json:"pricing_mode,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetSeatingPlanResponse) Reset() {
@@ -694,6 +695,13 @@ func (x *GetSeatingPlanResponse) GetStatus() string {
 func (x *GetSeatingPlanResponse) GetAssignmentMode() string {
 	if x != nil {
 		return x.AssignmentMode
+	}
+	return ""
+}
+
+func (x *GetSeatingPlanResponse) GetPricingMode() string {
+	if x != nil {
+		return x.PricingMode
 	}
 	return ""
 }

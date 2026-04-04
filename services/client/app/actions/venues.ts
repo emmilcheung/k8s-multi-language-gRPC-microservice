@@ -14,6 +14,7 @@ export interface Venue {
   name: string;
   capacity: number;
   timezone: string;
+  address?: string;
   version: number;
 }
 
@@ -68,6 +69,7 @@ export async function createVenue(
   const name = (formData.get("name") as string)?.trim();
   const capacityRaw = (formData.get("capacity") as string)?.trim();
   const timezone = (formData.get("timezone") as string)?.trim();
+  const address = (formData.get("address") as string)?.trim() ?? "";
 
   if (!name) return { error: "Venue name is required." };
 
@@ -81,7 +83,7 @@ export async function createVenue(
   const res = await fetch(`${base()}/api/venues`, {
     method: "POST",
     headers: await authHeaders(),
-    body: JSON.stringify({ name, capacity, timezone }),
+    body: JSON.stringify({ name, capacity, timezone, address }),
   });
 
   if (!res.ok) {
@@ -255,6 +257,22 @@ export async function createSeatingPlan(
   const plan = await res.json();
   revalidatePath(`/venues/${venueId}`);
   redirect(`/venues/${venueId}/plans/${plan.id}`);
+}
+
+/**
+ * Fetches sections for a seating plan.
+ * GET /api/seating-plans/:planId — returns plan with sections array.
+ * Used by ticket creation form for section pricing table.
+ */
+export async function fetchPlanSections(planId: string): Promise<import("@/lib/types").Section[]> {
+  if (!planId) return [];
+  const res = await fetch(`${base()}/api/seating-plans/${planId}`, {
+    cache: "no-store",
+    headers: await authHeaders(),
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data?.sections ?? []) as import("@/lib/types").Section[];
 }
 
 /**
@@ -436,4 +454,40 @@ export async function activatePlan(
 
   revalidatePath(`/venues/${venueId}/plans/${planId}`);
   redirect(`/venues/${venueId}/plans/${planId}`);
+}
+
+/**
+ * Updates an existing venue.
+ * PUT /api/venues/:id — Kong → venue-service.
+ */
+export async function updateVenue(
+  venueId: string,
+  _prev: VenueState,
+  formData: FormData
+): Promise<VenueState> {
+  const name = (formData.get("name") as string)?.trim();
+  const capacityRaw = formData.get("capacity") as string;
+  const capacity = parseInt(capacityRaw, 10);
+  const timezone = (formData.get("timezone") as string)?.trim() ?? "";
+  const address = (formData.get("address") as string)?.trim() ?? "";
+
+  if (!name) return { error: "Name is required." };
+  if (!capacityRaw || !Number.isFinite(capacity) || capacity < 1)
+    return { error: "Capacity must be a positive number." };
+
+  const res = await fetch(`${base()}/api/venues/${venueId}`, {
+    method: "PUT",
+    headers: await authHeaders(),
+    body: JSON.stringify({ name, capacity, timezone, address }),
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) redirect("/auth/signin");
+    const body = await res.json().catch(() => ({}));
+    return { error: body?.error?.message ?? body?.message ?? "Failed to update venue." };
+  }
+
+  revalidatePath(`/venues/${venueId}`);
+  revalidatePath("/venues");
+  redirect(`/venues/${venueId}`);
 }

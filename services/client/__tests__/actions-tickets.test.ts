@@ -19,10 +19,11 @@ vi.mock("@/lib/server-utils", () => ({
 
 import { createTicket, updateTicket } from "@/app/actions/tickets";
 
-function ticketForm(title: string, price: string): FormData {
+function ticketForm(title: string, price: string, startsAt = "2026-12-01T19:00:00Z"): FormData {
   const fd = new FormData();
   fd.set("title", title);
   fd.set("price", price);
+  if (startsAt) fd.set("startsAt", startsAt);
   return fd;
 }
 

@@ -368,6 +368,7 @@ func (s *VenueGrpcServer) GetSeatingPlan(ctx context.Context, req *venuev1.GetSe
 		TicketId:       plan.TicketID,
 		Status:         string(plan.Status),
 		AssignmentMode: plan.AssignmentMode,
+		PricingMode:    plan.PricingMode,
 	}, nil
 }
 

@@ -124,6 +124,8 @@ export interface SeatingPlan {
   maxSeatsPerOrder: number;
   /** Seller's choice of seat assignment mode: "manual" or "auto" */
   assignmentMode?: "manual" | "auto";
+  /** How seat prices are determined: single flat price, per-section, or per-seat */
+  pricingMode?: "single" | "section" | "seat";
   /**
    * layoutJson is the persisted canvas state for the drag-and-drop seating plan editor.
    * Populated by PATCH /api/seating-plans/:id/layout.

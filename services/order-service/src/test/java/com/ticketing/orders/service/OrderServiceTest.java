@@ -12,6 +12,7 @@ import com.ticketing.orders.exception.ConflictException;
 import com.ticketing.orders.exception.ForbiddenException;
 import com.ticketing.orders.exception.NotFoundException;
 import com.ticketing.orders.grpc.AutoAssignAndReserveResponse;
+import com.ticketing.orders.grpc.GetSeatingPlanResponse;
 import com.ticketing.orders.grpc.ReserveHeldSeatsResponse;
 import com.ticketing.orders.grpc.ReserveQuotaResponse;
 import com.ticketing.orders.grpc.SeatDetail;
@@ -392,6 +393,10 @@ class OrderServiceTest {
         req.setSeatIds(List.of(seatId.toString()));
         req.setQuantity(1);
 
+        GetSeatingPlanResponse planResponse = GetSeatingPlanResponse.newBuilder()
+                .setAssignmentMode("manual")
+                .build();
+        when(venueServiceClient.getSeatingPlan(planId.toString())).thenReturn(planResponse);
         when(venueServiceClient.reserveHeldSeats(
                 eq(planId.toString()), eq(ticketId.toString()), any(UUID.class),
                 eq(userId), anyList(), any(Instant.class)))
@@ -429,6 +434,10 @@ class OrderServiceTest {
         req.setSeatIds(List.of(seatId.toString()));
         req.setQuantity(1);
 
+        GetSeatingPlanResponse planResponse = GetSeatingPlanResponse.newBuilder()
+                .setAssignmentMode("manual")
+                .build();
+        when(venueServiceClient.getSeatingPlan(planId.toString())).thenReturn(planResponse);
         when(venueServiceClient.reserveHeldSeats(
                 eq(planId.toString()), eq(ticketId.toString()), any(UUID.class),
                 eq(userId), anyList(), any(Instant.class)))
@@ -461,6 +470,10 @@ class OrderServiceTest {
         req.setSeatIds(List.of(seatId.toString()));
         req.setQuantity(1);
 
+        GetSeatingPlanResponse planResponseCompensate = GetSeatingPlanResponse.newBuilder()
+                .setAssignmentMode("manual")
+                .build();
+        when(venueServiceClient.getSeatingPlan(planId.toString())).thenReturn(planResponseCompensate);
         when(venueServiceClient.reserveHeldSeats(
                 eq(planId.toString()), eq(ticketId.toString()), any(UUID.class),
                 eq(userId), anyList(), any(Instant.class)))
@@ -495,6 +508,10 @@ class OrderServiceTest {
         req.setSectionId(sectionId.toString());
         req.setQuantity(1);
 
+        GetSeatingPlanResponse planResponseAuto = GetSeatingPlanResponse.newBuilder()
+                .setAssignmentMode("auto")
+                .build();
+        when(venueServiceClient.getSeatingPlan(planId.toString())).thenReturn(planResponseAuto);
         when(venueServiceClient.autoAssignAndReserve(
                 eq(planId.toString()), eq(ticketId.toString()), eq(sectionId.toString()),
                 any(UUID.class), eq(userId), eq(1), any(Instant.class)))

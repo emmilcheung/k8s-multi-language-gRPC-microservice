@@ -5,7 +5,7 @@ import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Layers, Clock, Users, AlertCircle, Loader2, CheckCircle } from "lucide-react";
+import { Layers, Users, AlertCircle, Loader2, CheckCircle } from "lucide-react";
 import type { PlanState } from "@/app/actions/venues";
 
 interface PlanFormProps {
@@ -28,7 +28,7 @@ export function PlanForm({
       <div className="flex flex-col gap-1">
         <h2 className="text-lg font-bold tracking-tight">{submitLabel}</h2>
         <p className="text-sm text-muted-foreground">
-          Define the plan name, hold window, and seat limit per order.
+          Define the plan name and seat limit per order.
         </p>
       </div>
 
@@ -67,27 +67,8 @@ export function PlanForm({
           </div>
         </div>
 
-        {/* Hold TTL */}
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="holdTtlSec" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Hold Window (seconds)
-          </Label>
-          <div className="relative">
-            <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-            <Input
-              id="holdTtlSec"
-              name="holdTtlSec"
-              type="number"
-              min="30"
-              step="30"
-              defaultValue={300}
-              className="pl-9"
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            How long a seat hold lasts before it is automatically released (default: 300s).
-          </p>
-        </div>
+        {/* Hold TTL — kept as a hidden field; configurable via organizer settings */}
+        <input type="hidden" name="holdTtlSec" value="300" />
 
         {/* Max seats per order */}
         <div className="flex flex-col gap-1.5">

@@ -191,6 +191,14 @@ services:
     read_timeout: {{READ_TIMEOUT_MS}}
     write_timeout: {{WRITE_TIMEOUT_MS}}
     routes:
+      # Stripe webhook — unauthenticated (Stripe cannot present a JWT).
+      # Must be declared BEFORE payments-collection so Kong matches it first.
+      - name: payments-webhook
+        paths:
+          - ~/api/payments/webhook$
+        methods: [POST]
+        strip_path: false
+
       - name: payments-collection
         paths:
           - ~/api/payments$

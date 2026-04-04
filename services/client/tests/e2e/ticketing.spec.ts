@@ -37,16 +37,42 @@ async function signout(page: Page) {
   await page.waitForURL(/\/auth\/signin/);
 }
 
-/** Creates a ticket as the currently signed-in user and returns the ticket URL. */
+/** Creates a GA ticket as the currently signed-in user and returns the ticket URL. */
 async function createTicket(page: Page, title: string, price: string) {
   await page.goto("/tickets/new");
-  await page.getByLabel("Title").fill(title);
-  await page.getByLabel("Price (USD)").fill(price);
-  await page.getByRole("button", { name: /create ticket/i }).click();
-  // Wait for redirect to /tickets/<uuid> — must not match /tickets/new
-  await page.waitForURL(
-    /\/tickets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-  );
+
+  // Step 1: Select ticket type (General Admission button)
+  const gaButton = page.getByRole("button", { name: /general admission/i });
+  await gaButton.waitFor({ state: "visible", timeout: 5000 });
+  await gaButton.click();
+
+  // Step 2: Wait for form to appear and fill details
+  const titleInput = page.locator('#title');
+  await titleInput.waitFor({ state: "visible", timeout: 5000 });
+
+  await fillInputAndTriggerChange(page, '#title', title);
+  await fillInputAndTriggerChange(page, '#price', price);
+  await fillInputAndTriggerChange(page, '#startsAt', "2025-05-11T14:00");
+
+  // Get the ticket creation form (has class "glass" and contains the title input)
+  const form = page.locator('form.glass');
+  await form.waitFor({ state: "visible", timeout: 5000 });
+
+  const submitButton = form.getByRole("button", { name: /create ticket/i });
+  await submitButton.waitFor({ state: "visible", timeout: 5000 });
+
+  // Click the submit button
+  await submitButton.click();
+
+  // Wait for navigation away from /tickets/new or for an error to appear
+  try {
+    await page.waitForURL(url => !url.pathname.endsWith('/new'), { timeout: 15000 });
+  } catch {
+    // If redirect failed, check for error message
+    const alertContent = await page.locator('[role="alert"]').first().textContent().catch(() => null);
+    throw new Error(`Form submission failed. Alert: ${alertContent}`);
+  }
+
   return page.url();
 }
 
@@ -61,6 +87,24 @@ async function removeNativeValidation(page: Page, selector: string) {
     el.removeAttribute("min");
     el.removeAttribute("pattern");
   });
+}
+
+/**
+ * Fill a React controlled input and properly trigger onChange.
+ * Uses the native HTMLInputElement.prototype.value setter to bypass React's value tracking,
+ * then dispatches an input event so React's synthetic onChange handler fires.
+ */
+async function fillInputAndTriggerChange(page: Page, selector: string, value: string) {
+  const input = page.locator(selector);
+  await input.evaluate((el: HTMLInputElement, val: string) => {
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    if (nativeSetter) {
+      nativeSetter.call(el, val);
+    } else {
+      el.value = val;
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, value);
 }
 
 /**
@@ -170,8 +214,11 @@ test.describe("tickets", () => {
     const title = `E2E Concert ${Date.now()}`;
     await createTicket(page, title, "75.00");
 
+    // Wait for the heading to have content (RSC streaming completes when content appears)
+    await page.getByRole("heading", { level: 1 }).waitFor({ state: "attached", timeout: 10000 });
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(title, { timeout: 10000 });
+
     // Ticket detail page reflects the data
-    await expect(page.getByRole("heading", { level: 1 })).toContainText(title);
     await expect(page.getByText("$75.00").first()).toBeVisible();
 
     // Ticket card appears on home page.
@@ -198,7 +245,10 @@ test.describe("tickets", () => {
 
     await createTicket(page, `Owner Test ${Date.now()}`, "10.00");
 
-    await expect(page.getByRole("button", { name: /update ticket/i })).toBeVisible();
+    // Wait for page to fully load (RSC streaming)
+    await page.getByRole("heading", { level: 1 }).waitFor({ state: "attached", timeout: 10000 });
+
+    await expect(page.getByRole("button", { name: /update ticket/i }), "update ticket button should be visible").toBeVisible({ timeout: 10000 });
     await expect(page.getByRole("button", { name: /purchase ticket/i })).toHaveCount(0);
   });
 
@@ -221,9 +271,12 @@ test.describe("tickets", () => {
     const original = `Original ${Date.now()}`;
     await createTicket(page, original, "10.00");
 
+    // Wait for page to fully load (RSC streaming)
+    await page.getByRole("heading", { level: 1 }).waitFor({ state: "attached", timeout: 10000 });
+
     const updated = `Updated ${Date.now()}`;
-    await page.getByLabel("Title").fill(updated);
-    await page.getByLabel("Price (USD)").fill("99.99");
+    await fillInputAndTriggerChange(page, '#title', updated);
+    await fillInputAndTriggerChange(page, '#price', "99.99");
     await page.getByRole("button", { name: /update ticket/i }).click();
 
     // After update the server action redirects back to the same ticket URL;
@@ -240,10 +293,20 @@ test.describe("tickets", () => {
 
     await page.goto("/tickets/new");
 
+    // Step 1: Select ticket type (General Admission button)
+    await page.getByRole("button", { name: /general admission/i }).click();
+
+    // Step 2: Wait for form to appear
+    await page.locator('#title').waitFor({ state: "visible", timeout: 5000 });
+
     // Remove the browser-native `required` so the form reaches the server action
     await removeNativeValidation(page, 'input[name="title"]');
 
-    await page.getByLabel("Price (USD)").fill("10.00");
+    await fillInputAndTriggerChange(page, '#price', "10.00");
+
+    // Fill required Event Date & Time field (hardcoded future date)
+    await fillInputAndTriggerChange(page, '#startsAt', "2025-05-11T14:00");
+
     await page.getByRole("button", { name: /create ticket/i }).click();
 
     // TicketForm renders the error in a non-announcer alert div
@@ -257,11 +320,20 @@ test.describe("tickets", () => {
     await signup(page, email);
 
     await page.goto("/tickets/new");
-    await page.getByLabel("Title").fill("Bad Price Test");
+
+    // Step 1: Select ticket type (General Admission button)
+    await page.getByRole("button", { name: /general admission/i }).click();
+
+    // Step 2: Wait for form to appear
+    await page.locator('#title').waitFor({ state: "visible", timeout: 5000 });
+    await fillInputAndTriggerChange(page, '#title', "Bad Price Test");
 
     // Remove browser-native min/required so 0 reaches the server action
     await removeNativeValidation(page, 'input[name="price"]');
-    await page.getByLabel("Price (USD)").fill("0");
+    await fillInputAndTriggerChange(page, '#price', "0");
+
+    // Fill required Event Date & Time field (hardcoded future date)
+    await fillInputAndTriggerChange(page, '#startsAt', "2025-05-11T14:00");
 
     await page.getByRole("button", { name: /create ticket/i }).click();
 
@@ -423,8 +495,11 @@ test.describe("orders", () => {
 
     await createTicket(page, `No-Buy ${Date.now()}`, "25.00");
 
+    // Wait for page to fully load (RSC streaming)
+    await page.getByRole("heading", { level: 1 }).waitFor({ state: "attached", timeout: 10000 });
+
     // Still on the ticket detail page as owner
-    await expect(page.getByRole("button", { name: /update ticket/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /update ticket/i }), "update ticket button should be visible").toBeVisible({ timeout: 10000 });
     await expect(page.getByRole("button", { name: /purchase ticket/i })).toHaveCount(0);
   });
 

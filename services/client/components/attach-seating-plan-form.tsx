@@ -20,6 +20,10 @@ import Link from "next/link";
 interface AttachSeatingPlanFormProps {
   ticketId: string;
   currentPlanId: string | null;
+  /** Name of the currently attached plan (if any) — shown instead of raw UUID. */
+  currentPlanName?: string | null;
+  /** Prevent detach when there are active reservations or sold tickets. */
+  hasActiveOrders?: boolean;
   /** All plans for the organizer — active ones are shown in the dropdown */
   availablePlans?: SeatingPlan[];
 }
@@ -29,6 +33,8 @@ const initialState: TicketState = {};
 export function AttachSeatingPlanForm({
   ticketId,
   currentPlanId,
+  currentPlanName,
+  hasActiveOrders = false,
   availablePlans = [],
 }: AttachSeatingPlanFormProps) {
   const boundAttach = attachSeatingPlan.bind(null, ticketId);
@@ -48,43 +54,54 @@ export function AttachSeatingPlanForm({
       </div>
 
       {currentPlanId ? (
-        /* Plan is attached — show ID and detach option */
+        /* Plan is attached — show name and detach option */
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-0.5">
             <p className="text-xs text-muted-foreground uppercase tracking-wider">Attached plan</p>
-            <p className="text-sm font-mono break-all text-primary">{currentPlanId}</p>
+            {currentPlanName ? (
+              <p className="text-sm font-medium text-primary">{currentPlanName}</p>
+            ) : null}
+            <p className="text-xs font-mono text-muted-foreground break-all">{currentPlanId}</p>
           </div>
 
-          {detachState?.error && (
-            <div
-              role="alert"
-              className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2.5"
-            >
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{detachState.error}</span>
-            </div>
-          )}
-
-          <form action={detachAction}>
-            <Button
-              type="submit"
-              variant="outline"
-              className="w-full gap-2 text-destructive border-destructive/30 hover:bg-destructive/10"
-              disabled={detachPending}
-            >
-              {detachPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Detaching…
-                </>
-              ) : (
-                <>
-                  <Unlink className="w-4 h-4" />
-                  Detach Seating Plan
-                </>
+          {hasActiveOrders ? (
+            <p className="text-xs text-amber-400/80 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2.5">
+              This plan cannot be changed while there are active reservations or sold tickets.
+            </p>
+          ) : (
+            <>
+              {detachState?.error && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2.5"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{detachState.error}</span>
+                </div>
               )}
-            </Button>
-          </form>
+
+              <form action={detachAction}>
+                <Button
+                  type="submit"
+                  variant="outline"
+                  className="w-full gap-2 text-destructive border-destructive/30 hover:bg-destructive/10"
+                  disabled={detachPending}
+                >
+                  {detachPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Detaching…
+                    </>
+                  ) : (
+                    <>
+                      <Unlink className="w-4 h-4" />
+                      Detach Seating Plan
+                    </>
+                  )}
+                </Button>
+              </form>
+            </>
+          )}
         </div>
       ) : activePlans.length === 0 ? (
         /* No active plans available — guide the organizer to activate one */

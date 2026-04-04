@@ -11,8 +11,10 @@ import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
   Building2,
+  Globe,
   Plus,
   MapPin,
+  Pencil,
   Users,
   Layers,
   ChevronRight,
@@ -49,6 +51,19 @@ export default async function VenueDetailPage({ params }: Props) {
 
   if (!venue) notFound();
 
+  // Decode JWT to check ownership for the edit button.
+  let currentUserId: string | null = null;
+  try {
+    const payloadB64 = token.split(".")[1];
+    if (payloadB64) {
+      const json = Buffer.from(payloadB64, "base64url").toString("utf-8");
+      const payload = JSON.parse(json) as { sub?: string };
+      currentUserId = payload.sub ?? null;
+    }
+  } catch { /* non-fatal */ }
+
+  const isOwner = currentUserId !== null && currentUserId === venue.organizerId;
+
   const addSectionAction = createVenueSection.bind(null, venueId);
   // Pre-bind a delete action for each section server-side so no factory function is
   // passed to the Client Component (plain functions cannot cross the server/client boundary).
@@ -77,7 +92,18 @@ export default async function VenueDetailPage({ params }: Props) {
           <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-primary/10 ring-1 ring-primary/20 shrink-0">
             <Building2 className="w-7 h-7 text-primary" />
           </div>
-          <Badge className="bg-primary/15 text-primary border-primary/20">Venue</Badge>
+          <div className="flex items-center gap-2">
+            <Badge className="bg-primary/15 text-primary border-primary/20">Venue</Badge>
+            {isOwner && (
+              <Link
+                href={`/venues/${venueId}/edit`}
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                Edit
+              </Link>
+            )}
+          </div>
         </div>
 
         <div>
@@ -91,8 +117,14 @@ export default async function VenueDetailPage({ params }: Props) {
           </span>
           <span className="flex items-center gap-1.5">
             <MapPin className="w-3.5 h-3.5" />
-            {venue.timezone}
+            {venue.address || venue.timezone}
           </span>
+          {venue.address && (
+            <span className="flex items-center gap-1.5">
+              <Globe className="w-3.5 h-3.5" />
+              {venue.timezone}
+            </span>
+          )}
         </div>
       </div>
 

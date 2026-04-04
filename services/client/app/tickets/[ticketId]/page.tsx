@@ -24,6 +24,8 @@ import {
   User,
   ShieldCheck,
   MapPin,
+  CalendarDays,
+  AlignLeft,
 } from "lucide-react";
 
 interface Props {
@@ -124,7 +126,17 @@ export default async function TicketDetailPage({ params }: Props) {
       {/* Main panel */}
       <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
         {/* Left — ticket info */}
-        <div className="glass rounded-2xl p-8 flex flex-col gap-6">
+        <div className="glass rounded-2xl overflow-hidden flex flex-col gap-6">
+          {/* Event image banner */}
+          {ticket.event?.imageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={ticket.event.imageUrl}
+              alt={ticket.event.title || ticket.title}
+              className="w-full h-48 object-cover"
+            />
+          )}
+          <div className="p-8 flex flex-col gap-6">
           {/* Icon + reserved badge */}
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-primary/10 ring-1 ring-primary/20 shrink-0">
@@ -147,8 +159,47 @@ export default async function TicketDetailPage({ params }: Props) {
 
           {/* Title */}
           <h1 className="text-3xl font-bold tracking-tight leading-tight">
-            {ticket.title}
+            {ticket.event?.title || ticket.title}
           </h1>
+
+          {/* Event date + venue */}
+          {ticket.event?.startsAt && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 text-sm">
+                <CalendarDays className="w-4 h-4 text-primary/70 shrink-0" />
+                <span>
+                  {new Date(ticket.event.startsAt).toLocaleDateString("en-US", {
+                    weekday: "short",
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                  })}{" "}
+                  ·{" "}
+                  {new Date(ticket.event.startsAt).toLocaleTimeString("en-US", {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
+              {ticket.event.venueName && (
+                <div className="flex items-start gap-2 text-sm text-muted-foreground">
+                  <MapPin className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    {ticket.event.venueName}
+                    {ticket.event.venueAddress && (
+                      <> · {ticket.event.venueAddress}</>
+                    )}
+                  </span>
+                </div>
+              )}
+              {ticket.event.description && (
+                <div className="flex items-start gap-2 text-sm text-muted-foreground mt-1">
+                  <AlignLeft className="w-4 h-4 shrink-0 mt-0.5" />
+                  <p className="leading-relaxed">{ticket.event.description}</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Price pill */}
           <div className="flex items-center gap-3">
@@ -194,6 +245,7 @@ export default async function TicketDetailPage({ params }: Props) {
               )}
             </div>
           )}
+          </div>{/* end p-8 inner div */}
         </div>
 
         {/* Right — action panel */}
@@ -208,6 +260,7 @@ export default async function TicketDetailPage({ params }: Props) {
                   defaultPrice={ticket.price}
                   defaultQuota={ticket.quota}
                   defaultMaxPerUser={ticket.maxPerUser}
+                  defaultTicketType={(ticket.ticketType as "GA" | "SEATED_MANUAL" | "SEATED_AUTO") ?? "GA"}
                   submitLabel="Update Ticket"
                 />
               ) : (
@@ -222,6 +275,11 @@ export default async function TicketDetailPage({ params }: Props) {
               <AttachSeatingPlanForm
                 ticketId={ticketId}
                 currentPlanId={ticket.seatingPlanId ?? null}
+                currentPlanName={attachedPlan?.name ?? null}
+                hasActiveOrders={
+                  (ticket.reserved != null && ticket.reserved > 0) ||
+                  (ticket.sold != null && ticket.sold > 0)
+                }
                 availablePlans={availablePlans}
               />
               {/* Read-only preview of the attached seating plan */}

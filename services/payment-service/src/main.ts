@@ -43,7 +43,12 @@ process.on('uncaughtException', (err: Error) => {
 });
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    // rawBody: true enables req.rawBody on every request — required for Stripe
+    // webhook signature verification (stripe.webhooks.constructEvent needs raw Buffer).
+    rawBody: true,
+  });
 
   // Use pino as the global logger
   app.useLogger(app.get(Logger));
