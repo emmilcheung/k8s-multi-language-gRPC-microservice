@@ -77,6 +77,19 @@ export class PaymentsService {
 
     this.logger.info({ paymentId: payment.id, orderId: dto.orderId }, 'Payment created (pending)');
 
+    // Publish payment.initiated event to notify order-service to transition to AWAITING_PAYMENT
+    await this.db.transaction(async (tx) => {
+      await tx.insert(outbox).values(
+        this.buildOutboxRow('payments.payment.initiated', dto.orderId, {
+          orderId: dto.orderId,
+          paymentId: payment.id,
+          userId: dto.userId,
+          amount: dto.amount,
+          currency: dto.currency ?? 'usd',
+        }),
+      );
+    });
+
     try {
       const intent = await this.stripe.paymentIntents.create(
         {
