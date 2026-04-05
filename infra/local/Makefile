@@ -104,7 +104,7 @@ deploy: _check-secrets secrets kong-config helm-upgrade
 # ─────────────────────────────────────────────────────────────────────────────
 ## build : Build all service Docker images and load them into minikube
 # ─────────────────────────────────────────────────────────────────────────────
-build: build-order build-ticket build-services
+build: build-order build-ticket build-services build-venue
 	@echo "All images loaded into minikube."
 
 # order-service uses the repo root as its Docker build context (copies /proto)
@@ -143,6 +143,16 @@ build-services:
 		minikube image load --overwrite $$svc:latest; \
 		echo "  Loaded $$svc:latest"; \
 	done
+
+build-venue:
+	@echo "  Building venue-service (context: repo root)..."
+	@docker build \
+		--file $(REPO_ROOT)/services/venue-service/Dockerfile \
+		--tag venue-service:latest \
+		--quiet \
+		$(REPO_ROOT)
+	@minikube image load --overwrite venue-service:latest
+	@echo "  Loaded venue-service:latest"
 
 # ─────────────────────────────────────────────────────────────────────────────
 ## load-infra-images : Pull backing-service images and load them into minikube
@@ -209,8 +219,14 @@ secrets: _check-secrets _namespace
 			--from-literal=REDIS_URL="redis://ticketing-redis-master:6379"; \
 		\
 		_apply ticket-service-secrets \
-			--from-literal=MONGO_URI="mongodb://mongo_user:mongo-local-secret@ticketing-mongodb:27017/tickets?authSource=tickets" \
+			--from-literal=MONGO_URI="mongodb://mongo_user:mongo-local-secret@ticketing-mongodb:27017/tickets?authSource=admin" \
 			--from-literal=MONGO_DB="tickets" \
+			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092"; \
+		\
+		_apply venue-service-secrets \
+			--from-literal=DATABASE_URL="postgres://venue_user:venue-local-secret@ticketing-postgres-venue:5432/venue_db?sslmode=disable" \
+			--from-literal=REDIS_URL="redis://ticketing-redis-master:6379" \
+			--from-literal=TICKET_SERVICE_URL="ticketing-ticket-service.ticketing.svc.cluster.local:50051" \
 			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092"; \
 		\
 		_apply order-service-secrets \
@@ -257,6 +273,7 @@ helm-upgrade: _namespace
 		--set "mongodb.auth.existingSecret=" \
 		--set "auth-service.secretRef=auth-service-secrets" \
 		--set "ticket-service.secretRef=ticket-service-secrets" \
+		--set "venue-service.secretRef=venue-service-secrets" \
 		--set "order-service.secretRef=order-service-secrets" \
 		--set "payment-service.secretRef=payment-service-secrets" \
 		--set "expiration-service.secretRef=expiration-service-secrets" \

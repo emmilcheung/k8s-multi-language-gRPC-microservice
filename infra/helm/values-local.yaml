@@ -41,6 +41,7 @@ ticket-service:
     tag: latest
   env:
     REDIS_URL: redis://ticketing-redis-master.ticketing.svc.cluster.local:6379
+    VENUE_SERVICE_ADDR: ticketing-venue-service.ticketing.svc.cluster.local:50052
   resources:
     requests:
       cpu: 50m
@@ -245,17 +246,15 @@ postgres-venue:
 mongodb:
   auth:
     existingSecret: ""
-    rootPassword: "mongo-root-local-secret"
+    rootUser: mongo_user
+    rootPassword: "mongo-local-secret"
     # Clear the deprecated singular fields from values.yaml to prevent duplicate users
     username: ""
     password: ""
     database: ""
-    usernames:
-      - "mongo_user"
-    passwords:
-      - "mongo-local-secret"
-    databases:
-      - "tickets"
+    usernames: []
+    passwords: []
+    databases: []
   resources:
     requests:
       cpu: 50m
