@@ -285,6 +285,7 @@ services:
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: info
+      VENUE_SERVICE_ADDR: venue-service:50052
     depends_on:
       mongodb:
         condition: service_healthy
