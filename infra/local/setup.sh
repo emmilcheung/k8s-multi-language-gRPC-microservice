@@ -120,6 +120,7 @@ for SERVICE_ENTRY in \
   "ticket-service:${REPO_ROOT}/services/ticket-service" \
   "payment-service:${REPO_ROOT}/services/payment-service" \
   "expiration-service:${REPO_ROOT}/services/expiration-service" \
+  "venue-service:${REPO_ROOT}/services/venue-service" \
   "client:${REPO_ROOT}/services/client" \
 ; do
   SERVICE="${SERVICE_ENTRY%%:*}"
@@ -159,6 +160,7 @@ step "5/7  Creating Kubernetes Secrets..."
 PG_AUTH_HOST="ticketing-postgres-auth"
 PG_ORDERS_HOST="ticketing-postgres-orders"
 PG_PAYMENTS_HOST="ticketing-postgres-payments"
+PG_VENUE_HOST="ticketing-postgres-venue"
 MONGO_HOST="ticketing-mongodb"
 REDIS_HOST="ticketing-redis-master"
 KAFKA_HOST="ticketing-cp-kafka.ticketing.svc.cluster.local"   # in-cluster cp-kafka broker
@@ -167,6 +169,7 @@ KAFKA_HOST="ticketing-cp-kafka.ticketing.svc.cluster.local"   # in-cluster cp-ka
 PG_AUTH_PASS="auth-local-secret"
 PG_ORDERS_PASS="orders-local-secret"
 PG_PAYMENTS_PASS="payments-local-secret"
+PG_VENUE_PASS="venue-local-secret"
 
 # Helper: create or replace a secret (delete + recreate for idempotency)
 apply_secret() {
@@ -214,6 +217,12 @@ apply_secret expiration-service-secrets \
   --from-literal=REDIS_ADDR="${REDIS_HOST}:6379" \
   --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092"
 
+# venue-service-secrets
+apply_secret venue-service-secrets \
+  --from-literal=DATABASE_URL="postgresql://venue_user:${PG_VENUE_PASS}@${PG_VENUE_HOST}:5432/venue_db" \
+  --from-literal=REDIS_URL="redis://${REDIS_HOST}:6379" \
+  --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092"
+
 info "All secrets created."
 
 # ── 5.5 Render Kong config ────────────────────────────────────────────────────
@@ -243,6 +252,7 @@ helm upgrade --install ticketing "${HELM_CHART}" \
   --set "order-service.secretRef=order-service-secrets" \
   --set "payment-service.secretRef=payment-service-secrets" \
   --set "expiration-service.secretRef=expiration-service-secrets" \
+  --set "venue-service.secretRef=venue-service-secrets" \
   --timeout 10m \
   --wait
 

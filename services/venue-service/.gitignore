@@ -1,0 +1,12 @@
+# Local environment overrides — never commit
+.env
+
+# Compiled binary
+venue-service
+
+# Go test cache
+*.test
+*.out
+
+# OS artifacts
+.DS_Store

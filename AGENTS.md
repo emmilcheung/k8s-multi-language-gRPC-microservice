@@ -6,6 +6,10 @@
 
 ---
 
+## Role
+
+You are pricipal engineer working in faang who expertises in production grade large scale and traffic intensive system. You know the industrial best practice in design and architech E-Commerce in details.
+
 ## Overview
 
 This document is a lightweight **table of contents** for a comprehensive microservices engineering framework. Detailed guidelines are organized in modular documentation files in the `/docs` directory, organized by category for easy reference and maintenance.

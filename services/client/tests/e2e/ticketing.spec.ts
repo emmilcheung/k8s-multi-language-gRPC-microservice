@@ -37,16 +37,42 @@ async function signout(page: Page) {
   await page.waitForURL(/\/auth\/signin/);
 }
 
-/** Creates a ticket as the currently signed-in user and returns the ticket URL. */
+/** Creates a GA ticket as the currently signed-in user and returns the ticket URL. */
 async function createTicket(page: Page, title: string, price: string) {
   await page.goto("/tickets/new");
-  await page.getByLabel("Title").fill(title);
-  await page.getByLabel("Price (USD)").fill(price);
-  await page.getByRole("button", { name: /create ticket/i }).click();
-  // Wait for redirect to /tickets/<uuid> — must not match /tickets/new
-  await page.waitForURL(
-    /\/tickets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-  );
+
+  // Step 1: Select ticket type (General Admission button)
+  const gaButton = page.getByRole("button", { name: /general admission/i });
+  await gaButton.waitFor({ state: "visible", timeout: 5000 });
+  await gaButton.click();
+
+  // Step 2: Wait for form to appear and fill details
+  const titleInput = page.locator('#title');
+  await titleInput.waitFor({ state: "visible", timeout: 5000 });
+
+  await fillInputAndTriggerChange(page, '#title', title);
+  await fillInputAndTriggerChange(page, '#price', price);
+  await fillInputAndTriggerChange(page, '#startsAt', "2025-05-11T14:00");
+
+  // Get the ticket creation form (has class "glass" and contains the title input)
+  const form = page.locator('form.glass');
+  await form.waitFor({ state: "visible", timeout: 5000 });
+
+  const submitButton = form.getByRole("button", { name: /create ticket/i });
+  await submitButton.waitFor({ state: "visible", timeout: 5000 });
+
+  // Click the submit button
+  await submitButton.click();
+
+  // Wait for navigation away from /tickets/new or for an error to appear
+  try {
+    await page.waitForURL(url => !url.pathname.endsWith('/new'), { timeout: 15000 });
+  } catch {
+    // If redirect failed, check for error message
+    const alertContent = await page.locator('[role="alert"]').first().textContent().catch(() => null);
+    throw new Error(`Form submission failed. Alert: ${alertContent}`);
+  }
+
   return page.url();
 }
 
@@ -61,6 +87,24 @@ async function removeNativeValidation(page: Page, selector: string) {
     el.removeAttribute("min");
     el.removeAttribute("pattern");
   });
+}
+
+/**
+ * Fill a React controlled input and properly trigger onChange.
+ * Uses the native HTMLInputElement.prototype.value setter to bypass React's value tracking,
+ * then dispatches an input event so React's synthetic onChange handler fires.
+ */
+async function fillInputAndTriggerChange(page: Page, selector: string, value: string) {
+  const input = page.locator(selector);
+  await input.evaluate((el: HTMLInputElement, val: string) => {
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    if (nativeSetter) {
+      nativeSetter.call(el, val);
+    } else {
+      el.value = val;
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, value);
 }
 
 /**
@@ -170,13 +214,29 @@ test.describe("tickets", () => {
     const title = `E2E Concert ${Date.now()}`;
     await createTicket(page, title, "75.00");
 
+    // Wait for the heading to have content (RSC streaming completes when content appears)
+    await page.getByRole("heading", { level: 1 }).waitFor({ state: "attached", timeout: 10000 });
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(title, { timeout: 10000 });
+
     // Ticket detail page reflects the data
-    await expect(page.getByRole("heading", { level: 1 })).toContainText(title);
     await expect(page.getByText("$75.00").first()).toBeVisible();
 
-    // Ticket card appears on home page
-    await page.goto("/");
-    await expect(page.getByText(title)).toBeVisible();
+    // Ticket card appears on home page.
+    // Poll in case the ISR fetch cache hasn't been busted yet, and wait for the
+    // "Available Tickets" heading so RSC streaming finishes before we check the title.
+    await expect
+      .poll(
+        async () => {
+          await page.goto("/");
+          await page
+            .getByRole("heading", { name: /available tickets/i })
+            .waitFor({ timeout: 5000 })
+            .catch(() => {});
+          return page.getByText(title).isVisible();
+        },
+        { timeout: 15000, intervals: [2000, 3000] }
+      )
+      .toBe(true);
   });
 
   test("seller sees edit form on own ticket, not purchase button", async ({ page }) => {
@@ -185,7 +245,10 @@ test.describe("tickets", () => {
 
     await createTicket(page, `Owner Test ${Date.now()}`, "10.00");
 
-    await expect(page.getByRole("button", { name: /update ticket/i })).toBeVisible();
+    // Wait for page to fully load (RSC streaming)
+    await page.getByRole("heading", { level: 1 }).waitFor({ state: "attached", timeout: 10000 });
+
+    await expect(page.getByRole("button", { name: /update ticket/i }), "update ticket button should be visible").toBeVisible({ timeout: 10000 });
     await expect(page.getByRole("button", { name: /purchase ticket/i })).toHaveCount(0);
   });
 
@@ -208,9 +271,12 @@ test.describe("tickets", () => {
     const original = `Original ${Date.now()}`;
     await createTicket(page, original, "10.00");
 
+    // Wait for page to fully load (RSC streaming)
+    await page.getByRole("heading", { level: 1 }).waitFor({ state: "attached", timeout: 10000 });
+
     const updated = `Updated ${Date.now()}`;
-    await page.getByLabel("Title").fill(updated);
-    await page.getByLabel("Price (USD)").fill("99.99");
+    await fillInputAndTriggerChange(page, '#title', updated);
+    await fillInputAndTriggerChange(page, '#price', "99.99");
     await page.getByRole("button", { name: /update ticket/i }).click();
 
     // After update the server action redirects back to the same ticket URL;
@@ -227,10 +293,20 @@ test.describe("tickets", () => {
 
     await page.goto("/tickets/new");
 
+    // Step 1: Select ticket type (General Admission button)
+    await page.getByRole("button", { name: /general admission/i }).click();
+
+    // Step 2: Wait for form to appear
+    await page.locator('#title').waitFor({ state: "visible", timeout: 5000 });
+
     // Remove the browser-native `required` so the form reaches the server action
     await removeNativeValidation(page, 'input[name="title"]');
 
-    await page.getByLabel("Price (USD)").fill("10.00");
+    await fillInputAndTriggerChange(page, '#price', "10.00");
+
+    // Fill required Event Date & Time field (hardcoded future date)
+    await fillInputAndTriggerChange(page, '#startsAt', "2025-05-11T14:00");
+
     await page.getByRole("button", { name: /create ticket/i }).click();
 
     // TicketForm renders the error in a non-announcer alert div
@@ -244,11 +320,20 @@ test.describe("tickets", () => {
     await signup(page, email);
 
     await page.goto("/tickets/new");
-    await page.getByLabel("Title").fill("Bad Price Test");
+
+    // Step 1: Select ticket type (General Admission button)
+    await page.getByRole("button", { name: /general admission/i }).click();
+
+    // Step 2: Wait for form to appear
+    await page.locator('#title').waitFor({ state: "visible", timeout: 5000 });
+    await fillInputAndTriggerChange(page, '#title', "Bad Price Test");
 
     // Remove browser-native min/required so 0 reaches the server action
     await removeNativeValidation(page, 'input[name="price"]');
-    await page.getByLabel("Price (USD)").fill("0");
+    await fillInputAndTriggerChange(page, '#price', "0");
+
+    // Fill required Event Date & Time field (hardcoded future date)
+    await fillInputAndTriggerChange(page, '#startsAt', "2025-05-11T14:00");
 
     await page.getByRole("button", { name: /create ticket/i }).click();
 
@@ -321,13 +406,24 @@ test.describe("orders", () => {
     // Poll the order detail page until the status flips to complete.
     // The page is server-rendered and reads the order status from order-service;
     // Kafka consumption has variable latency so we reload until the state is reflected.
+    //
+    // IMPORTANT: Next.js App Router streams RSC content after the initial HTML.
+    // page.goto() resolves (load event) before streaming completes, so the page
+    // may still show the loading skeleton. We wait for the real content to appear
+    // (Order Summary heading) before checking for the success message.
     await expect
       .poll(
         async () => {
           await page.goto(page.url());
+          // Wait for the streaming RSC content to replace the loading skeleton.
+          // "Order Summary" heading only appears in the real page, not the skeleton.
+          await page
+            .getByRole("heading", { name: /order summary/i })
+            .waitFor({ timeout: 10000 })
+            .catch(() => {});
           return page.getByText(/payment received/i).isVisible();
         },
-        { timeout: 30000, intervals: [2000, 3000, 5000] }
+        { timeout: 45000, intervals: [2000, 3000, 5000] }
       )
       .toBe(true);
 
@@ -363,14 +459,25 @@ test.describe("orders", () => {
   test("ticket shows 'Already Reserved' after order is created", async ({ page }) => {
     const { ticketUrl } = await setupPurchase(page);
 
-    // The ticket detail page is server-rendered: it reads ticket.orderId from ticket-service.
-    // ticket-service receives the orderId via Kafka (orders.order.created), which has variable
+    // The ticket detail page is server-rendered: it reads ticket.reserved from ticket-service.
+    // ticket-service receives the reservation via Kafka (orders.order.created), which has variable
     // propagation latency. We poll by reloading the page until the reservation is reflected,
     // rather than relying on a single load within a fixed timeout.
+    //
+    // IMPORTANT: Next.js App Router streams RSC content after the initial HTML.
+    // page.goto() resolves (load event) before streaming completes — the loading.tsx
+    // skeleton is served first, and the real content (with the button) arrives later.
+    // We must wait for the h1 heading (absent in the skeleton) before checking the button.
     await expect
       .poll(
         async () => {
           await page.goto(ticketUrl);
+          // Wait for streaming RSC content to replace the loading skeleton.
+          // The h1 heading only appears in the real page, not the skeleton.
+          await page
+            .getByRole("heading", { level: 1 })
+            .waitFor({ timeout: 5000 })
+            .catch(() => {});
           return page.getByRole("button", { name: /already reserved/i }).isVisible();
         },
         { timeout: 30000, intervals: [2000, 3000, 5000] }
@@ -388,8 +495,11 @@ test.describe("orders", () => {
 
     await createTicket(page, `No-Buy ${Date.now()}`, "25.00");
 
+    // Wait for page to fully load (RSC streaming)
+    await page.getByRole("heading", { level: 1 }).waitFor({ state: "attached", timeout: 10000 });
+
     // Still on the ticket detail page as owner
-    await expect(page.getByRole("button", { name: /update ticket/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /update ticket/i }), "update ticket button should be visible").toBeVisible({ timeout: 10000 });
     await expect(page.getByRole("button", { name: /purchase ticket/i })).toHaveCount(0);
   });
 
@@ -405,5 +515,98 @@ test.describe("orders", () => {
 
     await expect(page.getByRole("link", { name: /sign in to purchase/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /purchase ticket/i })).toHaveCount(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Seating plan (CP-14) tests
+// ---------------------------------------------------------------------------
+
+test.describe("seating plan", () => {
+  test("organizer sees seating plan panel on own ticket", async ({ page }) => {
+    const email = uniqueEmail("org-seatplan");
+    await signup(page, email);
+
+    await createTicket(page, `Seating Plan Test ${Date.now()}`, "50.00");
+
+    // AttachSeatingPlanForm is only rendered for the ticket owner.
+    // With no active plans created yet the organiser is guided to the venue manager.
+    await expect(page.getByText("Seating Plan").first()).toBeVisible();
+    await expect(page.getByText(/no active seating plans/i)).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: /go to venue manager/i })
+    ).toBeVisible();
+  });
+
+  test("organizer can create a plan and attach it to a ticket", async ({ page }) => {
+    const email = uniqueEmail("org-attach");
+    await signup(page, email);
+
+    // 1. Create a venue
+    await page.goto("/venues/new");
+    await page.getByLabel(/venue name/i).fill("Attach Test Venue");
+    await page.getByLabel(/total capacity/i).fill("200");
+    await page.getByLabel(/timezone/i).fill("America/New_York");
+    await page.getByRole("button", { name: /create venue/i }).click();
+    await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
+
+    // 2. Add a venue layout section
+    await page.getByLabel(/section name/i).fill("Floor A");
+    // rowCount and columnCount fields appear when type=seated (the default)
+    await page.locator('#vs-rows').fill("5");
+    await page.locator('#vs-cols').fill("10");
+    await page.getByRole("button", { name: /add section/i }).click();
+    await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
+    await expect(page.getByText("Floor A")).toBeVisible();
+
+    // 3. Create a seating plan for this venue
+    await page.getByRole("link", { name: /new plan/i }).click();
+    await page.waitForURL(/\/venues\/[0-9a-f-]+\/plans\/new$/);
+    await page.getByLabel(/plan name/i).fill("April Show Plan");
+    await page.getByRole("button", { name: /create seating plan/i }).click();
+    await page.waitForURL(/\/venues\/[0-9a-f-]+\/plans\/[0-9a-f-]+$/);
+
+    // Plan auto-provisions sections from the venue template
+    await expect(page.getByText("Floor A")).toBeVisible();
+
+    // 3b. Activate the plan so it appears in the attach dropdown
+    await page.getByRole("button", { name: /activate/i }).click();
+    await expect(page.getByText(/active/i).first()).toBeVisible({ timeout: 10000 });
+
+    // 4. Create a ticket and navigate to its detail page
+    await createTicket(page, `Attach Test ${Date.now()}`, "55.00");
+
+    // 5. The seating plan panel now shows the active plan in the dropdown
+    await expect(page.getByText("Seating Plan").first()).toBeVisible();
+    await expect(page.locator('#planId')).toBeVisible();
+
+    // 6. Select the plan and attach it (there should be exactly one non-disabled option)
+    await page.locator('#planId').selectOption({ index: 1 });
+    await page.getByRole("button", { name: /attach seating plan/i }).click();
+
+    // 7. After redirect, the panel shows the attached plan ID and a Detach button
+    await expect(page.getByText(/attached plan/i)).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.getByRole("button", { name: /detach seating plan/i })
+    ).toBeVisible();
+  });
+
+  test("GA ticket with default quota does not show quantity stepper", async ({ page }) => {
+    const sellerEmail = uniqueEmail("seller-ga-qty");
+    const buyerEmail = uniqueEmail("buyer-ga-qty");
+    await signup(page, sellerEmail);
+
+    const ticketUrl = await createTicket(page, `GA No Stepper ${Date.now()}`, "20.00");
+
+    await signout(page);
+    await signup(page, buyerEmail);
+
+    await page.goto(ticketUrl);
+
+    // The "Purchase Ticket" button should be visible for the buyer
+    await expect(page.getByRole("button", { name: /purchase ticket/i })).toBeVisible();
+    // The quantity stepper input is only rendered when maxQuantity > 1 (quota > 1).
+    // A freshly created ticket has quota=1, so the stepper must be absent.
+    await expect(page.locator('#quantity[type="number"]')).toHaveCount(0);
   });
 });

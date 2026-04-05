@@ -4,6 +4,46 @@
 
 ---
 
+## Session: 2026-04-01 — Quota & Seating Plan Design: Open Questions Resolved ✅ READY FOR IMPLEMENTATION
+
+**Branch:** N/A (design documents only)
+
+### What was done
+
+1. **Comprehensive codebase exploration** of all 5 existing services — architecture, models, handlers, Kafka events, gRPC, database schemas.
+
+2. **GA Quota Design Document** written at `docs/quota-reservation-design.md`:
+   - 9 sections covering model changes, Redis Lua scripts, phased implementation (11 phases), breaking changes, migration strategy, 30+ unit tests, 5 load test scenarios, risk analysis.
+
+3. **Venue Seating Plan Design Document** written at `docs/venue-seating-plan-design.md`:
+   - 20 sections covering new venue-service architecture, seat state machine, hold mechanism (Redis Lua scripts), reservation flows (4 flows), auto-assign algorithm, SSE real-time, cross-service integration, order model changes, PostgreSQL schema, gRPC proto definitions, template system, 14 implementation phases.
+
+4. **All critical open questions resolved** via stakeholder Q&A:
+
+| Decision | Resolution |
+|---|---|
+| Sold counter | Option A: Separate `sold` field. `available = quota - reserved - sold`. |
+| Multi-quantity V1 | Yes — support from V1. `CreateOrderRequest.quantity` defaults to 1. |
+| Redisson lock | Keep as fallback safety net with reduced TTL (2s). Primary atomicity from Lua scripts. |
+| `orders.order.completed` topic | Add new Kafka topic. Producer: order-service. Consumers: venue-service + ticket-service. |
+
+5. **Both design documents updated** with all resolved decisions:
+   - Status changed from DRAFT to APPROVED
+   - Open questions section updated with resolutions
+   - Ticket model includes `sold` field throughout
+   - Reservation flow updated with Redisson fallback
+   - New `MarkSold` method added to QuotaManager, TicketRepository interfaces
+   - `orders.order.completed` event schema documented
+   - Kafka consumer updated with `handleOrderCompleted` handler
+
+### Next steps
+
+1. **Begin implementation** starting with proto changes (Phase 1 in quota doc / Phase 0 in seating doc)
+2. Implementation order: proto → ticket-service quota → order-service changes → venue-service scaffold
+3. Non-blocking design questions (seat labels, rendering tech, template sharing) deferred to relevant implementation phases
+
+---
+
 ## Session: 2026-04-01 — Post-audit lint/type hardening: PR #16 ⏳ AWAITING REVIEW
 
 **Branch:** `fix/audit-typescript-errors` → PR #16 (open, awaiting owner review).

@@ -27,8 +27,10 @@ import (
 // Used to drive the consumer retry loop to exhaustion.
 type alwaysFailReserver struct{ err error }
 
-func (r *alwaysFailReserver) ReserveTicket(_ context.Context, _, _ string) error { return r.err }
-func (r *alwaysFailReserver) ReleaseTicket(_ context.Context, _ string) error    { return r.err }
+func (r *alwaysFailReserver) ReserveTicket(_ context.Context, _, _ string) error       { return r.err }
+func (r *alwaysFailReserver) ReleaseTicket(_ context.Context, _ string) error          { return r.err }
+func (r *alwaysFailReserver) ReleaseReservation(_ context.Context, _ string) error     { return r.err }
+func (r *alwaysFailReserver) FinalizeReservation(_ context.Context, _, _ string) error { return r.err }
 
 // startKafkaForDLQ spins up apache/kafka in KRaft mode bound to a fixed host port.
 // Returns the broker address and a cleanup function.

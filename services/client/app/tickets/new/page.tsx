@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createTicket } from "@/app/actions/tickets";
 import { TicketForm } from "@/components/ticket-form";
+import { fetchAllMyPlans } from "@/app/actions/venues";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { ArrowLeft } from "lucide-react";
@@ -17,6 +18,11 @@ export default async function NewTicketPage() {
   if (!cookieStore.get("token")?.value) {
     redirect("/auth/signin");
   }
+
+  // Fetch organizer's active plans so the seated wizard can show a dropdown.
+  // Degrade gracefully on failure — form still works but shows a manual ID input.
+  const allPlans = await fetchAllMyPlans().catch(() => []);
+  const activePlans = allPlans.filter((p) => p.status === "active");
 
   return (
     <div className="flex flex-col items-center gap-8 py-4">
@@ -42,7 +48,7 @@ export default async function NewTicketPage() {
         </p>
       </div>
 
-      <TicketForm action={createTicket} submitLabel="Create Ticket" />
+      <TicketForm action={createTicket} availablePlans={activePlans} submitLabel="Create Ticket" />
     </div>
   );
 }

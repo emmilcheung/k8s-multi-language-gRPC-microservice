@@ -33,6 +33,7 @@ go.sum.local
 *.test
 coverage.out
 *.cover
+.playwright-mcp
 
 # Local Kubernetes secret env files (contain real passwords — never commit)
 infra/local/secrets/*.env
@@ -56,3 +57,6 @@ docker-compose.override.yml.local
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude
+.claude/settings.local.json

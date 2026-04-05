@@ -1,28 +1,25 @@
 # E2E test workflow (Playwright against Docker Compose stack)
 #
-# Runs AFTER the ci workflow completes successfully — not in parallel.
-# This is achieved via the `workflow_run` trigger, which waits for the named
-# workflow to finish before starting.
+# ⚠️  SUPERSEDED — this workflow is now DISABLED as an automatic trigger.
 #
-# Trigger conditions (enforced in the job `if`):
-#   - The ci workflow completed with conclusion == 'success'
-#   - The ci workflow was itself triggered by a pull_request event
-#     (prevents E2E running on direct pushes to main)
+# The E2E job has been moved into ci.yml where it runs directly on the
+# pull_request event, after all service CI jobs pass. This is necessary
+# because `workflow_run` workflows do NOT post their check results against
+# the PR's HEAD commit SHA, making them ineligible as required status checks
+# in GitHub branch protection / rulesets.
 #
-# Because `workflow_run` runs in the context of the default branch, the
-# checkout step must explicitly use the head SHA from the triggering run.
+# This file is retained for reference and can be triggered manually via
+# workflow_dispatch if you need to run E2E in isolation.
 #
-# Required secrets:
-#   RSA_PRIVATE_KEY    — the dev RSA private key (same value as in local .env)
-#   STRIPE_SECRET_KEY  — Stripe key; use "test_mock" to activate mock mode
+# Required secrets (still needed if run manually):
+#   RSA_PRIVATE_KEY     — the dev RSA private key (same value as in local .env)
+#   STRIPE_SECRET_KEY   — Stripe key; use "test_mock" to activate mock mode
 #   KONG_RSA_PUBLIC_KEY — the dev RSA public key
 
 name: e2e
 
 on:
-  workflow_run:
-    workflows: ["ci"]
-    types: [completed]
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -37,19 +34,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
-    # Only run when:
-    #   - The triggering ci workflow succeeded (all service jobs passed)
-    #   - The ci workflow was triggered by a pull_request (not a push)
-    if: |
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request'
+    # Always run when triggered manually
+    if: true
 
     steps:
-      # Check out the exact commit that triggered the ci workflow, not the
-      # default branch. This is required for workflow_run checkouts.
+      # Standard checkout — no workflow_run HEAD SHA needed for manual runs.
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
 
       # Write the .env file consumed by docker-compose via env_file directives.
       # auth-service reads RSA_PRIVATE_KEY; payment-service reads STRIPE_SECRET_KEY.

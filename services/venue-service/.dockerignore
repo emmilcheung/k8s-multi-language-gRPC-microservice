@@ -1,0 +1,30 @@
+# Files and directories to exclude from the Docker build context.
+# Build context is the repo root, so paths are relative to repo root.
+
+# VCS
+.git
+.gitignore
+
+# CI / editor artifacts
+.github
+.vscode
+.idea
+
+# Other services (keep build context lean)
+services/auth-service
+services/client
+services/expiration-service
+services/order-service
+services/payment-service
+services/ticket-service
+services/kong-gateway
+
+# Docs and infra (not needed in image)
+docs
+infra
+proto
+
+# Local env files
+*.env
+.env*
+!.env.example

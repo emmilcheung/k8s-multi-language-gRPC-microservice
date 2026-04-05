@@ -11,6 +11,7 @@ import {
   UnauthorizedException,
   NotFoundException,
   ForbiddenException,
+  Req,
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { ChargeDto } from './payments.dto';
@@ -42,6 +43,32 @@ export class PaymentsController {
     });
 
     return { payment };
+  }
+
+  /**
+   * POST /api/payments/webhook
+   * Stripe webhook endpoint — receives payment lifecycle events and drives order completion.
+   * This route must be UNAUTHENTICATED in Kong (Stripe cannot present a JWT).
+   * Kong route: payments-webhook (no jwt plugin, POST /api/payments/webhook only).
+   *
+   * Stripe signature verification is performed inside PaymentsService using the raw
+   * request body (enabled via NestFactory rawBody: true in main.ts).
+   */
+  @Post('webhook')
+  @HttpCode(HttpStatus.OK)
+  async stripeWebhook(
+    @Req() req: { rawBody?: Buffer; body?: unknown },
+    @Headers('stripe-signature') sig: string | undefined,
+  ): Promise<{ received: boolean }> {
+    if (!sig) {
+      throw new BadRequestException({
+        error: { code: 'MISSING_SIGNATURE', message: 'stripe-signature header is required' },
+      });
+    }
+    const rawBody: Buffer = req.rawBody ?? Buffer.from(JSON.stringify(req.body));
+    const event = this.paymentsService.constructWebhookEvent(rawBody, sig);
+    await this.paymentsService.handleStripeEvent(event);
+    return { received: true };
   }
 
   /**

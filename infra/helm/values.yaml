@@ -131,6 +131,27 @@ client:
       cpu: 500m
       memory: 512Mi
 
+# ── venue-service ─────────────────────────────────────────────────────────────
+venue-service:
+  replicaCount: 2
+  image:
+    repository: venue-service
+    tag: "SET_BY_CI"  # overridden to git SHA at deploy time; never use latest in any env (I-04)
+    grpcPort: 50052
+  env:
+    APP_ENV: production
+    PORT: "3003"
+    GRPC_PORT: "50052"
+    LOG_LEVEL: info
+  secretRef: venue-service-secrets  # contains DATABASE_URL, REDIS_URL, KAFKA_BROKERS
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
 # ── postgres-auth (Bitnami PostgreSQL) ────────────────────────────────────────
 postgres-auth:
   auth:
@@ -175,6 +196,25 @@ postgres-payments:
     database: payments_db
     username: payments_user
     existingSecret: postgres-payments-secret
+    secretKeys:
+      userPasswordKey: password
+  primary:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  metrics:
+    enabled: true
+
+# ── postgres-venue (Bitnami PostgreSQL) ───────────────────────────────────────
+postgres-venue:
+  auth:
+    database: venue_db
+    username: venue_user
+    existingSecret: postgres-venue-secret
     secretKeys:
       userPasswordKey: password
   primary:

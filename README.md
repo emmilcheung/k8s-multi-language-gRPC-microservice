@@ -69,21 +69,21 @@ Each architectural decision was chosen to mirror a real-world challenge:
 │                       │                                                   │
 HTTPS ──► ALB ──► Kong (JWT verify · rate-limit · correlation-ID)           │
 │                       │                   │                               │
-│             ┌─────────┼────────────┬──────┴──────────┐                    │
-│             │         │            │                 │                    │
-│        auth-service  ticket-  order-service    payment-service            │
-│        (NestJS/TS)   service   (Java/SB4)      (NestJS/TS)                │
-│                      (Go/Echo)     │                 │                    │
-│                        │      gRPC │                 │                    │
-│                        └──────────-┘                 │                    │
-│                              │                       │                    │
-│                       Apache Kafka (MSK / Strimzi) ──┘                    │
-│                              │                                            │
-│                      expiration-service (Go worker)                       │
+│        ┌──────────────┼──────────┬─────────┴────────┬──────────────┐     │
+│        │              │          │                  │              │     │
+│   auth-service   ticket-    order-service    payment-service  venue-    │
+│   (NestJS/TS)    service    (Java/SB4)       (NestJS/TS)      service   │
+│                  (Go/Echo)      │                  │           (Go/Echo) │
+│                    │       gRPC │                  │              │     │
+│                    └───────────-┘                  │              │     │
+│                          │                         │              │     │
+│                   Apache Kafka (MSK / Strimzi) ─────┴──────────────┘     │
+│                          │                                                │
+│                 expiration-service (Go worker)                            │
 │                                                                           │
-│Datastores:  RDS PostgreSQL ×3      MongoDB             ElastiCache Redis  │
+│Datastores:  RDS PostgreSQL ×4      MongoDB             ElastiCache Redis  │
 │             (auth · orders ·       (ticket-service)    (expiration +      │
-│              payments)                                  Kong rate-limit)  │
+│              payments · venue)                          Kong rate-limit)  │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -113,6 +113,7 @@ HTTPS ──► ALB ──► Kong (JWT verify · rate-limit · correlation-ID) 
 | **order-service** | Java 21 | Spring Boot 4 | 8080 | PostgreSQL 16 | Order lifecycle · gRPC client · transactional outbox |
 | **payment-service** | TypeScript / Node.js 24 | NestJS 10 | 3000 | PostgreSQL 16 | Payment creation · Stripe (stubbed Phase 1) · Kafka |
 | **expiration-service** | Go 1.23+ | — (worker) | 8080 (health) | Redis | Delayed job queue · publishes expiration events |
+| **venue-service** | Go 1.23+ | Echo v4 | 3003 / **50052** gRPC | PostgreSQL 16 | Venue management · seat inventory · quota reservation · Kafka consumer |
 | **client** | TypeScript | Next.js 15 | 4000 | — | App Router SSR frontend · Server Actions · shadcn/ui |
 | **kong-gateway** | — | Kong 3.9 | 8000 / 8443 | — (DB-less) | JWT auth · routing · rate-limiting · CSRF fix |
 
@@ -125,11 +126,13 @@ orders.order.created          ← order-service produces (outbox)
 orders.order.cancelled        ← order-service produces (outbox)
 payments.payment.captured     ← payment-service produces
 expiration.order.expiration_complete  ← expiration-service produces
+venue.seat.reserved           ← venue-service produces
+venue.seat.released           ← venue-service produces
 ```
 
 Every topic has a corresponding `.dlq` (dead letter queue) for failed consumer messages.
 
-### gRPC contract
+### gRPC contracts
 
 Defined in `proto/tickets/v1/tickets.proto` (proto3).
 
@@ -142,6 +145,18 @@ service TicketService {
 
 Generated stubs live in `libs/grpc-stubs/go/` (Go — ticket-service server side).
 Java (order-service) generates stubs at Maven build time via the `protobuf-maven-plugin`.
+
+Defined in `proto/venue/v1/venue.proto` (proto3).
+
+```protobuf
+service VenueService {
+  rpc GetVenue          (GetVenueRequest)          returns (VenueResponse);
+  rpc ReserveSeat       (ReserveSeatRequest)        returns (ReserveSeatResponse);
+  rpc ReleaseSeat       (ReleaseSeatRequest)        returns (ReleaseSeatResponse);
+}
+```
+
+Generated stubs live in `libs/grpc-stubs/go/` (Go — venue-service server side).
 
 ---
 
@@ -175,6 +190,7 @@ Java (order-service) generates stubs at Maven build time via the `protobuf-maven
 │   ├── order-service/          Java · Spring Boot · PostgreSQL · gRPC client
 │   ├── payment-service/        TypeScript · NestJS · PostgreSQL
 │   ├── expiration-service/     Go worker · Redis · Kafka
+│   ├── venue-service/          Go · Echo · PostgreSQL · gRPC server · Kafka consumer
 │   ├── client/                 Next.js 15 App Router
 │   └── kong-gateway/
 │       ├── config/kong.base.yml    declarative Kong config (template)
@@ -235,7 +251,7 @@ The most important ones:
 - Test runner: **Vitest** (not Jest).
 - Package manager: **pnpm**.
 
-### Go (ticket-service, expiration-service)
+### Go (ticket-service, expiration-service, venue-service)
 
 - Layout: `cmd/`, `internal/handler/`, `internal/service/`, `internal/repository/`.
 - `context.Context` is the first argument on every I/O function.
@@ -281,6 +297,7 @@ pnpm exec playwright test
 | auth-service | 3000 |
 | ticket-service | 3001 |
 | payment-service | 3002 |
+| venue-service | 3003 |
 | order-service | 8082 |
 | Kong (API gateway) | **8000** |
 | Kafka (host access for E2E) | 9093 |
@@ -288,6 +305,7 @@ pnpm exec playwright test
 | PostgreSQL (auth) | 5432 |
 | PostgreSQL (orders) | 5433 |
 | PostgreSQL (payments) | 5434 |
+| PostgreSQL (venue) | 5435 |
 | Redis | 6379 |
 | Schema Registry | 8081 |
 
@@ -320,7 +338,7 @@ make -C infra/local up
 3. Pulls and loads Bitnami / Kong / Kafka images into minikube's image store
    _(Bitnami doesn't publish pinned tags on Docker Hub — images are pulled as `:latest`,
    retagged to the exact version the Helm chart expects, then loaded locally)_
-4. Builds all 6 service images and loads them into minikube
+4. Builds all 7 service images and loads them into minikube
 5. Creates the `ticketing` namespace + Linkerd skip-port annotation
 6. Creates all Kubernetes secrets from `secrets.env`
 7. Runs `helm upgrade --install` with the umbrella chart
@@ -361,6 +379,7 @@ make -C infra/local restart SVC=auth-service
 | PostgreSQL (auth) | `ticketing-postgres-auth:5432` |
 | PostgreSQL (orders) | `ticketing-postgres-orders:5432` |
 | PostgreSQL (payments) | `ticketing-postgres-payments:5432` |
+| PostgreSQL (venue) | `ticketing-postgres-venue:5432` |
 | MongoDB | `ticketing-mongodb:27017` |
 | Redis | `ticketing-redis-master:6379` |
 | Kafka (internal) | `ticketing-cp-kafka:9092` |
@@ -465,7 +484,7 @@ pnpm exec playwright test
 
 ## 8. Status
 
-> **Overall: ~70% complete.** All services built and E2E tested. EKS and CI/CD are pending.
+> **Overall: ~75% complete.** All services built and E2E tested. EKS and CI/CD are pending.
 
 | Component | Status | Notes |
 |---|---|---|
@@ -474,12 +493,13 @@ pnpm exec playwright test
 | order-service | ✅ Complete | Flyway, gRPC client, outbox pattern |
 | payment-service | ✅ Complete | 25 tests passing; Stripe stubbed |
 | expiration-service | ✅ Complete | asynq + Redis + Kafka |
+| venue-service | ✅ Complete | Go/Echo; seat inventory; gRPC server (port 50052); Kafka consumer |
 | client (Next.js) | ✅ Complete | All pages, Server Actions |
 | Kong API Gateway | ✅ Complete | RS256 JWT; CSRF fix for Server Actions behind proxy |
 | E2E Playwright tests | ✅ 18/18 passing | Auth, tickets, orders, payment |
 | Docker Compose (local dev) | ✅ Running | `docker compose up --build` |
 | Local Kubernetes (minikube) | ✅ Running | `make -C infra/local up`; 13/13 pods Running |
-| Helm umbrella chart | ✅ Complete | Bitnami sub-charts + custom cp-kafka |
+| Helm umbrella chart | ✅ Complete | Bitnami sub-charts + custom cp-kafka + venue-service subchart |
 | Terraform modules | ✅ Scaffolded | vpc, eks, rds, elasticache, msk, kong; **not applied to real AWS** |
 | CI/CD pipelines | ⏳ Pending | `.github/workflows/` is empty |
 | EKS deployment | ⏳ Pending | Terraform apply deferred; local minikube is the active env |

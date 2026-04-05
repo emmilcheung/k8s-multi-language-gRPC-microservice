@@ -14,6 +14,7 @@ describe("TicketForm", () => {
         action={action}
         defaultTitle="Rock Concert"
         defaultPrice={49.99}
+        defaultTicketType="GA"
         submitLabel="Update Ticket"
       />
     );

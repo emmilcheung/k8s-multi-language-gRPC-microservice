@@ -4,6 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ticketing.orders.entity.OrderStatus;
 import com.ticketing.orders.entity.OrderTicket;
+import com.ticketing.orders.grpc.ReleaseReservationRequest;
+import com.ticketing.orders.grpc.ReleaseReservationResponse;
+import com.ticketing.orders.grpc.ReserveQuotaRequest;
+import com.ticketing.orders.grpc.ReserveQuotaResponse;
 import com.ticketing.orders.grpc.TicketServiceGrpc;
 import com.ticketing.orders.grpc.ValidateTicketRequest;
 import com.ticketing.orders.grpc.ValidateTicketResponse;
@@ -12,6 +16,7 @@ import com.ticketing.orders.repository.OrderTicketRepository;
 import com.ticketing.orders.service.OrderService;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;
+import io.grpc.Status;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
@@ -29,9 +34,9 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
@@ -47,6 +52,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -56,8 +62,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Full-stack integration test — real PostgreSQL + Kafka via Testcontainers,
  * in-process gRPC server for ticket-service stub.
  *
+ * CP-05: stub now implements {@code ReserveQuota} (GA path) and
+ * {@code ReleaseReservation} (compensation path) in addition to the legacy
+ * {@code ValidateTicketAvailability}. The concurrency test uses an atomic flag
+ * on the stub to simulate ticket-service returning RESOURCE_EXHAUSTED on the
+ * second concurrent reservation attempt — exactly what the real ticket-service
+ * does when the per-ticket quota is exhausted.
+ *
  * Test data is isolated per-test: each test inserts its own seed data and the
- * database is reset between test classes via container lifecycle.
+ * database is reset between tests via {@code @AfterEach}.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
@@ -97,8 +110,59 @@ class OrderIntegrationTest {
     static Server grpcServer;
     static ManagedChannel grpcChannel;
 
-    /** Minimal ticket-service stub that returns realistic ticket data matching seeded test data. */
+    /**
+     * Minimal ticket-service stub.
+     *
+     * <ul>
+     *   <li>{@code ReserveQuota} — succeeds on the first call per test; if
+     *       {@link #reservedOnce} is already set, returns RESOURCE_EXHAUSTED to
+     *       simulate a sold-out / quota-exceeded scenario (used by the concurrency
+     *       test).  Each test resets the flag via {@link #reset()}.
+     *   <li>{@code ReleaseReservation} — always succeeds (best-effort compensation).
+     *   <li>{@code ValidateTicketAvailability} — kept for legacy compatibility.
+     * </ul>
+     */
     static class StubTicketService extends TicketServiceGrpc.TicketServiceImplBase {
+
+        /** Set to true after the first ReserveQuota is accepted. */
+        final AtomicBoolean reservedOnce = new AtomicBoolean(false);
+
+        void reset() {
+            reservedOnce.set(false);
+        }
+
+        @Override
+        public void reserveQuota(
+                ReserveQuotaRequest request,
+                StreamObserver<ReserveQuotaResponse> responseObserver) {
+            if (reservedOnce.compareAndSet(false, true)) {
+                responseObserver.onNext(ReserveQuotaResponse.newBuilder()
+                        .setSuccess(true)
+                        .setReservationId(UUID.randomUUID().toString())
+                        .setTicketId(request.getTicketId())
+                        .setTitle("Test Concert")
+                        .setPrice("79.99")
+                        .setQuantity(request.getQuantity())
+                        .setRemaining(9)
+                        .build());
+                responseObserver.onCompleted();
+            } else {
+                // Quota exhausted — the second concurrent caller gets 409 via RESOURCE_EXHAUSTED
+                responseObserver.onError(
+                        Status.RESOURCE_EXHAUSTED
+                                .withDescription("Ticket quota exhausted")
+                                .asRuntimeException());
+            }
+        }
+
+        @Override
+        public void releaseReservation(
+                ReleaseReservationRequest request,
+                StreamObserver<ReleaseReservationResponse> responseObserver) {
+            responseObserver.onNext(ReleaseReservationResponse.newBuilder().build());
+            responseObserver.onCompleted();
+        }
+
         @Override
         public void validateTicketAvailability(
                 ValidateTicketRequest request,
@@ -113,15 +177,18 @@ class OrderIntegrationTest {
         }
     }
 
+    static StubTicketService stubTicketService;
+
     @TestConfiguration
     static class GrpcTestConfig {
         @Bean
         @Primary
         TicketServiceGrpc.TicketServiceBlockingStub ticketServiceBlockingStub() throws Exception {
             String serverName = InProcessServerBuilder.generateName();
+            stubTicketService = new StubTicketService();
             grpcServer = InProcessServerBuilder.forName(serverName)
                     .directExecutor()
-                    .addService(new StubTicketService())
+                    .addService(stubTicketService)
                     .build()
                     .start();
             grpcChannel = InProcessChannelBuilder.forName(serverName)
@@ -150,9 +217,13 @@ class OrderIntegrationTest {
     private UUID ticketId;
 
     @BeforeEach
-    void seedTicket() {
+    void setUp() {
         ticketId = UUID.randomUUID();
         orderTicketRepository.save(new OrderTicket(ticketId, "Test Concert", new BigDecimal("79.99")));
+        // Reset the stub's reservation gate so each test starts fresh
+        if (stubTicketService != null) {
+            stubTicketService.reset();
+        }
     }
 
     @AfterEach
@@ -180,32 +251,32 @@ class OrderIntegrationTest {
 
         JsonNode json = objectMapper.readTree(result.getResponse().getContentAsString());
         assertThat(json.path("id").asText()).isNotBlank();
+        assertThat(json.path("quantity").asInt()).isEqualTo(1);
     }
 
     @Test
-    void createOrder_returns_400_when_ticket_already_reserved() throws Exception {
+    void createOrder_returns_409_when_ticket_quota_exhausted() throws Exception {
         String body = """
                 { "ticketId": "%s" }
                 """.formatted(ticketId);
 
-        // First order
+        // First order — succeeds (stub allows one reservation)
         mockMvc.perform(post("/api/orders")
                         .header("X-User-Id", userId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated());
 
-        // Second order for same ticket — should be rejected
+        // Second order for same ticket — stub returns RESOURCE_EXHAUSTED → 409 CONFLICT
         mockMvc.perform(post("/api/orders")
                         .header("X-User-Id", UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"));
+                .andExpect(status().isConflict());
     }
 
     @Test
-    void createOrder_returns_409_or_400_when_concurrent_requests_for_same_ticket() throws Exception {
+    void createOrder_returns_409_or_201_when_concurrent_requests_for_same_ticket() throws Exception {
         String body = """
                 { "ticketId": "%s" }
                 """.formatted(ticketId);
@@ -371,7 +442,7 @@ class OrderIntegrationTest {
                 .andExpect(jsonPath("$.error.code").value("BAD_REQUEST"));
     }
 
-    // ── Kafka consumer integration (T-03) ────────────────────────────────────
+    // ── Kafka consumer integration ────────────────────────────────────────────
 
     @Test
     void paymentCapturedEvent_marks_order_complete() throws Exception {
@@ -436,9 +507,12 @@ class OrderIntegrationTest {
         publish("tickets.ticket.updated", event);
 
         awaitCondition(() -> orderTicketRepository.findById(ticketId)
-                .map(t -> updatedTitle.equals(t.getTitle()) && new BigDecimal("120.50").compareTo(t.getPrice()) == 0)
+                .map(t -> updatedTitle.equals(t.getTitle())
+                        && new BigDecimal("120.50").compareTo(t.getPrice()) == 0)
                 .orElse(false));
     }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private UUID createOrderAndReturnId(UUID targetTicketId, UUID targetUserId) throws Exception {
         String body = """
@@ -452,7 +526,8 @@ class OrderIntegrationTest {
                 .andExpect(status().isCreated())
                 .andReturn();
 
-        return UUID.fromString(objectMapper.readTree(result.getResponse().getContentAsString()).path("id").asText());
+        return UUID.fromString(
+                objectMapper.readTree(result.getResponse().getContentAsString()).path("id").asText());
     }
 
     private void publish(String topic, String payload) throws Exception {

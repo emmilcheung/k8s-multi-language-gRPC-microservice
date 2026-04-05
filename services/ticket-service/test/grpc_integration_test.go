@@ -3,6 +3,7 @@ package integration_test
 import (
 	"context"
 	"net"
+	"net/url"
 	"testing"
 	"time"
 
@@ -63,7 +64,7 @@ func setupGrpcServer(t *testing.T) (v1.TicketServiceClient, func()) {
 }
 
 // seedTicketViaGrpc creates a ticket directly in MongoDB so gRPC tests have data.
-func seedGrpcTicket(t *testing.T, repo repository.TicketRepository, id, userID, title string, price float64) {
+func seedGrpcTicket(t *testing.T, repo repository.TicketRepository, id, userID, title string, price string) {
 	t.Helper()
 	err := repo.Create(context.Background(), &repository.Ticket{
 		ID:     id,
@@ -90,7 +91,7 @@ func TestGrpc_GetTicket_returns_ticket_when_found(t *testing.T) {
 	require.NoError(t, err)
 	defer repo.Close(ctx) //nolint:errcheck
 
-	seedGrpcTicket(t, repo, "g-ticket-1", "user-1", "gRPC Ticket", 42.00)
+	seedGrpcTicket(t, repo, "g-ticket-1", "user-1", "gRPC Ticket", "42")
 
 	log := zap.NewNop()
 	srv := grpcserver.NewTicketGrpcServer(repo, log)
@@ -159,7 +160,7 @@ func TestGrpc_ValidateTicketAvailability_returns_available_true_for_unreserved_t
 	require.NoError(t, err)
 	defer repo.Close(ctx) //nolint:errcheck
 
-	seedGrpcTicket(t, repo, "g-avail-1", "user-2", "Available Ticket", 99.00)
+	seedGrpcTicket(t, repo, "g-avail-1", "user-2", "Available Ticket", "99")
 
 	log := zap.NewNop()
 	srv := grpcserver.NewTicketGrpcServer(repo, log)
@@ -190,19 +191,38 @@ func TestGrpc_ValidateTicketAvailability_returns_available_true_for_unreserved_t
 func TestGrpc_ValidateTicketAvailability_returns_available_false_for_reserved_ticket(t *testing.T) {
 	ctx := context.Background()
 
-	mongoContainer, err := tcmongo.Run(ctx, "mongo:7")
+	// Transactions (used by CreateReservation) require a replica set.
+	mongoContainer, err := tcmongo.Run(ctx, "mongo:7", tcmongo.WithReplicaSet("rs0"))
 	require.NoError(t, err)
 	defer mongoContainer.Terminate(ctx) //nolint:errcheck
 
 	mongoURI, err := mongoContainer.ConnectionString(ctx)
 	require.NoError(t, err)
 
+	// Strip replicaSet param and force directConnection to avoid internal-hostname
+	// resolution issues when running against a testcontainers replica-set node.
+	u, urlErr := url.Parse(mongoURI)
+	require.NoError(t, urlErr)
+	q := u.Query()
+	q.Del("replicaSet")
+	q.Set("directConnection", "true")
+	u.RawQuery = q.Encode()
+	mongoURI = u.String()
+
 	repo, err := repository.NewMongoTicketRepository(ctx, mongoURI, dbName(t.Name()+"_r"))
 	require.NoError(t, err)
 	defer repo.Close(ctx) //nolint:errcheck
 
-	seedGrpcTicket(t, repo, "g-reserved-1", "user-3", "Reserved Ticket", 50.00)
-	err = repo.ReserveTicket(ctx, "g-reserved-1", "order-xyz")
+	seedGrpcTicket(t, repo, "g-reserved-1", "user-3", "Reserved Ticket", "50")
+	// Use the quota-based reservation to exhaust inventory (Quota defaults to 1).
+	// The legacy ReserveTicket only sets orderId and does not affect the reserved
+	// counter, so ValidateTicketAvailability would still see quota available.
+	err = repo.CreateReservation(ctx, &repository.TicketReservation{
+		ID:       "grpc-res-1",
+		TicketID: "g-reserved-1",
+		UserID:   "buyer-grpc-1",
+		Quantity: 1,
+	})
 	require.NoError(t, err)
 
 	log := zap.NewNop()

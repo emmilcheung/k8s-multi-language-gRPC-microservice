@@ -15,13 +15,29 @@ import { cookies } from "next/headers";
 export const base = (): string =>
   (process.env.INTERNAL_API_URL ?? "http://localhost:8080").replace(/\/$/, "");
 
+interface RequestWithCookies {
+  cookies: {
+    get(name: string): { value: string } | undefined;
+  };
+}
+
 /**
  * Returns fetch headers that forward the auth token cookie to the upstream API.
  * Reads the "token" cookie from the current request context.
+ * Optionally accepts a NextRequest to extract headers from (for use in Route Handlers).
  */
-export async function authHeaders(): Promise<HeadersInit> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get("token")?.value ?? "";
+export async function authHeaders(request?: RequestWithCookies): Promise<HeadersInit> {
+  let token: string | undefined;
+
+  if (request && typeof request.cookies?.get === "function") {
+    // Extract from NextRequest (Route Handler context)
+    token = request.cookies.get("token")?.value;
+  } else {
+    // Extract from global cookies context (Server Action context)
+    const cookieStore = await cookies();
+    token = cookieStore.get("token")?.value;
+  }
+
   return {
     "Content-Type": "application/json",
     ...(token ? { Cookie: `token=${token}` } : {}),

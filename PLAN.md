@@ -75,20 +75,20 @@ Rebuild the system with **functionally equivalent behaviour** to the legacy, on 
   HTTPS ──► ALB ──► Kong Ingress Controller                                │
                          │  (JWT verify, rate-limit, correlation-ID)        │
                          │              │                                   │
-               ┌─────────┼─────────┬────┴──────────────┐                   │
-               │         │         │                   │                   │
-          auth-svc   ticket-svc  order-svc        payment-svc              │
-        (NestJS/TS)  (Go/Echo)  (Java/SB4)       (NestJS/TS)             │
-              │          │         │                   │                   │
-              │          └────gRPC─┘                   │                   │
-              │                │                       │                   │
-               └────────────────┴────── Kafka (Strimzi / MSK Phase 2) ────┘                   │
-                                            │                              │
-                                   expiration-svc (Go worker)              │
-                                                                           │
-  Databases:  RDS PostgreSQL ×3   MongoDB StatefulSet    ElastiCache       │
+               ┌─────────┼─────────┬────┴──────────────┬──────────────┐    │
+               │         │         │                   │              │    │
+          auth-svc   ticket-svc  order-svc        payment-svc    venue-svc  │
+        (NestJS/TS)  (Go/Echo)  (Java/SB4)       (NestJS/TS)   (Go/Echo)  │
+              │          │         │                   │              │    │
+              │          └────gRPC─┘                   │              │    │
+              │                │                       │              │    │
+               └───────────────┴────── Kafka (Strimzi / MSK Phase 2) ┴───┘  │
+                                            │                               │
+                                   expiration-svc (Go worker)               │
+                                                                            │
+  Databases:  RDS PostgreSQL ×4   MongoDB StatefulSet    ElastiCache       │
               (auth, orders,       (ticket-service)      Redis Cluster     │
-               payments)                                 (expiration +     │
+               payments, venue)                          (expiration +     │
                                                           Kong RL)         │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -120,12 +120,14 @@ Rebuild the system with **functionally equivalent behaviour** to the legacy, on 
 | **order-service language** | Java 21 / Spring Boot 4 | Spring's transactional support, JPA, Spring Kafka, and Spring State Machine are ideal for order lifecycle management. |
 | **ticket-service language** | Go / Echo | High-read service. Echo is lightweight, high-performance, and more opinionated than Gin (better middleware management). Also runs gRPC server. |
 | **expiration-service language** | Go (pure worker) | No HTTP surface. Go's lightweight goroutines handle delayed job scheduling efficiently. |
+| **venue-service language** | Go 1.23+ / Echo v4 | Same rationale as ticket-service. High-throughput seat inventory management; gRPC server; Kafka consumer. PostgreSQL for relational seat/venue data. |
 | **auth-service language** | TypeScript / Node.js 24 LTS + pnpm + NestJS 10 | NestJS provides IoC container, dependency injection, and decorator-driven modules — reduces boilerplate for a structured auth service. Node.js 24 LTS + pnpm for faster installs and better monorepo support. |
 | **payment-service language** | TypeScript / Node.js 24 LTS + pnpm + NestJS 10 | Same rationale as auth-service. NestJS module structure suits the payment flow cleanly. Stripe SDK is excellent in Node. Payment Intents deferred to Phase 2. |
 | **frontend** | Next.js 15 App Router + TypeScript | Modern SSR/RSC. Server Actions for mutations. App Router replaces Pages Router. |
 | **Auth DB** | PostgreSQL 16 (RDS) | User records are relational, benefit from ACID guarantees. UUIDs as PKs. |
 | **Orders DB** | PostgreSQL 16 (RDS) | Order lifecycle has strict ACID requirements. State machine transitions must be atomic. |
 | **Payments DB** | PostgreSQL 16 (RDS) | Financial records must have ACID guarantees. Idempotency key support. |
+| **Venue DB** | PostgreSQL 16 (RDS) | Seat inventory requires ACID transactions for quota reservation. OCC via `version` field. |
 | **Tickets DB** | MongoDB 7 (StatefulSet on EKS) | Flexible document model. High read throughput. Self-hosted on EKS for Phase 1. |
 | **Expiration store** | Redis 7 (ElastiCache Cluster) | Delayed job queue via `asynq`. Shared with Kong rate limiting. |
 | **Schema registry** | Confluent Schema Registry (self-hosted on EKS) | Richer ecosystem than AWS Glue. REST API. Supports Avro, JSON Schema, Protobuf. Deployed in `infra` namespace. |
@@ -522,7 +524,92 @@ CREATE TABLE payments (
 
 ---
 
-## 5. Infrastructure Design
+### 4.7 venue-service
+
+| Property | Value |
+|---|---|
+| Language | Go 1.23+ |
+| Framework | Echo v4 |
+| Database | PostgreSQL 16 (AWS RDS) |
+| Logging | `zap` (JSON) |
+| Metrics | `prometheus/client_golang` (`/metrics`) |
+| Tracing | OpenTelemetry Go SDK + `otelecho` |
+| gRPC | Server (defined in `proto/venue/v1/venue.proto`) |
+| Kafka | Consumer (`segmentio/kafka-go`) |
+| Ports | 3003 (HTTP/REST), **50052** (gRPC) |
+| Test framework | `testify` + `testcontainers-go` (PostgreSQL + Kafka) |
+
+**Responsibilities:**
+
+- Venue and seat inventory management
+- Quota reservation for seats (OCC via `version` field)
+- Serve gRPC `VenueService` for seat reservation/release
+- Consume `orders.order.completed` from Kafka to finalize seat allocation
+
+**API Routes:**
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/venues` | Yes | Create venue |
+| `GET` | `/api/venues` | No | List venues |
+| `GET` | `/api/venues/:id` | No | Get single venue |
+| `PUT` | `/api/venues/:id` | Yes (owner) | Update venue details |
+| `POST` | `/api/venues/:id/seats` | Yes | Add seats to a venue |
+| `GET` | `/api/venues/:id/seats` | No | List seats with availability |
+| `GET` | `/healthz/live` | No | Liveness |
+| `GET` | `/healthz/ready` | No | Readiness (PostgreSQL + Kafka check) |
+| `GET` | `/metrics` | No | Prometheus |
+
+**gRPC service (see Section 8 for full proto):**
+
+- `GetVenue` — fetch a venue by ID
+- `ReserveSeat` — reserve a specific seat (used when an order is placed)
+- `ReleaseSeat` — release a previously reserved seat (on order cancellation / expiry)
+
+**Database schema (PostgreSQL):**
+
+```sql
+CREATE TABLE venues (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       TEXT        NOT NULL,
+  address    TEXT        NOT NULL,
+  capacity   INT         NOT NULL,
+  version    INT         NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE seats (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  venue_id   UUID        NOT NULL REFERENCES venues(id),
+  row        TEXT        NOT NULL,
+  number     INT         NOT NULL,
+  status     VARCHAR(20) NOT NULL DEFAULT 'available', -- available | reserved | sold
+  order_id   UUID,
+  version    INT         NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (venue_id, row, number)
+);
+
+CREATE INDEX idx_seats_venue_id ON seats(venue_id);
+CREATE INDEX idx_seats_status   ON seats(status);
+```
+
+**Kafka:**
+
+- Produces: `venue.seat.reserved`, `venue.seat.released`
+- Consumes (consumer group `venue-service`): `orders.order.completed`
+
+**Environment variables:**
+
+- `DATABASE_URL` — PostgreSQL connection string
+- `REDIS_URL` — Redis connection URL (cache layer)
+- `KAFKA_BROKERS` — comma-separated broker endpoints
+- `GRPC_PORT` (default: **50052**)
+- `PORT` (default: 3003)
+
+---
 
 ### 5.1 Repository Layout for IaC
 
@@ -580,12 +667,12 @@ infra/
 - OIDC provider for IRSA
 - Cluster logging: API, audit, authenticator, scheduler, controller-manager → CloudWatch
 
-**`rds` module (instantiated ×3):**
+**`rds` module (instantiated ×4):**
 
 - Engine: PostgreSQL 16
 - Instance: `db.t4g.micro` (dev), `db.r6g.large` (prod)
 - Multi-AZ: false (dev), true (prod)
-- DB names: `auth_db`, `orders_db`, `payments_db`
+- DB names: `auth_db`, `orders_db`, `payments_db`, `venue_db`
 - Subnet group in private subnets; automated backups 7 days (prod)
 - Credentials → Secrets Manager
 
@@ -612,7 +699,7 @@ infra/
 
 **`ecr` module:**
 
-- Repositories: `auth-service`, `ticket-service`, `order-service`, `payment-service`, `expiration-service`, `client`
+- Repositories: `auth-service`, `ticket-service`, `order-service`, `payment-service`, `expiration-service`, `venue-service`, `client`
 - Lifecycle policy: retain last 20 images by push date
 - ECR enhanced scanning on push
 - Repository policy: EKS node role can pull
@@ -626,6 +713,7 @@ infra/
 | `payment-service-role` | Secrets Manager read: `db-password-payments`, `stripe-secret-key` |
 | `ticket-service-role` | No AWS service access (MongoDB on-cluster) |
 | `expiration-service-role` | No AWS service access (Redis on-cluster via internal DNS) |
+| `venue-service-role` | Secrets Manager read: `db-password-venue` |
 
 **`secrets` module:**
 
@@ -739,6 +827,7 @@ minikube stop
 | PostgreSQL (auth) | `ticketing-postgres-auth:5432` |
 | PostgreSQL (orders) | `ticketing-postgres-orders:5432` |
 | PostgreSQL (payments) | `ticketing-postgres-payments:5432` |
+| PostgreSQL (venue) | `ticketing-postgres-venue:5432` |
 | MongoDB | `ticketing-mongodb:27017` |
 | Redis | `ticketing-redis-master:6379` |
 | Kafka | `ticketing-cp-kafka.ticketing.svc.cluster.local:9092` |
@@ -796,8 +885,11 @@ All Kong configuration is declarative via `KongIngress`, `KongPlugin`, and `Kong
 | `tickets.ticket.updated` | ticket-service | order-service | `ticketId` |
 | `orders.order.created` | order-service | ticket-service, payment-service, expiration-service | `orderId` |
 | `orders.order.cancelled` | order-service | ticket-service, payment-service | `orderId` |
+| `orders.order.completed` | order-service | venue-service | `orderId` |
 | `expiration.order.expiration_complete` | expiration-service | order-service | `orderId` |
 | `payments.payment.captured` | payment-service | order-service | `orderId` |
+| `venue.seat.reserved` | venue-service | — | `seatId` |
+| `venue.seat.released` | venue-service | — | `seatId` |
 
 **DLQ topics (one per consumer, after max retries):**
 
@@ -806,8 +898,11 @@ tickets.ticket.created.dlq
 tickets.ticket.updated.dlq
 orders.order.created.dlq
 orders.order.cancelled.dlq
+orders.order.completed.dlq
 expiration.order.expiration_complete.dlq
 payments.payment.captured.dlq
+venue.seat.reserved.dlq
+venue.seat.released.dlq
 ```
 
 ### 7.2 Event Envelope (CloudEvents v1.0)
@@ -857,6 +952,9 @@ proto/
 ├── tickets/
 │   └── v1/
 │       └── tickets.proto
+├── venue/
+│   └── v1/
+│       └── venue.proto
 └── auth/
     └── v1/
         └── auth.proto     # Reserved for future use; Kong JWKS is sufficient for Phase 1
@@ -904,7 +1002,36 @@ message ValidateTicketResponse {
 }
 ```
 
-### 8.3 Generated Stubs
+### 8.3 Venue Proto
+
+```protobuf
+syntax = "proto3";
+package acme.venue.v1;
+
+option go_package = "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1";
+
+service VenueService {
+  rpc GetVenue     (GetVenueRequest)     returns (GetVenueResponse);
+  rpc ReserveSeat  (ReserveSeatRequest)  returns (ReserveSeatResponse);
+  rpc ReleaseSeat  (ReleaseSeatRequest)  returns (ReleaseSeatResponse);
+}
+
+message GetVenueRequest  { string venue_id = 1; }
+message GetVenueResponse {
+  string venue_id  = 1;
+  string name      = 2;
+  string address   = 3;
+  int32  capacity  = 4;
+}
+
+message ReserveSeatRequest  { string venue_id = 1; string seat_id = 2; string order_id = 3; }
+message ReserveSeatResponse { bool success = 1; string seat_id = 2; }
+
+message ReleaseSeatRequest  { string venue_id = 1; string seat_id = 2; string order_id = 3; }
+message ReleaseSeatResponse { bool success = 1; string seat_id = 2; }
+```
+
+### 8.4 Generated Stubs
 
 - Generated via `buf generate` (using `buf.gen.yaml`)
 - Go stubs → `libs/grpc-stubs/go/`
@@ -912,12 +1039,15 @@ message ValidateTicketResponse {
 - Regenerated in CI on any `.proto` file change (`make proto`)
 - CI runs `buf breaking --against .git#branch=main` — fails on breaking changes without a version bump
 
-### 8.4 gRPC Client Deadlines
+### 8.5 gRPC Client Deadlines
 
 | RPC | Deadline |
 |---|---|
 | `ValidateTicketAvailability` | 5 s (read) |
 | `GetTicket` | 5 s (read) |
+| `ReserveSeat` | 5 s (write) |
+| `ReleaseSeat` | 5 s (write) |
+| `GetVenue` | 5 s (read) |
 
 ---
 
@@ -1041,6 +1171,11 @@ Triggered on change under `infra/terraform/`:
 │   │   ├── package.json
 │   │   └── README.md
 │   ├── expiration-service/     # Go / Echo v4 (health+metrics only) + asynq worker
+│   │   ├── src/
+│   │   ├── Dockerfile
+│   │   ├── go.mod
+│   │   └── README.md
+│   ├── venue-service/          # Go / Echo v4 + gRPC server + Kafka consumer
 │   │   ├── src/
 │   │   ├── Dockerfile
 │   │   ├── go.mod

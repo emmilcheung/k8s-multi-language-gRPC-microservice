@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package acme.venue.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1";
+option java_multiple_files = true;
+option java_outer_classname = "VenueProto";
+option java_package = "com.ticketing.orders.grpc";
+
+service VenueService {
+  rpc ReserveHeldSeats(ReserveHeldSeatsRequest) returns (ReserveHeldSeatsResponse);
+  rpc AutoAssignAndReserve(AutoAssignAndReserveRequest) returns (AutoAssignAndReserveResponse);
+  rpc ReleaseSeatReservation(ReleaseSeatReservationRequest) returns (ReleaseSeatReservationResponse);
+  rpc FinalizeSeatReservation(FinalizeSeatReservationRequest) returns (FinalizeSeatReservationResponse);
+  rpc GetSeatingPlan(GetSeatingPlanRequest) returns (GetSeatingPlanResponse);
+}
+
+message SeatDetail {
+  string seat_id = 1;
+  string section_id = 2;
+  string seat_label = 3;
+  string price = 4;
+}
+
+message ReserveHeldSeatsRequest {
+  string plan_id = 1;
+  string ticket_id = 2;
+  string reservation_id = 3;
+  string user_id = 4;
+  repeated string seat_ids = 5;
+  google.protobuf.Timestamp expires_at = 6;
+}
+
+message ReserveHeldSeatsResponse {
+  bool success = 1;
+  string reservation_id = 2;
+  repeated SeatDetail seats = 3;
+  repeated string unavailable_seat_ids = 4;
+}
+
+message AutoAssignAndReserveRequest {
+  string plan_id = 1;
+  string ticket_id = 2;
+  string section_id = 3;
+  string reservation_id = 4;
+  string user_id = 5;
+  int32 quantity = 6;
+  google.protobuf.Timestamp expires_at = 7;
+}
+
+message AutoAssignAndReserveResponse {
+  bool success = 1;
+  string reservation_id = 2;
+  repeated SeatDetail seats = 3;
+}
+
+message ReleaseSeatReservationRequest {
+  string reservation_id = 1;
+  string reason = 2; // CANCELLED | EXPIRED | COMPENSATION
+}
+
+message ReleaseSeatReservationResponse {
+  bool success = 1;
+}
+
+message FinalizeSeatReservationRequest {
+  string reservation_id = 1;
+  string order_id = 2;
+}
+
+message FinalizeSeatReservationResponse {
+  bool success = 1;
+}
+
+message GetSeatingPlanRequest {
+  string plan_id = 1;
+}
+
+message GetSeatingPlanResponse {
+  string plan_id = 1;
+  string ticket_id = 2;
+  string status = 3;
+  string assignment_mode = 4; // "manual" or "auto"
+}

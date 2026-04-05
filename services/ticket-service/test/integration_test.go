@@ -15,11 +15,13 @@ import (
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
+	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	echofx "github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	tcmongo "github.com/testcontainers/testcontainers-go/modules/mongodb"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 // noopPublisher satisfies service.EventPublisher without requiring a real Kafka broker.
@@ -31,6 +33,33 @@ func (p *noopPublisher) PublishTicketCreated(_ context.Context, _ kafka.TicketEv
 }
 func (p *noopPublisher) PublishTicketUpdated(_ context.Context, _ kafka.TicketEventData) error {
 	return nil
+}
+
+// stubVenueClient is a stub for venue-service gRPC client used in tests
+type stubVenueClient struct{}
+
+func (*stubVenueClient) ReserveHeldSeats(_ context.Context, _ *venuev1.ReserveHeldSeatsRequest, _ ...grpc.CallOption) (*venuev1.ReserveHeldSeatsResponse, error) {
+	return nil, nil
+}
+
+func (*stubVenueClient) AutoAssignAndReserve(_ context.Context, _ *venuev1.AutoAssignAndReserveRequest, _ ...grpc.CallOption) (*venuev1.AutoAssignAndReserveResponse, error) {
+	return nil, nil
+}
+
+func (*stubVenueClient) ReleaseSeatReservation(_ context.Context, _ *venuev1.ReleaseSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.ReleaseSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*stubVenueClient) FinalizeSeatReservation(_ context.Context, _ *venuev1.FinalizeSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.FinalizeSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*stubVenueClient) GetSeatingPlan(_ context.Context, req *venuev1.GetSeatingPlanRequest, _ ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error) {
+	// Stub: return a plan with manual assignment mode by default
+	return &venuev1.GetSeatingPlanResponse{
+		PlanId:         req.PlanId,
+		AssignmentMode: "manual",
+	}, nil
 }
 
 // setupTestServer starts a real MongoDB via Testcontainers, wires the full Echo stack,
@@ -53,7 +82,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, func()) {
 	require.NoError(t, err, "failed to create mongo repository")
 
 	log := zap.NewNop()
-	svc := service.NewTicketService(repo, &noopPublisher{}, log)
+	svc := service.NewTicketService(repo, &noopPublisher{}, log, &stubVenueClient{})
 
 	e := echofx.New()
 	e.HideBanner = true
@@ -70,6 +99,8 @@ func setupTestServer(t *testing.T) (*httptest.Server, func()) {
 	g.GET("", ticketH.List)
 	g.GET("/:id", ticketH.GetByID)
 	g.PUT("/:id", ticketH.Update)
+	g.PUT("/:id/seating-plan", ticketH.AttachSeatingPlan)
+	g.DELETE("/:id/seating-plan", ticketH.DetachSeatingPlan)
 
 	ts := httptest.NewServer(e)
 
@@ -103,7 +134,7 @@ func TestCreateTicket_ShouldReturn201WithTicketBody(t *testing.T) {
 	ts, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	body := jsonBody(t, map[string]interface{}{"title": "Concert Ticket", "price": 29.99})
+	body := jsonBody(t, map[string]interface{}{"title": "Concert Ticket", "price": "29.99"})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "user-123")
@@ -117,7 +148,7 @@ func TestCreateTicket_ShouldReturn201WithTicketBody(t *testing.T) {
 	var result map[string]interface{}
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 	assert.Equal(t, "Concert Ticket", result["title"])
-	assert.Equal(t, 29.99, result["price"])
+	assert.Equal(t, "29.99", result["price"])
 	assert.Equal(t, "user-123", result["userId"])
 	assert.NotEmpty(t, result["id"])
 }
@@ -126,7 +157,7 @@ func TestCreateTicket_ShouldReturn401WhenNoUserHeader(t *testing.T) {
 	ts, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	body := jsonBody(t, map[string]interface{}{"title": "Concert", "price": 10.0})
+	body := jsonBody(t, map[string]interface{}{"title": "Concert", "price": "10.00"})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	req.Header.Set("Content-Type", "application/json")
 	// No X-User-Id header
@@ -142,7 +173,7 @@ func TestCreateTicket_ShouldReturn400WhenTitleIsEmpty(t *testing.T) {
 	ts, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	body := jsonBody(t, map[string]interface{}{"title": "", "price": 10.0})
+	body := jsonBody(t, map[string]interface{}{"title": "", "price": "10.00"})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "user-1")
@@ -158,7 +189,7 @@ func TestCreateTicket_ShouldReturn400WhenPriceIsNegative(t *testing.T) {
 	ts, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	body := jsonBody(t, map[string]interface{}{"title": "Ticket", "price": -5.0})
+	body := jsonBody(t, map[string]interface{}{"title": "Ticket", "price": "-5.00"})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "user-1")
@@ -175,7 +206,7 @@ func TestGetTicketByID_ShouldReturn200ForExistingTicket(t *testing.T) {
 	defer cleanup()
 
 	// Create a ticket first
-	body := jsonBody(t, map[string]interface{}{"title": "Rock Concert", "price": 50.0})
+	body := jsonBody(t, map[string]interface{}{"title": "Rock Concert", "price": "50.00"})
 	createReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("X-User-Id", "user-1")
@@ -234,7 +265,7 @@ func TestListTickets_ShouldReturnAllCreatedTickets(t *testing.T) {
 
 	titles := []string{"Ticket A", "Ticket B", "Ticket C"}
 	for _, title := range titles {
-		body := jsonBody(t, map[string]interface{}{"title": title, "price": 10.0})
+		body := jsonBody(t, map[string]interface{}{"title": title, "price": "10.00"})
 		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-User-Id", "user-1")
@@ -260,7 +291,7 @@ func TestUpdateTicket_ShouldReturn200WhenOwnerUpdates(t *testing.T) {
 	defer cleanup()
 
 	// Create ticket
-	body := jsonBody(t, map[string]interface{}{"title": "Old Title", "price": 10.0})
+	body := jsonBody(t, map[string]interface{}{"title": "Old Title", "price": "10.00"})
 	createReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("X-User-Id", "owner-user")
@@ -274,7 +305,7 @@ func TestUpdateTicket_ShouldReturn200WhenOwnerUpdates(t *testing.T) {
 	ticketID := created["id"].(string)
 
 	// Update ticket
-	updateBody := jsonBody(t, map[string]interface{}{"title": "New Title", "price": 99.99})
+	updateBody := jsonBody(t, map[string]interface{}{"title": "New Title", "price": "99.99"})
 	updateReq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/tickets/"+ticketID, updateBody)
 	updateReq.Header.Set("Content-Type", "application/json")
 	updateReq.Header.Set("X-User-Id", "owner-user")
@@ -286,7 +317,7 @@ func TestUpdateTicket_ShouldReturn200WhenOwnerUpdates(t *testing.T) {
 	var updated map[string]interface{}
 	require.NoError(t, json.NewDecoder(updateResp.Body).Decode(&updated))
 	assert.Equal(t, "New Title", updated["title"])
-	assert.Equal(t, 99.99, updated["price"])
+	assert.Equal(t, "99.99", updated["price"])
 }
 
 func TestUpdateTicket_ShouldReturn403WhenNonOwnerUpdates(t *testing.T) {
@@ -294,7 +325,7 @@ func TestUpdateTicket_ShouldReturn403WhenNonOwnerUpdates(t *testing.T) {
 	defer cleanup()
 
 	// Create ticket as owner
-	body := jsonBody(t, map[string]interface{}{"title": "Title", "price": 10.0})
+	body := jsonBody(t, map[string]interface{}{"title": "Title", "price": "10.00"})
 	createReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("X-User-Id", "owner-user")
@@ -307,7 +338,7 @@ func TestUpdateTicket_ShouldReturn403WhenNonOwnerUpdates(t *testing.T) {
 	ticketID := created["id"].(string)
 
 	// Try to update as different user
-	updateBody := jsonBody(t, map[string]interface{}{"title": "Hijacked", "price": 1.0})
+	updateBody := jsonBody(t, map[string]interface{}{"title": "Hijacked", "price": "1.00"})
 	updateReq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/tickets/"+ticketID, updateBody)
 	updateReq.Header.Set("Content-Type", "application/json")
 	updateReq.Header.Set("X-User-Id", "attacker-user")
@@ -322,7 +353,7 @@ func TestUpdateTicket_ShouldReturn404ForNonExistentTicket(t *testing.T) {
 	ts, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	body := jsonBody(t, map[string]interface{}{"title": "Title", "price": 10.0})
+	body := jsonBody(t, map[string]interface{}{"title": "Title", "price": "10.00"})
 	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/tickets/22222222-2222-4222-8222-222222222222", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "user-1")
@@ -375,7 +406,7 @@ func TestUpdateTicket_ConcurrentOCC(t *testing.T) {
 	original := &repository.Ticket{
 		ID:     "occ-test-ticket-id",
 		Title:  "Original Title",
-		Price:  50.0,
+		Price:  "50.0",
 		UserID: "owner-123",
 	}
 	require.NoError(t, repo.Create(ctx, original))

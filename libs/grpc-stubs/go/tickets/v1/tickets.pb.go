@@ -72,10 +72,22 @@ type GetTicketResponse struct {
 	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
 	Price         string                 `protobuf:"bytes,3,opt,name=price,proto3" json:"price,omitempty"` // decimal string, e.g. "12.50" — avoids floating-point precision loss
 	UserId        string                 `protobuf:"bytes,4,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	OrderId       string                 `protobuf:"bytes,5,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	OrderId       string                 `protobuf:"bytes,5,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"` // deprecated: kept for rollout compatibility with legacy flow
 	Version       int64                  `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Quota         int32                  `protobuf:"varint,9,opt,name=quota,proto3" json:"quota,omitempty"`
+	Reserved      int32                  `protobuf:"varint,10,opt,name=reserved,proto3" json:"reserved,omitempty"`
+	Sold          int32                  `protobuf:"varint,11,opt,name=sold,proto3" json:"sold,omitempty"`
+	MaxPerUser    int32                  `protobuf:"varint,12,opt,name=max_per_user,json=maxPerUser,proto3" json:"max_per_user,omitempty"`
+	SeatingPlanId string                 `protobuf:"bytes,13,opt,name=seating_plan_id,json=seatingPlanId,proto3" json:"seating_plan_id,omitempty"`
+	EventTitle    string                 `protobuf:"bytes,14,opt,name=event_title,json=eventTitle,proto3" json:"event_title,omitempty"` // WS8: event metadata
+	EventStartsAt *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=event_starts_at,json=eventStartsAt,proto3" json:"event_starts_at,omitempty"`
+	EventEndsAt   *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=event_ends_at,json=eventEndsAt,proto3" json:"event_ends_at,omitempty"`
+	EventImageUrl string                 `protobuf:"bytes,17,opt,name=event_image_url,json=eventImageUrl,proto3" json:"event_image_url,omitempty"`
+	VenueName     string                 `protobuf:"bytes,18,opt,name=venue_name,json=venueName,proto3" json:"venue_name,omitempty"`
+	VenueAddress  string                 `protobuf:"bytes,19,opt,name=venue_address,json=venueAddress,proto3" json:"venue_address,omitempty"`
+	TicketType    string                 `protobuf:"bytes,20,opt,name=ticket_type,json=ticketType,proto3" json:"ticket_type,omitempty"` // WS3: "GA" | "SEATED_MANUAL" | "SEATED_AUTO"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -164,6 +176,90 @@ func (x *GetTicketResponse) GetUpdatedAt() *timestamppb.Timestamp {
 		return x.UpdatedAt
 	}
 	return nil
+}
+
+func (x *GetTicketResponse) GetQuota() int32 {
+	if x != nil {
+		return x.Quota
+	}
+	return 0
+}
+
+func (x *GetTicketResponse) GetReserved() int32 {
+	if x != nil {
+		return x.Reserved
+	}
+	return 0
+}
+
+func (x *GetTicketResponse) GetSold() int32 {
+	if x != nil {
+		return x.Sold
+	}
+	return 0
+}
+
+func (x *GetTicketResponse) GetMaxPerUser() int32 {
+	if x != nil {
+		return x.MaxPerUser
+	}
+	return 0
+}
+
+func (x *GetTicketResponse) GetSeatingPlanId() string {
+	if x != nil {
+		return x.SeatingPlanId
+	}
+	return ""
+}
+
+func (x *GetTicketResponse) GetEventTitle() string {
+	if x != nil {
+		return x.EventTitle
+	}
+	return ""
+}
+
+func (x *GetTicketResponse) GetEventStartsAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EventStartsAt
+	}
+	return nil
+}
+
+func (x *GetTicketResponse) GetEventEndsAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EventEndsAt
+	}
+	return nil
+}
+
+func (x *GetTicketResponse) GetEventImageUrl() string {
+	if x != nil {
+		return x.EventImageUrl
+	}
+	return ""
+}
+
+func (x *GetTicketResponse) GetVenueName() string {
+	if x != nil {
+		return x.VenueName
+	}
+	return ""
+}
+
+func (x *GetTicketResponse) GetVenueAddress() string {
+	if x != nil {
+		return x.VenueAddress
+	}
+	return ""
+}
+
+func (x *GetTicketResponse) GetTicketType() string {
+	if x != nil {
+		return x.TicketType
+	}
+	return ""
 }
 
 type ValidateTicketRequest struct {
@@ -278,13 +374,405 @@ func (x *ValidateTicketResponse) GetTitle() string {
 	return ""
 }
 
+type ReserveQuotaRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TicketId      string                 `protobuf:"bytes,1,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"`
+	ReservationId string                 `protobuf:"bytes,2,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Quantity      int32                  `protobuf:"varint,4,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReserveQuotaRequest) Reset() {
+	*x = ReserveQuotaRequest{}
+	mi := &file_tickets_v1_tickets_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReserveQuotaRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReserveQuotaRequest) ProtoMessage() {}
+
+func (x *ReserveQuotaRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tickets_v1_tickets_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReserveQuotaRequest.ProtoReflect.Descriptor instead.
+func (*ReserveQuotaRequest) Descriptor() ([]byte, []int) {
+	return file_tickets_v1_tickets_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ReserveQuotaRequest) GetTicketId() string {
+	if x != nil {
+		return x.TicketId
+	}
+	return ""
+}
+
+func (x *ReserveQuotaRequest) GetReservationId() string {
+	if x != nil {
+		return x.ReservationId
+	}
+	return ""
+}
+
+func (x *ReserveQuotaRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ReserveQuotaRequest) GetQuantity() int32 {
+	if x != nil {
+		return x.Quantity
+	}
+	return 0
+}
+
+func (x *ReserveQuotaRequest) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
+}
+
+type ReserveQuotaResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	ReservationId string                 `protobuf:"bytes,2,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
+	TicketId      string                 `protobuf:"bytes,3,opt,name=ticket_id,json=ticketId,proto3" json:"ticket_id,omitempty"`
+	Quantity      int32                  `protobuf:"varint,4,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	Remaining     int32                  `protobuf:"varint,5,opt,name=remaining,proto3" json:"remaining,omitempty"`
+	Title         string                 `protobuf:"bytes,6,opt,name=title,proto3" json:"title,omitempty"`
+	Price         string                 `protobuf:"bytes,7,opt,name=price,proto3" json:"price,omitempty"`
+	MaxPerUser    int32                  `protobuf:"varint,8,opt,name=max_per_user,json=maxPerUser,proto3" json:"max_per_user,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReserveQuotaResponse) Reset() {
+	*x = ReserveQuotaResponse{}
+	mi := &file_tickets_v1_tickets_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReserveQuotaResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReserveQuotaResponse) ProtoMessage() {}
+
+func (x *ReserveQuotaResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tickets_v1_tickets_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReserveQuotaResponse.ProtoReflect.Descriptor instead.
+func (*ReserveQuotaResponse) Descriptor() ([]byte, []int) {
+	return file_tickets_v1_tickets_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ReserveQuotaResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ReserveQuotaResponse) GetReservationId() string {
+	if x != nil {
+		return x.ReservationId
+	}
+	return ""
+}
+
+func (x *ReserveQuotaResponse) GetTicketId() string {
+	if x != nil {
+		return x.TicketId
+	}
+	return ""
+}
+
+func (x *ReserveQuotaResponse) GetQuantity() int32 {
+	if x != nil {
+		return x.Quantity
+	}
+	return 0
+}
+
+func (x *ReserveQuotaResponse) GetRemaining() int32 {
+	if x != nil {
+		return x.Remaining
+	}
+	return 0
+}
+
+func (x *ReserveQuotaResponse) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *ReserveQuotaResponse) GetPrice() string {
+	if x != nil {
+		return x.Price
+	}
+	return ""
+}
+
+func (x *ReserveQuotaResponse) GetMaxPerUser() int32 {
+	if x != nil {
+		return x.MaxPerUser
+	}
+	return 0
+}
+
+type ReleaseReservationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ReservationId string                 `protobuf:"bytes,1,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"` // CANCELLED | EXPIRED | COMPENSATION
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReleaseReservationRequest) Reset() {
+	*x = ReleaseReservationRequest{}
+	mi := &file_tickets_v1_tickets_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReleaseReservationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReleaseReservationRequest) ProtoMessage() {}
+
+func (x *ReleaseReservationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tickets_v1_tickets_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReleaseReservationRequest.ProtoReflect.Descriptor instead.
+func (*ReleaseReservationRequest) Descriptor() ([]byte, []int) {
+	return file_tickets_v1_tickets_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ReleaseReservationRequest) GetReservationId() string {
+	if x != nil {
+		return x.ReservationId
+	}
+	return ""
+}
+
+func (x *ReleaseReservationRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type ReleaseReservationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	ReservationId string                 `protobuf:"bytes,2,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
+	Remaining     int32                  `protobuf:"varint,3,opt,name=remaining,proto3" json:"remaining,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReleaseReservationResponse) Reset() {
+	*x = ReleaseReservationResponse{}
+	mi := &file_tickets_v1_tickets_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReleaseReservationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReleaseReservationResponse) ProtoMessage() {}
+
+func (x *ReleaseReservationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tickets_v1_tickets_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReleaseReservationResponse.ProtoReflect.Descriptor instead.
+func (*ReleaseReservationResponse) Descriptor() ([]byte, []int) {
+	return file_tickets_v1_tickets_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ReleaseReservationResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ReleaseReservationResponse) GetReservationId() string {
+	if x != nil {
+		return x.ReservationId
+	}
+	return ""
+}
+
+func (x *ReleaseReservationResponse) GetRemaining() int32 {
+	if x != nil {
+		return x.Remaining
+	}
+	return 0
+}
+
+type FinalizeReservationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ReservationId string                 `protobuf:"bytes,1,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
+	OrderId       string                 `protobuf:"bytes,2,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FinalizeReservationRequest) Reset() {
+	*x = FinalizeReservationRequest{}
+	mi := &file_tickets_v1_tickets_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FinalizeReservationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FinalizeReservationRequest) ProtoMessage() {}
+
+func (x *FinalizeReservationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tickets_v1_tickets_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FinalizeReservationRequest.ProtoReflect.Descriptor instead.
+func (*FinalizeReservationRequest) Descriptor() ([]byte, []int) {
+	return file_tickets_v1_tickets_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *FinalizeReservationRequest) GetReservationId() string {
+	if x != nil {
+		return x.ReservationId
+	}
+	return ""
+}
+
+func (x *FinalizeReservationRequest) GetOrderId() string {
+	if x != nil {
+		return x.OrderId
+	}
+	return ""
+}
+
+type FinalizeReservationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	ReservationId string                 `protobuf:"bytes,2,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FinalizeReservationResponse) Reset() {
+	*x = FinalizeReservationResponse{}
+	mi := &file_tickets_v1_tickets_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FinalizeReservationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FinalizeReservationResponse) ProtoMessage() {}
+
+func (x *FinalizeReservationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tickets_v1_tickets_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FinalizeReservationResponse.ProtoReflect.Descriptor instead.
+func (*FinalizeReservationResponse) Descriptor() ([]byte, []int) {
+	return file_tickets_v1_tickets_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *FinalizeReservationResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *FinalizeReservationResponse) GetReservationId() string {
+	if x != nil {
+		return x.ReservationId
+	}
+	return ""
+}
+
 var File_tickets_v1_tickets_proto protoreflect.FileDescriptor
 
 const file_tickets_v1_tickets_proto_rawDesc = "" +
 	"\n" +
 	"\x18tickets/v1/tickets.proto\x12\x0facme.tickets.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"/\n" +
 	"\x10GetTicketRequest\x12\x1b\n" +
-	"\tticket_id\x18\x01 \x01(\tR\bticketId\"\xa0\x02\n" +
+	"\tticket_id\x18\x01 \x01(\tR\bticketId\"\xb0\x03\n" +
 	"\x11GetTicketResponse\x12\x1b\n" +
 	"\tticket_id\x18\x01 \x01(\tR\bticketId\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x14\n" +
@@ -295,17 +783,57 @@ const file_tickets_v1_tickets_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"4\n" +
+	"updated_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x14\n" +
+	"\x05quota\x18\t \x01(\x05R\x05quota\x12\x1a\n" +
+	"\breserved\x18\n" +
+	" \x01(\x05R\breserved\x12\x12\n" +
+	"\x04sold\x18\v \x01(\x05R\x04sold\x12 \n" +
+	"\fmax_per_user\x18\f \x01(\x05R\n" +
+	"maxPerUser\x12&\n" +
+	"\x0fseating_plan_id\x18\r \x01(\tR\rseatingPlanId\"4\n" +
 	"\x15ValidateTicketRequest\x12\x1b\n" +
 	"\tticket_id\x18\x01 \x01(\tR\bticketId\"\x7f\n" +
 	"\x16ValidateTicketResponse\x12\x1c\n" +
 	"\tavailable\x18\x01 \x01(\bR\tavailable\x12\x1b\n" +
 	"\tticket_id\x18\x02 \x01(\tR\bticketId\x12\x14\n" +
 	"\x05price\x18\x03 \x01(\tR\x05price\x12\x14\n" +
-	"\x05title\x18\x04 \x01(\tR\x05title2\xd2\x01\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\"\xc9\x01\n" +
+	"\x13ReserveQuotaRequest\x12\x1b\n" +
+	"\tticket_id\x18\x01 \x01(\tR\bticketId\x12%\n" +
+	"\x0ereservation_id\x18\x02 \x01(\tR\rreservationId\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\tR\x06userId\x12\x1a\n" +
+	"\bquantity\x18\x04 \x01(\x05R\bquantity\x129\n" +
+	"\n" +
+	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\xfc\x01\n" +
+	"\x14ReserveQuotaResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12%\n" +
+	"\x0ereservation_id\x18\x02 \x01(\tR\rreservationId\x12\x1b\n" +
+	"\tticket_id\x18\x03 \x01(\tR\bticketId\x12\x1a\n" +
+	"\bquantity\x18\x04 \x01(\x05R\bquantity\x12\x1c\n" +
+	"\tremaining\x18\x05 \x01(\x05R\tremaining\x12\x14\n" +
+	"\x05title\x18\x06 \x01(\tR\x05title\x12\x14\n" +
+	"\x05price\x18\a \x01(\tR\x05price\x12 \n" +
+	"\fmax_per_user\x18\b \x01(\x05R\n" +
+	"maxPerUser\"Z\n" +
+	"\x19ReleaseReservationRequest\x12%\n" +
+	"\x0ereservation_id\x18\x01 \x01(\tR\rreservationId\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"{\n" +
+	"\x1aReleaseReservationResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12%\n" +
+	"\x0ereservation_id\x18\x02 \x01(\tR\rreservationId\x12\x1c\n" +
+	"\tremaining\x18\x03 \x01(\x05R\tremaining\"^\n" +
+	"\x1aFinalizeReservationRequest\x12%\n" +
+	"\x0ereservation_id\x18\x01 \x01(\tR\rreservationId\x12\x19\n" +
+	"\border_id\x18\x02 \x01(\tR\aorderId\"^\n" +
+	"\x1bFinalizeReservationResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12%\n" +
+	"\x0ereservation_id\x18\x02 \x01(\tR\rreservationId2\x90\x04\n" +
 	"\rTicketService\x12R\n" +
 	"\tGetTicket\x12!.acme.tickets.v1.GetTicketRequest\x1a\".acme.tickets.v1.GetTicketResponse\x12m\n" +
-	"\x1aValidateTicketAvailability\x12&.acme.tickets.v1.ValidateTicketRequest\x1a'.acme.tickets.v1.ValidateTicketResponseB\xc3\x01\n" +
+	"\x1aValidateTicketAvailability\x12&.acme.tickets.v1.ValidateTicketRequest\x1a'.acme.tickets.v1.ValidateTicketResponse\x12[\n" +
+	"\fReserveQuota\x12$.acme.tickets.v1.ReserveQuotaRequest\x1a%.acme.tickets.v1.ReserveQuotaResponse\x12m\n" +
+	"\x12ReleaseReservation\x12*.acme.tickets.v1.ReleaseReservationRequest\x1a+.acme.tickets.v1.ReleaseReservationResponse\x12p\n" +
+	"\x13FinalizeReservation\x12+.acme.tickets.v1.FinalizeReservationRequest\x1a,.acme.tickets.v1.FinalizeReservationResponseB\xc3\x01\n" +
 	"\x13com.acme.tickets.v1B\fTicketsProtoP\x01Z@github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1;ticketsv1\xa2\x02\x03ATX\xaa\x02\x0fAcme.Tickets.V1\xca\x02\x0fAcme\\Tickets\\V1\xe2\x02\x1bAcme\\Tickets\\V1\\GPBMetadata\xea\x02\x11Acme::Tickets::V1b\x06proto3"
 
 var (
@@ -320,26 +848,39 @@ func file_tickets_v1_tickets_proto_rawDescGZIP() []byte {
 	return file_tickets_v1_tickets_proto_rawDescData
 }
 
-var file_tickets_v1_tickets_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_tickets_v1_tickets_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_tickets_v1_tickets_proto_goTypes = []any{
-	(*GetTicketRequest)(nil),       // 0: acme.tickets.v1.GetTicketRequest
-	(*GetTicketResponse)(nil),      // 1: acme.tickets.v1.GetTicketResponse
-	(*ValidateTicketRequest)(nil),  // 2: acme.tickets.v1.ValidateTicketRequest
-	(*ValidateTicketResponse)(nil), // 3: acme.tickets.v1.ValidateTicketResponse
-	(*timestamppb.Timestamp)(nil),  // 4: google.protobuf.Timestamp
+	(*GetTicketRequest)(nil),            // 0: acme.tickets.v1.GetTicketRequest
+	(*GetTicketResponse)(nil),           // 1: acme.tickets.v1.GetTicketResponse
+	(*ValidateTicketRequest)(nil),       // 2: acme.tickets.v1.ValidateTicketRequest
+	(*ValidateTicketResponse)(nil),      // 3: acme.tickets.v1.ValidateTicketResponse
+	(*ReserveQuotaRequest)(nil),         // 4: acme.tickets.v1.ReserveQuotaRequest
+	(*ReserveQuotaResponse)(nil),        // 5: acme.tickets.v1.ReserveQuotaResponse
+	(*ReleaseReservationRequest)(nil),   // 6: acme.tickets.v1.ReleaseReservationRequest
+	(*ReleaseReservationResponse)(nil),  // 7: acme.tickets.v1.ReleaseReservationResponse
+	(*FinalizeReservationRequest)(nil),  // 8: acme.tickets.v1.FinalizeReservationRequest
+	(*FinalizeReservationResponse)(nil), // 9: acme.tickets.v1.FinalizeReservationResponse
+	(*timestamppb.Timestamp)(nil),       // 10: google.protobuf.Timestamp
 }
 var file_tickets_v1_tickets_proto_depIdxs = []int32{
-	4, // 0: acme.tickets.v1.GetTicketResponse.created_at:type_name -> google.protobuf.Timestamp
-	4, // 1: acme.tickets.v1.GetTicketResponse.updated_at:type_name -> google.protobuf.Timestamp
-	0, // 2: acme.tickets.v1.TicketService.GetTicket:input_type -> acme.tickets.v1.GetTicketRequest
-	2, // 3: acme.tickets.v1.TicketService.ValidateTicketAvailability:input_type -> acme.tickets.v1.ValidateTicketRequest
-	1, // 4: acme.tickets.v1.TicketService.GetTicket:output_type -> acme.tickets.v1.GetTicketResponse
-	3, // 5: acme.tickets.v1.TicketService.ValidateTicketAvailability:output_type -> acme.tickets.v1.ValidateTicketResponse
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	10, // 0: acme.tickets.v1.GetTicketResponse.created_at:type_name -> google.protobuf.Timestamp
+	10, // 1: acme.tickets.v1.GetTicketResponse.updated_at:type_name -> google.protobuf.Timestamp
+	10, // 2: acme.tickets.v1.ReserveQuotaRequest.expires_at:type_name -> google.protobuf.Timestamp
+	0,  // 3: acme.tickets.v1.TicketService.GetTicket:input_type -> acme.tickets.v1.GetTicketRequest
+	2,  // 4: acme.tickets.v1.TicketService.ValidateTicketAvailability:input_type -> acme.tickets.v1.ValidateTicketRequest
+	4,  // 5: acme.tickets.v1.TicketService.ReserveQuota:input_type -> acme.tickets.v1.ReserveQuotaRequest
+	6,  // 6: acme.tickets.v1.TicketService.ReleaseReservation:input_type -> acme.tickets.v1.ReleaseReservationRequest
+	8,  // 7: acme.tickets.v1.TicketService.FinalizeReservation:input_type -> acme.tickets.v1.FinalizeReservationRequest
+	1,  // 8: acme.tickets.v1.TicketService.GetTicket:output_type -> acme.tickets.v1.GetTicketResponse
+	3,  // 9: acme.tickets.v1.TicketService.ValidateTicketAvailability:output_type -> acme.tickets.v1.ValidateTicketResponse
+	5,  // 10: acme.tickets.v1.TicketService.ReserveQuota:output_type -> acme.tickets.v1.ReserveQuotaResponse
+	7,  // 11: acme.tickets.v1.TicketService.ReleaseReservation:output_type -> acme.tickets.v1.ReleaseReservationResponse
+	9,  // 12: acme.tickets.v1.TicketService.FinalizeReservation:output_type -> acme.tickets.v1.FinalizeReservationResponse
+	8,  // [8:13] is the sub-list for method output_type
+	3,  // [3:8] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_tickets_v1_tickets_proto_init() }
@@ -353,7 +894,7 @@ func file_tickets_v1_tickets_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tickets_v1_tickets_proto_rawDesc), len(file_tickets_v1_tickets_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

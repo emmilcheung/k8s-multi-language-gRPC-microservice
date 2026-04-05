@@ -7,6 +7,7 @@ import Link from "next/link";
 import { serverApi } from "@/lib/api";
 import type { Order } from "@/lib/types";
 import { STATUS_LABEL, STATUS_BADGE } from "@/lib/order-status";
+import { calculateOrderTotal } from "@/lib/order-utils";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { OrderPaymentForm } from "@/components/order-payment-form";
@@ -62,6 +63,7 @@ export default async function OrderDetailPage({ params }: Props) {
   const canPay = order.status === "awaiting_payment" || order.status === "created";
   const currentStep = STEP_ORDER[order.status];
   const isCancelled = order.status === "cancelled";
+  const amount = calculateOrderTotal(order);
 
   return (
     <div className="flex flex-col gap-8 max-w-4xl mx-auto">
@@ -163,7 +165,7 @@ export default async function OrderDetailPage({ params }: Props) {
               <div className="flex flex-col gap-0.5">
                 <p className="text-xs text-muted-foreground uppercase tracking-wider">Amount</p>
                 <p className="text-2xl font-bold gradient-text">
-                  ${order.ticket.price.toFixed(2)}
+                  ${amount.toFixed(2)}
                 </p>
               </div>
             </div>
@@ -198,7 +200,7 @@ export default async function OrderDetailPage({ params }: Props) {
         {canPay && (
           <OrderPaymentForm
             orderId={order.id}
-            amount={order.ticket.price}
+            amount={amount}
             expiresAt={order.expiresAt}
           />
         )}

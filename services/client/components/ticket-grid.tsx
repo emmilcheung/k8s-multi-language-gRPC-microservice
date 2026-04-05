@@ -9,7 +9,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowRight, Tag, Ticket as TicketIcon, Loader2 } from "lucide-react";
+import { ArrowRight, Tag, Ticket as TicketIcon, Loader2, ShoppingBag, Armchair, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
@@ -110,6 +110,53 @@ export function TicketGrid({
 }
 
 function TicketCard({ ticket }: { ticket: Ticket }) {
+  // Format event date badge if available
+  const eventDate = ticket.event?.startsAt
+    ? new Date(ticket.event.startsAt).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : null;
+
+  // Get ticket type icon
+  const getTicketTypeIcon = () => {
+    switch (ticket.ticketType) {
+      case "GA":
+        return <ShoppingBag className="w-4 h-4" />;
+      case "SEATED_MANUAL":
+        return <Armchair className="w-4 h-4" />;
+      case "SEATED_AUTO":
+        return <Zap className="w-4 h-4" />;
+      default:
+        return null;
+    }
+  };
+
+  const getTicketTypeLabel = () => {
+    switch (ticket.ticketType) {
+      case "GA":
+        return "GA";
+      case "SEATED_MANUAL":
+        return "Manual Seating";
+      case "SEATED_AUTO":
+        return "Auto Seating";
+      default:
+        return null;
+    }
+  };
+
+  // Calculate remaining GA tickets
+  const getRemainingCount = () => {
+    if (ticket.ticketType === "GA" && ticket.quota !== undefined && ticket.sold !== undefined) {
+      const remaining = ticket.quota - ticket.sold;
+      return remaining > 0 ? remaining : 0;
+    }
+    return null;
+  };
+
+  const remaining = getRemainingCount();
+
   return (
     <Link
       href={`/tickets/${ticket.id}`}
@@ -121,14 +168,38 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
           <TicketIcon className="w-5 h-5 text-primary/80" />
         </div>
         <Badge className="bg-primary/15 text-primary border-primary/20 font-semibold text-sm px-2.5 py-0.5 shrink-0">
-          ${ticket.price.toFixed(2)}
+          ${parseFloat(ticket.price).toFixed(2)}
         </Badge>
       </div>
+
+      {/* Event date badge (if available) */}
+      {eventDate && (
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <div className="px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-primary/80">
+            {eventDate}
+          </div>
+        </div>
+      )}
 
       {/* Title */}
       <p className="font-semibold leading-snug line-clamp-2 group-hover:text-primary transition-colors">
         {ticket.title}
       </p>
+
+      {/* Ticket type indicator + remaining count */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {ticket.ticketType && (
+          <div className="flex items-center gap-1.5 px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-xs text-muted-foreground">
+            {getTicketTypeIcon()}
+            <span>{getTicketTypeLabel()}</span>
+          </div>
+        )}
+        {remaining !== null && (
+          <div className="text-xs text-muted-foreground">
+            {remaining} remaining
+          </div>
+        )}
+      </div>
 
       {/* CTA */}
       <div className="flex items-center gap-1 text-xs text-muted-foreground group-hover:text-primary/80 transition-colors mt-auto">

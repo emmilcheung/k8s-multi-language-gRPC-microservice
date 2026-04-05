@@ -48,6 +48,30 @@ func (r *countingRepo) ReleaseTicket(ctx context.Context, ticketID string) error
 	return r.repo.ReleaseTicket(ctx, ticketID)
 }
 
+func (r *countingRepo) CreateReservation(ctx context.Context, res *repository.TicketReservation) error {
+	return r.repo.CreateReservation(ctx, res)
+}
+
+func (r *countingRepo) FindReservationByID(ctx context.Context, reservationID string) (*repository.TicketReservation, error) {
+	return r.repo.FindReservationByID(ctx, reservationID)
+}
+
+func (r *countingRepo) ReleaseReservation(ctx context.Context, reservationID string) error {
+	return r.repo.ReleaseReservation(ctx, reservationID)
+}
+
+func (r *countingRepo) FinalizeReservation(ctx context.Context, reservationID, orderID string) error {
+	return r.repo.FinalizeReservation(ctx, reservationID, orderID)
+}
+
+func (r *countingRepo) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID string) error {
+	return r.repo.AttachSeatingPlan(ctx, ticketID, planID, userID)
+}
+
+func (r *countingRepo) DetachSeatingPlan(ctx context.Context, ticketID, userID string) error {
+	return r.repo.DetachSeatingPlan(ctx, ticketID, userID)
+}
+
 func (r *countingRepo) Ping(ctx context.Context) error {
 	return r.repo.Ping(ctx)
 }
@@ -125,7 +149,7 @@ func seedTicket(t *testing.T, repo repository.TicketRepository, id, userID strin
 	err := repo.Create(context.Background(), &repository.Ticket{
 		ID:     id,
 		Title:  "Ticket " + id,
-		Price:  10,
+		Price:  "10.00",
 		UserID: userID,
 	})
 	require.NoError(t, err)
@@ -201,7 +225,7 @@ func TestCachingRepo_Create_invalidates_list_cache(t *testing.T) {
 	err := redisClient.Set(context.Background(), "ticket-service:tickets:list", "cached", 0).Err()
 	require.NoError(t, err)
 
-	err = cacheRepo.Create(context.Background(), &repository.Ticket{ID: "t-6", Title: "T6", Price: 10, UserID: "u-1"})
+	err = cacheRepo.Create(context.Background(), &repository.Ticket{ID: "t-6", Title: "T6", Price: "10.00", UserID: "u-1"})
 	require.NoError(t, err)
 
 	_, err = redisClient.Get(context.Background(), "ticket-service:tickets:list").Result()

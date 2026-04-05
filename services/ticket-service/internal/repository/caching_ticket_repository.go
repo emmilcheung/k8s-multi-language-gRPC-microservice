@@ -59,9 +59,9 @@ func (r *CachingTicketRepository) FindByID(ctx context.Context, id string) (*Tic
 }
 
 func (r *CachingTicketRepository) FindAll(ctx context.Context, p PaginationParams) ([]*Ticket, error) {
-	// Cache is only used for the default first-page request (no cursor, default limit).
-	// Paginated pages beyond the first are fetched directly from the DB.
-	useCache := p.After == "" && (p.Limit <= 0 || p.Limit == 20)
+	// Cache is only used for the default first-page request (no cursor, default limit, no filter).
+	// Paginated pages beyond the first, filtered requests, or custom limits are fetched directly from the DB.
+	useCache := p.After == "" && (p.Limit <= 0 || p.Limit == 20) && !p.AvailableOnly
 
 	if useCache {
 		if data, err := r.cache.GetList(ctx); err != nil {
@@ -137,4 +137,88 @@ func (r *CachingTicketRepository) Ping(ctx context.Context) error {
 
 func (r *CachingTicketRepository) Close(ctx context.Context) error {
 	return r.inner.Close(ctx)
+}
+
+// ─── Quota-based reservation passthrough ─────────────────────────────────────
+// Reservation writes invalidate the ticket cache because reserved/sold counters change.
+
+func (r *CachingTicketRepository) CreateReservation(ctx context.Context, res *TicketReservation) error {
+	if err := r.inner.CreateReservation(ctx, res); err != nil {
+		return err
+	}
+	if err := r.cache.InvalidateTicket(ctx, res.TicketID); err != nil {
+		r.log.Warn("failed to invalidate ticket cache after CreateReservation", zap.String("ticketId", res.TicketID), zap.Error(err))
+	}
+	if err := r.cache.InvalidateList(ctx); err != nil {
+		r.log.Warn("failed to invalidate ticket list cache after CreateReservation", zap.Error(err))
+	}
+	return nil
+}
+
+func (r *CachingTicketRepository) FindReservationByID(ctx context.Context, reservationID string) (*TicketReservation, error) {
+	return r.inner.FindReservationByID(ctx, reservationID)
+}
+
+func (r *CachingTicketRepository) ReleaseReservation(ctx context.Context, reservationID string) error {
+	res, err := r.inner.FindReservationByID(ctx, reservationID)
+	if err != nil {
+		return err
+	}
+	if err := r.inner.ReleaseReservation(ctx, reservationID); err != nil {
+		return err
+	}
+	if err := r.cache.InvalidateTicket(ctx, res.TicketID); err != nil {
+		r.log.Warn("failed to invalidate ticket cache after ReleaseReservation", zap.String("ticketId", res.TicketID), zap.Error(err))
+	}
+	if err := r.cache.InvalidateList(ctx); err != nil {
+		r.log.Warn("failed to invalidate ticket list cache after ReleaseReservation", zap.Error(err))
+	}
+	return nil
+}
+
+func (r *CachingTicketRepository) FinalizeReservation(ctx context.Context, reservationID, orderID string) error {
+	res, err := r.inner.FindReservationByID(ctx, reservationID)
+	if err != nil {
+		return err
+	}
+	if err := r.inner.FinalizeReservation(ctx, reservationID, orderID); err != nil {
+		return err
+	}
+	if err := r.cache.InvalidateTicket(ctx, res.TicketID); err != nil {
+		r.log.Warn("failed to invalidate ticket cache after FinalizeReservation", zap.String("ticketId", res.TicketID), zap.Error(err))
+	}
+	if err := r.cache.InvalidateList(ctx); err != nil {
+		r.log.Warn("failed to invalidate ticket list cache after FinalizeReservation", zap.Error(err))
+	}
+	return nil
+}
+
+// ─── Seating plan attachment passthrough (CP-13) ──────────────────────────────
+// Both operations mutate the ticket document, so the individual ticket cache and
+// the list cache are invalidated after a successful write.
+
+func (r *CachingTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID string) error {
+	if err := r.inner.AttachSeatingPlan(ctx, ticketID, planID, userID); err != nil {
+		return err
+	}
+	if err := r.cache.InvalidateTicket(ctx, ticketID); err != nil {
+		r.log.Warn("failed to invalidate ticket cache after AttachSeatingPlan", zap.String("ticketId", ticketID), zap.Error(err))
+	}
+	if err := r.cache.InvalidateList(ctx); err != nil {
+		r.log.Warn("failed to invalidate ticket list cache after AttachSeatingPlan", zap.Error(err))
+	}
+	return nil
+}
+
+func (r *CachingTicketRepository) DetachSeatingPlan(ctx context.Context, ticketID, userID string) error {
+	if err := r.inner.DetachSeatingPlan(ctx, ticketID, userID); err != nil {
+		return err
+	}
+	if err := r.cache.InvalidateTicket(ctx, ticketID); err != nil {
+		r.log.Warn("failed to invalidate ticket cache after DetachSeatingPlan", zap.String("ticketId", ticketID), zap.Error(err))
+	}
+	if err := r.cache.InvalidateList(ctx); err != nil {
+		r.log.Warn("failed to invalidate ticket list cache after DetachSeatingPlan", zap.Error(err))
+	}
+	return nil
 }
