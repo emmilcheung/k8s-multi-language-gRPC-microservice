@@ -53,8 +53,8 @@ async function createTicket(page: Page, title: string, price: string) {
   await fillInputAndTriggerChange(page, '#price', price);
   await fillInputAndTriggerChange(page, '#startsAt', "2025-05-11T14:00");
 
-  // Get the ticket creation form (has class "glass" and contains the title input)
-  const form = page.locator('form.glass');
+  // Get the ticket creation form that contains the title input.
+  const form = page.locator("form", { has: page.locator('#title') });
   await form.waitFor({ state: "visible", timeout: 5000 });
 
   const submitButton = form.getByRole("button", { name: /create ticket/i });

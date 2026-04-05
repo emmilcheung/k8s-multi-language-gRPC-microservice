@@ -32,7 +32,7 @@ export default async function HomePage() {
             className="font-display font-extrabold leading-[0.95] tracking-tight"
             style={{ fontSize: "clamp(3rem, 8vw, 5.5rem)" }}
           >
-            <span className="text-foreground">Find your</span>
+            <span className="text-foreground">Find your</span>{" "}
             <br />
             <span className="gradient-text">next show.</span>
           </h1>

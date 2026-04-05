@@ -133,8 +133,8 @@ describe("HomePage", () => {
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
 
-    expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
-    expect(screen.getByText(/starts here/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: /find your/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: /next show/i })).toBeInTheDocument();
   });
 
   it("renders TicketGrid with the fetched tickets", async () => {
@@ -157,7 +157,7 @@ describe("HomePage", () => {
     render(await HomePage());
 
     // availableCount = 1 (one ticket has no orderId)
-    expect(screen.getByText(/\(1\)/)).toBeInTheDocument();
+    expect(screen.getByText(/1\s*listings/)).toBeInTheDocument();
   });
 
   it("shows hasMore '+' indicator when there are more pages", async () => {
@@ -167,7 +167,7 @@ describe("HomePage", () => {
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
 
-    expect(screen.getByText(/\(1\+\)/)).toBeInTheDocument();
+    expect(screen.getByText(/1\s*\+\s*listings/)).toBeInTheDocument();
   });
 
   it("falls back gracefully when fetchTicketPage rejects", async () => {
