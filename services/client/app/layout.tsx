@@ -1,17 +1,18 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Syne, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { cookies } from "next/headers";
 import { NavBar } from "@/components/nav-bar";
 
-const geistSans = Geist({
-  variable: "--font-sans",
+const syne = Syne({
+  variable: "--font-display",
   subsets: ["latin"],
+  weight: ["400", "600", "700", "800"],
   display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const dmSans = DM_Sans({
+  variable: "--font-sans",
   subsets: ["latin"],
   display: "swap",
 });
@@ -31,26 +32,21 @@ export default async function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${syne.variable} ${dmSans.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-background text-foreground selection:bg-primary/30">
-        {/* Ambient gradient blobs */}
-        <div
-          aria-hidden
-          className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
-        >
-          <div className="absolute -top-40 -right-40 h-[600px] w-[600px] rounded-full bg-primary/10 blur-[120px]" />
-          <div className="absolute top-1/2 -left-60 h-[500px] w-[500px] rounded-full bg-violet-900/20 blur-[100px]" />
-          <div className="absolute bottom-0 right-1/4 h-[400px] w-[400px] rounded-full bg-indigo-900/15 blur-[100px]" />
-        </div>
-
+      <body className="min-h-full flex flex-col bg-background text-foreground selection:bg-primary/20 selection:text-primary">
         <NavBar isLoggedIn={isLoggedIn} />
         <main className="flex-1 container mx-auto px-4 py-10 max-w-6xl">
           {children}
         </main>
 
-        <footer className="border-t border-white/5 py-6 text-center text-xs text-muted-foreground">
-          © {new Date().getFullYear()} Ticketing Platform
+        <footer className="border-t border-border py-8">
+          <div className="container mx-auto px-4 max-w-6xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span className="font-display font-700 text-foreground text-sm tracking-tight">
+              MARQUEE
+            </span>
+            <span>© {new Date().getFullYear()} Ticketing Platform · All events welcome</span>
+          </div>
         </footer>
       </body>
     </html>

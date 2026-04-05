@@ -106,11 +106,11 @@ step "3/7  Building and loading service images into minikube..."
 info "  Building order-service (build context: repo root)..."
 docker build \
   --file "${REPO_ROOT}/services/order-service/Dockerfile" \
-  --tag order-service:local \
+  --tag order-service:latest \
   --quiet \
   "${REPO_ROOT}"
-minikube image load order-service:local
-info "  Loaded order-service:local"
+minikube image load order-service:latest
+info "  Loaded order-service:latest"
 
 # Build and load remaining services (parallel-safe: sequential for simplicity)
 # Using a space-separated "name:dir" list to avoid Bash 4 associative arrays
@@ -128,11 +128,11 @@ for SERVICE_ENTRY in \
   info "  Building ${SERVICE}..."
   docker build \
     --file "${SERVICE_DIR}/Dockerfile" \
-    --tag "${SERVICE}:local" \
+    --tag "${SERVICE}:latest" \
     --quiet \
     "${SERVICE_DIR}"
-  minikube image load "${SERVICE}:local"
-  info "  Loaded ${SERVICE}:local"
+  minikube image load "${SERVICE}:latest"
+  info "  Loaded ${SERVICE}:latest"
 done
 
 info "All service images loaded into minikube."
@@ -192,7 +192,7 @@ apply_secret auth-service-secrets \
 
 # ticket-service-secrets
 apply_secret ticket-service-secrets \
-  --from-literal=MONGO_URI="mongodb://mongo_user:mongo-local-secret@${MONGO_HOST}:27017/tickets?authSource=tickets" \
+  --from-literal=MONGO_URI="mongodb://mongo_user:mongo-local-secret@${MONGO_HOST}:27017/tickets?authSource=admin" \
   --from-literal=MONGO_DB="tickets" \
   --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092"
 
@@ -219,8 +219,9 @@ apply_secret expiration-service-secrets \
 
 # venue-service-secrets
 apply_secret venue-service-secrets \
-  --from-literal=DATABASE_URL="postgresql://venue_user:${PG_VENUE_PASS}@${PG_VENUE_HOST}:5432/venue_db" \
+  --from-literal=DATABASE_URL="postgres://venue_user:${PG_VENUE_PASS}@${PG_VENUE_HOST}:5432/venue_db?sslmode=disable" \
   --from-literal=REDIS_URL="redis://${REDIS_HOST}:6379" \
+  --from-literal=TICKET_SERVICE_URL="ticketing-ticket-service.ticketing.svc.cluster.local:50051" \
   --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092"
 
 info "All secrets created."

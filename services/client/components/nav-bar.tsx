@@ -1,6 +1,3 @@
-// components/nav-bar.tsx — Glassmorphism top navigation (Client Component).
-// Auth state is derived server-side (token httpOnly cookie) and passed as a prop.
-
 "use client";
 
 import Link from "next/link";
@@ -9,7 +6,7 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { Button } from "@/components/ui/button";
 import { signout } from "@/app/actions/auth";
 import { cn } from "@/lib/utils";
-import { Ticket, LayoutDashboard, LogOut, LogIn, UserPlus, Tag, Building2 } from "lucide-react";
+import { Tag, Building2, LayoutDashboard, LogOut, LogIn, UserPlus } from "lucide-react";
 
 interface NavBarProps {
   isLoggedIn: boolean;
@@ -24,60 +21,62 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
   }, []);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/8 bg-background/60 backdrop-blur-xl">
-      <div className="container mx-auto px-4 max-w-6xl h-16 flex items-center justify-between gap-4">
+    <header className="sticky top-0 z-50 bg-background border-b border-border">
+      <div className="container mx-auto px-4 max-w-6xl h-14 flex items-center justify-between gap-4">
         {/* Brand */}
-        <Link href="/" className="flex items-center gap-2 group shrink-0">
-          <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/20 ring-1 ring-primary/30 group-hover:bg-primary/30 transition-colors">
-            <Ticket className="w-4 h-4 text-primary" />
+        <Link href="/" className="flex items-center gap-2.5 group shrink-0">
+          <span className="flex items-center justify-center size-7 rounded bg-primary">
+            <span className="text-primary-foreground font-display font-extrabold text-xs tracking-widest leading-none">
+              M
+            </span>
           </span>
-          <span className="font-semibold text-base tracking-tight gradient-text">
-            Ticketing
+          <span className="font-display font-extrabold text-sm tracking-[0.12em] uppercase text-foreground">
+            Marquee
           </span>
         </Link>
 
-        {/* Nav links — hidden until mounted to avoid hydration flash */}
-        <nav className={cn("flex items-center gap-1 transition-opacity", mounted ? "opacity-100" : "opacity-0")}>
+        {/* Nav */}
+        <nav className={cn("flex items-center gap-0.5 transition-opacity", mounted ? "opacity-100" : "opacity-0")}>
           {isLoggedIn ? (
             <>
               <Link
                 href="/tickets/new"
                 className={cn(
                   buttonVariants({ variant: "ghost", size: "sm" }),
-                  "gap-1.5 text-muted-foreground hover:text-foreground"
+                  "gap-1.5 text-muted-foreground hover:text-foreground text-xs font-medium"
                 )}
               >
-                <Tag className="w-3.5 h-3.5" />
+                <Tag className="size-3.5" />
                 Sell
               </Link>
               <Link
                 href="/venues"
                 className={cn(
                   buttonVariants({ variant: "ghost", size: "sm" }),
-                  "gap-1.5 text-muted-foreground hover:text-foreground"
+                  "gap-1.5 text-muted-foreground hover:text-foreground text-xs font-medium"
                 )}
               >
-                <Building2 className="w-3.5 h-3.5" />
+                <Building2 className="size-3.5" />
                 Venues
               </Link>
               <Link
                 href="/orders"
                 className={cn(
                   buttonVariants({ variant: "ghost", size: "sm" }),
-                  "gap-1.5 text-muted-foreground hover:text-foreground"
+                  "gap-1.5 text-muted-foreground hover:text-foreground text-xs font-medium"
                 )}
               >
-                <LayoutDashboard className="w-3.5 h-3.5" />
-                My Orders
+                <LayoutDashboard className="size-3.5" />
+                Orders
               </Link>
-              <form action={signout}>
+              <form action={signout} className="ml-1">
                 <Button
                   type="submit"
                   variant="ghost"
                   size="sm"
-                  className="gap-1.5 text-muted-foreground hover:text-foreground"
+                  className="gap-1.5 text-muted-foreground hover:text-foreground text-xs font-medium"
                 >
-                  <LogOut className="w-3.5 h-3.5" />
+                  <LogOut className="size-3.5" />
                   Sign Out
                 </Button>
               </form>
@@ -88,20 +87,20 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
                 href="/auth/signin"
                 className={cn(
                   buttonVariants({ variant: "ghost", size: "sm" }),
-                  "gap-1.5 text-muted-foreground hover:text-foreground"
+                  "gap-1.5 text-muted-foreground hover:text-foreground text-xs font-medium"
                 )}
               >
-                <LogIn className="w-3.5 h-3.5" />
+                <LogIn className="size-3.5" />
                 Sign In
               </Link>
               <Link
                 href="/auth/signup"
                 className={cn(
                   buttonVariants({ size: "sm" }),
-                  "gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground"
+                  "gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold ml-1"
                 )}
               >
-                <UserPlus className="w-3.5 h-3.5" />
+                <UserPlus className="size-3.5" />
                 Sign Up
               </Link>
             </>

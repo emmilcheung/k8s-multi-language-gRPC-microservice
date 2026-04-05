@@ -81,7 +81,7 @@ export default async function OrderDetailPage({ params }: Props) {
 
       {/* Stepper */}
       {!isCancelled ? (
-        <div className="glass rounded-2xl px-8 py-5">
+        <div className="bg-card border border-border rounded px-8 py-5">
           <ol className="flex items-center gap-0">
             {STEPS.map((step, idx) => {
               const done = currentStep > idx;
@@ -124,7 +124,7 @@ export default async function OrderDetailPage({ params }: Props) {
           </ol>
         </div>
       ) : (
-        <div className="glass rounded-2xl px-6 py-4 flex items-center gap-3 border-l-4 border-l-destructive/60">
+        <div className="bg-card border border-border rounded px-6 py-4 flex items-center gap-3 border-l-4 border-l-destructive/60">
           <XCircle className="w-5 h-5 text-destructive shrink-0" />
           <div>
             <p className="font-semibold text-sm">Order Cancelled</p>
@@ -142,7 +142,7 @@ export default async function OrderDetailPage({ params }: Props) {
       {/* Main panels */}
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         {/* Left — order summary */}
-        <div className="glass rounded-2xl p-8 flex flex-col gap-6">
+        <div className="bg-card border border-border rounded p-8 flex flex-col gap-6">
           <h2 className="font-bold text-lg tracking-tight">Order Summary</h2>
 
           <div className="flex flex-col gap-4">
@@ -164,7 +164,7 @@ export default async function OrderDetailPage({ params }: Props) {
               </div>
               <div className="flex flex-col gap-0.5">
                 <p className="text-xs text-muted-foreground uppercase tracking-wider">Amount</p>
-                <p className="text-2xl font-bold gradient-text">
+                <p className="font-display font-extrabold text-2xl text-foreground">
                   ${amount.toFixed(2)}
                 </p>
               </div>

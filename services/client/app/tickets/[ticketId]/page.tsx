@@ -17,6 +17,8 @@ import { AttachSeatingPlanForm } from "@/components/attach-seating-plan-form";
 import { SeatingPlanPreview } from "@/components/seating-plan-preview";
 import { updateTicket } from "@/app/actions/tickets";
 import { fetchAllMyPlans, fetchPriceTiers } from "@/app/actions/venues";
+import { Separator } from "@/components/ui/separator";
+import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress";
 import {
   ArrowLeft,
   Ticket as TicketIcon,
@@ -116,7 +118,7 @@ export default async function TicketDetailPage({ params }: Props) {
         href="/"
         className={cn(
           buttonVariants({ variant: "ghost", size: "sm" }),
-          "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2"
+          "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2 text-xs"
         )}
       >
         <ArrowLeft className="w-3.5 h-3.5" />
@@ -126,7 +128,7 @@ export default async function TicketDetailPage({ params }: Props) {
       {/* Main panel */}
       <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
         {/* Left — ticket info */}
-        <div className="glass rounded-2xl overflow-hidden flex flex-col gap-6">
+        <div className="bg-card border border-border border-l-[3px] border-l-primary rounded overflow-hidden flex flex-col gap-6">
           {/* Event image banner */}
           {ticket.event?.imageUrl && (
             // eslint-disable-next-line @next/next/no-img-element
@@ -158,7 +160,7 @@ export default async function TicketDetailPage({ params }: Props) {
           </div>
 
           {/* Title */}
-          <h1 className="text-3xl font-bold tracking-tight leading-tight">
+          <h1 className="font-display font-extrabold text-2xl tracking-tight leading-tight">
             {ticket.event?.title || ticket.title}
           </h1>
 
@@ -201,16 +203,17 @@ export default async function TicketDetailPage({ params }: Props) {
             </div>
           )}
 
-          {/* Price pill */}
+          {/* Price */}
           <div className="flex items-center gap-3">
             <Tag className="w-4 h-4 text-muted-foreground" />
-            <span className="text-2xl font-bold gradient-text">
+            <span className="font-display font-extrabold text-2xl text-foreground">
               ${parseFloat(ticket.price).toFixed(2)}
             </span>
           </div>
 
+          <Separator />
           {/* Meta row */}
-          <div className="flex flex-wrap gap-4 text-sm text-muted-foreground pt-2 border-t border-white/6">
+          <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
             <span className="flex items-center gap-1.5">
               <User className="w-3.5 h-3.5" />
               {isOwner ? "Your listing" : "Listed by seller"}
@@ -224,20 +227,12 @@ export default async function TicketDetailPage({ params }: Props) {
           {/* GA quota availability bar */}
           {ticket.quota != null && ticket.quota > 1 && (
             <div className="flex flex-col gap-2 pt-1">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Availability</span>
-                <span className="font-medium">
-                  {Math.max(0, ticket.quota - (ticket.reserved ?? 0) - (ticket.sold ?? 0))} / {ticket.quota} remaining
-                </span>
-              </div>
-              <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-primary/70 transition-all"
-                  style={{
-                    width: `${Math.min(100, (((ticket.reserved ?? 0) + (ticket.sold ?? 0)) / ticket.quota) * 100)}%`,
-                  }}
-                />
-              </div>
+              <Progress
+                value={Math.min(100, (((ticket.reserved ?? 0) + (ticket.sold ?? 0)) / ticket.quota) * 100)}
+              >
+                <ProgressLabel>Availability</ProgressLabel>
+                <ProgressValue>{() => `${Math.max(0, ticket.quota! - (ticket.reserved ?? 0) - (ticket.sold ?? 0))} / ${ticket.quota} remaining`}</ProgressValue>
+              </Progress>
               {ticket.maxPerUser != null && ticket.maxPerUser > 1 && (
                 <p className="text-xs text-muted-foreground">
                   Max {ticket.maxPerUser} per order
@@ -264,7 +259,7 @@ export default async function TicketDetailPage({ params }: Props) {
                   submitLabel="Update Ticket"
                 />
               ) : (
-                <div className="glass rounded-2xl p-6 flex flex-col gap-3">
+                <div className="bg-card border border-border rounded shadow-sm p-6 flex flex-col gap-3">
                   <p className="font-semibold">Your listing</p>
                   <p className="text-sm text-muted-foreground">
                     This ticket is currently reserved and cannot be edited.
@@ -289,12 +284,12 @@ export default async function TicketDetailPage({ params }: Props) {
             </div>
           ) : (
             /* Buyer: purchase or sign-in */
-            <div className="glass rounded-2xl p-6 flex flex-col gap-4">
+            <div className="bg-card border border-border rounded p-6 flex flex-col gap-4 shadow-sm">
               <div className="flex flex-col gap-1">
                 <p className="text-sm text-muted-foreground">
                   {isSeated ? "Select your seats" : "Total price"}
                 </p>
-                <p className="text-3xl font-bold gradient-text">
+                <p className="font-display font-extrabold text-3xl text-foreground">
                   ${parseFloat(ticket.price).toFixed(2)}
                   {isSeated && (
                     <span className="text-sm font-normal text-muted-foreground ml-1">
@@ -303,7 +298,7 @@ export default async function TicketDetailPage({ params }: Props) {
                   )}
                 </p>
               </div>
-              <div className="h-px bg-white/6" />
+              <Separator />
               {isSeated ? (
                 /* Seated ticket — CTA navigates to seat map */
                 token ? (

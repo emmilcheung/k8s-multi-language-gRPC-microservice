@@ -5,10 +5,11 @@ import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
 import { Building2, Users, Globe, MapPin, AlertCircle, Loader2, CheckCircle } from "lucide-react";
 import type { VenueState } from "@/app/actions/venues";
 
-// Common timezones for the dropdown (typed as plain input for simplicity)
 const COMMON_TIMEZONES = [
   "America/New_York",
   "America/Chicago",
@@ -47,27 +48,20 @@ export function VenueForm({
   const [state, formAction, pending] = useActionState(action, initialState);
 
   return (
-    <div className="glass rounded-2xl w-full max-w-md p-8 flex flex-col gap-6">
-      {/* Heading */}
+    <div className="bg-card border border-border rounded-lg w-full max-w-md p-8 flex flex-col gap-6 shadow-sm">
       <div className="flex flex-col gap-1">
         <h2 className="text-lg font-bold tracking-tight">{submitLabel}</h2>
-        <p className="text-sm text-muted-foreground">
-          Enter the details for your venue.
-        </p>
+        <p className="text-sm text-muted-foreground">Enter the details for your venue.</p>
       </div>
 
-      <div className="h-px bg-white/6" />
+      <Separator />
 
       <form action={formAction} className="flex flex-col gap-4">
-        {/* Error alert */}
         {state?.error && (
-          <div
-            role="alert"
-            className="flex items-start gap-2.5 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2.5"
-          >
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>{state.error}</span>
-          </div>
+          <Alert variant="destructive">
+            <AlertCircle />
+            <AlertDescription>{state.error}</AlertDescription>
+          </Alert>
         )}
 
         {/* Name */}
@@ -76,7 +70,7 @@ export function VenueForm({
             Venue Name
           </Label>
           <div className="relative">
-            <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
             <Input
               id="name"
               name="name"
@@ -95,7 +89,7 @@ export function VenueForm({
             Total Capacity
           </Label>
           <div className="relative">
-            <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <Users className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
             <Input
               id="capacity"
               name="capacity"
@@ -116,7 +110,7 @@ export function VenueForm({
             Timezone
           </Label>
           <div className="relative">
-            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
             <Input
               id="timezone"
               name="timezone"
@@ -144,7 +138,7 @@ export function VenueForm({
             Address
           </Label>
           <div className="relative">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
             <Input
               id="address"
               name="address"
@@ -159,20 +153,15 @@ export function VenueForm({
           </p>
         </div>
 
-        {/* Submit */}
-        <Button
-          type="submit"
-          className="w-full gap-2 bg-primary hover:bg-primary/90 text-primary-foreground mt-1"
-          disabled={pending}
-        >
+        <Button type="submit" className="w-full mt-1" disabled={pending}>
           {pending ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 data-icon="inline-start" className="animate-spin" />
               Saving…
             </>
           ) : (
             <>
-              <CheckCircle className="w-4 h-4" />
+              <CheckCircle data-icon="inline-start" />
               {submitLabel}
             </>
           )}

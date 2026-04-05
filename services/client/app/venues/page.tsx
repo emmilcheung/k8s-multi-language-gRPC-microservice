@@ -5,14 +5,12 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { fetchMyVenues } from "@/app/actions/venues";
 import { buttonVariants } from "@/components/ui/button-variants";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Building2, Plus, ArrowLeft, MapPin, Users } from "lucide-react";
+import { Building2, Plus, ArrowLeft, MapPin, Users, ArrowRight } from "lucide-react";
 
-export const metadata = { title: "My Venues — Ticketing" };
+export const metadata = { title: "My Venues — Marquee" };
 
 export default async function VenuesPage() {
-  // Auth gate — redirect to sign-in if no token cookie.
   const cookieStore = await cookies();
   const token = cookieStore.get("token")?.value;
   if (!token) redirect("/auth/signin");
@@ -26,88 +24,87 @@ export default async function VenuesPage() {
         href="/"
         className={cn(
           buttonVariants({ variant: "ghost", size: "sm" }),
-          "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2"
+          "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2 text-xs"
         )}
       >
-        <ArrowLeft className="w-3.5 h-3.5" />
+        <ArrowLeft className="size-3.5" />
         Home
       </Link>
 
       {/* Header */}
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight gradient-text">My Venues</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage your venues and seating plans.
-          </p>
+      <div className="flex items-end justify-between gap-4">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-px w-6 bg-primary" />
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+              Venues
+            </span>
+          </div>
+          <h1 className="font-display font-extrabold text-2xl tracking-tight">My Venues</h1>
+          <p className="text-sm text-muted-foreground">Manage venues and seating plans.</p>
         </div>
         <Link
           href="/venues/new"
           className={cn(
             buttonVariants({ size: "sm" }),
-            "gap-2 bg-primary hover:bg-primary/90 text-primary-foreground glow-violet"
+            "gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shrink-0"
           )}
         >
-          <Plus className="w-3.5 h-3.5" />
+          <Plus className="size-3.5" />
           New Venue
         </Link>
       </div>
 
-      {/* Venue list */}
       {venues.length === 0 ? (
-        <div className="glass rounded-2xl p-12 flex flex-col items-center gap-4 text-center">
-          <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-            <Building2 className="w-8 h-8 text-primary" />
+        <div className="border border-border rounded bg-card p-12 flex flex-col items-center gap-5 text-center">
+          <div className="flex items-center justify-center size-14 rounded bg-muted">
+            <Building2 className="size-7 text-muted-foreground" />
           </div>
-          <div>
-            <h2 className="text-lg font-semibold">No venues yet</h2>
-            <p className="text-sm text-muted-foreground mt-1">
+          <div className="flex flex-col gap-1">
+            <h2 className="font-display font-bold text-lg">No venues yet</h2>
+            <p className="text-sm text-muted-foreground">
               Create your first venue to start building seating plans.
             </p>
           </div>
           <Link
             href="/venues/new"
-            className={cn(
-              buttonVariants(),
-              "gap-2 bg-primary hover:bg-primary/90 text-primary-foreground mt-2"
-            )}
+            className={cn(buttonVariants(), "gap-2 bg-primary hover:bg-primary/90 text-primary-foreground")}
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="size-4" />
             Create Venue
           </Link>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2">
           {venues.map((venue) => (
             <Link
               key={venue.id}
               href={`/venues/${venue.id}`}
-              className="glass rounded-2xl p-6 flex flex-col gap-3 hover:bg-white/5 transition-colors group"
+              className="group bg-card border border-border border-l-[3px] border-l-primary/40 hover:border-l-primary rounded overflow-hidden p-5 flex flex-col gap-3 transition-all hover:shadow-sm"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 ring-1 ring-primary/20 shrink-0">
-                  <Building2 className="w-5 h-5 text-primary" />
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center size-9 rounded bg-primary/10 shrink-0">
+                  <Building2 className="size-4 text-primary" />
                 </div>
-                <Badge className="bg-primary/15 text-primary border-primary/20 text-xs">
-                  Venue
-                </Badge>
-              </div>
-
-              <div>
-                <h3 className="font-semibold text-base group-hover:text-primary transition-colors">
+                <h3 className="font-display font-bold text-sm group-hover:text-primary transition-colors line-clamp-1">
                   {venue.name}
                 </h3>
               </div>
 
-              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+              <div className="flex items-center gap-4 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1.5">
-                  <Users className="w-3.5 h-3.5" />
+                  <Users className="size-3.5" />
                   {venue.capacity.toLocaleString()} capacity
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5" />
+                  <MapPin className="size-3.5" />
                   {venue.timezone}
                 </span>
+              </div>
+
+              <div className="flex items-center gap-1 text-xs text-muted-foreground group-hover:text-primary transition-colors mt-1">
+                Manage
+                <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
               </div>
             </Link>
           ))}

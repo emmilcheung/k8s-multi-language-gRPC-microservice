@@ -1,5 +1,5 @@
 "use client";
-// components/ticket-form.tsx — 2-step wizard for creating tickets (WS3)
+// components/ticket-form.tsx — 2-step wizard for creating tickets
 // Step 1: Select ticket type (GA, Manual Seated, Auto Seated)
 // Step 2: Dynamic fields based on type
 
@@ -8,6 +8,18 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   FileText,
   DollarSign,
@@ -16,11 +28,13 @@ import {
   CheckCircle,
   Hash,
   Users,
-  Radio,
   MapPin,
   Calendar,
-  Image,
-  AlignLeft,
+  Image as ImageIcon,
+  Radio,
+  Armchair,
+  Zap,
+  ArrowLeft,
 } from "lucide-react";
 import type { TicketState } from "@/app/actions/tickets";
 import type { SeatingPlan, Section } from "@/lib/types";
@@ -32,9 +46,7 @@ interface TicketFormProps {
   defaultPrice?: number | string;
   defaultQuota?: number;
   defaultMaxPerUser?: number;
-  /** Pre-select ticket type and skip to step 2 (for edit/update flows). */
   defaultTicketType?: TicketType;
-  /** Active seating plans to show in the plan picker (seated ticket creation only). */
   availablePlans?: SeatingPlan[];
   submitLabel?: string;
 }
@@ -51,7 +63,6 @@ interface FormState {
   pricingMode?: "single" | "section" | "seat";
   sectionPrices?: Record<string, string>;
   totalCapacity?: number;
-  // Event metadata
   startsAt: string;
   endsAt: string;
   eventTitle: string;
@@ -72,6 +83,27 @@ const initialFormState: FormState = {
   venueName: "",
   venueAddress: "",
 };
+
+const TICKET_TYPES: { value: TicketType; label: string; description: string; icon: React.ReactNode }[] = [
+  {
+    value: "GA",
+    label: "General Admission",
+    description: "Sell tickets with quantity limits. Buyers select how many they want.",
+    icon: <Radio className="size-5 shrink-0 text-primary" />,
+  },
+  {
+    value: "SEATED_MANUAL",
+    label: "Manual Assigned Seating",
+    description: "Buyers pick their own seats from your venue layout.",
+    icon: <Armchair className="size-5 shrink-0 text-primary" />,
+  },
+  {
+    value: "SEATED_AUTO",
+    label: "Auto-assigned Seating",
+    description: "System automatically assigns the best available seats.",
+    icon: <Zap className="size-5 shrink-0 text-primary" />,
+  },
+];
 
 export function TicketForm({
   action,
@@ -97,7 +129,6 @@ export function TicketForm({
   const [planSections, setPlanSections] = useState<Section[]>([]);
   const [sectionsLoading, setSectionsLoading] = useState(false);
 
-  // Fetch sections when section pricing mode + a plan is selected.
   const selectedPlanId = formData.seatingPlanId;
   const selectedPricingMode = formData.pricingMode;
   useEffect(() => {
@@ -130,7 +161,6 @@ export function TicketForm({
 
     try {
       const form = e.currentTarget as HTMLFormElement;
-      // Read from DOM as fallback for E2E tests where fill() doesn't update React state
       const getTitleValue = (): string => {
         const el = form.elements.namedItem("title") as HTMLInputElement | null;
         return el?.value || formData.title;
@@ -165,8 +195,6 @@ export function TicketForm({
         }
       }
 
-      // Event metadata — required startsAt + optional fields
-      // Only include event data if startsAt is provided (required for create, skip for update)
       if (startsAt) {
         formDataObj.append("startsAt", startsAt);
       }
@@ -188,10 +216,10 @@ export function TicketForm({
     }
   };
 
-  // Step 1: Select ticket type
+  // ── Step 1: Select ticket type ────────────────────────────────────────────
   if (step === "type") {
     return (
-      <div className="glass rounded-2xl w-full max-w-md p-8 flex flex-col gap-6">
+      <div className="bg-card border border-border rounded-lg w-full max-w-md p-8 flex flex-col gap-6 shadow-sm">
         <div className="flex flex-col gap-1">
           <h2 className="text-lg font-bold tracking-tight">Select Ticket Type</h2>
           <p className="text-sm text-muted-foreground">
@@ -199,92 +227,60 @@ export function TicketForm({
           </p>
         </div>
 
-        <div className="h-px bg-white/6" />
+        <Separator />
 
         <div className="flex flex-col gap-3">
-          {/* GA Option */}
-          <button
-            type="button"
-            onClick={() => handleTypeSelect("GA")}
-            className="flex items-start gap-3 p-4 rounded-lg border border-white/10 hover:border-white/20 hover:bg-white/5 transition-all cursor-pointer text-left"
-          >
-            <Radio className="w-5 h-5 shrink-0 mt-0.5 text-primary" />
-            <div className="flex flex-col gap-1">
-              <p className="font-medium">General Admission</p>
-              <p className="text-xs text-muted-foreground">
-                Sell tickets with quantity limits. Buyers select how many they want.
-              </p>
-            </div>
-          </button>
-
-          {/* Manual Seated Option */}
-          <button
-            type="button"
-            onClick={() => handleTypeSelect("SEATED_MANUAL")}
-            className="flex items-start gap-3 p-4 rounded-lg border border-white/10 hover:border-white/20 hover:bg-white/5 transition-all cursor-pointer text-left"
-          >
-            <Radio className="w-5 h-5 shrink-0 mt-0.5 text-primary" />
-            <div className="flex flex-col gap-1">
-              <p className="font-medium">Manual Assigned Seating</p>
-              <p className="text-xs text-muted-foreground">
-                Buyers pick their own seats from your venue layout.
-              </p>
-            </div>
-          </button>
-
-          {/* Auto Seated Option */}
-          <button
-            type="button"
-            onClick={() => handleTypeSelect("SEATED_AUTO")}
-            className="flex items-start gap-3 p-4 rounded-lg border border-white/10 hover:border-white/20 hover:bg-white/5 transition-all cursor-pointer text-left"
-          >
-            <Radio className="w-5 h-5 shrink-0 mt-0.5 text-primary" />
-            <div className="flex flex-col gap-1">
-              <p className="font-medium">Auto-assigned Seating</p>
-              <p className="text-xs text-muted-foreground">
-                System automatically assigns seats to buyers.
-              </p>
-            </div>
-          </button>
+          {TICKET_TYPES.map(({ value, label, description, icon }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => handleTypeSelect(value)}
+              className="flex items-start gap-4 p-4 rounded-xl border border-border hover:border-primary/40 hover:bg-primary/5 transition-all cursor-pointer text-left group"
+            >
+              <div className="flex items-center justify-center size-10 rounded-lg bg-primary/10 ring-1 ring-primary/20 shrink-0 group-hover:bg-primary/15 transition-colors">
+                {icon}
+              </div>
+              <div className="flex flex-col gap-0.5 min-w-0">
+                <p className="font-medium text-sm">{label}</p>
+                <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
+              </div>
+            </button>
+          ))}
         </div>
       </div>
     );
   }
 
-  // Step 2: Details based on ticket type
+  // ── Step 2: Details ───────────────────────────────────────────────────────
+  const typeLabel = TICKET_TYPES.find((t) => t.value === ticketType)?.label ?? "Ticket";
+
   return (
-    <form onSubmit={handleSubmit} className="glass rounded-2xl w-full max-w-md p-8 flex flex-col gap-6">
+    <form onSubmit={handleSubmit} className="bg-card border border-border rounded-lg w-full max-w-md p-8 flex flex-col gap-6 shadow-sm">
       <div className="flex flex-col gap-1">
         <h2 className="text-lg font-bold tracking-tight">
           {ticketType === "GA" ? "General Admission Details" : "Seating Plan Details"}
         </h2>
         <p className="text-sm text-muted-foreground">
-          {ticketType === "GA"
-            ? "Configure your general admission ticket."
-            : "Link a seating plan and set pricing."}
+          Type: <span className="text-foreground font-medium">{typeLabel}</span>
         </p>
       </div>
 
-      <div className="h-px bg-white/6" />
+      <Separator />
 
-      {/* Error alert */}
       {error && (
-        <div
-          role="alert"
-          className="flex items-start gap-2.5 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2.5"
-        >
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>{error}</span>
-        </div>
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
-      {/* Title (common to all types) */}
+      {/* Title */}
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="title" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           Title
         </Label>
         <div className="relative">
-          <FileText className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <FileText className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
           <Input
             id="title"
             name="title"
@@ -298,7 +294,7 @@ export function TicketForm({
         </div>
       </div>
 
-      {/* GA Fields */}
+      {/* ── GA Fields ── */}
       {ticketType === "GA" && (
         <>
           <div className="flex flex-col gap-1.5">
@@ -306,7 +302,7 @@ export function TicketForm({
               Price (USD)
             </Label>
             <div className="relative">
-              <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+              <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
               <Input
                 id="price"
                 name="price"
@@ -322,91 +318,89 @@ export function TicketForm({
             </div>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="quota" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Total Capacity
-            </Label>
-            <div className="relative">
-              <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-              <Input
-                id="quota"
-                name="quota"
-                type="number"
-                min="1"
-                step="1"
-                placeholder="e.g. 200"
-                value={formData.quota ?? ""}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    quota: e.target.value ? parseInt(e.target.value) : undefined,
-                  }))
-                }
-                className="pl-9"
-              />
+          <div className="flex gap-4">
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="quota" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Capacity
+              </Label>
+              <div className="relative">
+                <Hash className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  id="quota"
+                  name="quota"
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="200"
+                  value={formData.quota ?? ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      quota: e.target.value ? parseInt(e.target.value) : undefined,
+                    }))
+                  }
+                  className="pl-9"
+                />
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Total tickets available for purchase.
-            </p>
-          </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="maxPerUser" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Max Per Buyer
-            </Label>
-            <div className="relative">
-              <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-              <Input
-                id="maxPerUser"
-                name="maxPerUser"
-                type="number"
-                min="1"
-                step="1"
-                placeholder="e.g. 4"
-                value={formData.maxPerUser ?? ""}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    maxPerUser: e.target.value ? parseInt(e.target.value) : undefined,
-                  }))
-                }
-                className="pl-9"
-              />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor="maxPerUser" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Max / Buyer
+              </Label>
+              <div className="relative">
+                <Users className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  id="maxPerUser"
+                  name="maxPerUser"
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="4"
+                  value={formData.maxPerUser ?? ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      maxPerUser: e.target.value ? parseInt(e.target.value) : undefined,
+                    }))
+                  }
+                  className="pl-9"
+                />
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Maximum tickets a single buyer can purchase in one order.
-            </p>
           </div>
         </>
       )}
 
-      {/* Seated Fields (Manual + Auto) */}
+      {/* ── Seated Fields ── */}
       {ticketType?.startsWith("SEATED") && (
         <>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="seatingPlanId" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
               Seating Plan
             </Label>
             {availablePlans.length > 0 ? (
-              <select
-                id="seatingPlanId"
-                name="seatingPlanId"
-                required
+              <Select
                 value={formData.seatingPlanId ?? ""}
-                onChange={(e) => setFormData((prev) => ({ ...prev, seatingPlanId: e.target.value }))}
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                onValueChange={(val) => setFormData((prev) => ({ ...prev, seatingPlanId: val !== null ? val : undefined }))}
               >
-                <option value="" disabled>Select an active plan…</option>
-                {availablePlans.map((plan) => (
-                  <option key={plan.id} value={plan.id}>
-                    {plan.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="w-full h-10">
+                  <SelectValue placeholder="Select an active plan…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {availablePlans.map((plan) => (
+                      <SelectItem key={plan.id} value={plan.id}>
+                        {plan.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             ) : (
               <>
                 <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
                   <Input
                     id="seatingPlanId"
                     name="seatingPlanId"
@@ -418,62 +412,54 @@ export function TicketForm({
                     className="pl-9"
                   />
                 </div>
-                <p className="text-xs text-amber-400/80">
-                  No active plans found. Create and activate a plan in the{" "}
-                  <Link href="/venues" className="underline">Venue Manager</Link> first.
-                </p>
+                <Alert>
+                  <AlertCircle />
+                  <AlertDescription>
+                    No active plans found. Create and activate a plan in the{" "}
+                    <Link href="/venues" className="underline">Venue Manager</Link> first.
+                  </AlertDescription>
+                </Alert>
               </>
             )}
           </div>
 
-          {/* Pricing Mode Selector */}
+          {/* Pricing Mode */}
           <div className="flex flex-col gap-2">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pricing Mode</p>
-            <div className="flex flex-col gap-2">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="pricingMode"
-                  value="single"
-                  checked={formData.pricingMode === "single" || !formData.pricingMode}
-                  onChange={() => setFormData((prev) => ({ ...prev, pricingMode: "single" as const }))}
-                  className="w-4 h-4"
-                />
-                <span className="text-sm">Single Price (all seats cost the same)</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="pricingMode"
-                  value="section"
-                  checked={formData.pricingMode === "section"}
-                  onChange={() => setFormData((prev) => ({ ...prev, pricingMode: "section" as const }))}
-                  className="w-4 h-4"
-                />
-                <span className="text-sm">Section Pricing (different prices per section)</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="pricingMode"
-                  value="seat"
-                  checked={formData.pricingMode === "seat"}
-                  onChange={() => setFormData((prev) => ({ ...prev, pricingMode: "seat" as const }))}
-                  className="w-4 h-4"
-                />
-                <span className="text-sm">Seat Pricing (configured in plan editor)</span>
-              </label>
-            </div>
+            <ToggleGroup
+              orientation="vertical"
+              spacing={2}
+              value={[formData.pricingMode ?? "single"]}
+              onValueChange={(vals: string[]) => {
+                const current = formData.pricingMode ?? "single";
+                const next = vals.find((v) => v !== current) ?? current;
+                setFormData((prev) => ({ ...prev, pricingMode: next as "single" | "section" | "seat" }));
+              }}
+              className="w-full"
+            >
+              <ToggleGroupItem value="single" variant="outline" className="w-full justify-start gap-2 text-sm font-normal">
+                Single Price
+                <span className="text-xs text-muted-foreground ml-1">all seats cost the same</span>
+              </ToggleGroupItem>
+              <ToggleGroupItem value="section" variant="outline" className="w-full justify-start gap-2 text-sm font-normal">
+                Section Pricing
+                <span className="text-xs text-muted-foreground ml-1">different prices per section</span>
+              </ToggleGroupItem>
+              <ToggleGroupItem value="seat" variant="outline" className="w-full justify-start gap-2 text-sm font-normal">
+                Seat Pricing
+                <span className="text-xs text-muted-foreground ml-1">configured in plan editor</span>
+              </ToggleGroupItem>
+            </ToggleGroup>
           </div>
 
-          {/* Single price mode */}
+          {/* Single price */}
           {(formData.pricingMode === "single" || !formData.pricingMode) && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="price" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Price (USD)
               </Label>
               <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
                 <Input
                   id="price"
                   name="price"
@@ -487,29 +473,30 @@ export function TicketForm({
                   className="pl-9"
                 />
               </div>
-              <p className="text-xs text-muted-foreground">
-                Price for all seats in this plan.
-              </p>
+              <p className="text-xs text-muted-foreground">Price for all seats in this plan.</p>
             </div>
           )}
 
-          {/* Section pricing mode */}
+          {/* Section pricing */}
           {formData.pricingMode === "section" && (
             <div className="flex flex-col gap-3">
               {sectionsLoading ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Loader2 className="size-4 animate-spin" />
                   Loading sections…
                 </div>
               ) : planSections.length === 0 ? (
-                <p className="text-xs text-amber-400/80 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2.5">
-                  No sections found for this plan. Select a plan first, or switch to Single Price.
-                </p>
+                <Alert>
+                  <AlertCircle />
+                  <AlertDescription>
+                    No sections found for this plan. Select a plan first, or switch to Single Price.
+                  </AlertDescription>
+                </Alert>
               ) : (
                 <div className="flex flex-col gap-2">
                   <p className="text-xs text-muted-foreground">Set a price for each section:</p>
                   {planSections.map((section) => (
-                    <div key={section.id} className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-white/10">
+                    <div key={section.id} className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-border">
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{section.name}</p>
                         <p className="text-xs text-muted-foreground">
@@ -517,7 +504,7 @@ export function TicketForm({
                         </p>
                       </div>
                       <div className="relative w-28 shrink-0">
-                        <DollarSign className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                        <DollarSign className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
                         <Input
                           type="number"
                           step="0.01"
@@ -541,13 +528,14 @@ export function TicketForm({
             </div>
           )}
 
-          {/* Seat pricing mode */}
+          {/* Seat pricing info */}
           {formData.pricingMode === "seat" && (
-            <div className="p-3 bg-white/5 rounded-lg border border-white/10">
-              <p className="text-sm text-muted-foreground">
+            <Alert>
+              <AlertCircle />
+              <AlertDescription>
                 Configure seat-level pricing in the Seating Plan editor.
-              </p>
-            </div>
+              </AlertDescription>
+            </Alert>
           )}
 
           <div className="flex flex-col gap-1.5">
@@ -555,14 +543,14 @@ export function TicketForm({
               Max Seats Per Buyer
             </Label>
             <div className="relative">
-              <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+              <Users className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
               <Input
                 id="maxSeatsPerOrder"
                 name="maxSeatsPerOrder"
                 type="number"
                 min="1"
                 step="1"
-                placeholder="e.g. 4"
+                placeholder="4"
                 value={formData.maxPerUser ?? ""}
                 onChange={(e) =>
                   setFormData((prev) => ({
@@ -573,24 +561,22 @@ export function TicketForm({
                 className="pl-9"
               />
             </div>
-            <p className="text-xs text-muted-foreground">
-              Maximum seats a single buyer can purchase in one order.
-            </p>
           </div>
         </>
       )}
 
-      {/* Event Details — shared by GA and Seated */}
-      <div className="border-t border-white/8 pt-4 flex flex-col gap-4">
+      {/* ── Event Details ── */}
+      <Separator />
+
+      <div className="flex flex-col gap-4">
         <p className="text-sm font-semibold">Event Details</p>
 
-        {/* Event title */}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="eventTitle" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
             Event Name
           </Label>
           <div className="relative">
-            <FileText className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <FileText className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
             <Input
               id="eventTitle"
               name="eventTitle"
@@ -604,68 +590,62 @@ export function TicketForm({
           <p className="text-xs text-muted-foreground">Defaults to ticket title if left blank.</p>
         </div>
 
-        {/* Starts at — required */}
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="startsAt" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Event Date &amp; Time <span className="text-destructive">*</span>
-          </Label>
-          <div className="relative">
-            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-            <Input
-              id="startsAt"
-              name="startsAt"
-              type="datetime-local"
-              value={formData.startsAt}
-              onChange={(e) => setFormData((prev) => ({ ...prev, startsAt: e.target.value }))}
-              className="pl-9"
-            />
+        <div className="flex gap-4">
+          <div className="flex flex-col gap-1.5 flex-1">
+            <Label htmlFor="startsAt" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Starts <span className="text-destructive">*</span>
+            </Label>
+            <div className="relative">
+              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Input
+                id="startsAt"
+                name="startsAt"
+                type="datetime-local"
+                value={formData.startsAt}
+                onChange={(e) => setFormData((prev) => ({ ...prev, startsAt: e.target.value }))}
+                className="pl-9"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5 flex-1">
+            <Label htmlFor="endsAt" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Ends <span className="text-muted-foreground font-normal">(opt.)</span>
+            </Label>
+            <div className="relative">
+              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Input
+                id="endsAt"
+                name="endsAt"
+                type="datetime-local"
+                value={formData.endsAt}
+                onChange={(e) => setFormData((prev) => ({ ...prev, endsAt: e.target.value }))}
+                className="pl-9"
+              />
+            </div>
           </div>
         </div>
 
-        {/* Ends at — optional */}
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="endsAt" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            End Time <span className="text-muted-foreground font-normal">(optional)</span>
-          </Label>
-          <div className="relative">
-            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-            <Input
-              id="endsAt"
-              name="endsAt"
-              type="datetime-local"
-              value={formData.endsAt}
-              onChange={(e) => setFormData((prev) => ({ ...prev, endsAt: e.target.value }))}
-              className="pl-9"
-            />
-          </div>
-        </div>
-
-        {/* Description — optional */}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="eventDescription" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
             Description <span className="text-muted-foreground font-normal">(optional)</span>
           </Label>
-          <div className="relative">
-            <AlignLeft className="absolute left-3 top-3 w-4 h-4 text-muted-foreground pointer-events-none" />
-            <textarea
-              id="eventDescription"
-              name="eventDescription"
-              rows={3}
-              placeholder="What&apos;s this event about?"
-              value={formData.eventDescription}
-              onChange={(e) => setFormData((prev) => ({ ...prev, eventDescription: e.target.value }))}
-              className="w-full rounded-xl border border-white/10 bg-white/5 pl-9 pr-3 py-2 text-sm text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground"
-            />
-          </div>
+          <Textarea
+            id="eventDescription"
+            name="eventDescription"
+            rows={3}
+            placeholder="What's this event about?"
+            value={formData.eventDescription}
+            onChange={(e) => setFormData((prev) => ({ ...prev, eventDescription: e.target.value }))}
+          />
         </div>
 
-        {/* Image URL — optional */}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="eventImageUrl" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Event Image URL <span className="text-muted-foreground font-normal">(optional)</span>
+            Image URL <span className="text-muted-foreground font-normal">(optional)</span>
           </Label>
           <div className="relative">
-            <Image className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <ImageIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
             <Input
               id="eventImageUrl"
               name="eventImageUrl"
@@ -679,68 +659,71 @@ export function TicketForm({
           <p className="text-xs text-muted-foreground">Shown as a banner on the ticket page.</p>
         </div>
 
-        {/* Venue name — optional (auto for seated) */}
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="venueName" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Venue Name <span className="text-muted-foreground font-normal">(optional)</span>
-          </Label>
-          <div className="relative">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-            <Input
-              id="venueName"
-              name="venueName"
-              type="text"
-              placeholder="Madison Square Garden"
-              value={formData.venueName}
-              onChange={(e) => setFormData((prev) => ({ ...prev, venueName: e.target.value }))}
-              className="pl-9"
-            />
+        <div className="flex gap-4">
+          <div className="flex flex-col gap-1.5 flex-1">
+            <Label htmlFor="venueName" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Venue <span className="text-muted-foreground font-normal">(opt.)</span>
+            </Label>
+            <div className="relative">
+              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Input
+                id="venueName"
+                name="venueName"
+                type="text"
+                placeholder="Madison Square Garden"
+                value={formData.venueName}
+                onChange={(e) => setFormData((prev) => ({ ...prev, venueName: e.target.value }))}
+                className="pl-9"
+              />
+            </div>
           </div>
-        </div>
 
-        {/* Venue address — optional */}
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="venueAddress" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Venue Address <span className="text-muted-foreground font-normal">(optional)</span>
-          </Label>
-          <div className="relative">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-            <Input
-              id="venueAddress"
-              name="venueAddress"
-              type="text"
-              placeholder="4 Pennsylvania Plaza, New York, NY 10001"
-              value={formData.venueAddress}
-              onChange={(e) => setFormData((prev) => ({ ...prev, venueAddress: e.target.value }))}
-              className="pl-9"
-            />
+          <div className="flex flex-col gap-1.5 flex-1">
+            <Label htmlFor="venueAddress" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Address <span className="text-muted-foreground font-normal">(opt.)</span>
+            </Label>
+            <div className="relative">
+              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Input
+                id="venueAddress"
+                name="venueAddress"
+                type="text"
+                placeholder="4 Pennsylvania Plaza, NY"
+                value={formData.venueAddress}
+                onChange={(e) => setFormData((prev) => ({ ...prev, venueAddress: e.target.value }))}
+                className="pl-9"
+              />
+            </div>
           </div>
         </div>
       </div>
 
       {/* Buttons */}
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          onClick={handleBackToType}
-          variant="outline"
-          className="flex-1"
-        >
-          Back
-        </Button>
+      <div className="flex gap-2 pt-2">
+        {!defaultTicketType && (
+          <Button
+            type="button"
+            onClick={handleBackToType}
+            variant="outline"
+            className="flex-1"
+          >
+            <ArrowLeft data-icon="inline-start" />
+            Back
+          </Button>
+        )}
         <Button
           type="submit"
-          className="flex-1 gap-2 bg-primary hover:bg-primary/90 text-primary-foreground"
+          className={defaultTicketType ? "w-full" : "flex-1"}
           disabled={pending}
         >
           {pending ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 data-icon="inline-start" className="animate-spin" />
               Saving…
             </>
           ) : (
             <>
-              <CheckCircle className="w-4 h-4" />
+              <CheckCircle data-icon="inline-start" />
               {submitLabel}
             </>
           )}
