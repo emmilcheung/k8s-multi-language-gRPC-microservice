@@ -1,16 +1,11 @@
-// app/page.tsx — Landing page: hero section + available ticket grid (Server Component).
-// The first page of tickets is fetched server-side for instant SSR. Subsequent
-// pages are loaded on demand by the TicketGrid Client Component (P-02).
-
 import Link from "next/link";
 import { fetchTicketPage } from "@/app/actions/tickets";
 import { TicketGrid } from "@/components/ticket-grid";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
-import { Ticket as TicketIcon, ArrowRight, Tag, Zap, Shield, Globe } from "lucide-react";
+import { Tag, ArrowRight } from "lucide-react";
 
 export default async function HomePage() {
-  // Fetch first page server-side — benefits from ISR caching in fetchTicketPage.
   const firstPage = await fetchTicketPage(null).catch(() => ({
     tickets: [],
     cursor: null,
@@ -20,87 +15,111 @@ export default async function HomePage() {
   const availableCount = firstPage.tickets.filter((t) => !t.orderId).length;
 
   return (
-    <div className="flex flex-col gap-20">
+    <div className="flex flex-col gap-16">
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <section className="relative pt-12 pb-4 flex flex-col items-center text-center gap-6">
-        {/* Pill badge */}
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-primary/30 bg-primary/10 text-primary text-xs font-medium">
-          <Zap className="w-3 h-3" />
-          Live ticket marketplace
+      <section className="pt-8 pb-4 flex flex-col gap-8">
+        {/* Label */}
+        <div className="flex items-center gap-2">
+          <span className="inline-block h-px w-8 bg-primary" />
+          <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+            Live Ticket Marketplace
+          </span>
         </div>
 
-        <h1 className="text-5xl sm:text-6xl font-bold tracking-tight leading-[1.1] max-w-2xl">
-          Your next event{" "}
-          <span className="gradient-text">starts here</span>
-        </h1>
-
-        <p className="text-lg text-muted-foreground max-w-md leading-relaxed">
-          Buy and sell event tickets instantly. No fees, no friction — just you
-          and the events you love.
-        </p>
-
-        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-          <Link
-            href="/#tickets"
-            className={cn(
-              buttonVariants({ size: "lg" }),
-              "gap-2 bg-primary hover:bg-primary/90 text-primary-foreground glow-violet"
-            )}
+        {/* Headline */}
+        <div className="flex flex-col gap-4 max-w-3xl">
+          <h1
+            className="font-display font-extrabold leading-[0.95] tracking-tight"
+            style={{ fontSize: "clamp(3rem, 8vw, 5.5rem)" }}
           >
-            Browse Tickets
-            <ArrowRight className="w-4 h-4" />
-          </Link>
-          <Link
-            href="/tickets/new"
-            className={cn(
-              buttonVariants({ variant: "outline", size: "lg" }),
-              "gap-2 border-white/10 hover:bg-white/5"
-            )}
-          >
-            <Tag className="w-4 h-4" />
-            Sell a Ticket
-          </Link>
+            <span className="text-foreground">Find your</span>
+            <br />
+            <span className="gradient-text">next show.</span>
+          </h1>
+          <p className="text-base text-muted-foreground max-w-sm leading-relaxed">
+            Buy and sell tickets to live events. No hidden fees, instant checkout.
+          </p>
         </div>
 
-        {/* Stats strip */}
-        <div className="mt-6 flex flex-wrap justify-center gap-8 text-sm text-muted-foreground">
-          {[
-            { icon: TicketIcon, label: `${Math.max(availableCount, 10)}+ tickets listed` },
-            { icon: Shield, label: "Secure checkout" },
-            { icon: Globe, label: "All events welcome" },
-          ].map(({ icon: Icon, label }) => (
-            <span key={label} className="flex items-center gap-1.5">
-              <Icon className="w-4 h-4 text-primary/70" />
-              {label}
-            </span>
-          ))}
+        {/* CTAs + stats in one row */}
+        <div className="flex flex-wrap items-center gap-6">
+          <div className="flex items-center gap-2">
+            <Link
+              href="/#tickets"
+              className={cn(
+                buttonVariants(),
+                "gap-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
+              )}
+            >
+              Browse Tickets
+              <ArrowRight className="size-4" />
+            </Link>
+            <Link
+              href="/tickets/new"
+              className={cn(
+                buttonVariants({ variant: "outline" }),
+                "gap-2 border-border hover:bg-muted font-medium"
+              )}
+            >
+              <Tag className="size-4" />
+              Sell a Ticket
+            </Link>
+          </div>
+
+          {/* Divider */}
+          <span className="hidden sm:block h-6 w-px bg-border" />
+
+          {/* Stats */}
+          <div className="flex items-center gap-5 text-sm">
+            <div className="flex flex-col">
+              <span className="font-display font-bold text-foreground text-lg leading-none">
+                {Math.max(availableCount, 10)}+
+              </span>
+              <span className="text-xs text-muted-foreground mt-0.5">tickets listed</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="font-display font-bold text-foreground text-lg leading-none">
+                0%
+              </span>
+              <span className="text-xs text-muted-foreground mt-0.5">platform fees</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="font-display font-bold text-foreground text-lg leading-none">
+                All
+              </span>
+              <span className="text-xs text-muted-foreground mt-0.5">events welcome</span>
+            </div>
+          </div>
         </div>
       </section>
 
       {/* ── Ticket grid ──────────────────────────────────────────────────── */}
       <section id="tickets" className="flex flex-col gap-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold tracking-tight">
-            Available Tickets
+        {/* Section header */}
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="inline-block h-5 w-0.5 bg-primary" />
+            <h2 className="font-display font-bold text-base uppercase tracking-widest">
+              Available Tickets
+            </h2>
             {availableCount > 0 && (
-              <span className="ml-2 text-sm font-normal text-muted-foreground">
-                ({availableCount}{firstPage.hasMore ? "+" : ""})
+              <span className="text-xs text-muted-foreground font-medium">
+                {availableCount}{firstPage.hasMore ? "+" : ""} listings
               </span>
             )}
-          </h2>
+          </div>
           <Link
             href="/tickets/new"
             className={cn(
               buttonVariants({ variant: "ghost", size: "sm" }),
-              "gap-1.5 text-muted-foreground hover:text-foreground"
+              "gap-1.5 text-muted-foreground hover:text-foreground text-xs"
             )}
           >
-            <Tag className="w-3.5 h-3.5" />
+            <Tag className="size-3.5" />
             List yours
           </Link>
         </div>
 
-        {/* Client Component: handles "Load more" interactivity */}
         <TicketGrid
           initialTickets={firstPage.tickets}
           initialCursor={firstPage.cursor}

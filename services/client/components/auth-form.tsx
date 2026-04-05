@@ -1,13 +1,13 @@
 "use client";
-// components/auth-form.tsx — Shared Client Component for signup/signin.
-// Glass card with Lucide icon-prefixed inputs and rich error state.
 
 import { useActionState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Ticket, Mail, Lock, AlertCircle, ArrowRight, Loader2 } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
+import { Mail, Lock, AlertCircle, ArrowRight, Loader2 } from "lucide-react";
 import type { AuthState } from "@/app/actions/auth";
 
 interface AuthFormProps {
@@ -24,109 +24,111 @@ export function AuthForm({ mode, action }: AuthFormProps) {
   const title = isSignup ? "Create an account" : "Welcome back";
   const subtitle = isSignup
     ? "Join thousands buying and selling event tickets"
-    : "Sign in to your Ticketing account";
+    : "Sign in to your Marquee account";
   const submitLabel = isSignup ? "Sign Up" : "Sign In";
   const altText = isSignup ? "Already have an account?" : "Don't have an account?";
   const altHref = isSignup ? "/auth/signin" : "/auth/signup";
   const altLabel = isSignup ? "Sign in" : "Sign up";
 
   return (
-    <div className="glass rounded-2xl w-full max-w-sm p-8 flex flex-col gap-6">
-      {/* Brand header */}
-      <div className="flex flex-col items-center gap-3 text-center">
-        <div className="flex items-center justify-center w-12 h-12 rounded-2xl bg-primary/15 ring-1 ring-primary/30">
-          <Ticket className="w-6 h-6 text-primary" />
+    <div className="w-full max-w-sm flex flex-col gap-8">
+      {/* Header */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="inline-block h-px w-6 bg-primary" />
+          <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+            {isSignup ? "New Account" : "Sign In"}
+          </span>
         </div>
-        <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-bold tracking-tight">{title}</h1>
-          <p className="text-sm text-muted-foreground">{subtitle}</p>
-        </div>
+        <h1 className="font-display font-extrabold text-2xl tracking-tight text-foreground">
+          {title}
+        </h1>
+        <p className="text-sm text-muted-foreground">{subtitle}</p>
       </div>
 
-      {/* Divider */}
-      <div className="h-px bg-white/6" />
-
-      <form action={formAction} className="flex flex-col gap-4">
-        {/* Error alert */}
+      {/* Form card */}
+      <div className="bg-card border border-border rounded-lg p-6 flex flex-col gap-5 shadow-sm">
         {state?.error && (
-          <div
-            role="alert"
-            className="flex items-start gap-2.5 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2.5"
-          >
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>{state.error}</span>
-          </div>
+          <Alert variant="destructive">
+            <AlertCircle />
+            <AlertDescription>{state.error}</AlertDescription>
+          </Alert>
         )}
 
-        {/* Email */}
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="email" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Email
-          </Label>
-          <div className="relative">
-            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              autoComplete={isSignup ? "email" : "username"}
-              required
-              placeholder="you@example.com"
-              className="pl-9"
-            />
+        <form action={formAction} className="flex flex-col gap-4">
+          {/* Email */}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="email" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Email
+            </Label>
+            <div className="relative">
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete={isSignup ? "email" : "username"}
+                required
+                placeholder="you@example.com"
+                className="pl-9 bg-background border-border focus:border-primary"
+              />
+            </div>
           </div>
-        </div>
 
-        {/* Password */}
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="password" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Password
-          </Label>
-          <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete={isSignup ? "new-password" : "current-password"}
-              required
-              placeholder="••••••••"
-              minLength={isSignup ? 8 : undefined}
-              className="pl-9"
-            />
+          {/* Password */}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="password" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Password
+            </Label>
+            <div className="relative">
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete={isSignup ? "new-password" : "current-password"}
+                required
+                placeholder="••••••••"
+                minLength={isSignup ? 8 : undefined}
+                className="pl-9 bg-background border-border focus:border-primary"
+              />
+            </div>
+            {isSignup && (
+              <p className="text-xs text-muted-foreground">Minimum 8 characters</p>
+            )}
           </div>
-          {isSignup && (
-            <p className="text-xs text-muted-foreground pl-0.5">Minimum 8 characters</p>
-          )}
-        </div>
 
-        {/* Submit */}
-        <Button
-          type="submit"
-          className="w-full gap-2 bg-primary hover:bg-primary/90 text-primary-foreground mt-1"
-          disabled={pending}
-        >
-          {pending ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Please wait…
-            </>
-          ) : (
-            <>
-              {submitLabel}
-              <ArrowRight className="w-4 h-4" />
-            </>
-          )}
-        </Button>
-      </form>
+          <Button
+            type="submit"
+            className="w-full mt-1 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
+            disabled={pending}
+          >
+            {pending ? (
+              <>
+                <Loader2 data-icon="inline-start" className="animate-spin" />
+                Please wait…
+              </>
+            ) : (
+              <>
+                {submitLabel}
+                <ArrowRight data-icon="inline-end" />
+              </>
+            )}
+          </Button>
+        </form>
 
-      {/* Alt link */}
-      <p className="text-sm text-muted-foreground text-center">
-        {altText}{" "}
-        <Link href={altHref} className="text-primary hover:text-primary/80 underline underline-offset-2 transition-colors">
-          {altLabel}
-        </Link>
-      </p>
+        <Separator />
+
+        <p className="text-sm text-muted-foreground text-center">
+          {altText}{" "}
+          <Link
+            href={altHref}
+            className="text-primary font-semibold hover:underline underline-offset-2 transition-colors"
+          >
+            {altLabel}
+          </Link>
+        </p>
+      </div>
     </div>
   );
 }

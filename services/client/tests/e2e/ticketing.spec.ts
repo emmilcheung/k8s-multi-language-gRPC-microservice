@@ -6,7 +6,6 @@ import { Kafka } from "kafkajs";
 // ---------------------------------------------------------------------------
 
 const PASSWORD = "Password123!";
-const UUID_RE = /\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -24,13 +23,13 @@ async function signup(page: Page, email: string) {
   await page.waitForURL("/");
 }
 
-async function signin(page: Page, email: string) {
-  await page.goto("/auth/signin");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL("/");
-}
+// async function signin(page: Page, email: string) {
+//   await page.goto("/auth/signin");
+//   await page.getByLabel("Email").fill(email);
+//   await page.getByLabel("Password").fill(PASSWORD);
+//   await page.getByRole("button", { name: /sign in/i }).click();
+//   await page.waitForURL("/");
+// }
 
 async function signout(page: Page) {
   await page.getByRole("button", { name: /sign out/i }).click();
