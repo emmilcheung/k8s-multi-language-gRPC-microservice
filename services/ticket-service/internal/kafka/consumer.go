@@ -174,6 +174,9 @@ func (oc *OrderConsumer) Start(ctx context.Context) {
 // exponential back-off + jitter between attempts. If all retries are exhausted,
 // the raw message is published to the dead-letter topic.
 func (oc *OrderConsumer) processWithRetry(ctx context.Context, topic string, msg *kafka.Message) error {
+	processCtx, span := startKafkaConsumerSpan(ctx, topic, msg.Headers)
+	defer span.End()
+
 	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
@@ -191,7 +194,7 @@ func (oc *OrderConsumer) processWithRetry(ctx context.Context, topic string, msg
 			}
 		}
 
-		if err := oc.handleMessage(ctx, topic, msg.Value); err != nil {
+		if err := oc.handleMessage(processCtx, topic, msg.Value); err != nil {
 			lastErr = err
 			continue
 		}
@@ -200,7 +203,9 @@ func (oc *OrderConsumer) processWithRetry(ctx context.Context, topic string, msg
 
 	// All retries exhausted — publish to DLQ so the message is never silently lost.
 	if oc.producer != nil {
-		if dlqErr := oc.producer.PublishToDLQ(ctx, topic, msg.Key, msg.Value, lastErr); dlqErr != nil {
+		recordSpanError(span, lastErr)
+		if dlqErr := oc.producer.PublishToDLQ(processCtx, topic, msg.Key, msg.Value, msg.Headers, lastErr); dlqErr != nil {
+			recordSpanError(span, dlqErr)
 			return fmt.Errorf("publish to DLQ failed (original error: %w): %v", lastErr, dlqErr)
 		}
 		oc.log.Error("message routed to DLQ after exhausting retries",
@@ -211,6 +216,7 @@ func (oc *OrderConsumer) processWithRetry(ctx context.Context, topic string, msg
 		return nil // DLQ write succeeded; offset can be committed
 	}
 
+	recordSpanError(span, lastErr)
 	return fmt.Errorf("message processing failed after %d attempts (no DLQ producer configured): %w", maxRetries, lastErr)
 }
 

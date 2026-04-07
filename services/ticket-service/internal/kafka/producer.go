@@ -40,13 +40,13 @@ type CloudEvent struct {
 // inventory management to the venue-service path.
 // Event (WS8): optional event metadata for event-ticketing association.
 type TicketEventData struct {
-	ID            string      `json:"id"`
-	Title         string      `json:"title"`
-	Price         string      `json:"price"`
-	UserID        string      `json:"userId"`
-	SeatingPlanID string      `json:"seatingPlanId,omitempty"`
-	Version       int         `json:"version"`
-	Event         *EventData  `json:"event,omitempty"` // WS8: nullable event metadata
+	ID            string     `json:"id"`
+	Title         string     `json:"title"`
+	Price         string     `json:"price"`
+	UserID        string     `json:"userId"`
+	SeatingPlanID string     `json:"seatingPlanId,omitempty"`
+	Version       int        `json:"version"`
+	Event         *EventData `json:"event,omitempty"` // WS8: nullable event metadata
 }
 
 // EventData is the event metadata payload in Kafka events.
@@ -120,8 +120,10 @@ func (p *Producer) PublishTicketUpdated(ctx context.Context, data TicketEventDat
 // PublishToDLQ routes a failed raw Kafka message to the appropriate dead-letter topic.
 // The DLQ topic name is derived by appending ".dlq" to the source topic.
 // The raw message bytes are forwarded unchanged so the DLQ consumer can inspect the original payload.
-func (p *Producer) PublishToDLQ(ctx context.Context, sourceTopic string, key, payload []byte, processingErr error) error {
+func (p *Producer) PublishToDLQ(ctx context.Context, sourceTopic string, key, payload []byte, sourceHeaders []kafka.Header, processingErr error) error {
 	dlqTopic := sourceTopic + ".dlq"
+	spanCtx, span, _ := startKafkaProducerSpan(ctx, dlqTopic)
+	defer span.End()
 
 	p.log.Error("routing message to DLQ",
 		zap.String("sourceTopic", sourceTopic),
@@ -130,17 +132,22 @@ func (p *Producer) PublishToDLQ(ctx context.Context, sourceTopic string, key, pa
 		zap.Error(processingErr),
 	)
 
+	headers := append([]kafka.Header{}, sourceHeaders...)
+	headers = append(headers,
+		kafka.Header{Key: "x-dlq-source-topic", Value: []byte(sourceTopic)},
+		kafka.Header{Key: "x-dlq-error", Value: []byte(processingErr.Error())},
+	)
+	headers = injectKafkaContextHeaders(spanCtx, headers)
+
 	deliveryChan := make(chan kafka.Event, 1)
 	err := p.p.Produce(&kafka.Message{
 		TopicPartition: kafka.TopicPartition{Topic: &dlqTopic, Partition: kafka.PartitionAny},
 		Key:            key,
 		Value:          payload,
-		Headers: []kafka.Header{
-			{Key: "x-dlq-source-topic", Value: []byte(sourceTopic)},
-			{Key: "x-dlq-error", Value: []byte(processingErr.Error())},
-		},
+		Headers:        headers,
 	}, deliveryChan)
 	if err != nil {
+		recordSpanError(span, err)
 		return fmt.Errorf("produce to DLQ topic %s: %w", dlqTopic, err)
 	}
 
@@ -148,15 +155,21 @@ func (p *Producer) PublishToDLQ(ctx context.Context, sourceTopic string, key, pa
 	case e := <-deliveryChan:
 		msg := e.(*kafka.Message)
 		if msg.TopicPartition.Error != nil {
+			recordSpanError(span, msg.TopicPartition.Error)
 			return fmt.Errorf("DLQ delivery error: %w", msg.TopicPartition.Error)
 		}
 		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("DLQ produce cancelled: %w", ctx.Err())
+		err := fmt.Errorf("DLQ produce cancelled: %w", ctx.Err())
+		recordSpanError(span, err)
+		return err
 	}
 }
 
 func (p *Producer) publish(ctx context.Context, topic, partitionKey, eventType string, data interface{}) error {
+	_, span, headers := startKafkaProducerSpan(ctx, topic)
+	defer span.End()
+
 	event := CloudEvent{
 		SpecVersion:     "1.0",
 		Type:            eventType,
@@ -177,8 +190,10 @@ func (p *Producer) publish(ctx context.Context, topic, partitionKey, eventType s
 		TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
 		Key:            []byte(partitionKey),
 		Value:          payload,
+		Headers:        headers,
 	}, deliveryChan)
 	if err != nil {
+		recordSpanError(span, err)
 		return fmt.Errorf("kafka produce: %w", err)
 	}
 
@@ -187,11 +202,14 @@ func (p *Producer) publish(ctx context.Context, topic, partitionKey, eventType s
 	case e := <-deliveryChan:
 		msg := e.(*kafka.Message)
 		if msg.TopicPartition.Error != nil {
+			recordSpanError(span, msg.TopicPartition.Error)
 			return fmt.Errorf("kafka delivery error: %w", msg.TopicPartition.Error)
 		}
 		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("kafka produce cancelled: %w", ctx.Err())
+		err := fmt.Errorf("kafka produce cancelled: %w", ctx.Err())
+		recordSpanError(span, err)
+		return err
 	}
 }
 

@@ -58,9 +58,9 @@ var ErrUnauthorized = errors.New("not authorised to modify this ticket")
 
 // TicketService contains the business logic for managing tickets.
 type TicketService struct {
-	repo             repository.TicketRepository
-	publisher        EventPublisher
-	log              *zap.Logger
+	repo               repository.TicketRepository
+	publisher          EventPublisher
+	log                *zap.Logger
 	venueServiceClient venuev1.VenueServiceClient // WS3: fetch seating plan assignment mode
 }
 
@@ -120,8 +120,9 @@ func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInpu
 			VenueAddress: ticket.Event.VenueAddress,
 		}
 	}
+	publishCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := s.publisher.PublishTicketCreated(context.Background(), eventData); err != nil {
+		if err := s.publisher.PublishTicketCreated(publishCtx, eventData); err != nil {
 			s.log.Error("failed to publish ticket.created event", zap.Error(err), zap.String("ticketId", eventData.ID))
 		}
 	}()
@@ -198,8 +199,9 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 			VenueAddress: ticket.Event.VenueAddress,
 		}
 	}
+	publishCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := s.publisher.PublishTicketUpdated(context.Background(), eventData); err != nil {
+		if err := s.publisher.PublishTicketUpdated(publishCtx, eventData); err != nil {
 			s.log.Error("failed to publish ticket.updated event", zap.Error(err), zap.String("ticketId", eventData.ID))
 		}
 	}()
@@ -275,8 +277,9 @@ func (s *TicketService) AttachSeatingPlan(ctx context.Context, input AttachSeati
 		SeatingPlanID: ticket.SeatingPlanID,
 		Version:       ticket.Version,
 	}
+	publishCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := s.publisher.PublishTicketUpdated(context.Background(), eventData); err != nil {
+		if err := s.publisher.PublishTicketUpdated(publishCtx, eventData); err != nil {
 			s.log.Error("failed to publish ticket.updated event after attach", zap.Error(err), zap.String("ticketId", eventData.ID))
 		}
 	}()
@@ -314,8 +317,9 @@ func (s *TicketService) DetachSeatingPlan(ctx context.Context, input DetachSeati
 		Version: ticket.Version,
 		// SeatingPlanID is intentionally empty — the plan was just detached.
 	}
+	publishCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := s.publisher.PublishTicketUpdated(context.Background(), eventData); err != nil {
+		if err := s.publisher.PublishTicketUpdated(publishCtx, eventData); err != nil {
 			s.log.Error("failed to publish ticket.updated event after detach", zap.Error(err), zap.String("ticketId", eventData.ID))
 		}
 	}()
