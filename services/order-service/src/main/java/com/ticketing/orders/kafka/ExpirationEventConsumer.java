@@ -3,11 +3,17 @@ package com.ticketing.orders.kafka;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ticketing.orders.service.OrderService;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
-import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -40,18 +46,30 @@ public class ExpirationEventConsumer {
             groupId = "order-service",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void onExpirationComplete(@Payload String message, Acknowledgment ack) {
+    public void onExpirationComplete(ConsumerRecord<String, String> record, Acknowledgment ack) {
+        Context parentContext = KafkaTraceContext.extractContext(record);
+        Span span = GlobalOpenTelemetry.getTracer("order-service")
+                .spanBuilder("kafka consume " + record.topic())
+                .setParent(parentContext)
+                .setSpanKind(SpanKind.CONSUMER)
+                .startSpan();
         try {
-            JsonNode root = objectMapper.readTree(message);
-            JsonNode data = root.path("data");
-            UUID orderId = UUID.fromString(data.path("orderId").asText());
+            try (Scope ignored = span.makeCurrent()) {
+                JsonNode root = objectMapper.readTree(record.value());
+                JsonNode data = root.path("data");
+                UUID orderId = UUID.fromString(data.path("orderId").asText());
 
-            orderService.expireOrder(orderId);
-            log.info("Processed expiration event orderId={}", orderId);
-            ack.acknowledge();
+                orderService.expireOrder(orderId);
+                log.info("Processed expiration event orderId={}", orderId);
+                ack.acknowledge();
+            }
         } catch (Exception e) {
+            span.recordException(e);
+            span.setStatus(StatusCode.ERROR, e.getMessage());
             log.error("Failed to process expiration event: {}", e.getMessage(), e);
             throw new RuntimeException("Expiration event processing failed", e);
+        } finally {
+            span.end();
         }
     }
 }

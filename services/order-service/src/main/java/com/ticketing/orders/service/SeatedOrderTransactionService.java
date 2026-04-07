@@ -12,6 +12,7 @@ import com.ticketing.orders.entity.OutboxMessage;
 import com.ticketing.orders.event.OrderCreatedEvent;
 import com.ticketing.orders.exception.NotFoundException;
 import com.ticketing.orders.grpc.SeatDetail;
+import com.ticketing.orders.kafka.KafkaTraceContext;
 import com.ticketing.orders.repository.OrderRepository;
 import com.ticketing.orders.repository.OrderSeatRepository;
 import com.ticketing.orders.repository.OrderTicketRepository;
@@ -150,7 +151,12 @@ public class SeatedOrderTransactionService {
     private void writeOutbox(String topic, String partitionKey, Object payload) {
         try {
             String json = objectMapper.writeValueAsString(payload);
-            outboxRepository.save(new OutboxMessage(topic, json, partitionKey));
+                        outboxRepository.save(new OutboxMessage(
+                                        topic,
+                                        json,
+                                        partitionKey,
+                                        KafkaTraceContext.captureCurrentTraceHeaders()
+                        ));
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to serialise outbox payload", e);
         }

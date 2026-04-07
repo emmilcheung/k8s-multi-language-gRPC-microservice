@@ -1,7 +1,16 @@
 package com.ticketing.orders.outbox;
 
 import com.ticketing.orders.entity.OutboxMessage;
+import com.ticketing.orders.kafka.KafkaTraceContext;
 import com.ticketing.orders.repository.OutboxRepository;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -20,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class OutboxMessagePublisher {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxMessagePublisher.class);
+    private static final Tracer tracer = GlobalOpenTelemetry.getTracer("order-service");
 
     private final OutboxRepository outboxRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
@@ -45,15 +55,28 @@ public class OutboxMessagePublisher {
      */
     @Transactional
     public void publishOne(OutboxMessage msg) {
+        Context parentContext = KafkaTraceContext.extractContext(msg.getTraceHeaders());
+        Span span = tracer.spanBuilder("kafka publish " + msg.getTopic())
+                .setParent(parentContext)
+                .setSpanKind(SpanKind.PRODUCER)
+                .startSpan();
         try {
-            // send() is async — get() blocks until the broker acknowledges (acks=all)
-            kafkaTemplate.send(msg.getTopic(), msg.getPartitionKey(), msg.getPayload()).get();
+            ProducerRecord<String, String> record =
+                    new ProducerRecord<>(msg.getTopic(), msg.getPartitionKey(), msg.getPayload());
+            try (Scope ignored = span.makeCurrent()) {
+                KafkaTraceContext.injectContext(Context.current(), record.headers());
+                kafkaTemplate.send(record).get();
+            }
             msg.markPublished();
             outboxRepository.save(msg);
             log.debug("Outbox message published id={} topic={}", msg.getId(), msg.getTopic());
         } catch (Exception e) {
+            span.recordException(e);
+            span.setStatus(StatusCode.ERROR, e.getMessage());
             log.error("Failed to publish outbox message id={} topic={}: {}",
                     msg.getId(), msg.getTopic(), e.getMessage(), e);
+        } finally {
+            span.end();
         }
     }
 }

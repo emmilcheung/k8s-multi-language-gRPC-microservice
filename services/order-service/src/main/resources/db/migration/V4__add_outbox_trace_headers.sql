@@ -1,0 +1,2 @@
+ALTER TABLE outbox
+  ADD COLUMN IF NOT EXISTS trace_headers JSONB NOT NULL DEFAULT '{}'::jsonb;
