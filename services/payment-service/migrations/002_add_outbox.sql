@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS outbox (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   topic         TEXT        NOT NULL,
   payload       JSONB       NOT NULL,
+  trace_headers JSONB       NOT NULL DEFAULT '{}',
   partition_key TEXT        NOT NULL,
   published     BOOLEAN     NOT NULL DEFAULT false,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()

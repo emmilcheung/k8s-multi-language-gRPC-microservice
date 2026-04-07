@@ -24,6 +24,7 @@ import supertest from 'supertest';
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
 import { DatabaseModule } from '../src/database/database.module';
 import { PaymentsModule } from '../src/modules/payments/payments.module';
+import { OutboxRelayService } from '../src/modules/payments/outbox-relay.service';
 import { HealthModule } from '../src/modules/health/health.module';
 import { KafkaChecker } from '../src/modules/health/kafka.checker';
 import { STRIPE_CLIENT } from '../src/modules/payments/stripe.constants';
@@ -115,6 +116,8 @@ beforeAll(async () => {
     .useValue(mockStripe)
     .overrideProvider(KafkaChecker)
     .useValue(mockKafkaChecker)
+    .overrideProvider(OutboxRelayService)
+    .useValue({ onModuleInit: async () => {}, onModuleDestroy: async () => {} })
     .compile();
 
   app = moduleRef.createNestApplication();
