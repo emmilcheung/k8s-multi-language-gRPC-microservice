@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	appkafka "github.com/acme/expiration-service/internal/kafka"
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
 
@@ -38,6 +39,9 @@ func (h *Handler) ProcessTask(ctx context.Context, t *asynq.Task) error {
 	var payload scheduler.OrderExpirationPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		return fmt.Errorf("unmarshal expiration payload: %w", err)
+	}
+	if len(payload.TraceHeaders) > 0 {
+		ctx = appkafka.ExtractTraceContext(ctx, payload.TraceHeaders)
 	}
 
 	h.log.Info("processing order expiration", zap.String("orderId", payload.OrderID))

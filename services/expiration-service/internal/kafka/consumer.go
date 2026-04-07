@@ -98,13 +98,18 @@ func (c *Consumer) Start(ctx context.Context, handler OrderCreatedHandler) {
 // Uses exponential back-off with full jitter (R-10 fix — was quadratic 100ms*attempt^2).
 // After all retries are exhausted, the message is published to the DLQ (R-04).
 func (c *Consumer) processMessage(ctx context.Context, msg *confluent.Message, handler OrderCreatedHandler) error {
+	processCtx, span := startKafkaConsumerSpan(ctx, TopicOrderCreated, msg.Headers)
+	defer span.End()
+
 	var envelope CloudEvent
 	if err := json.Unmarshal(msg.Value, &envelope); err != nil {
+		recordSpanError(span, err)
 		return fmt.Errorf("unmarshal cloud event: %w", err)
 	}
 
 	var data OrderCreatedData
 	if err := json.Unmarshal(envelope.Data, &data); err != nil {
+		recordSpanError(span, err)
 		return fmt.Errorf("unmarshal order created data: %w", err)
 	}
 
@@ -126,7 +131,7 @@ func (c *Consumer) processMessage(ctx context.Context, msg *confluent.Message, h
 			}
 		}
 
-		if err := handler(ctx, data); err != nil {
+		if err := handler(processCtx, data); err != nil {
 			lastErr = err
 			continue
 		}
@@ -135,7 +140,9 @@ func (c *Consumer) processMessage(ctx context.Context, msg *confluent.Message, h
 
 	// All retries exhausted — route to DLQ so the message is never silently lost (R-04).
 	if c.producer != nil {
-		if dlqErr := c.producer.PublishToDLQ(ctx, TopicOrderCreated, msg.Key, msg.Value, lastErr); dlqErr != nil {
+		recordSpanError(span, lastErr)
+		if dlqErr := c.producer.PublishToDLQ(processCtx, TopicOrderCreated, msg.Key, msg.Value, msg.Headers, lastErr); dlqErr != nil {
+			recordSpanError(span, dlqErr)
 			return fmt.Errorf("publish to DLQ failed (original error: %w): %v", lastErr, dlqErr)
 		}
 		c.log.Error("message routed to DLQ after exhausting retries",
@@ -146,6 +153,7 @@ func (c *Consumer) processMessage(ctx context.Context, msg *confluent.Message, h
 		return nil // DLQ write succeeded; offset can be committed
 	}
 
+	recordSpanError(span, lastErr)
 	return fmt.Errorf("handler failed after %d attempts (no DLQ producer configured): %w", maxRetries, lastErr)
 }
 
