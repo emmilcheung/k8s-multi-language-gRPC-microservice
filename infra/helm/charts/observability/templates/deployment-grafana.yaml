@@ -34,6 +34,8 @@ spec:
           volumeMounts:
             - name: provisioning
               mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboards-provisioning
+              mountPath: /etc/grafana/provisioning/dashboards
             - name: dashboards
               mountPath: /var/lib/grafana/dashboards
           resources:
@@ -50,5 +52,12 @@ spec:
             items:
               - key: datasources.yml
                 path: datasources.yml
+        - name: dashboards-provisioning
+          configMap:
+            name: {{ include "observability.fullname" . }}-grafana-dashboards
+            items:
+              - key: dashboards.yml
+                path: dashboards.yml
         - name: dashboards
-          emptyDir: {}
+          configMap:
+            name: {{ include "observability.fullname" . }}-grafana-dashboards

@@ -7,11 +7,4 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name | quote }}
 data:
   datasources.yml: |-
-    apiVersion: 1
-    datasources:
-      - name: Prometheus
-        type: prometheus
-        access: proxy
-        url: http://{{ include "observability.fullname" . }}-prometheus:9090
-        isDefault: true
-        editable: false
+{{ .Files.Get "grafana/provisioning/datasources/datasources.yml" | replace "http://prometheus:9090" (printf "http://%s-prometheus:9090" (include "observability.fullname" .)) | replace "http://jaeger:16686" (printf "http://%s-jaeger:16686" (include "observability.fullname" .)) | indent 4 }}
