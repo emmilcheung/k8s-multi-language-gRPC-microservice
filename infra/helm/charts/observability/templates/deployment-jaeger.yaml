@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "observability.fullname" . }}-jaeger
+  labels:
+    app.kubernetes.io/name: {{ include "observability.fullname" . }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "observability.fullname" . }}
+      app.kubernetes.io/component: jaeger
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "observability.fullname" . }}
+        app.kubernetes.io/component: jaeger
+    spec:
+      containers:
+        - name: jaeger
+          image: {{ printf "%s:%s" .Values.jaeger.image.repository .Values.jaeger.image.tag | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: COLLECTOR_OTLP_ENABLED
+              value: "true"
+            - name: LOG_LEVEL
+              value: info
+          ports:
+            - name: ui
+              containerPort: {{ .Values.jaeger.service.uiPort }}
+            - name: otlp-grpc
+              containerPort: {{ .Values.jaeger.service.otlpPort }}
+          resources:
+            requests:
+              cpu: {{ .Values.jaeger.resources.requests.cpu }}
+              memory: {{ .Values.jaeger.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.jaeger.resources.limits.cpu }}
+              memory: {{ .Values.jaeger.resources.limits.memory }}

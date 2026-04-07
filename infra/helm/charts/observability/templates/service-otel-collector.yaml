@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "observability.fullname" . }}-otel-collector
+  labels:
+    app.kubernetes.io/name: {{ include "observability.fullname" . }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+spec:
+  type: {{ .Values.otelCollector.service.type }}
+  selector:
+    app.kubernetes.io/name: {{ include "observability.fullname" . }}
+    app.kubernetes.io/component: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: {{ .Values.otelCollector.service.grpcPort }}
+      targetPort: {{ .Values.otelCollector.service.grpcPort }}
+    - name: otlp-http
+      port: {{ .Values.otelCollector.service.httpPort }}
+      targetPort: {{ .Values.otelCollector.service.httpPort }}
+    - name: metrics
+      port: {{ .Values.otelCollector.service.metricsPort }}
+      targetPort: {{ .Values.otelCollector.service.metricsPort }}

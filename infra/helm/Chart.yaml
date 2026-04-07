@@ -32,6 +32,10 @@ dependencies:
   - name: venue-service
     version: "0.1.0"
     repository: "file://charts/venue-service"
+  - name: observability
+    version: "0.1.0"
+    repository: "file://charts/observability"
+    condition: observability.enabled
 
   # ── Backing infrastructure (Bitnami community charts) ─────────────────────
   - name: postgresql
