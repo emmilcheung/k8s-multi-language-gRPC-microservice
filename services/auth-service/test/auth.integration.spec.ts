@@ -195,7 +195,9 @@ describe('POST /api/users/signup returns 201 Created given valid credentials', (
 
     expect(res.status).toBe(201);
     expect(res.body.currentUser.email).toBe('signup@example.com');
-    const setCookieHeaders = res.headers['set-cookie'] as unknown as string[] | undefined;
+    const setCookieHeaders = res.headers['set-cookie'] as unknown as
+      | string[]
+      | undefined;
     expect(setCookieHeaders).toBeDefined();
     const tokenCookie = setCookieHeaders!.find((c) => c.startsWith('token='));
     expect(tokenCookie).toBeDefined();
@@ -208,7 +210,9 @@ describe('POST /api/users/signup returns 201 Created given valid credentials', (
       .send({ email: 'signup-refresh@example.com', password: 'password123' });
 
     expect(res.status).toBe(201);
-    const setCookieHeaders = res.headers['set-cookie'] as unknown as string[] | undefined;
+    const setCookieHeaders = res.headers['set-cookie'] as unknown as
+      | string[]
+      | undefined;
     expect(setCookieHeaders).toBeDefined();
     const refreshCookie = setCookieHeaders!.find((c) =>
       c.startsWith('refreshToken='),
@@ -277,7 +281,9 @@ describe('POST /api/users/signin returns 200 OK given valid credentials', () => 
       .send({ email, password });
 
     expect(res.status).toBe(200);
-    const setCookieHeaders = res.headers['set-cookie'] as unknown as string[] | undefined;
+    const setCookieHeaders = res.headers['set-cookie'] as unknown as
+      | string[]
+      | undefined;
     expect(setCookieHeaders).toBeDefined();
     const tokenCookie = setCookieHeaders!.find((c) => c.startsWith('token='));
     const refreshCookie = setCookieHeaders!.find((c) =>
@@ -334,7 +340,9 @@ describe('POST /api/auth/refresh rotates refresh token', () => {
       .send({ email: 'refresh-rotate@example.com', password: 'password123' });
     expect(signupRes.status).toBe(201);
 
-    const signupCookies = signupRes.headers['set-cookie'] as unknown as string[];
+    const signupCookies = signupRes.headers[
+      'set-cookie'
+    ] as unknown as string[];
     const oldRefreshTokenValue = getCookieValue(signupCookies, 'refreshToken');
     expect(oldRefreshTokenValue).toBeDefined();
 
@@ -344,7 +352,9 @@ describe('POST /api/auth/refresh rotates refresh token', () => {
       .set('Cookie', `refreshToken=${oldRefreshTokenValue!}`);
 
     expect(refreshRes.status).toBe(200);
-    const refreshCookies = refreshRes.headers['set-cookie'] as unknown as string[];
+    const refreshCookies = refreshRes.headers[
+      'set-cookie'
+    ] as unknown as string[];
     const newTokenValue = getCookieValue(refreshCookies, 'token');
     const newRefreshTokenValue = getCookieValue(refreshCookies, 'refreshToken');
     expect(newTokenValue).toBeDefined();
@@ -360,7 +370,9 @@ describe('POST /api/auth/refresh rotates refresh token', () => {
       .send({ email: 'refresh-replay@example.com', password: 'password123' });
     expect(signupRes.status).toBe(201);
 
-    const signupCookies = signupRes.headers['set-cookie'] as unknown as string[];
+    const signupCookies = signupRes.headers[
+      'set-cookie'
+    ] as unknown as string[];
     const originalRefreshToken = getCookieValue(signupCookies, 'refreshToken');
     expect(originalRefreshToken).toBeDefined();
 
@@ -386,7 +398,8 @@ describe('POST /api/users/signout returns 204 No Content', () => {
     expect(res.status).toBe(204);
     // Cookie header should contain an expired/empty token cookie
     const cookie =
-      ((res.headers['set-cookie'] as unknown as string[] | undefined) ?? [])[0] ?? '';
+      ((res.headers['set-cookie'] as unknown as string[] | undefined) ??
+        [])[0] ?? '';
     expect(cookie).toMatch(/token=/);
   });
 
@@ -398,7 +411,9 @@ describe('POST /api/users/signout returns 204 No Content', () => {
     });
     expect(signupRes.status).toBe(201);
 
-    const signupCookies = signupRes.headers['set-cookie'] as unknown as string[];
+    const signupCookies = signupRes.headers[
+      'set-cookie'
+    ] as unknown as string[];
     const refreshTokenValue = getCookieValue(signupCookies, 'refreshToken');
     expect(refreshTokenValue).toBeDefined();
 
