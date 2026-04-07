@@ -6,6 +6,7 @@
  */
 
 import { cookies } from "next/headers";
+import { traceHeaders } from "@/lib/tracing";
 
 /**
  * Returns the base URL for the internal API gateway.
@@ -40,6 +41,7 @@ export async function authHeaders(request?: RequestWithCookies): Promise<Headers
 
   return {
     "Content-Type": "application/json",
+    ...traceHeaders(),
     ...(token ? { Cookie: `token=${token}` } : {}),
   };
 }

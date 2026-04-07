@@ -3,6 +3,7 @@ import { Syne, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { cookies } from "next/headers";
 import { NavBar } from "@/components/nav-bar";
+import { currentTraceId } from "@/lib/tracing";
 
 const syne = Syne({
   variable: "--font-display",
@@ -29,11 +30,16 @@ export default async function RootLayout({
 }>) {
   const cookieStore = await cookies();
   const isLoggedIn = Boolean(cookieStore.get("token")?.value);
+  const traceId = currentTraceId();
+
   return (
     <html
       lang="en"
       className={`${syne.variable} ${dmSans.variable} h-full antialiased`}
     >
+      <head>
+        {traceId ? <meta name="x-trace-id" content={traceId} /> : null}
+      </head>
       <body className="min-h-full flex flex-col bg-background text-foreground selection:bg-primary/20 selection:text-primary">
         <NavBar isLoggedIn={isLoggedIn} />
         <main className="flex-1 container mx-auto px-4 py-10 max-w-6xl">
