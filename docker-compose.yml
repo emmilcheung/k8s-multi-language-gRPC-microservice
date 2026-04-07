@@ -2,81 +2,8 @@
 # Kafka runs in KRaft mode (no ZooKeeper) to keep resource use minimal.
 # All services have mem_limit set for low-spec development machines.
 # Do NOT use this compose file for production.
-
+name: microservices 
 services:
-
-  # ── Observability: Jaeger trace storage + UI ───────────────────────────────
-  jaeger:
-    image: jaegertracing/all-in-one:1.65.0
-    restart: unless-stopped
-    environment:
-      COLLECTOR_OTLP_ENABLED: "true"
-      LOG_LEVEL: info
-    ports:
-      - "16686:16686"
-    mem_limit: 256m
-    networks:
-      - microservices-net
-
-  # ── Observability: OpenTelemetry Collector ────────────────────────────────
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.114.0
-    restart: unless-stopped
-    command:
-      - --config=/etc/otelcol-contrib/config.yaml
-    volumes:
-      - ./observability/local/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
-    depends_on:
-      jaeger:
-        condition: service_started
-    ports:
-      - "4317:4317"
-      - "4318:4318"
-    mem_limit: 256m
-    networks:
-      - microservices-net
-
-  # ── Observability: Prometheus metrics scraping ────────────────────────────
-  prometheus:
-    image: prom/prometheus:v2.55.1
-    restart: unless-stopped
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --web.enable-lifecycle
-    volumes:
-      - ./observability/local/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    ports:
-      - "9090:9090"
-    mem_limit: 256m
-    networks:
-      - microservices-net
-
-  # ── Observability: Grafana dashboards ─────────────────────────────────────
-  grafana:
-    image: grafana/grafana:11.3.1
-    restart: unless-stopped
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    volumes:
-      - ./observability/local/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./observability/local/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./observability/local/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana_data:/var/lib/grafana
-    depends_on:
-      prometheus:
-        condition: service_started
-      jaeger:
-        condition: service_started
-    ports:
-      - "3004:3000"
-    mem_limit: 256m
-    networks:
-      - microservices-net
-
   # ── PostgreSQL: auth-service ────────────────────────────────────────────────
   postgres-auth:
     image: postgres:16-alpine
@@ -544,8 +471,6 @@ volumes:
   mongodb_data:
   redis_data:
   kafka_data:
-  prometheus_data:
-  grafana_data:
 
 networks:
   microservices-net:
