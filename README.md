@@ -1,4 +1,4 @@
-# E-Commerce app
+# E-Ticketing platform
 
 > **Project inspiration:** This project rebuilds the concept and domain from the Udemy course
 > [Microservices with Node JS and React](https://www.udemy.com/course/microservices-with-node-js-and-react/),
