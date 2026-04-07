@@ -30,7 +30,7 @@ spec:
               containerPort: {{ .Values.otelCollector.service.metricsPort }}
           command:
             - "/otelcol-contrib"
-            - "--config=/etc/otelcol-contrib/config.yaml"
+            - "--config=/etc/otelcol-contrib/otel-collector.yaml"
           volumeMounts:
             - name: config
               mountPath: /etc/otelcol-contrib

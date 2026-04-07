@@ -62,6 +62,8 @@ order-service:
     REDIS_URL: ""
     TICKET_SERVICE_GRPC_HOST: ticket-service
     TICKET_SERVICE_GRPC_PORT: "50051"
+    VENUE_SERVICE_GRPC_HOST: venue-service
+    VENUE_SERVICE_GRPC_PORT: "50052"
     TICKET_SERVICE_GRPC_DEADLINE_MS: "5000"
   secretRef: order-service-secrets
   resources:

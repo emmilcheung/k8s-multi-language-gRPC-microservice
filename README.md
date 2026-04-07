@@ -2,15 +2,18 @@
 
 > **Project inspiration:** This project rebuilds the concept and domain from the Udemy course
 > [Microservices with Node JS and React](https://www.udemy.com/course/microservices-with-node-js-and-react/),
-> but with a completely redesigned architecture, polyglot stack, and production-grade infrastructure.
+> but with a completely redesigned architecture, polyglot stack, and distributed infrastructure.
 
 > **Work in progress — practice project.**
 >
 > This is a deliberately over-engineered E-Commerce app built as a hands-on study of
 > **polyglot microservices**, **multi-language inter-process communication**, and
-> **production-grade infrastructure patterns** — not as a production system.
-> The goal is to experience the real friction of operating multiple languages and runtimes
-> inside a single platform: shared contracts, independent deployments, cost trade-offs,
+> **Kubernetes infrastructure patterns** — not as a production system.
+
+> The goal is to experience the real friction of operating multiple languages and runtimes inside a kubernetes: shared contracts, independent deployments, cost trade-offs,
+> It also explores human-in-the-loop and agentic workflow patterns across tools such as
+> Claude Code, OpenCode, and Copilot within a continuously iterated development workflow.
+> tools and methodologies: shared contracts, independent deployments, cost trade-offs,
 > and the infrastructure plumbing that holds it all together.
 
 ---
@@ -65,19 +68,19 @@ Each architectural decision was chosen to mirror a real-world challenge:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│                       │              AWS EKS  (ap-southeast-1)            │
-│                       │                                                   │
+│                    │                 AWS EKS  (ap-southeast-1)            │
+│                    │                                                      │
 HTTPS ──► ALB ──► Kong (JWT verify · rate-limit · correlation-ID)           │
-│                       │                   │                               │
-│        ┌──────────────┼──────────┬─────────┴────────┬──────────────┐     │
-│        │              │          │                  │              │     │
-│   auth-service   ticket-    order-service    payment-service  venue-    │
-│   (NestJS/TS)    service    (Java/SB4)       (NestJS/TS)      service   │
-│                  (Go/Echo)      │                  │           (Go/Echo) │
-│                    │       gRPC │                  │              │     │
-│                    └───────────-┘                  │              │     │
-│                          │                         │              │     │
-│                   Apache Kafka (MSK / Strimzi) ─────┴──────────────┘     │
+│                    │                       │                              │
+│        ┌───────────┼─────────────┬─────────┴────────┬──────────────┐      │
+│        │           │             │                  │              │      │
+│   auth-service   ticket-    order-service    payment-service    venue-    │
+│   (NestJS/TS)    service    (Java/SB4)       (NestJS/TS)        service   │
+│                  (Go/Echo)       │                  │          (Go/Echo)  │
+│                    │        gRPC │                  │              │      │
+│                    └────────────-┘                  │              │      │
+│                          │                          │              │      │
+│                   Apache Kafka (MSK / Strimzi) ─────┴──────────────┘      │
 │                          │                                                │
 │                 expiration-service (Go worker)                            │
 │                                                                           │
