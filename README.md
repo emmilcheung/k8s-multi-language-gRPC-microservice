@@ -57,7 +57,7 @@ Each architectural decision was chosen to mirror a real-world challenge:
 
 - A production system. Shortcuts are documented (stubbed Stripe, dev RSA key in compose, no CI yet).
 - A showcase of business logic. The domain is a vehicle for the infrastructure patterns.
-- Complete. CI/CD pipelines, EKS deployment, and the observability stack are pending.
+- Complete. CI/CD pipelines, EKS deployment, and AWS-managed observability are still pending.
 
 ---
 
@@ -308,8 +308,25 @@ pnpm exec playwright test
 | PostgreSQL (venue) | 5435 |
 | Redis | 6379 |
 | Schema Registry | 8081 |
+| Prometheus | 9090 |
+| Jaeger | 16686 |
+| Grafana | 3004 |
+| OTel Collector (gRPC) | 4317 |
+| OTel Collector (HTTP) | 4318 |
 
 All traffic from the browser goes through Kong on port **8000**.
+
+#### Local observability
+
+Docker Compose now includes a local observability stack for traces and metrics:
+
+- OpenTelemetry Collector receives OTLP traces from the services.
+- Jaeger stores and visualizes trace spans.
+- Prometheus scrapes `/metrics` and `/actuator/prometheus` endpoints.
+- Grafana provisions a starter dashboard from the repository.
+
+See [observability/local/README.md](observability/local/README.md) for the
+trace walkthrough, connectivity checks, and host-run client instructions.
 
 ---
 
@@ -503,7 +520,8 @@ pnpm exec playwright test
 | Terraform modules | ✅ Scaffolded | vpc, eks, rds, elasticache, msk, kong; **not applied to real AWS** |
 | CI/CD pipelines | ⏳ Pending | `.github/workflows/` is empty |
 | EKS deployment | ⏳ Pending | Terraform apply deferred; local minikube is the active env |
-| Observability (OTel/AMP/AMG) | ⏳ Pending | Deferred to Milestone 7 |
+| Observability (local compose) | ✅ Available | OTel Collector + Prometheus + Jaeger + Grafana |
+| Observability (AWS-managed) | ⏳ Pending | AMP / AMG / X-Ray wiring still deferred |
 
 ### Known shortcuts and tech debt
 
