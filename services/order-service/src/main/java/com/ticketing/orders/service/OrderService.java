@@ -20,6 +20,7 @@ import com.ticketing.orders.grpc.ReserveHeldSeatsResponse;
 import com.ticketing.orders.grpc.ReserveQuotaResponse;
 import com.ticketing.orders.grpc.TicketServiceClient;
 import com.ticketing.orders.grpc.VenueServiceClient;
+import com.ticketing.orders.kafka.KafkaTraceContext;
 import com.ticketing.orders.repository.OrderRepository;
 import com.ticketing.orders.repository.OrderSeatRepository;
 import com.ticketing.orders.repository.OutboxRepository;
@@ -383,7 +384,12 @@ public class OrderService {
     private void writeOutbox(String topic, String partitionKey, Object payload) {
         try {
             String json = objectMapper.writeValueAsString(payload);
-            outboxRepository.save(new OutboxMessage(topic, json, partitionKey));
+            outboxRepository.save(new OutboxMessage(
+                    topic,
+                    json,
+                    partitionKey,
+                    KafkaTraceContext.captureCurrentTraceHeaders()
+            ));
         } catch (JsonProcessingException e) {
             // This should never happen for our simple POJOs — treat as programmer error
             throw new IllegalStateException("Failed to serialise outbox payload", e);
