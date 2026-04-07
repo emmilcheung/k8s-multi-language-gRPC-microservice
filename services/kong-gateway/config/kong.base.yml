@@ -450,6 +450,10 @@ plugins:
       generator: uuid#counter
       echo_downstream: true
 
+  # Expose gateway metrics on Kong's status listener for local Prometheus
+  # scraping and future managed backends behind the same collector boundary.
+  - name: prometheus
+
   # Rate limiting — backed by Redis in production; local counter in dev
   # IP-based limit for anonymous (unauthenticated) requests.
   # Authenticated consumers get a higher limit via the consumer-scoped plugin

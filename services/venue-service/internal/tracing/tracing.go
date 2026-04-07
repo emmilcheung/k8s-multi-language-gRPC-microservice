@@ -5,7 +5,9 @@ package tracing
 
 import (
 	"context"
+	"net/url"
 	"os"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -16,10 +18,25 @@ import (
 	"go.uber.org/zap"
 )
 
+func normalizeCollectorEndpoint(raw string) string {
+	if raw == "" {
+		return ""
+	}
+
+	if strings.Contains(raw, "://") {
+		parsed, err := url.Parse(raw)
+		if err == nil && parsed.Host != "" {
+			return parsed.Host
+		}
+	}
+
+	return raw
+}
+
 // Init sets up the global OTel TracerProvider and TextMapPropagator.
 // Returns a shutdown function that flushes pending spans.
 func Init(ctx context.Context, serviceName string, log *zap.Logger) func(context.Context) {
-	collectorURL := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	collectorURL := normalizeCollectorEndpoint(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
 
 	res, err := resource.New(ctx,
 		resource.WithAttributes(

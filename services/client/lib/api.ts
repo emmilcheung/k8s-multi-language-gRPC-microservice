@@ -4,6 +4,7 @@
 // Client Components should use plain fetch() with relative URLs.
 
 import { cookies } from "next/headers";
+import { traceHeaders } from "@/lib/tracing";
 
 // Paths whose responses are safe to cache via ISR (non-user-specific, read-only).
 // All other paths use cache:"no-store" to prevent stale user-specific data.
@@ -23,8 +24,11 @@ export async function serverApi<T = unknown>(
   options: RequestInit = {}
 ): Promise<T> {
   const base =
-    process.env.INTERNAL_API_URL?.replace(/\/$/, "") ??
-    "http://localhost:8080";
+    (
+      process.env.INTERNAL_API_URL ??
+      process.env.NEXT_PUBLIC_API_URL ??
+      "http://localhost:8080"
+    ).replace(/\/$/, "");
 
   const cookieStore = await cookies();
   const token = cookieStore.get("token")?.value ?? "";
@@ -38,13 +42,19 @@ export async function serverApi<T = unknown>(
       ? { next: { revalidate: ISR_REVALIDATE_SECONDS } }
       : { cache: "no-store" };
 
+  const headers =
+    options.headers instanceof Headers
+      ? Object.fromEntries(options.headers.entries())
+      : (options.headers ?? {});
+
   const res = await fetch(`${base}${path}`, {
     ...nextCacheOptions,
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...traceHeaders(),
       ...(token ? { Cookie: `token=${token}` } : {}),
-      ...(options.headers ?? {}),
+      ...headers,
     },
   });
 

@@ -8,6 +8,7 @@ import { Kafka, Producer } from 'kafkajs';
 import * as net from 'net';
 import { DRIZZLE_DB, type DrizzleDB } from '../../database/database.module';
 import { outbox } from '../../database/schema';
+import { withKafkaProducerSpan } from '../../kafka/trace-context';
 
 const RELAY_BATCH_SIZE = 50;
 
@@ -100,15 +101,22 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
 
     for (const row of rows) {
       try {
-        await this.producer.send({
-          topic: row.topic,
-          messages: [
-            {
-              key: row.partitionKey,
-              value: JSON.stringify(row.payload),
-            },
-          ],
-        });
+        await withKafkaProducerSpan(
+          `kafka publish ${row.topic}`,
+          row.traceHeaders,
+          async (headers) => {
+            await this.producer!.send({
+              topic: row.topic,
+              messages: [
+                {
+                  key: row.partitionKey,
+                  value: JSON.stringify(row.payload),
+                  headers,
+                },
+              ],
+            });
+          },
+        );
 
         await this.db.update(outbox).set({ published: true }).where(eq(outbox.id, row.id));
 

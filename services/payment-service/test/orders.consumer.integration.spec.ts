@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
 import { DatabaseModule } from '../src/database/database.module';
 import { PaymentsModule } from '../src/modules/payments/payments.module';
+import { OutboxRelayService } from '../src/modules/payments/outbox-relay.service';
 import { HealthModule } from '../src/modules/health/health.module';
 import { OrdersConsumer } from '../src/kafka/orders.consumer';
 import { STRIPE_CLIENT } from '../src/modules/payments/stripe.constants';
@@ -111,6 +112,8 @@ beforeAll(async () => {
   })
     .overrideProvider(STRIPE_CLIENT)
     .useValue(mockStripe)
+    .overrideProvider(OutboxRelayService)
+    .useValue({ onModuleInit: async () => {}, onModuleDestroy: async () => {} })
     .compile();
 
   app = moduleRef.createNestApplication();

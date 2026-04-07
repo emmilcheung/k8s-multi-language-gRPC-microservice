@@ -2,15 +2,18 @@
 
 > **Project inspiration:** This project rebuilds the concept and domain from the Udemy course
 > [Microservices with Node JS and React](https://www.udemy.com/course/microservices-with-node-js-and-react/),
-> but with a completely redesigned architecture, polyglot stack, and production-grade infrastructure.
+> but with a completely redesigned architecture, polyglot stack, and distributed infrastructure.
 
 > **Work in progress — practice project.**
 >
 > This is a deliberately over-engineered E-Commerce app built as a hands-on study of
 > **polyglot microservices**, **multi-language inter-process communication**, and
-> **production-grade infrastructure patterns** — not as a production system.
-> The goal is to experience the real friction of operating multiple languages and runtimes
-> inside a single platform: shared contracts, independent deployments, cost trade-offs,
+> **Kubernetes infrastructure patterns** — not as a production system.
+
+> The goal is to experience the real friction of operating multiple languages and runtimes inside a kubernetes: shared contracts, independent deployments, cost trade-offs,
+> It also explores human-in-the-loop and agentic workflow patterns across tools such as
+> Claude Code, OpenCode, and Copilot within a continuously iterated development workflow.
+> tools and methodologies: shared contracts, independent deployments, cost trade-offs,
 > and the infrastructure plumbing that holds it all together.
 
 ---
@@ -57,7 +60,7 @@ Each architectural decision was chosen to mirror a real-world challenge:
 
 - A production system. Shortcuts are documented (stubbed Stripe, dev RSA key in compose, no CI yet).
 - A showcase of business logic. The domain is a vehicle for the infrastructure patterns.
-- Complete. CI/CD pipelines, EKS deployment, and the observability stack are pending.
+- Complete. CI/CD pipelines, EKS deployment, and AWS-managed observability are still pending.
 
 ---
 
@@ -65,19 +68,19 @@ Each architectural decision was chosen to mirror a real-world challenge:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│                       │              AWS EKS  (ap-southeast-1)            │
-│                       │                                                   │
+│                    │                 AWS EKS  (ap-southeast-1)            │
+│                    │                                                      │
 HTTPS ──► ALB ──► Kong (JWT verify · rate-limit · correlation-ID)           │
-│                       │                   │                               │
-│        ┌──────────────┼──────────┬─────────┴────────┬──────────────┐     │
-│        │              │          │                  │              │     │
-│   auth-service   ticket-    order-service    payment-service  venue-    │
-│   (NestJS/TS)    service    (Java/SB4)       (NestJS/TS)      service   │
-│                  (Go/Echo)      │                  │           (Go/Echo) │
-│                    │       gRPC │                  │              │     │
-│                    └───────────-┘                  │              │     │
-│                          │                         │              │     │
-│                   Apache Kafka (MSK / Strimzi) ─────┴──────────────┘     │
+│                    │                       │                              │
+│        ┌───────────┼─────────────┬─────────┴────────┬──────────────┐      │
+│        │           │             │                  │              │      │
+│   auth-service   ticket-    order-service    payment-service    venue-    │
+│   (NestJS/TS)    service    (Java/SB4)       (NestJS/TS)        service   │
+│                  (Go/Echo)       │                  │          (Go/Echo)  │
+│                    │        gRPC │                  │              │      │
+│                    └────────────-┘                  │              │      │
+│                          │                          │              │      │
+│                   Apache Kafka (MSK / Strimzi) ─────┴──────────────┘      │
 │                          │                                                │
 │                 expiration-service (Go worker)                            │
 │                                                                           │
@@ -308,8 +311,25 @@ pnpm exec playwright test
 | PostgreSQL (venue) | 5435 |
 | Redis | 6379 |
 | Schema Registry | 8081 |
+| Prometheus | 9090 |
+| Jaeger | 16686 |
+| Grafana | 3004 |
+| OTel Collector (gRPC) | 4317 |
+| OTel Collector (HTTP) | 4318 |
 
 All traffic from the browser goes through Kong on port **8000**.
+
+#### Local observability
+
+Docker Compose now includes a local observability stack for traces and metrics:
+
+- OpenTelemetry Collector receives OTLP traces from the services.
+- Jaeger stores and visualizes trace spans.
+- Prometheus scrapes `/metrics` and `/actuator/prometheus` endpoints.
+- Grafana provisions a starter dashboard from the repository.
+
+See [observability/local/README.md](observability/local/README.md) for the
+trace walkthrough, connectivity checks, and host-run client instructions.
 
 ---
 
@@ -503,7 +523,8 @@ pnpm exec playwright test
 | Terraform modules | ✅ Scaffolded | vpc, eks, rds, elasticache, msk, kong; **not applied to real AWS** |
 | CI/CD pipelines | ⏳ Pending | `.github/workflows/` is empty |
 | EKS deployment | ⏳ Pending | Terraform apply deferred; local minikube is the active env |
-| Observability (OTel/AMP/AMG) | ⏳ Pending | Deferred to Milestone 7 |
+| Observability (local compose) | ✅ Available | OTel Collector + Prometheus + Jaeger + Grafana |
+| Observability (AWS-managed) | ⏳ Pending | AMP / AMG / X-Ray wiring still deferred |
 
 ### Known shortcuts and tech debt
 

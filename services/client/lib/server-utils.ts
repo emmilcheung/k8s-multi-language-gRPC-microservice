@@ -6,14 +6,19 @@
  */
 
 import { cookies } from "next/headers";
+import { traceHeaders } from "@/lib/tracing";
 
 /**
  * Returns the base URL for the internal API gateway.
- * Uses INTERNAL_API_URL (cluster-internal Kong URL) in production/staging and
- * falls back to localhost for local docker-compose development.
+ * Uses INTERNAL_API_URL (cluster-internal Kong URL) in production/staging,
+ * falls back to NEXT_PUBLIC_API_URL in local dev, and finally to localhost.
  */
 export const base = (): string =>
-  (process.env.INTERNAL_API_URL ?? "http://localhost:8080").replace(/\/$/, "");
+  (
+    process.env.INTERNAL_API_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    "http://localhost:8080"
+  ).replace(/\/$/, "");
 
 interface RequestWithCookies {
   cookies: {
@@ -40,6 +45,7 @@ export async function authHeaders(request?: RequestWithCookies): Promise<Headers
 
   return {
     "Content-Type": "application/json",
+    ...traceHeaders(),
     ...(token ? { Cookie: `token=${token}` } : {}),
   };
 }

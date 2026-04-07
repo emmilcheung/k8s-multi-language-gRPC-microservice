@@ -16,6 +16,8 @@ global:
   imageRegistry: ""
   imagePullPolicy: IfNotPresent
   namespace: ticketing
+  security:
+    allowInsecureImages: true
 
 # ── Application services — single replica, smaller resources for local dev ───
 
@@ -24,6 +26,10 @@ auth-service:
   image:
     repository: auth-service
     tag: latest
+  env:
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    OTEL_SERVICE_NAME: auth-service
   resources:
     requests:
       cpu: 50m
@@ -42,6 +48,9 @@ ticket-service:
   env:
     REDIS_URL: redis://ticketing-redis-master.ticketing.svc.cluster.local:6379
     VENUE_SERVICE_ADDR: ticketing-venue-service.ticketing.svc.cluster.local:50052
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    OTEL_SERVICE_NAME: ticket-service
   resources:
     requests:
       cpu: 50m
@@ -63,6 +72,13 @@ order-service:
     # The release name is 'ticketing' and the namespace is 'ticketing'.
     TICKET_SERVICE_GRPC_HOST: ticketing-ticket-service.ticketing.svc.cluster.local
     TICKET_SERVICE_GRPC_PORT: "50051"
+    VENUE_SERVICE_GRPC_HOST: ticketing-venue-service.ticketing.svc.cluster.local
+    VENUE_SERVICE_GRPC_PORT: "50052"
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    OTEL_LOGS_EXPORTER: none
+    OTEL_METRICS_EXPORTER: none
+    OTEL_SERVICE_NAME: order-service
   resources:
     requests:
       cpu: 100m
@@ -96,6 +112,10 @@ payment-service:
   image:
     repository: payment-service
     tag: latest
+  env:
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    OTEL_SERVICE_NAME: payment-service
   resources:
     requests:
       cpu: 50m
@@ -111,6 +131,10 @@ expiration-service:
   image:
     repository: expiration-service
     tag: latest
+  env:
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    OTEL_SERVICE_NAME: expiration-service
   resources:
     requests:
       cpu: 25m
@@ -128,6 +152,9 @@ venue-service:
     tag: latest
   env:
     REDIS_URL: redis://ticketing-redis-master.ticketing.svc.cluster.local:6379
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    OTEL_SERVICE_NAME: venue-service
   resources:
     requests:
       cpu: 50m
@@ -143,6 +170,12 @@ client:
   image:
     repository: client
     tag: latest
+  env:
+    NEXT_PUBLIC_API_URL: "http://localhost:8000"
+    INTERNAL_API_URL: "http://ticketing-kong-proxy:8000"
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    OTEL_SERVICE_NAME: client
   resources:
     requests:
       cpu: 50m
@@ -168,6 +201,22 @@ client:
     periodSeconds: 15
     timeoutSeconds: 5
     failureThreshold: 3
+
+observability:
+  enabled: true
+  jaeger:
+    service:
+      type: LoadBalancer
+      uiPort: 16686
+      otlpPort: 4317
+  prometheus:
+    service:
+      type: LoadBalancer
+      port: 9090
+  grafana:
+    service:
+      type: LoadBalancer
+      port: 3000
 
 # ── Backing infrastructure — minimal footprint for minikube ──────────────────
 

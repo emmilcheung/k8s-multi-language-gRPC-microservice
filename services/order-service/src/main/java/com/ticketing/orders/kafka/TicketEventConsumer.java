@@ -4,11 +4,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ticketing.orders.entity.OrderTicket;
 import com.ticketing.orders.repository.OrderTicketRepository;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
-import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,33 +51,45 @@ public class TicketEventConsumer {
             containerFactory = "kafkaListenerContainerFactory"
     )
     @Transactional
-    public void onTicketEvent(@Payload String message, Acknowledgment ack) {
+    public void onTicketEvent(ConsumerRecord<String, String> record, Acknowledgment ack) {
+        Context parentContext = KafkaTraceContext.extractContext(record);
+        Span span = GlobalOpenTelemetry.getTracer("order-service")
+                .spanBuilder("kafka consume " + record.topic())
+                .setParent(parentContext)
+                .setSpanKind(SpanKind.CONSUMER)
+                .startSpan();
         try {
-            JsonNode root = objectMapper.readTree(message);
-            JsonNode data = root.path("data");
+            try (Scope ignored = span.makeCurrent()) {
+                JsonNode root = objectMapper.readTree(record.value());
+                JsonNode data = root.path("data");
 
-            UUID ticketId = UUID.fromString(data.path("id").asText());
-            String title = data.path("title").asText();
-            BigDecimal price = new BigDecimal(data.path("price").asText());
+                UUID ticketId = UUID.fromString(data.path("id").asText());
+                String title = data.path("title").asText();
+                BigDecimal price = new BigDecimal(data.path("price").asText());
 
-            orderTicketRepository.findById(ticketId).ifPresentOrElse(
-                    existing -> {
-                        existing.setTitle(title);
-                        existing.setPrice(price);
-                        orderTicketRepository.save(existing);
-                        log.info("Ticket replica updated ticketId={}", ticketId);
-                    },
-                    () -> {
-                        orderTicketRepository.save(new OrderTicket(ticketId, title, price));
-                        log.info("Ticket replica created ticketId={}", ticketId);
-                    }
-            );
+                orderTicketRepository.findById(ticketId).ifPresentOrElse(
+                        existing -> {
+                            existing.setTitle(title);
+                            existing.setPrice(price);
+                            orderTicketRepository.save(existing);
+                            log.info("Ticket replica updated ticketId={}", ticketId);
+                        },
+                        () -> {
+                            orderTicketRepository.save(new OrderTicket(ticketId, title, price));
+                            log.info("Ticket replica created ticketId={}", ticketId);
+                        }
+                );
 
-            ack.acknowledge();
+                ack.acknowledge();
+            }
         } catch (Exception e) {
+            span.recordException(e);
+            span.setStatus(StatusCode.ERROR, e.getMessage());
             log.error("Failed to process ticket event: {}", e.getMessage(), e);
             // Re-throw to trigger the configured error handler (DLQ after retries)
             throw new RuntimeException("Ticket event processing failed", e);
+        } finally {
+            span.end();
         }
     }
 }

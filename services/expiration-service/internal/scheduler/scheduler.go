@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	appkafka "github.com/acme/expiration-service/internal/kafka"
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
 )
@@ -16,7 +17,8 @@ const TaskTypeOrderExpiration = "order:expire"
 
 // OrderExpirationPayload is the payload stored in each asynq task.
 type OrderExpirationPayload struct {
-	OrderID string `json:"orderId"`
+	OrderID      string            `json:"orderId"`
+	TraceHeaders map[string]string `json:"traceHeaders,omitempty"`
 }
 
 // Scheduler schedules delayed order expiration tasks via asynq.
@@ -35,7 +37,10 @@ func New(redisAddr string, log *zap.Logger) *Scheduler {
 // The task ID is set to the orderID to ensure idempotency — re-enqueueing the same
 // order will be a no-op if the task is already pending or scheduled.
 func (s *Scheduler) ScheduleExpiration(ctx context.Context, orderID string, expiresAt time.Time) error {
-	payload, err := json.Marshal(OrderExpirationPayload{OrderID: orderID})
+	payload, err := json.Marshal(OrderExpirationPayload{
+		OrderID:      orderID,
+		TraceHeaders: appkafka.CaptureTraceHeaders(ctx),
+	})
 	if err != nil {
 		return fmt.Errorf("marshal expiration payload: %w", err)
 	}

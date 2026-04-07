@@ -112,6 +112,11 @@
       <version>${logstash-logback.version}</version>
     </dependency>
 
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-api</artifactId>
+    </dependency>
+
     <!-- ── Jackson extras ───────────────────────────────────────────────── -->
     <dependency>
       <groupId>com.fasterxml.jackson.datatype</groupId>

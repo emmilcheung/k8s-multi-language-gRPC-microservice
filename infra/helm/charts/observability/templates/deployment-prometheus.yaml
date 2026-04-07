@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "observability.fullname" . }}-prometheus
+  labels:
+    app.kubernetes.io/name: {{ include "observability.fullname" . }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "observability.fullname" . }}
+      app.kubernetes.io/component: prometheus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "observability.fullname" . }}
+        app.kubernetes.io/component: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: {{ printf "%s:%s" .Values.prometheus.image.repository .Values.prometheus.image.tag | quote }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - "/bin/prometheus"
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--web.enable-lifecycle"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: data
+              mountPath: /prometheus
+          ports:
+            - name: web
+              containerPort: {{ .Values.prometheus.service.port }}
+          resources:
+            requests:
+              cpu: {{ .Values.prometheus.resources.requests.cpu }}
+              memory: {{ .Values.prometheus.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.prometheus.resources.limits.cpu }}
+              memory: {{ .Values.prometheus.resources.limits.memory }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "observability.fullname" . }}-prometheus-config
+        - name: data
+          emptyDir: {}

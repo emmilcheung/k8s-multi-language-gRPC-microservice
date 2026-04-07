@@ -94,6 +94,9 @@ func NewProducer(brokers []string, log *zap.Logger) (*Producer, error) {
 
 // PublishExpirationComplete publishes an expiration.order.expiration_complete CloudEvent.
 func (p *Producer) PublishExpirationComplete(ctx context.Context, orderID string) error {
+	_, span, headers := startKafkaProducerSpan(ctx, TopicExpirationComplete)
+	defer span.End()
+
 	data := ExpirationCompleteData{OrderID: orderID}
 
 	dataBytes, err := json.Marshal(data)
@@ -122,8 +125,10 @@ func (p *Producer) PublishExpirationComplete(ctx context.Context, orderID string
 		TopicPartition: confluent.TopicPartition{Topic: &topic, Partition: confluent.PartitionAny},
 		Key:            []byte(orderID),
 		Value:          payload,
+		Headers:        headers,
 	}, deliveryChan)
 	if err != nil {
+		recordSpanError(span, err)
 		return fmt.Errorf("kafka produce: %w", err)
 	}
 
@@ -131,18 +136,23 @@ func (p *Producer) PublishExpirationComplete(ctx context.Context, orderID string
 	case e := <-deliveryChan:
 		msg := e.(*confluent.Message)
 		if msg.TopicPartition.Error != nil {
+			recordSpanError(span, msg.TopicPartition.Error)
 			return fmt.Errorf("kafka delivery error: %w", msg.TopicPartition.Error)
 		}
 		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("kafka produce cancelled: %w", ctx.Err())
+		err := fmt.Errorf("kafka produce cancelled: %w", ctx.Err())
+		recordSpanError(span, err)
+		return err
 	}
 }
 
 // PublishToDLQ routes a failed raw Kafka message to the dead-letter topic.
 // Headers carry the source topic and the error that caused the failure for observability.
-func (p *Producer) PublishToDLQ(ctx context.Context, sourceTopic string, key, payload []byte, processingErr error) error {
+func (p *Producer) PublishToDLQ(ctx context.Context, sourceTopic string, key, payload []byte, sourceHeaders []confluent.Header, processingErr error) error {
 	dlqTopic := TopicExpirationCompleteDLQ
+	spanCtx, span, _ := startKafkaProducerSpan(ctx, dlqTopic)
+	defer span.End()
 
 	p.log.Error("routing message to DLQ",
 		zap.String("sourceTopic", sourceTopic),
@@ -151,17 +161,22 @@ func (p *Producer) PublishToDLQ(ctx context.Context, sourceTopic string, key, pa
 		zap.Error(processingErr),
 	)
 
+	headers := append([]confluent.Header{}, sourceHeaders...)
+	headers = append(headers,
+		confluent.Header{Key: "x-dlq-source-topic", Value: []byte(sourceTopic)},
+		confluent.Header{Key: "x-dlq-error", Value: []byte(processingErr.Error())},
+	)
+	headers = injectKafkaContextHeaders(spanCtx, headers)
+
 	deliveryChan := make(chan confluent.Event, 1)
 	err := p.p.Produce(&confluent.Message{
 		TopicPartition: confluent.TopicPartition{Topic: &dlqTopic, Partition: confluent.PartitionAny},
 		Key:            key,
 		Value:          payload,
-		Headers: []confluent.Header{
-			{Key: "x-dlq-source-topic", Value: []byte(sourceTopic)},
-			{Key: "x-dlq-error", Value: []byte(processingErr.Error())},
-		},
+		Headers:        headers,
 	}, deliveryChan)
 	if err != nil {
+		recordSpanError(span, err)
 		return fmt.Errorf("produce to DLQ topic %s: %w", dlqTopic, err)
 	}
 
@@ -169,11 +184,14 @@ func (p *Producer) PublishToDLQ(ctx context.Context, sourceTopic string, key, pa
 	case e := <-deliveryChan:
 		msg := e.(*confluent.Message)
 		if msg.TopicPartition.Error != nil {
+			recordSpanError(span, msg.TopicPartition.Error)
 			return fmt.Errorf("DLQ delivery error: %w", msg.TopicPartition.Error)
 		}
 		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("DLQ produce cancelled: %w", ctx.Err())
+		err := fmt.Errorf("DLQ produce cancelled: %w", ctx.Err())
+		recordSpanError(span, err)
+		return err
 	}
 }
 

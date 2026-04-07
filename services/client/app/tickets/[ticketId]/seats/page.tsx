@@ -8,6 +8,7 @@ import { cache } from "react";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
 import { base } from "@/lib/server-utils";
+import { traceHeaders } from "@/lib/tracing";
 import type { Ticket, SeatingPlan, AvailabilitySnapshot, PriceTier } from "@/lib/types";
 import { fetchPriceTiers } from "@/app/actions/venues";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -91,7 +92,10 @@ export default async function SeatsPage({ params }: Props) {
   try {
     const apiBase = base();
     const [availRes] = await Promise.all([
-      fetch(`${apiBase}/api/seating-plans/${planId}/availability`, { cache: "no-store" }),
+      fetch(`${apiBase}/api/seating-plans/${planId}/availability`, {
+        cache: "no-store",
+        headers: traceHeaders(),
+      }),
     ]);
     if (availRes.ok) {
       initialAvailability = await availRes.json() as AvailabilitySnapshot;

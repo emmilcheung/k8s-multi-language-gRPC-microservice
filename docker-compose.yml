@@ -2,9 +2,8 @@
 # Kafka runs in KRaft mode (no ZooKeeper) to keep resource use minimal.
 # All services have mem_limit set for low-spec development machines.
 # Do NOT use this compose file for production.
-
+name: microservices 
 services:
-
   # ── PostgreSQL: auth-service ────────────────────────────────────────────────
   postgres-auth:
     image: postgres:16-alpine
@@ -206,6 +205,7 @@ services:
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
       KONG_PROXY_LISTEN: "0.0.0.0:8000"
       KONG_ADMIN_LISTEN: "127.0.0.1:8001"
+      KONG_STATUS_LISTEN: "0.0.0.0:8100"
       KONG_LOG_LEVEL: info
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
@@ -249,6 +249,8 @@ services:
       JWT_SECRET: "dev-jwt-secret-change-in-production"
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: auth-service
     depends_on:
       postgres-auth:
         condition: service_healthy
@@ -286,6 +288,7 @@ services:
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: info
       VENUE_SERVICE_ADDR: venue-service:50052
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       mongodb:
         condition: service_healthy
@@ -326,6 +329,11 @@ services:
       TICKET_SERVICE_GRPC_DEADLINE_MS: "5000"
       VENUE_SERVICE_GRPC_HOST: venue-service
       VENUE_SERVICE_GRPC_PORT: "50052"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_LOGS_EXPORTER: none
+      OTEL_METRICS_EXPORTER: none
+      OTEL_SERVICE_NAME: order-service
     depends_on:
       postgres-orders:
         condition: service_healthy
@@ -365,6 +373,8 @@ services:
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
       ORDER_SERVICE_URL: http://order-service:8082
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: payment-service
     depends_on:
       postgres-payments:
         condition: service_healthy
@@ -403,6 +413,7 @@ services:
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: info
       TICKET_SERVICE_URL: ticket-service:50051
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       postgres-venue:
         condition: service_healthy
@@ -434,6 +445,7 @@ services:
       LOG_LEVEL: info
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       redis:
         condition: service_healthy

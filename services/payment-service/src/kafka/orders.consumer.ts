@@ -4,6 +4,7 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { Kafka, Consumer, EachMessagePayload, KafkaMessage, Producer } from 'kafkajs';
 import * as net from 'net';
 import { PaymentsService } from '../modules/payments/payments.service';
+import { withKafkaConsumerSpan, withKafkaProducerSpan } from './trace-context';
 
 /** Shape of the CloudEvents envelope we expect from order-service. */
 interface OrderCreatedEvent {
@@ -143,63 +144,65 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async handleMessage({ message }: EachMessagePayload): Promise<void> {
-    const raw = message.value?.toString();
-    if (!raw) {
-      this.logger.warn('Received empty Kafka message — skipping');
-      return;
-    }
+  private async handleMessage({ topic, message }: EachMessagePayload): Promise<void> {
+    await withKafkaConsumerSpan(`kafka consume ${topic}`, message.headers, async () => {
+      const raw = message.value?.toString();
+      if (!raw) {
+        this.logger.warn('Received empty Kafka message — skipping');
+        return;
+      }
 
-    let event: OrderCreatedEvent;
-    try {
-      event = JSON.parse(raw) as OrderCreatedEvent;
-    } catch {
-      this.logger.error({ raw }, 'Failed to parse Kafka message — routing to DLQ');
-      await this.sendToDlq(message, 'PARSE_ERROR');
-      return;
-    }
-
-    if (!event.data?.orderId || !event.data?.userId || !event.data?.amount) {
-      this.logger.error({ event }, 'Invalid event payload — routing to DLQ');
-      await this.sendToDlq(message, 'INVALID_PAYLOAD');
-      return;
-    }
-
-    // Retry with exponential back-off (max 3 attempts)
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      let event: OrderCreatedEvent;
       try {
-        await this.paymentsService.processOrderCreatedEvent(event.data);
-        return; // success
-      } catch (err) {
-        const delay = Math.min(1000 * 2 ** (attempt - 1), 8000);
-        const msg = err instanceof Error ? err.message : 'Unknown';
-        this.logger.warn(
-          { attempt, orderId: event.data.orderId, err: msg },
-          `Processing failed — retrying in ${delay}ms`,
-        );
-        if (attempt < MAX_RETRIES) {
-          await sleep(delay);
+        event = JSON.parse(raw) as OrderCreatedEvent;
+      } catch {
+        this.logger.error({ raw }, 'Failed to parse Kafka message — routing to DLQ');
+        await this.sendToDlq(message, 'PARSE_ERROR');
+        return;
+      }
+
+      if (!event.data?.orderId || !event.data?.userId || !event.data?.amount) {
+        this.logger.error({ event }, 'Invalid event payload — routing to DLQ');
+        await this.sendToDlq(message, 'INVALID_PAYLOAD');
+        return;
+      }
+
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          await this.paymentsService.processOrderCreatedEvent(event.data);
+          return;
+        } catch (err) {
+          const delay = Math.min(1000 * 2 ** (attempt - 1), 8000);
+          const msg = err instanceof Error ? err.message : 'Unknown';
+          this.logger.warn(
+            { attempt, orderId: event.data.orderId, err: msg },
+            `Processing failed — retrying in ${delay}ms`,
+          );
+          if (attempt < MAX_RETRIES) {
+            await sleep(delay);
+          }
         }
       }
-    }
 
-    // All retries exhausted → DLQ
-    this.logger.error({ orderId: event.data.orderId }, 'All retries exhausted — routing to DLQ');
-    await this.sendToDlq(message, 'MAX_RETRIES_EXCEEDED');
+      this.logger.error({ orderId: event.data.orderId }, 'All retries exhausted — routing to DLQ');
+      await this.sendToDlq(message, 'MAX_RETRIES_EXCEEDED');
+    });
   }
 
   private async sendToDlq(message: KafkaMessage, reason: string): Promise<void> {
     if (!this.producer) return; // never connected — nothing to do
     try {
-      await this.producer.send({
-        topic: DLQ_TOPIC,
-        messages: [
-          {
-            key: message.key,
-            value: message.value,
-            headers: { ...message.headers, 'x-dlq-reason': reason },
-          },
-        ],
+      await withKafkaProducerSpan(`kafka publish ${DLQ_TOPIC}`, undefined, async (headers) => {
+        await this.producer!.send({
+          topic: DLQ_TOPIC,
+          messages: [
+            {
+              key: message.key,
+              value: message.value,
+              headers: { ...message.headers, ...headers, 'x-dlq-reason': reason },
+            },
+          ],
+        });
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown';

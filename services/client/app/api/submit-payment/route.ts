@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { base, authHeaders } from "@/lib/server-utils";
+import { traceResponseHeaders } from "@/lib/tracing";
 
 interface SubmitPaymentRequest {
   orderId: string;
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!orderId || !amount || !paymentMethodId) {
       return NextResponse.json(
         { error: { code: "INVALID_INPUT", message: "Missing required fields." } },
-        { status: 400 }
+        { status: 400, headers: traceResponseHeaders() }
       );
     }
 
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const body = await res.json().catch(() => ({}));
       return NextResponse.json(
         { error: body?.error ?? { message: "Payment processing failed." } },
-        { status: res.status }
+        { status: res.status, headers: traceResponseHeaders() }
       );
     }
 
@@ -49,13 +50,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Revalidate the order page to reflect payment status
     revalidatePath(`/orders/${orderId}`);
 
-    return NextResponse.json(paymentResponse, { status: 201 });
+    return NextResponse.json(paymentResponse, {
+      status: 201,
+      headers: traceResponseHeaders(),
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error("Payment submission error:", errorMessage);
     return NextResponse.json(
       { error: { code: "INTERNAL_ERROR", message: "Payment submission failed." } },
-      { status: 500 }
+      { status: 500, headers: traceResponseHeaders() }
     );
   }
 }

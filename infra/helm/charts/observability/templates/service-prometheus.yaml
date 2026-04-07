@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "observability.fullname" . }}-prometheus
+  labels:
+    app.kubernetes.io/name: {{ include "observability.fullname" . }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+spec:
+  type: {{ .Values.prometheus.service.type }}
+  selector:
+    app.kubernetes.io/name: {{ include "observability.fullname" . }}
+    app.kubernetes.io/component: prometheus
+  ports:
+    - name: web
+      port: {{ .Values.prometheus.service.port }}
+      targetPort: {{ .Values.prometheus.service.port }}

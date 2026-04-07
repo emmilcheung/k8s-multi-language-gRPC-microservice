@@ -1,0 +1,129 @@
+{
+  "generatedAt": "2026-04-07T11:33:49.728Z",
+  "order": {
+    "id": "eef65270-86c9-476d-9388-afc15abf668f",
+    "traceId": "11111111111111111111111169d4eb84",
+    "finalStatus": "complete",
+    "services": [
+      "order-service",
+      "payment-service",
+      "ticket-service",
+      "expiration-service"
+    ],
+    "operations": [
+      "INSERT orders_db.orders",
+      "INSERT orders_db.outbox",
+      "OrderRepository.save",
+      "OrderTicketRepository.findById",
+      "OutboxRepository.save",
+      "POST /api/orders",
+      "SELECT orders_db.order_tickets",
+      "SELECT orders_db.orders",
+      "Session.find com.ticketing.orders.entity.OrderTicket",
+      "Session.merge com.ticketing.orders.entity.Order",
+      "Session.persist com.ticketing.orders.entity.OutboxMessage",
+      "Transaction.commit",
+      "acme.tickets.v1.TicketService/ReserveQuota",
+      "kafka consume orders.order.created",
+      "kafka publish orders.order.created",
+      "kafka publish orders.order.created.dlq",
+      "orders.order.created publish",
+      "process orders.order.created",
+      "send orders.order.created.dlq"
+    ]
+  },
+  "payment": {
+    "id": "380cc137-4e18-4ff8-b249-4b2db1843a1d",
+    "traceId": "22222222222222222222222269d4eb84",
+    "status": "completed",
+    "services": [
+      "payment-service",
+      "order-service",
+      "ticket-service"
+    ],
+    "operations": [
+      "INSERT orders_db.outbox",
+      "OrderRepository.findByIdWithTicket",
+      "OrderRepository.save",
+      "OrderSeatRepository.findAllByOrderId",
+      "OutboxRepository.save",
+      "POST /api/payments",
+      "PaymentsController.charge",
+      "SELECT",
+      "SELECT com.ticketing.orders.entity.OrderSeat",
+      "SELECT orders_db",
+      "SELECT orders_db.order_seats",
+      "Session.merge com.ticketing.orders.entity.Order",
+      "Session.persist com.ticketing.orders.entity.OutboxMessage",
+      "Transaction.commit",
+      "UPDATE orders_db.orders",
+      "charge",
+      "kafka consume orders.order.completed",
+      "kafka consume payments.payment.captured",
+      "kafka publish orders.order.completed",
+      "kafka publish payments.payment.captured",
+      "middleware - <anonymous>",
+      "middleware - jsonParser",
+      "middleware - patched",
+      "middleware - urlencodedParser",
+      "orders.order.completed publish",
+      "orders_db",
+      "payments.payment.captured process",
+      "pg-pool.connect",
+      "pg.query:BEGIN payments_db",
+      "pg.query:COMMIT payments_db",
+      "pg.query:INSERT payments_db",
+      "pg.query:SELECT payments_db",
+      "request handler - /api/payments",
+      "request handler - /{*path}",
+      "send payments.payment.captured"
+    ]
+  },
+  "prometheusTargets": [
+    {
+      "job": "auth-service",
+      "health": "up",
+      "scrapeUrl": "http://auth-service:3000/metrics"
+    },
+    {
+      "job": "expiration-service",
+      "health": "up",
+      "scrapeUrl": "http://expiration-service:8083/metrics"
+    },
+    {
+      "job": "kong",
+      "health": "up",
+      "scrapeUrl": "http://kong:8100/metrics"
+    },
+    {
+      "job": "order-service",
+      "health": "up",
+      "scrapeUrl": "http://order-service:8082/actuator/prometheus"
+    },
+    {
+      "job": "otel-collector",
+      "health": "up",
+      "scrapeUrl": "http://otel-collector:8888/metrics"
+    },
+    {
+      "job": "payment-service",
+      "health": "up",
+      "scrapeUrl": "http://payment-service:3002/metrics"
+    },
+    {
+      "job": "prometheus",
+      "health": "up",
+      "scrapeUrl": "http://prometheus:9090/metrics"
+    },
+    {
+      "job": "ticket-service",
+      "health": "up",
+      "scrapeUrl": "http://ticket-service:3001/metrics"
+    },
+    {
+      "job": "venue-service",
+      "health": "up",
+      "scrapeUrl": "http://venue-service:3003/metrics"
+    }
+  ]
+}

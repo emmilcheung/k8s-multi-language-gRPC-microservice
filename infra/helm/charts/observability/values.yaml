@@ -1,0 +1,150 @@
+enabled: true
+
+jaeger:
+  image:
+    repository: jaegertracing/all-in-one
+    tag: "1.65.0"
+  service:
+    type: LoadBalancer
+    uiPort: 16686
+    otlpPort: 4317
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+otelCollector:
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    tag: "0.114.0"
+  service:
+    type: ClusterIP
+    grpcPort: 4317
+    httpPort: 4318
+    metricsPort: 8888
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  config: |-
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 512
+
+    exporters:
+      otlp/jaeger:
+        endpoint: http://{{ include "observability.fullname" . }}-jaeger:4317
+        tls:
+          insecure: true
+      debug:
+        verbosity: basic
+
+    service:
+      extensions: [health_check]
+      telemetry:
+        metrics:
+          address: 0.0.0.0:8888
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [otlp/jaeger, debug]
+
+prometheus:
+  image:
+    repository: prom/prometheus
+    tag: v2.55.1
+  service:
+    type: LoadBalancer
+    port: 9090
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  config: |-
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: [{{ include "observability.fullname" . }}-prometheus:9090]
+
+      - job_name: otel-collector
+        static_configs:
+          - targets: [{{ include "observability.fullname" . }}-otel-collector:8888]
+
+      - job_name: kong
+        metrics_path: /metrics
+        static_configs:
+          - targets: [{{ .Release.Name }}-kong-proxy:80]
+
+      - job_name: auth-service
+        metrics_path: /metrics
+        static_configs:
+          - targets: [{{ .Release.Name }}-auth-service:3000]
+
+      - job_name: ticket-service
+        metrics_path: /metrics
+        static_configs:
+          - targets: [{{ .Release.Name }}-ticket-service:3001]
+
+      - job_name: order-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: [{{ .Release.Name }}-order-service:8082]
+
+      - job_name: payment-service
+        metrics_path: /metrics
+        static_configs:
+          - targets: [{{ .Release.Name }}-payment-service:3002]
+
+      - job_name: venue-service
+        metrics_path: /metrics
+        static_configs:
+          - targets: [{{ .Release.Name }}-venue-service:3003]
+
+      - job_name: expiration-service
+        metrics_path: /metrics
+        static_configs:
+          - targets: [{{ .Release.Name }}-expiration-service:8083]
+
+grafana:
+  image:
+    repository: grafana/grafana
+    tag: 11.3.1
+  adminUser: admin
+  adminPassword: admin
+  service:
+    type: LoadBalancer
+    port: 3000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
