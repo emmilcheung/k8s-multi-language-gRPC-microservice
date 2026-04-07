@@ -24,8 +24,11 @@ export async function serverApi<T = unknown>(
   options: RequestInit = {}
 ): Promise<T> {
   const base =
-    process.env.INTERNAL_API_URL?.replace(/\/$/, "") ??
-    "http://localhost:8080";
+    (
+      process.env.INTERNAL_API_URL ??
+      process.env.NEXT_PUBLIC_API_URL ??
+      "http://localhost:8080"
+    ).replace(/\/$/, "");
 
   const cookieStore = await cookies();
   const token = cookieStore.get("token")?.value ?? "";

@@ -367,8 +367,8 @@ _minikube-start:
 	@if minikube status --profile minikube 2>/dev/null | grep -q "Running"; then \
 		echo "minikube is already running."; \
 	else \
-		echo "Starting minikube (4 CPU, 7168 MB RAM)..."; \
-		minikube start --cpus=4 --memory=7168 --disk-size=30g --driver=docker; \
+		echo "Starting minikube (5 CPU, 7851 MB RAM)..."; \
+		minikube start --cpus=5 --memory=7851 --disk-size=50g --driver=docker; \
 	fi
 
 _namespace:

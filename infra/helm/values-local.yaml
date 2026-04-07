@@ -28,6 +28,7 @@ auth-service:
     tag: latest
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     OTEL_SERVICE_NAME: auth-service
   resources:
     requests:
@@ -48,6 +49,7 @@ ticket-service:
     REDIS_URL: redis://ticketing-redis-master.ticketing.svc.cluster.local:6379
     VENUE_SERVICE_ADDR: ticketing-venue-service.ticketing.svc.cluster.local:50052
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     OTEL_SERVICE_NAME: ticket-service
   resources:
     requests:
@@ -70,7 +72,12 @@ order-service:
     # The release name is 'ticketing' and the namespace is 'ticketing'.
     TICKET_SERVICE_GRPC_HOST: ticketing-ticket-service.ticketing.svc.cluster.local
     TICKET_SERVICE_GRPC_PORT: "50051"
+    VENUE_SERVICE_GRPC_HOST: ticketing-venue-service.ticketing.svc.cluster.local
+    VENUE_SERVICE_GRPC_PORT: "50052"
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    OTEL_LOGS_EXPORTER: none
+    OTEL_METRICS_EXPORTER: none
     OTEL_SERVICE_NAME: order-service
   resources:
     requests:
@@ -107,6 +114,7 @@ payment-service:
     tag: latest
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     OTEL_SERVICE_NAME: payment-service
   resources:
     requests:
@@ -125,6 +133,7 @@ expiration-service:
     tag: latest
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     OTEL_SERVICE_NAME: expiration-service
   resources:
     requests:
@@ -144,6 +153,7 @@ venue-service:
   env:
     REDIS_URL: redis://ticketing-redis-master.ticketing.svc.cluster.local:6379
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     OTEL_SERVICE_NAME: venue-service
   resources:
     requests:
@@ -162,8 +172,9 @@ client:
     tag: latest
   env:
     NEXT_PUBLIC_API_URL: "http://localhost:8000"
-    INTERNAL_API_URL: "http://ticketing-kong-proxy:80"
+    INTERNAL_API_URL: "http://ticketing-kong-proxy:8000"
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     OTEL_SERVICE_NAME: client
   resources:
     requests:
