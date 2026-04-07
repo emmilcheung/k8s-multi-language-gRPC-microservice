@@ -15,6 +15,13 @@
       "when": 1743120000000,
       "tag": "002_add_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1775529600000,
+      "tag": "003_add_outbox_trace_headers",
+      "breakpoints": true
     }
   ]
 }

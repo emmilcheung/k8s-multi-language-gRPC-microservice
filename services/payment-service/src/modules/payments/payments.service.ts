@@ -13,6 +13,7 @@ import { PaymentsRepository } from './payments.repository';
 import { STRIPE_CLIENT } from './stripe.constants';
 import { type Payment, PAYMENT_STATUS, outbox, payments } from '../../database/schema';
 import { DRIZZLE_DB, type DrizzleDB } from '../../database/database.module';
+import { captureTraceHeaders } from '../../kafka/trace-context';
 
 export interface ChargePaymentDto {
   orderId: string;
@@ -419,6 +420,7 @@ export class PaymentsService {
     return {
       topic,
       partitionKey,
+      traceHeaders: captureTraceHeaders(),
       payload: {
         specversion: '1.0',
         type: topic,

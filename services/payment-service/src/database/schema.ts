@@ -47,6 +47,8 @@ export const outbox = pgTable('outbox', {
   topic: text('topic').notNull(),
   /** CloudEvents envelope as JSONB. */
   payload: jsonb('payload').notNull(),
+  /** Persisted W3C trace headers restored by the outbox relay at publish time. */
+  traceHeaders: jsonb('trace_headers').$type<Record<string, string>>().notNull(),
   /** Kafka partition key — typically the orderId for per-order ordering. */
   partitionKey: text('partition_key').notNull(),
   published: boolean('published').notNull().default(false),
