@@ -11,15 +11,15 @@ import (
 // Config holds all configuration for ticket-service.
 // All fields are validated at startup — the service refuses to start if anything is missing.
 type Config struct {
-	Env               string
-	Port              int
-	GrpcPort          int
-	LogLevel          string
-	MongoURI          string
-	MongoDB           string
-	KafkaBrokers      []string
-	RedisURL          string
-	VenueServiceAddr  string // WS3: gRPC address of venue-service (e.g. "localhost:9091")
+	Env              string
+	Port             int
+	GrpcPort         int
+	LogLevel         string
+	MongoURI         string
+	MongoDB          string
+	KafkaBrokers     []string
+	RedisURL         string
+	VenueServiceAddr string // WS3: gRPC address of venue-service (e.g. "localhost:9091")
 }
 
 // Load reads configuration from environment variables and validates all required fields.
