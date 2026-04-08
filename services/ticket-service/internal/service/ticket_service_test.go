@@ -5,7 +5,6 @@ import (
 	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/repository"
@@ -46,6 +45,19 @@ func (m *mockRepo) Create(ctx context.Context, t *repository.Ticket) error {
 	if t.MaxPerUser == 0 {
 		t.MaxPerUser = 1
 	}
+	if len(t.PendingOutbox) > 0 {
+		for index := range t.PendingOutbox {
+			t.PendingOutbox[index].Payload.ID = t.ID
+			t.PendingOutbox[index].Payload.Title = t.Title
+			t.PendingOutbox[index].Payload.Price = t.Price
+			t.PendingOutbox[index].Payload.UserID = t.UserID
+			t.PendingOutbox[index].Payload.SeatingPlanID = t.SeatingPlanID
+			t.PendingOutbox[index].Payload.TicketType = t.TicketType
+			t.PendingOutbox[index].Payload.Version = t.Version
+		}
+		t.Outbox = append(t.Outbox, t.PendingOutbox...)
+		t.PendingOutbox = nil
+	}
 	m.tickets[t.ID] = t
 	return nil
 }
@@ -75,6 +87,20 @@ func (m *mockRepo) FindAll(ctx context.Context, _ repository.PaginationParams) (
 func (m *mockRepo) Update(ctx context.Context, t *repository.Ticket) error {
 	if m.err != nil {
 		return m.err
+	}
+	t.Version++
+	if len(t.PendingOutbox) > 0 {
+		for index := range t.PendingOutbox {
+			t.PendingOutbox[index].Payload.ID = t.ID
+			t.PendingOutbox[index].Payload.Title = t.Title
+			t.PendingOutbox[index].Payload.Price = t.Price
+			t.PendingOutbox[index].Payload.UserID = t.UserID
+			t.PendingOutbox[index].Payload.SeatingPlanID = t.SeatingPlanID
+			t.PendingOutbox[index].Payload.TicketType = t.TicketType
+			t.PendingOutbox[index].Payload.Version = t.Version
+		}
+		t.Outbox = append(t.Outbox, t.PendingOutbox...)
+		t.PendingOutbox = nil
 	}
 	m.tickets[t.ID] = t
 	return nil
@@ -156,7 +182,7 @@ func (m *mockRepo) FinalizeReservation(ctx context.Context, reservationID, order
 // attachErr / detachErr allow per-call error injection distinct from the generic m.err.
 // These are separate fields so tests can inject targeted errors without breaking other methods.
 
-func (m *mockRepo) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string) error {
+func (m *mockRepo) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string, outbox *repository.TicketOutboxEvent) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -172,10 +198,21 @@ func (m *mockRepo) AttachSeatingPlan(ctx context.Context, ticketID, planID, user
 	}
 	t.SeatingPlanID = planID
 	t.TicketType = ticketType
+	t.Version++
+	if outbox != nil {
+		outbox.Payload.ID = t.ID
+		outbox.Payload.Title = t.Title
+		outbox.Payload.Price = t.Price
+		outbox.Payload.UserID = t.UserID
+		outbox.Payload.SeatingPlanID = t.SeatingPlanID
+		outbox.Payload.TicketType = t.TicketType
+		outbox.Payload.Version = t.Version
+		t.Outbox = append(t.Outbox, *outbox)
+	}
 	return nil
 }
 
-func (m *mockRepo) DetachSeatingPlan(ctx context.Context, ticketID, userID string) error {
+func (m *mockRepo) DetachSeatingPlan(ctx context.Context, ticketID, userID string, outbox *repository.TicketOutboxEvent) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -188,6 +225,15 @@ func (m *mockRepo) DetachSeatingPlan(ctx context.Context, ticketID, userID strin
 	}
 	t.SeatingPlanID = ""
 	t.TicketType = ""
+	t.Version++
+	if outbox != nil {
+		outbox.Payload.ID = t.ID
+		outbox.Payload.Title = t.Title
+		outbox.Payload.Price = t.Price
+		outbox.Payload.UserID = t.UserID
+		outbox.Payload.Version = t.Version
+		t.Outbox = append(t.Outbox, *outbox)
+	}
 	return nil
 }
 
@@ -278,7 +324,7 @@ func newSvc(repo repository.TicketRepository, pub service.EventPublisher) *servi
 	return service.NewTicketService(repo, pub, zap.NewNop(), &mockVenueClient{})
 }
 
-func TestCreateTicket_ShouldCreateTicketAndPublishEvent(t *testing.T) {
+func TestCreateTicket_ShouldCreateTicketAndStoreOutboxEvent(t *testing.T) {
 	repo := newMockRepo()
 	pub := &mockPublisher{}
 	svc := newSvc(repo, pub)
@@ -294,14 +340,14 @@ func TestCreateTicket_ShouldCreateTicketAndPublishEvent(t *testing.T) {
 	assert.Equal(t, "99.99", ticket.Price)
 	assert.Equal(t, "user-1", ticket.UserID)
 	assert.NotEmpty(t, ticket.ID)
-
-	// Kafka publish is async — give the goroutine time to run.
-	time.Sleep(10 * time.Millisecond)
-	assert.Len(t, pub.createdEvents, 1)
-	assert.Equal(t, ticket.ID, pub.createdEvents[0].ID)
+	assert.Len(t, ticket.Outbox, 1)
+	assert.Equal(t, repository.OutboxEventTypeTicketCreated, ticket.Outbox[0].Type)
+	assert.Equal(t, ticket.ID, ticket.Outbox[0].Payload.ID)
+	assert.Equal(t, ticket.Version, ticket.Outbox[0].Payload.Version)
+	assert.Empty(t, pub.createdEvents)
 }
 
-func TestCreateTicket_ShouldRetryKafkaPublishUntilSuccess(t *testing.T) {
+func TestCreateTicket_ShouldNotPublishDirectlyToKafka(t *testing.T) {
 	repo := newMockRepo()
 	pub := &flakyPublisher{failCreatedFor: 2}
 	svc := newSvc(repo, pub)
@@ -313,16 +359,12 @@ func TestCreateTicket_ShouldRetryKafkaPublishUntilSuccess(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Eventually(t, func() bool {
-		pub.mu.Lock()
-		defer pub.mu.Unlock()
-		return len(pub.createdEvents) == 1
-	}, 3*time.Second, 25*time.Millisecond)
-
 	pub.mu.Lock()
 	defer pub.mu.Unlock()
-	assert.Equal(t, 3, pub.createAttempts)
-	assert.Equal(t, ticket.ID, pub.createdEvents[0].ID)
+	assert.Zero(t, pub.createAttempts)
+	assert.Empty(t, pub.createdEvents)
+	assert.Len(t, ticket.Outbox, 1)
+	assert.Equal(t, repository.OutboxEventTypeTicketCreated, ticket.Outbox[0].Type)
 }
 
 func TestCreateTicket_ShouldReturnErrorWhenRepoFails(t *testing.T) {
@@ -342,10 +384,7 @@ func TestCreateTicket_ShouldReturnErrorWhenRepoFails(t *testing.T) {
 	assert.Empty(t, pub.createdEvents)
 }
 
-func TestCreateTicket_ShouldSucceedEvenWhenKafkaFails(t *testing.T) {
-	// Kafka publish is fire-and-forget (goroutine). A publish failure must not
-	// cause CreateTicket to return an error — the DB write is the source of truth (R-05).
-	// The failure is logged at ERROR level so it remains observable.
+func TestCreateTicket_ShouldSucceedEvenWhenPublisherWouldFail(t *testing.T) {
 	repo := newMockRepo()
 	pub := &mockPublisher{err: errors.New("kafka unavailable")}
 	svc := newSvc(repo, pub)
@@ -359,6 +398,8 @@ func TestCreateTicket_ShouldSucceedEvenWhenKafkaFails(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, ticket)
 	assert.NotEmpty(t, ticket.ID)
+	assert.Len(t, ticket.Outbox, 1)
+	assert.Empty(t, pub.createdEvents)
 }
 
 func TestGetTicketByID_ShouldReturnTicketWhenExists(t *testing.T) {
@@ -395,7 +436,7 @@ func TestListTickets_ShouldReturnAllTickets(t *testing.T) {
 	assert.Len(t, tickets, 2)
 }
 
-func TestUpdateTicket_ShouldUpdateAndPublishEvent(t *testing.T) {
+func TestUpdateTicket_ShouldUpdateAndStoreOutboxEvent(t *testing.T) {
 	repo := newMockRepo()
 	pub := &mockPublisher{}
 	svc := newSvc(repo, pub)
@@ -412,15 +453,13 @@ func TestUpdateTicket_ShouldUpdateAndPublishEvent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "New Title", ticket.Title)
 	assert.Equal(t, "15.00", ticket.Price)
-
-	// Kafka publish is async — give the goroutine time to run.
-	time.Sleep(10 * time.Millisecond)
-	assert.Len(t, pub.updatedEvents, 1)
+	assert.Len(t, ticket.Outbox, 1)
+	assert.Equal(t, repository.OutboxEventTypeTicketUpdated, ticket.Outbox[len(ticket.Outbox)-1].Type)
+	assert.Equal(t, 2, ticket.Outbox[len(ticket.Outbox)-1].Payload.Version)
+	assert.Empty(t, pub.updatedEvents)
 }
 
-func TestUpdateTicket_ShouldSucceedEvenWhenKafkaFails(t *testing.T) {
-	// Kafka publish is fire-and-forget (goroutine). A publish failure must not
-	// cause UpdateTicket to return an error — the DB write is the source of truth (R-05).
+func TestUpdateTicket_ShouldSucceedEvenWhenPublisherWouldFail(t *testing.T) {
 	repo := newMockRepo()
 	pub := &mockPublisher{err: errors.New("kafka unavailable")}
 	svc := newSvc(repo, pub)
@@ -437,6 +476,8 @@ func TestUpdateTicket_ShouldSucceedEvenWhenKafkaFails(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, ticket)
 	assert.Equal(t, "New Title", ticket.Title)
+	assert.Len(t, ticket.Outbox, 1)
+	assert.Empty(t, pub.updatedEvents)
 }
 
 func TestUpdateTicket_ShouldReturnUnauthorizedWhenUserDoesNotOwnTicket(t *testing.T) {
@@ -491,7 +532,7 @@ func TestUpdateTicket_ShouldReturnNotFoundWhenTicketMissing(t *testing.T) {
 
 // ── AttachSeatingPlan ─────────────────────────────────────────────────────────
 
-func TestAttachSeatingPlan_ShouldAttachAndPublishEvent(t *testing.T) {
+func TestAttachSeatingPlan_ShouldAttachAndStoreOutboxEvent(t *testing.T) {
 	repo := newMockRepo()
 	pub := &mockPublisher{}
 	svc := newSvc(repo, pub)
@@ -507,15 +548,14 @@ func TestAttachSeatingPlan_ShouldAttachAndPublishEvent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "plan-uuid-1", ticket.SeatingPlanID)
 	assert.Equal(t, "SEATED_MANUAL", ticket.TicketType)
-
-	// Kafka publish is async — give the goroutine time to run.
-	time.Sleep(10 * time.Millisecond)
-	require.Len(t, pub.updatedEvents, 1)
-	assert.Equal(t, "plan-uuid-1", pub.updatedEvents[0].SeatingPlanID)
-	assert.Equal(t, "SEATED_MANUAL", pub.updatedEvents[0].TicketType)
+	require.Len(t, ticket.Outbox, 1)
+	assert.Equal(t, repository.OutboxEventTypeTicketUpdated, ticket.Outbox[len(ticket.Outbox)-1].Type)
+	assert.Equal(t, "plan-uuid-1", ticket.Outbox[len(ticket.Outbox)-1].Payload.SeatingPlanID)
+	assert.Equal(t, "SEATED_MANUAL", ticket.Outbox[len(ticket.Outbox)-1].Payload.TicketType)
+	assert.Empty(t, pub.updatedEvents)
 }
 
-func TestAttachSeatingPlan_ShouldPublishAutoAssignedTicketType(t *testing.T) {
+func TestAttachSeatingPlan_ShouldStoreAutoAssignedTicketTypeInOutbox(t *testing.T) {
 	repo := newMockRepo()
 	pub := &mockPublisher{}
 	svc := newSvc(repo, pub)
@@ -530,11 +570,9 @@ func TestAttachSeatingPlan_ShouldPublishAutoAssignedTicketType(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "SEATED_AUTO", ticket.TicketType)
-
-	require.Eventually(t, func() bool {
-		return len(pub.updatedEvents) == 1
-	}, time.Second, 10*time.Millisecond)
-	assert.Equal(t, "SEATED_AUTO", pub.updatedEvents[0].TicketType)
+	require.Len(t, ticket.Outbox, 1)
+	assert.Equal(t, "SEATED_AUTO", ticket.Outbox[len(ticket.Outbox)-1].Payload.TicketType)
+	assert.Empty(t, pub.updatedEvents)
 }
 
 func TestAttachSeatingPlan_ShouldReturnUnauthorizedWhenNotOwner(t *testing.T) {
@@ -589,7 +627,7 @@ func TestAttachSeatingPlan_ShouldReturnErrorWhenPlanAlreadyAttached(t *testing.T
 
 // ── DetachSeatingPlan ─────────────────────────────────────────────────────────
 
-func TestDetachSeatingPlan_ShouldDetachAndPublishEvent(t *testing.T) {
+func TestDetachSeatingPlan_ShouldDetachAndStoreOutboxEvent(t *testing.T) {
 	repo := newMockRepo()
 	pub := &mockPublisher{}
 	svc := newSvc(repo, pub)
@@ -608,12 +646,11 @@ func TestDetachSeatingPlan_ShouldDetachAndPublishEvent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, ticket.SeatingPlanID)
 	assert.Empty(t, ticket.TicketType)
-
-	// Kafka publish is async — give the goroutine time to run.
-	time.Sleep(10 * time.Millisecond)
-	require.Len(t, pub.updatedEvents, 1)
-	assert.Empty(t, pub.updatedEvents[0].SeatingPlanID)
-	assert.Empty(t, pub.updatedEvents[0].TicketType)
+	require.Len(t, ticket.Outbox, 1)
+	assert.Equal(t, repository.OutboxEventTypeTicketUpdated, ticket.Outbox[len(ticket.Outbox)-1].Type)
+	assert.Empty(t, ticket.Outbox[len(ticket.Outbox)-1].Payload.SeatingPlanID)
+	assert.Empty(t, ticket.Outbox[len(ticket.Outbox)-1].Payload.TicketType)
+	assert.Empty(t, pub.updatedEvents)
 }
 
 func TestDetachSeatingPlan_ShouldReturnUnauthorizedWhenNotOwner(t *testing.T) {

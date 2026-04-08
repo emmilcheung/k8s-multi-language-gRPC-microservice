@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"time"
 
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/repository"
 	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 // EventPublisher is the interface the service uses to publish domain events.
@@ -18,6 +18,13 @@ import (
 type EventPublisher interface {
 	PublishTicketCreated(ctx context.Context, data kafka.TicketEventData) error
 	PublishTicketUpdated(ctx context.Context, data kafka.TicketEventData) error
+}
+
+// SeatingPlanLookupClient narrows the venue-service dependency used by the
+// ticket service so wrappers can add deadlines and circuit breaking without
+// dragging the whole generated client into tests.
+type SeatingPlanLookupClient interface {
+	GetSeatingPlan(ctx context.Context, in *venuev1.GetSeatingPlanRequest, opts ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error)
 }
 
 // CreateTicketInput is the validated input for creating a ticket.
@@ -57,17 +64,53 @@ type DetachSeatingPlanInput struct {
 // ErrUnauthorized is returned when a user tries to modify a ticket they don't own.
 var ErrUnauthorized = errors.New("not authorised to modify this ticket")
 
+// ErrVenueServiceUnavailable indicates venue-service could not be reached or
+// its circuit breaker is open.
+var ErrVenueServiceUnavailable = errors.New("venue-service unavailable")
+
+// ErrVenueServiceTimeout indicates venue-service did not respond within the
+// configured read budget.
+var ErrVenueServiceTimeout = errors.New("venue-service deadline exceeded")
+
 // TicketService contains the business logic for managing tickets.
 type TicketService struct {
 	repo               repository.TicketRepository
 	publisher          EventPublisher
 	log                *zap.Logger
-	venueServiceClient venuev1.VenueServiceClient // WS3: fetch seating plan assignment mode
+	venueServiceClient SeatingPlanLookupClient // WS3: fetch seating plan assignment mode
 }
 
 // NewTicketService creates a new TicketService with the given dependencies.
-func NewTicketService(repo repository.TicketRepository, publisher EventPublisher, log *zap.Logger, venueClient venuev1.VenueServiceClient) *TicketService {
+func NewTicketService(repo repository.TicketRepository, publisher EventPublisher, log *zap.Logger, venueClient SeatingPlanLookupClient) *TicketService {
 	return &TicketService{repo: repo, publisher: publisher, log: log, venueServiceClient: venueClient}
+}
+
+func buildOutboxPayload(ticket *repository.Ticket) repository.TicketOutboxPayload {
+	payload := repository.TicketOutboxPayload{
+		ID:            ticket.ID,
+		Title:         ticket.Title,
+		Price:         ticket.Price,
+		UserID:        ticket.UserID,
+		SeatingPlanID: ticket.SeatingPlanID,
+		TicketType:    ticket.TicketType,
+		Version:       ticket.Version,
+	}
+	if ticket.Event != nil {
+		var endsAt string
+		if ticket.Event.EndsAt != nil {
+			endsAt = ticket.Event.EndsAt.Format(time.RFC3339)
+		}
+		payload.Event = &repository.TicketOutboxDetail{
+			Title:        ticket.Event.Title,
+			Description:  ticket.Event.Description,
+			StartsAt:     ticket.Event.StartsAt.Format(time.RFC3339),
+			EndsAt:       endsAt,
+			ImageURL:     ticket.Event.ImageURL,
+			VenueName:    ticket.Event.VenueName,
+			VenueAddress: ticket.Event.VenueAddress,
+		}
+	}
+	return payload
 }
 
 // CreateTicket creates a new ticket and publishes a ticket.created event.
@@ -89,45 +132,16 @@ func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInpu
 		MaxPerUser: input.MaxPerUser,
 		Event:      input.Event,
 	}
+	ticket.PendingOutbox = []repository.TicketOutboxEvent{
+		repository.NewTicketOutboxEvent(repository.OutboxEventTypeTicketCreated, buildOutboxPayload(ticket)),
+	}
 
 	if err := s.repo.Create(ctx, ticket); err != nil {
 		return nil, fmt.Errorf("create ticket: %w", err)
 	}
+	ticket.PendingOutbox = nil
 
 	s.log.Info("ticket created", zap.String("ticketId", ticket.ID), zap.String("userId", ticket.UserID))
-
-	// Publish async — do not block or fail the gRPC response on Kafka availability.
-	// MongoDB is the source of truth; Kafka is eventually consistent.
-	eventData := kafka.TicketEventData{
-		ID:         ticket.ID,
-		Title:      ticket.Title,
-		Price:      ticket.Price,
-		UserID:     ticket.UserID,
-		TicketType: ticket.TicketType,
-		Version:    ticket.Version,
-	}
-	// WS8: Include event metadata if present
-	if ticket.Event != nil {
-		var endsAt string
-		if ticket.Event.EndsAt != nil {
-			endsAt = ticket.Event.EndsAt.Format(time.RFC3339)
-		}
-		eventData.Event = &kafka.EventData{
-			Title:        ticket.Event.Title,
-			Description:  ticket.Event.Description,
-			StartsAt:     ticket.Event.StartsAt.Format(time.RFC3339),
-			EndsAt:       endsAt,
-			ImageURL:     ticket.Event.ImageURL,
-			VenueName:    ticket.Event.VenueName,
-			VenueAddress: ticket.Event.VenueAddress,
-		}
-	}
-	publishCtx := context.WithoutCancel(ctx)
-	go func() {
-		s.publishWithRetry(publishCtx, "ticket.created", eventData.ID, func() error {
-			return s.publisher.PublishTicketCreated(publishCtx, eventData)
-		})
-	}()
 
 	return ticket, nil
 }
@@ -169,45 +183,16 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 
 	ticket.Title = input.Title
 	ticket.Price = input.Price
+	ticket.PendingOutbox = []repository.TicketOutboxEvent{
+		repository.NewTicketOutboxEvent(repository.OutboxEventTypeTicketUpdated, buildOutboxPayload(ticket)),
+	}
 
 	if err := s.repo.Update(ctx, ticket); err != nil {
 		return nil, fmt.Errorf("update ticket: %w", err)
 	}
+	ticket.PendingOutbox = nil
 
 	s.log.Info("ticket updated", zap.String("ticketId", ticket.ID), zap.String("userId", ticket.UserID))
-
-	// Publish async — do not block or fail the gRPC response on Kafka availability.
-	eventData := kafka.TicketEventData{
-		ID:            ticket.ID,
-		Title:         ticket.Title,
-		Price:         ticket.Price,
-		UserID:        ticket.UserID,
-		SeatingPlanID: ticket.SeatingPlanID,
-		TicketType:    ticket.TicketType,
-		Version:       ticket.Version,
-	}
-	// WS8: Include event metadata if present
-	if ticket.Event != nil {
-		var endsAt string
-		if ticket.Event.EndsAt != nil {
-			endsAt = ticket.Event.EndsAt.Format(time.RFC3339)
-		}
-		eventData.Event = &kafka.EventData{
-			Title:        ticket.Event.Title,
-			Description:  ticket.Event.Description,
-			StartsAt:     ticket.Event.StartsAt.Format(time.RFC3339),
-			EndsAt:       endsAt,
-			ImageURL:     ticket.Event.ImageURL,
-			VenueName:    ticket.Event.VenueName,
-			VenueAddress: ticket.Event.VenueAddress,
-		}
-	}
-	publishCtx := context.WithoutCancel(ctx)
-	go func() {
-		s.publishWithRetry(publishCtx, "ticket.updated", eventData.ID, func() error {
-			return s.publisher.PublishTicketUpdated(publishCtx, eventData)
-		})
-	}()
 
 	return ticket, nil
 }
@@ -224,6 +209,11 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 //   - ownership enforced in the repository layer (ErrOwnership → ErrUnauthorized)
 //   - plan-already-attached detected atomically in the repository layer
 func (s *TicketService) AttachSeatingPlan(ctx context.Context, input AttachSeatingPlanInput) (*repository.Ticket, error) {
+	existing, err := s.repo.FindByID(ctx, input.TicketID)
+	if err != nil {
+		return nil, fmt.Errorf("find ticket for attach: %w", err)
+	}
+
 	// WS3: Fetch the seating plan from venue-service to get assignmentMode
 	planResp, err := s.venueServiceClient.GetSeatingPlan(ctx, &venuev1.GetSeatingPlanRequest{
 		PlanId: input.PlanID,
@@ -244,8 +234,21 @@ func (s *TicketService) AttachSeatingPlan(ctx context.Context, input AttachSeati
 		s.log.Warn("unknown assignment mode from venue-service", zap.String("mode", planResp.AssignmentMode))
 		ticketType = ""
 	}
+	outboxEvent := repository.NewTicketOutboxEvent(
+		repository.OutboxEventTypeTicketUpdated,
+		buildOutboxPayload(&repository.Ticket{
+			ID:            existing.ID,
+			Title:         existing.Title,
+			Price:         existing.Price,
+			UserID:        existing.UserID,
+			SeatingPlanID: input.PlanID,
+			TicketType:    ticketType,
+			Version:       existing.Version + 1,
+			Event:         existing.Event,
+		}),
+	)
 
-	if err := s.repo.AttachSeatingPlan(ctx, input.TicketID, input.PlanID, input.UserID, ticketType); err != nil {
+	if err := s.repo.AttachSeatingPlan(ctx, input.TicketID, input.PlanID, input.UserID, ticketType, &outboxEvent); err != nil {
 		switch {
 		case errors.Is(err, repository.ErrOwnership):
 			return nil, ErrUnauthorized
@@ -266,29 +269,30 @@ func (s *TicketService) AttachSeatingPlan(ctx context.Context, input AttachSeati
 		zap.String("userId", input.UserID),
 	)
 
-	eventData := kafka.TicketEventData{
-		ID:            ticket.ID,
-		Title:         ticket.Title,
-		Price:         ticket.Price,
-		UserID:        ticket.UserID,
-		SeatingPlanID: ticket.SeatingPlanID,
-		TicketType:    ticket.TicketType,
-		Version:       ticket.Version,
-	}
-	publishCtx := context.WithoutCancel(ctx)
-	go func() {
-		s.publishWithRetry(publishCtx, "ticket.updated", eventData.ID, func() error {
-			return s.publisher.PublishTicketUpdated(publishCtx, eventData)
-		})
-	}()
-
 	return ticket, nil
 }
 
 // DetachSeatingPlan removes the seating plan association from a ticket, reverting it to a GA
 // ticket. The caller must own the ticket.
 func (s *TicketService) DetachSeatingPlan(ctx context.Context, input DetachSeatingPlanInput) (*repository.Ticket, error) {
-	if err := s.repo.DetachSeatingPlan(ctx, input.TicketID, input.UserID); err != nil {
+	existing, err := s.repo.FindByID(ctx, input.TicketID)
+	if err != nil {
+		return nil, fmt.Errorf("find ticket for detach: %w", err)
+	}
+
+	outboxEvent := repository.NewTicketOutboxEvent(
+		repository.OutboxEventTypeTicketUpdated,
+		buildOutboxPayload(&repository.Ticket{
+			ID:         existing.ID,
+			Title:      existing.Title,
+			Price:      existing.Price,
+			UserID:     existing.UserID,
+			Version:    existing.Version + 1,
+			Event:      existing.Event,
+			TicketType: "",
+		}),
+	)
+	if err := s.repo.DetachSeatingPlan(ctx, input.TicketID, input.UserID, &outboxEvent); err != nil {
 		switch {
 		case errors.Is(err, repository.ErrOwnership):
 			return nil, ErrUnauthorized
@@ -307,67 +311,5 @@ func (s *TicketService) DetachSeatingPlan(ctx context.Context, input DetachSeati
 		zap.String("userId", input.UserID),
 	)
 
-	eventData := kafka.TicketEventData{
-		ID:      ticket.ID,
-		Title:   ticket.Title,
-		Price:   ticket.Price,
-		UserID:  ticket.UserID,
-		Version: ticket.Version,
-		// SeatingPlanID and TicketType are intentionally empty — the plan was just detached.
-	}
-	publishCtx := context.WithoutCancel(ctx)
-	go func() {
-		s.publishWithRetry(publishCtx, "ticket.updated", eventData.ID, func() error {
-			return s.publisher.PublishTicketUpdated(publishCtx, eventData)
-		})
-	}()
-
 	return ticket, nil
-}
-
-// publishWithRetry retries fn up to maxRetries times using exponential backoff with jitter.
-// It is designed for use inside fire-and-forget goroutines: errors are logged, not propagated.
-// The context must not be cancelled before all retries complete — use context.WithoutCancel.
-func (s *TicketService) publishWithRetry(ctx context.Context, eventType, ticketID string, fn func() error) {
-	const maxRetries = 3
-	const baseDelay = 200 * time.Millisecond
-	const maxDelay = 5 * time.Second
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		if err := fn(); err == nil {
-			return
-		} else if attempt == maxRetries {
-			s.log.Error("kafka publish failed after retries",
-				zap.String("event", eventType),
-				zap.String("ticketId", ticketID),
-				zap.Error(err),
-				zap.Int("attempts", maxRetries),
-			)
-			return
-		} else {
-			delay := publishBackoffWithJitter(attempt, baseDelay, maxDelay)
-			s.log.Warn("kafka publish failed, retrying",
-				zap.String("event", eventType),
-				zap.String("ticketId", ticketID),
-				zap.Int("attempt", attempt),
-				zap.Duration("delay", delay),
-			)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(delay):
-			}
-		}
-	}
-}
-
-// publishBackoffWithJitter returns a full-jitter exponential back-off duration.
-func publishBackoffWithJitter(attempt int, base, max time.Duration) time.Duration {
-	exp := base * (1 << attempt)
-	if exp > max {
-		exp = max
-	}
-	half := exp / 2
-	jitter := time.Duration(rand.Int63n(int64(half) + 1)) //nolint:gosec // non-crypto jitter
-	return half + jitter
 }

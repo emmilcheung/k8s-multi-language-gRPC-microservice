@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"runtime/debug"
@@ -27,7 +28,7 @@ type VenueGrpcServer struct {
 	reservationRepo repository.ReservationRepository
 	sectionRepo     repository.SectionRepository
 	planRepo        repository.PlanRepository
-	ticketClient    ticketsv1.TicketServiceClient
+	ticketClient    TicketLookupClient
 	log             *zap.Logger
 }
 
@@ -36,7 +37,7 @@ func NewVenueGrpcServer(
 	reservationRepo repository.ReservationRepository,
 	sectionRepo repository.SectionRepository,
 	planRepo repository.PlanRepository,
-	ticketClient ticketsv1.TicketServiceClient,
+	ticketClient TicketLookupClient,
 	log *zap.Logger,
 ) *VenueGrpcServer {
 	return &VenueGrpcServer{
@@ -105,6 +106,16 @@ func (s *VenueGrpcServer) ReserveHeldSeats(ctx context.Context, req *venuev1.Res
 	// Fetch ticket price from ticket-service for price fallback resolution.
 	ticketResp, err := s.ticketClient.GetTicket(ctx, &ticketsv1.GetTicketRequest{TicketId: req.TicketId})
 	if err != nil {
+		switch {
+		case errors.Is(err, ErrTicketServiceUnavailable):
+			s.log.Error("ReserveHeldSeats: ticket-service unavailable", zap.Error(err),
+				zap.String("ticketId", req.TicketId))
+			return nil, status.Error(codes.Unavailable, "ticket-service unavailable")
+		case errors.Is(err, ErrTicketServiceTimeout):
+			s.log.Error("ReserveHeldSeats: ticket-service timeout", zap.Error(err),
+				zap.String("ticketId", req.TicketId))
+			return nil, status.Error(codes.DeadlineExceeded, "ticket-service deadline exceeded")
+		}
 		s.log.Error("ReserveHeldSeats: GetTicket failed", zap.Error(err),
 			zap.String("ticketId", req.TicketId))
 		return nil, status.Error(codes.Internal, "internal error")
@@ -233,6 +244,16 @@ func (s *VenueGrpcServer) AutoAssignAndReserve(ctx context.Context, req *venuev1
 	// Fetch ticket price from ticket-service for price fallback resolution.
 	ticketResp, err := s.ticketClient.GetTicket(ctx, &ticketsv1.GetTicketRequest{TicketId: req.TicketId})
 	if err != nil {
+		switch {
+		case errors.Is(err, ErrTicketServiceUnavailable):
+			s.log.Error("AutoAssignAndReserve: ticket-service unavailable", zap.Error(err),
+				zap.String("ticketId", req.TicketId))
+			return nil, status.Error(codes.Unavailable, "ticket-service unavailable")
+		case errors.Is(err, ErrTicketServiceTimeout):
+			s.log.Error("AutoAssignAndReserve: ticket-service timeout", zap.Error(err),
+				zap.String("ticketId", req.TicketId))
+			return nil, status.Error(codes.DeadlineExceeded, "ticket-service deadline exceeded")
+		}
 		s.log.Error("AutoAssignAndReserve: GetTicket failed", zap.Error(err),
 			zap.String("ticketId", req.TicketId))
 		return nil, status.Error(codes.Internal, "internal error")

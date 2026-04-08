@@ -126,6 +126,7 @@ pnpm exec playwright test
 5. **Minimal blast radius** — scope changes to the smallest possible surface
 6. **Security is not optional** — treat all user input as hostile
 7. **Observable by default** — structured logs, metrics, traces from day one
+8. **Minial Changes** - consider updates over entire rewrite
 
 ---
 

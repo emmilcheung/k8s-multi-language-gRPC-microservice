@@ -186,6 +186,7 @@ func (oc *OrderConsumer) Start(ctx context.Context) {
 					zap.String("topic", topic),
 					zap.Error(processErr),
 				)
+				continue
 			}
 
 			// Commit only after successful processing or DLQ routing — never silently discard.

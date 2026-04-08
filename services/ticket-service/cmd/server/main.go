@@ -16,6 +16,7 @@ import (
 	"github.com/acme/ticket-service/internal/health"
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/middleware"
+	"github.com/acme/ticket-service/internal/outbox"
 	"github.com/acme/ticket-service/internal/reconciler"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
@@ -31,6 +32,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 func main() {
@@ -103,6 +105,7 @@ func main() {
 	}
 	defer producer.Close()
 	kafkaChecker = health.NewKafkaChecker(cfg.KafkaBrokers)
+	outboxRelay := outbox.NewRelay(mongoRepo, producer, log)
 
 	// Kafka consumer — listens to order events and keeps ticket reservation state in sync.
 	// The producer is passed so the consumer can route failed messages to the DLQ.
@@ -114,13 +117,26 @@ func main() {
 	defer consumerCancel()
 	go orderConsumer.Start(consumerCtx)
 
+	relayCtx, relayCancel := context.WithCancel(context.Background())
+	defer relayCancel()
+	go outboxRelay.Start(relayCtx)
+
 	// WS3: Venue-service gRPC client for fetching seating plan assignment mode
-	venueConn, err := grpc.NewClient(cfg.VenueServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	venueConn, err := grpc.NewClient(
+		cfg.VenueServiceAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10*1024*1024)),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                30 * time.Second,
+			Timeout:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	)
 	if err != nil {
 		log.Fatal("failed to dial venue-service", zap.Error(err), zap.String("addr", cfg.VenueServiceAddr))
 	}
 	defer venueConn.Close() //nolint:errcheck
-	venueClient := venuev1.NewVenueServiceClient(venueConn)
+	venueClient := service.NewResilientVenueClient(venuev1.NewVenueServiceClient(venueConn), log)
 	log.Info("connected to venue-service", zap.String("addr", cfg.VenueServiceAddr))
 
 	// Business logic service
@@ -187,16 +203,18 @@ func main() {
 	case <-quit:
 		log.Info("shutting down ticket-service (signal received)")
 	case <-egCtx.Done():
-		// One of the servers failed — initiate controlled shutdown.
-		if err := eg.Wait(); err != nil {
-			log.Error("server error — initiating shutdown", zap.Error(err))
-		}
+		log.Error("server error — initiating shutdown")
 	}
 
 	grpcCancel() // signal gRPC server to stop
+	relayCancel()
+	consumerCancel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := e.Shutdown(ctx); err != nil {
 		log.Error("shutdown error", zap.Error(err))
+	}
+	if err := eg.Wait(); err != nil {
+		log.Error("server exited with error", zap.Error(err))
 	}
 }

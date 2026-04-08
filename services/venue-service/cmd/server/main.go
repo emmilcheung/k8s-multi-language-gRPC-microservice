@@ -34,6 +34,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 func main() {
@@ -175,12 +176,17 @@ func main() {
 		cfg.TicketServiceURL,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10*1024*1024)),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                30 * time.Second,
+			Timeout:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
 	)
 	if err != nil {
 		log.Fatal("failed to connect to ticket-service", zap.Error(err))
 	}
 	defer ticketConn.Close() //nolint:errcheck
-	ticketClient := ticketsv1.NewTicketServiceClient(ticketConn)
+	ticketClient := grpcserver.NewResilientTicketClient(ticketsv1.NewTicketServiceClient(ticketConn), log)
 
 	// gRPC server — wired with real repos in CP-08.
 	grpcSrv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, ticketClient, log)
@@ -253,10 +259,7 @@ func main() {
 	case <-quit:
 		log.Info("shutting down venue-service (signal received)")
 	case <-egCtx.Done():
-		// One of the servers failed — initiate controlled shutdown.
-		if err := eg.Wait(); err != nil {
-			log.Error("server error — initiating shutdown", zap.Error(err))
-		}
+		log.Error("server error — initiating shutdown")
 	}
 
 	grpcCancel()
@@ -271,5 +274,8 @@ func main() {
 	defer cancel()
 	if shutdownErr := e.Shutdown(ctx); shutdownErr != nil {
 		log.Error("HTTP shutdown error", zap.Error(shutdownErr))
+	}
+	if err := eg.Wait(); err != nil {
+		log.Error("server exited with error", zap.Error(err))
 	}
 }

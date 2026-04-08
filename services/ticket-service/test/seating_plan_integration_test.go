@@ -194,7 +194,7 @@ func TestGrpc_ReserveQuota_returns_FAILED_PRECONDITION_for_seated_ticket(t *test
 	require.NoError(t, err)
 	// Attach via repository directly — bypasses ownership check by calling the
 	// mongo implementation which checks ownership; we use the owner's ID.
-	err = repo.AttachSeatingPlan(ctx, "seated-ticket-1", "plan-uuid-seated", "organiser-1", "SEATED_MANUAL")
+	err = repo.AttachSeatingPlan(ctx, "seated-ticket-1", "plan-uuid-seated", "organiser-1", "SEATED_MANUAL", nil)
 	require.NoError(t, err)
 
 	log := zap.NewNop()

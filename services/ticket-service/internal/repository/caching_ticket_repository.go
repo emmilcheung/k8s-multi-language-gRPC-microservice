@@ -197,8 +197,8 @@ func (r *CachingTicketRepository) FinalizeReservation(ctx context.Context, reser
 // Both operations mutate the ticket document, so the individual ticket cache and
 // the list cache are invalidated after a successful write.
 
-func (r *CachingTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string) error {
-	if err := r.inner.AttachSeatingPlan(ctx, ticketID, planID, userID, ticketType); err != nil {
+func (r *CachingTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string, outbox *TicketOutboxEvent) error {
+	if err := r.inner.AttachSeatingPlan(ctx, ticketID, planID, userID, ticketType, outbox); err != nil {
 		return err
 	}
 	if err := r.cache.InvalidateTicket(ctx, ticketID); err != nil {
@@ -210,8 +210,8 @@ func (r *CachingTicketRepository) AttachSeatingPlan(ctx context.Context, ticketI
 	return nil
 }
 
-func (r *CachingTicketRepository) DetachSeatingPlan(ctx context.Context, ticketID, userID string) error {
-	if err := r.inner.DetachSeatingPlan(ctx, ticketID, userID); err != nil {
+func (r *CachingTicketRepository) DetachSeatingPlan(ctx context.Context, ticketID, userID string, outbox *TicketOutboxEvent) error {
+	if err := r.inner.DetachSeatingPlan(ctx, ticketID, userID, outbox); err != nil {
 		return err
 	}
 	if err := r.cache.InvalidateTicket(ctx, ticketID); err != nil {
