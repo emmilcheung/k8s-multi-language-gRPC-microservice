@@ -38,6 +38,8 @@ type CloudEvent struct {
 // Price is a decimal string to match the quota-based ticket model (no float drift).
 // SeatingPlanID (CP-13): non-empty for seated tickets; consumers use this to route
 // inventory management to the venue-service path.
+// TicketType: "SEATED_MANUAL", "SEATED_AUTO", or empty for GA — included so downstream
+// consumers can detect type changes without re-fetching the ticket.
 // Event (WS8): optional event metadata for event-ticketing association.
 type TicketEventData struct {
 	ID            string     `json:"id"`
@@ -45,6 +47,7 @@ type TicketEventData struct {
 	Price         string     `json:"price"`
 	UserID        string     `json:"userId"`
 	SeatingPlanID string     `json:"seatingPlanId,omitempty"`
+	TicketType    string     `json:"ticketType,omitempty"`
 	Version       int        `json:"version"`
 	Event         *EventData `json:"event,omitempty"` // WS8: nullable event metadata
 }

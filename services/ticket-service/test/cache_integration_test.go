@@ -64,8 +64,8 @@ func (r *countingRepo) FinalizeReservation(ctx context.Context, reservationID, o
 	return r.repo.FinalizeReservation(ctx, reservationID, orderID)
 }
 
-func (r *countingRepo) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID string) error {
-	return r.repo.AttachSeatingPlan(ctx, ticketID, planID, userID)
+func (r *countingRepo) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string) error {
+	return r.repo.AttachSeatingPlan(ctx, ticketID, planID, userID, ticketType)
 }
 
 func (r *countingRepo) DetachSeatingPlan(ctx context.Context, ticketID, userID string) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/acme/ticket-service/internal/kafka"
@@ -98,11 +99,12 @@ func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInpu
 	// Publish async — do not block or fail the gRPC response on Kafka availability.
 	// MongoDB is the source of truth; Kafka is eventually consistent.
 	eventData := kafka.TicketEventData{
-		ID:      ticket.ID,
-		Title:   ticket.Title,
-		Price:   ticket.Price,
-		UserID:  ticket.UserID,
-		Version: ticket.Version,
+		ID:         ticket.ID,
+		Title:      ticket.Title,
+		Price:      ticket.Price,
+		UserID:     ticket.UserID,
+		TicketType: ticket.TicketType,
+		Version:    ticket.Version,
 	}
 	// WS8: Include event metadata if present
 	if ticket.Event != nil {
@@ -122,9 +124,9 @@ func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInpu
 	}
 	publishCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := s.publisher.PublishTicketCreated(publishCtx, eventData); err != nil {
-			s.log.Error("failed to publish ticket.created event", zap.Error(err), zap.String("ticketId", eventData.ID))
-		}
+		s.publishWithRetry(publishCtx, "ticket.created", eventData.ID, func() error {
+			return s.publisher.PublishTicketCreated(publishCtx, eventData)
+		})
 	}()
 
 	return ticket, nil
@@ -181,6 +183,7 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 		Price:         ticket.Price,
 		UserID:        ticket.UserID,
 		SeatingPlanID: ticket.SeatingPlanID,
+		TicketType:    ticket.TicketType,
 		Version:       ticket.Version,
 	}
 	// WS8: Include event metadata if present
@@ -201,9 +204,9 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 	}
 	publishCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := s.publisher.PublishTicketUpdated(publishCtx, eventData); err != nil {
-			s.log.Error("failed to publish ticket.updated event", zap.Error(err), zap.String("ticketId", eventData.ID))
-		}
+		s.publishWithRetry(publishCtx, "ticket.updated", eventData.ID, func() error {
+			return s.publisher.PublishTicketUpdated(publishCtx, eventData)
+		})
 	}()
 
 	return ticket, nil
@@ -242,7 +245,7 @@ func (s *TicketService) AttachSeatingPlan(ctx context.Context, input AttachSeati
 		ticketType = ""
 	}
 
-	if err := s.repo.AttachSeatingPlan(ctx, input.TicketID, input.PlanID, input.UserID); err != nil {
+	if err := s.repo.AttachSeatingPlan(ctx, input.TicketID, input.PlanID, input.UserID, ticketType); err != nil {
 		switch {
 		case errors.Is(err, repository.ErrOwnership):
 			return nil, ErrUnauthorized
@@ -254,12 +257,6 @@ func (s *TicketService) AttachSeatingPlan(ctx context.Context, input AttachSeati
 	ticket, err := s.repo.FindByID(ctx, input.TicketID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch ticket after attach: %w", err)
-	}
-
-	// WS3: Set the ticketType on the ticket
-	ticket.TicketType = ticketType
-	if err := s.repo.Update(ctx, ticket); err != nil {
-		return nil, fmt.Errorf("update ticket type: %w", err)
 	}
 
 	s.log.Info("seating plan attached",
@@ -275,13 +272,14 @@ func (s *TicketService) AttachSeatingPlan(ctx context.Context, input AttachSeati
 		Price:         ticket.Price,
 		UserID:        ticket.UserID,
 		SeatingPlanID: ticket.SeatingPlanID,
+		TicketType:    ticket.TicketType,
 		Version:       ticket.Version,
 	}
 	publishCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := s.publisher.PublishTicketUpdated(publishCtx, eventData); err != nil {
-			s.log.Error("failed to publish ticket.updated event after attach", zap.Error(err), zap.String("ticketId", eventData.ID))
-		}
+		s.publishWithRetry(publishCtx, "ticket.updated", eventData.ID, func() error {
+			return s.publisher.PublishTicketUpdated(publishCtx, eventData)
+		})
 	}()
 
 	return ticket, nil
@@ -315,14 +313,61 @@ func (s *TicketService) DetachSeatingPlan(ctx context.Context, input DetachSeati
 		Price:   ticket.Price,
 		UserID:  ticket.UserID,
 		Version: ticket.Version,
-		// SeatingPlanID is intentionally empty — the plan was just detached.
+		// SeatingPlanID and TicketType are intentionally empty — the plan was just detached.
 	}
 	publishCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := s.publisher.PublishTicketUpdated(publishCtx, eventData); err != nil {
-			s.log.Error("failed to publish ticket.updated event after detach", zap.Error(err), zap.String("ticketId", eventData.ID))
-		}
+		s.publishWithRetry(publishCtx, "ticket.updated", eventData.ID, func() error {
+			return s.publisher.PublishTicketUpdated(publishCtx, eventData)
+		})
 	}()
 
 	return ticket, nil
+}
+
+// publishWithRetry retries fn up to maxRetries times using exponential backoff with jitter.
+// It is designed for use inside fire-and-forget goroutines: errors are logged, not propagated.
+// The context must not be cancelled before all retries complete — use context.WithoutCancel.
+func (s *TicketService) publishWithRetry(ctx context.Context, eventType, ticketID string, fn func() error) {
+	const maxRetries = 3
+	const baseDelay = 200 * time.Millisecond
+	const maxDelay = 5 * time.Second
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if err := fn(); err == nil {
+			return
+		} else if attempt == maxRetries {
+			s.log.Error("kafka publish failed after retries",
+				zap.String("event", eventType),
+				zap.String("ticketId", ticketID),
+				zap.Error(err),
+				zap.Int("attempts", maxRetries),
+			)
+			return
+		} else {
+			delay := publishBackoffWithJitter(attempt, baseDelay, maxDelay)
+			s.log.Warn("kafka publish failed, retrying",
+				zap.String("event", eventType),
+				zap.String("ticketId", ticketID),
+				zap.Int("attempt", attempt),
+				zap.Duration("delay", delay),
+			)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+		}
+	}
+}
+
+// publishBackoffWithJitter returns a full-jitter exponential back-off duration.
+func publishBackoffWithJitter(attempt int, base, max time.Duration) time.Duration {
+	exp := base * (1 << attempt)
+	if exp > max {
+		exp = max
+	}
+	half := exp / 2
+	jitter := time.Duration(rand.Int63n(int64(half) + 1)) //nolint:gosec // non-crypto jitter
+	return half + jitter
 }

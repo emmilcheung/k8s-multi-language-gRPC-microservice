@@ -155,7 +155,7 @@ func (m *mockRepo) FinalizeReservation(ctx context.Context, reservationID, order
 // attachErr / detachErr allow per-call error injection distinct from the generic m.err.
 // These are separate fields so tests can inject targeted errors without breaking other methods.
 
-func (m *mockRepo) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID string) error {
+func (m *mockRepo) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -170,6 +170,7 @@ func (m *mockRepo) AttachSeatingPlan(ctx context.Context, ticketID, planID, user
 		return repository.ErrSeatingPlanAlreadyAttached
 	}
 	t.SeatingPlanID = planID
+	t.TicketType = ticketType
 	return nil
 }
 

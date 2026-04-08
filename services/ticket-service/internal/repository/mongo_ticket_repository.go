@@ -193,14 +193,14 @@ type TicketRepository interface {
 
 	// --- Seating plan attachment (CP-13) ---
 
-	// AttachSeatingPlan sets seatingPlanId on a ticket. The caller must own the ticket
-	// (userID must match ticket.UserID). Returns ErrTicketNotFound if the ticket does
-	// not exist, ErrUnauthorized if the user doesn't own it, and
+	// AttachSeatingPlan atomically sets seatingPlanId and ticketType on a ticket in a
+	// single MongoDB update. The caller must own the ticket. Returns ErrTicketNotFound
+	// if the ticket does not exist, ErrOwnership if the user doesn't own it, and
 	// ErrSeatingPlanAlreadyAttached if a plan is already attached.
-	AttachSeatingPlan(ctx context.Context, ticketID, planID, userID string) error
+	AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string) error
 
-	// DetachSeatingPlan clears seatingPlanId from a ticket. The caller must own the
-	// ticket. Idempotent: if no plan is attached this is a no-op success.
+	// DetachSeatingPlan clears both seatingPlanId and ticketType from a ticket. The
+	// caller must own the ticket. Idempotent: if no plan is attached this is a no-op.
 	DetachSeatingPlan(ctx context.Context, ticketID, userID string) error
 }
 
@@ -988,13 +988,15 @@ func (r *MongoTicketRepository) SweepExpiredReservations(ctx context.Context) (i
 
 // ─── Seating plan attachment methods (CP-13) ──────────────────────────────────
 
-// AttachSeatingPlan sets seatingPlanId on a ticket. The caller must own the ticket.
-// Returns ErrTicketNotFound if the ticket does not exist, ErrUnauthorized if the
-// user doesn't own it, and ErrSeatingPlanAlreadyAttached if a plan is already set.
+// AttachSeatingPlan atomically sets seatingPlanId and ticketType on a ticket in a
+// single MongoDB update. The caller must own the ticket. Returns ErrTicketNotFound
+// if the ticket does not exist, ErrOwnership if the user doesn't own it, and
+// ErrSeatingPlanAlreadyAttached if a plan is already set.
 //
 // Uses a conditional filter ($and) so the update is atomic: the seatingPlanId field
-// must be absent or empty, ensuring two concurrent callers cannot both attach.
-func (r *MongoTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID string) error {
+// must be absent or empty, ensuring two concurrent callers cannot both attach. Both
+// seatingPlanId and ticketType are set in the same $set to avoid a separate Update call.
+func (r *MongoTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -1012,6 +1014,7 @@ func (r *MongoTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID,
 	update := bson.M{
 		"$set": bson.M{
 			"seatingPlanId": planID,
+			"ticket_type":   ticketType,
 			"updatedAt":     now,
 		},
 		"$inc": bson.M{"version": 1},
@@ -1040,8 +1043,8 @@ func (r *MongoTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID,
 	return nil
 }
 
-// DetachSeatingPlan clears seatingPlanId from a ticket. The caller must own the
-// ticket. Idempotent: if no plan is attached the update is a no-op success.
+// DetachSeatingPlan clears both seatingPlanId and ticketType from a ticket atomically.
+// The caller must own the ticket. Idempotent: if no plan is attached the update is a no-op.
 func (r *MongoTicketRepository) DetachSeatingPlan(ctx context.Context, ticketID, userID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -1050,7 +1053,10 @@ func (r *MongoTicketRepository) DetachSeatingPlan(ctx context.Context, ticketID,
 
 	filter := bson.M{"_id": ticketID, "userId": userID}
 	update := bson.M{
-		"$unset": bson.M{"seatingPlanId": ""},
+		// Clear both seatingPlanId and ticket_type in the same operation so the
+		// document is never left in a state where ticketType implies seated but
+		// no seatingPlanId exists.
+		"$unset": bson.M{"seatingPlanId": "", "ticket_type": ""},
 		"$set":   bson.M{"updatedAt": now},
 		"$inc":   bson.M{"version": 1},
 	}
