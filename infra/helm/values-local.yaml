@@ -18,6 +18,14 @@ global:
   namespace: ticketing
   security:
     allowInsecureImages: true
+  serviceMesh:
+    enabled: true
+    provider: linkerd
+    linkerd:
+      skipOutboundPorts: "9092"
+      grpcServerPolicy:
+        enabled: true
+      identityDomain: cluster.local
 
 # ── Application services — single replica, smaller resources for local dev ───
 

@@ -41,6 +41,8 @@
 
 - All traffic between Kong and external clients: TLS 1.2+ (enforce TLS 1.3 where possible).
 - All traffic inside the cluster: mTLS via a service mesh (Istio or Linkerd) — services do not implement mTLS themselves.
+- Local Kubernetes should mirror this rule: install Linkerd during bootstrap, inject only the workloads that participate in internal gRPC, and apply Linkerd policy on the gRPC port rather than whole-pod deny rules so HTTP traffic from Kong is unaffected.
+- For Kafka with Linkerd, explicitly skip the raw broker ports used by the binary protocol; do not rely on the proxy to interpret Kafka traffic.
 - Never disable certificate verification (`InsecureSkipVerify`, `rejectUnauthorized: false`) except in local dev, and even then prefer self-signed certs over disabling verification.
 
 ## Supply Chain
