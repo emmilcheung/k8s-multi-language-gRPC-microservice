@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -186,6 +187,7 @@ func (m *mockRepo) DetachSeatingPlan(ctx context.Context, ticketID, userID strin
 		return repository.ErrOwnership
 	}
 	t.SeatingPlanID = ""
+	t.TicketType = ""
 	return nil
 }
 
@@ -210,6 +212,31 @@ func (m *mockPublisher) PublishTicketUpdated(_ context.Context, data kafka.Ticke
 		return m.err
 	}
 	m.updatedEvents = append(m.updatedEvents, data)
+	return nil
+}
+
+type flakyPublisher struct {
+	mu             sync.Mutex
+	failCreatedFor int
+	createAttempts int
+	createdEvents  []kafka.TicketEventData
+}
+
+func (m *flakyPublisher) PublishTicketCreated(_ context.Context, data kafka.TicketEventData) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.createAttempts++
+	if m.createAttempts <= m.failCreatedFor {
+		return errors.New("transient kafka error")
+	}
+	m.createdEvents = append(m.createdEvents, data)
+	return nil
+}
+
+func (m *flakyPublisher) PublishTicketUpdated(_ context.Context, data kafka.TicketEventData) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.createdEvents = append(m.createdEvents, data)
 	return nil
 }
 
@@ -271,6 +298,30 @@ func TestCreateTicket_ShouldCreateTicketAndPublishEvent(t *testing.T) {
 	// Kafka publish is async — give the goroutine time to run.
 	time.Sleep(10 * time.Millisecond)
 	assert.Len(t, pub.createdEvents, 1)
+	assert.Equal(t, ticket.ID, pub.createdEvents[0].ID)
+}
+
+func TestCreateTicket_ShouldRetryKafkaPublishUntilSuccess(t *testing.T) {
+	repo := newMockRepo()
+	pub := &flakyPublisher{failCreatedFor: 2}
+	svc := newSvc(repo, pub)
+
+	ticket, err := svc.CreateTicket(context.Background(), service.CreateTicketInput{
+		Title:  "Concert Ticket",
+		Price:  "99.99",
+		UserID: "user-1",
+	})
+
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		pub.mu.Lock()
+		defer pub.mu.Unlock()
+		return len(pub.createdEvents) == 1
+	}, 3*time.Second, 25*time.Millisecond)
+
+	pub.mu.Lock()
+	defer pub.mu.Unlock()
+	assert.Equal(t, 3, pub.createAttempts)
 	assert.Equal(t, ticket.ID, pub.createdEvents[0].ID)
 }
 
@@ -455,11 +506,35 @@ func TestAttachSeatingPlan_ShouldAttachAndPublishEvent(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "plan-uuid-1", ticket.SeatingPlanID)
+	assert.Equal(t, "SEATED_MANUAL", ticket.TicketType)
 
 	// Kafka publish is async — give the goroutine time to run.
 	time.Sleep(10 * time.Millisecond)
 	require.Len(t, pub.updatedEvents, 1)
 	assert.Equal(t, "plan-uuid-1", pub.updatedEvents[0].SeatingPlanID)
+	assert.Equal(t, "SEATED_MANUAL", pub.updatedEvents[0].TicketType)
+}
+
+func TestAttachSeatingPlan_ShouldPublishAutoAssignedTicketType(t *testing.T) {
+	repo := newMockRepo()
+	pub := &mockPublisher{}
+	svc := newSvc(repo, pub)
+
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "50.00", UserID: "owner-1"})
+
+	ticket, err := svc.AttachSeatingPlan(context.Background(), service.AttachSeatingPlanInput{
+		TicketID: "t1",
+		PlanID:   "auto-plan",
+		UserID:   "owner-1",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "SEATED_AUTO", ticket.TicketType)
+
+	require.Eventually(t, func() bool {
+		return len(pub.updatedEvents) == 1
+	}, time.Second, 10*time.Millisecond)
+	assert.Equal(t, "SEATED_AUTO", pub.updatedEvents[0].TicketType)
 }
 
 func TestAttachSeatingPlan_ShouldReturnUnauthorizedWhenNotOwner(t *testing.T) {
@@ -522,7 +597,7 @@ func TestDetachSeatingPlan_ShouldDetachAndPublishEvent(t *testing.T) {
 	// Seed a ticket with a seating plan already attached.
 	repo.tickets["t1"] = &repository.Ticket{
 		ID: "t1", Title: "Concert", Price: "50.00", UserID: "owner-1",
-		SeatingPlanID: "plan-uuid-1", Quota: 1, MaxPerUser: 1, Version: 1,
+		SeatingPlanID: "plan-uuid-1", TicketType: "SEATED_MANUAL", Quota: 1, MaxPerUser: 1, Version: 1,
 	}
 
 	ticket, err := svc.DetachSeatingPlan(context.Background(), service.DetachSeatingPlanInput{
@@ -532,11 +607,13 @@ func TestDetachSeatingPlan_ShouldDetachAndPublishEvent(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, ticket.SeatingPlanID)
+	assert.Empty(t, ticket.TicketType)
 
 	// Kafka publish is async — give the goroutine time to run.
 	time.Sleep(10 * time.Millisecond)
 	require.Len(t, pub.updatedEvents, 1)
 	assert.Empty(t, pub.updatedEvents[0].SeatingPlanID)
+	assert.Empty(t, pub.updatedEvents[0].TicketType)
 }
 
 func TestDetachSeatingPlan_ShouldReturnUnauthorizedWhenNotOwner(t *testing.T) {

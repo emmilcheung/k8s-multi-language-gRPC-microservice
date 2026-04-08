@@ -49,6 +49,7 @@ func TestAttachSeatingPlan_ShouldReturn200AndSetSeatingPlanId(t *testing.T) {
 	var result map[string]interface{}
 	require.NoError(t, decodeJSON(resp, &result))
 	assert.Equal(t, planID, result["seatingPlanId"])
+	assert.Equal(t, "SEATED_MANUAL", result["ticketType"])
 	assert.Equal(t, ticketID, result["id"])
 }
 
@@ -73,10 +74,11 @@ func TestAttachSeatingPlan_ShouldReturn200OnGet(t *testing.T) {
 	var ticket map[string]interface{}
 	require.NoError(t, decodeJSON(getResp, &ticket))
 	assert.Equal(t, planID, ticket["seatingPlanId"])
+	assert.Equal(t, "SEATED_MANUAL", ticket["ticketType"])
 }
 
 // TestAttachSeatingPlan_ThenDetach_ShouldClearSeatingPlanId verifies attach →
-// detach → GET leaves no seatingPlanId on the ticket.
+// detach → GET leaves no seatingPlanId or ticketType on the ticket.
 func TestAttachSeatingPlan_ThenDetach_ShouldClearSeatingPlanId(t *testing.T) {
 	ts, cleanup := setupTestServer(t)
 	defer cleanup()
@@ -94,15 +96,17 @@ func TestAttachSeatingPlan_ThenDetach_ShouldClearSeatingPlanId(t *testing.T) {
 	defer delResp.Body.Close() //nolint:errcheck
 	assert.Equal(t, http.StatusOK, delResp.StatusCode)
 
-	// GET should have no seatingPlanId.
+	// GET should have no seatingPlanId or ticketType.
 	getReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/tickets/"+ticketID, nil)
 	getResp, err := http.DefaultClient.Do(getReq)
 	require.NoError(t, err)
 	defer getResp.Body.Close() //nolint:errcheck
 	var ticket map[string]interface{}
 	require.NoError(t, decodeJSON(getResp, &ticket))
-	_, hasField := ticket["seatingPlanId"]
-	assert.False(t, hasField, "seatingPlanId should be absent after detach")
+	_, hasSeatingPlanField := ticket["seatingPlanId"]
+	_, hasTicketTypeField := ticket["ticketType"]
+	assert.False(t, hasSeatingPlanField, "seatingPlanId should be absent after detach")
+	assert.False(t, hasTicketTypeField, "ticketType should be absent after detach")
 }
 
 // TestAttachSeatingPlan_ShouldReturn409WhenAlreadyAttached verifies that a
