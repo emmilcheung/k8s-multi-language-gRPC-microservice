@@ -42,12 +42,12 @@ type createTicketRequest struct {
 	Quota      int    `json:"quota"`
 	MaxPerUser int    `json:"maxPerUser"`
 	Event      *struct {
-		Title       string     `json:"title"`
-		Description string     `json:"description,omitempty"`
-		StartsAt    time.Time  `json:"startsAt"`
-		EndsAt      *time.Time `json:"endsAt,omitempty"`
-		ImageURL    string     `json:"imageUrl,omitempty"`
-		VenueName   string     `json:"venueName,omitempty"`
+		Title        string     `json:"title"`
+		Description  string     `json:"description,omitempty"`
+		StartsAt     time.Time  `json:"startsAt"`
+		EndsAt       *time.Time `json:"endsAt,omitempty"`
+		ImageURL     string     `json:"imageUrl,omitempty"`
+		VenueName    string     `json:"venueName,omitempty"`
 		VenueAddress string     `json:"venueAddress,omitempty"`
 	} `json:"event,omitempty"`
 }
@@ -77,13 +77,13 @@ type ticketResponse struct {
 	CreatedAt     string `json:"createdAt"`
 	UpdatedAt     string `json:"updatedAt"`
 	Event         *struct {
-		Title       string `json:"title"`
-		Description string `json:"description,omitempty"`
-		StartsAt    string `json:"startsAt"`
-		EndsAt      *string `json:"endsAt,omitempty"`
-		ImageURL    string `json:"imageUrl,omitempty"`
-		VenueName   string `json:"venueName,omitempty"`
-		VenueAddress string `json:"venueAddress,omitempty"`
+		Title        string  `json:"title"`
+		Description  string  `json:"description,omitempty"`
+		StartsAt     string  `json:"startsAt"`
+		EndsAt       *string `json:"endsAt,omitempty"`
+		ImageURL     string  `json:"imageUrl,omitempty"`
+		VenueName    string  `json:"venueName,omitempty"`
+		VenueAddress string  `json:"venueAddress,omitempty"`
 	} `json:"event,omitempty"`
 }
 
@@ -112,13 +112,13 @@ func toResponse(t *repository.Ticket) ticketResponse {
 			endsAt = &s
 		}
 		resp.Event = &struct {
-			Title        string `json:"title"`
-			Description  string `json:"description,omitempty"`
-			StartsAt     string `json:"startsAt"`
+			Title        string  `json:"title"`
+			Description  string  `json:"description,omitempty"`
+			StartsAt     string  `json:"startsAt"`
 			EndsAt       *string `json:"endsAt,omitempty"`
-			ImageURL     string `json:"imageUrl,omitempty"`
-			VenueName    string `json:"venueName,omitempty"`
-			VenueAddress string `json:"venueAddress,omitempty"`
+			ImageURL     string  `json:"imageUrl,omitempty"`
+			VenueName    string  `json:"venueName,omitempty"`
+			VenueAddress string  `json:"venueAddress,omitempty"`
 		}{
 			Title:        t.Event.Title,
 			Description:  t.Event.Description,
@@ -370,6 +370,10 @@ func (h *TicketHandler) AttachSeatingPlan(c echo.Context) error {
 			return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Ticket not found", nil)
 		case errors.Is(err, service.ErrUnauthorized):
 			return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Not authorised to modify this ticket", nil)
+		case errors.Is(err, service.ErrVenueServiceUnavailable):
+			return errorResponse(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "Venue service is temporarily unavailable", nil)
+		case errors.Is(err, service.ErrVenueServiceTimeout):
+			return errorResponse(c, http.StatusGatewayTimeout, "DEPENDENCY_TIMEOUT", "Venue service did not respond in time", nil)
 		case errors.Is(err, repository.ErrSeatingPlanAlreadyAttached):
 			return errorResponse(c, http.StatusConflict, "CONFLICT", "Ticket already has a seating plan attached — detach it first", nil)
 		default:

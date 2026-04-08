@@ -11,9 +11,9 @@ import (
 
 // VenueSectionHandler handles template section CRUD under /api/venues/:venueId/sections.
 type VenueSectionHandler struct {
-	venueRepo   repository.VenueRepository
+	venueRepo     repository.VenueRepository
 	vsSectionRepo repository.VenueSectionRepository
-	log         *zap.Logger
+	log           *zap.Logger
 }
 
 // NewVenueSectionHandler creates a new VenueSectionHandler.

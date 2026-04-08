@@ -62,21 +62,110 @@ type TicketEvent struct {
 // Valid values: "GA", "SEATED_MANUAL", "SEATED_AUTO". Empty string on create;
 // populated when ticket is attached to a plan.
 type Ticket struct {
-	ID            string       `bson:"_id"`
-	Title         string       `bson:"title"`
-	Price         string       `bson:"price"` // decimal string; migrated from float64
-	UserID        string       `bson:"userId"`
-	OrderID       string       `bson:"orderId,omitempty"`       // deprecated: kept for backward compat during migration
-	SeatingPlanID string       `bson:"seatingPlanId,omitempty"` // CP-13: venue seating plan UUID; empty = GA ticket
-	TicketType    string       `bson:"ticket_type,omitempty"`   // WS3: "GA" | "SEATED_MANUAL" | "SEATED_AUTO"
-	Quota         int          `bson:"quota"`                   // total available inventory (GA tickets only)
-	Reserved      int          `bson:"reserved"`                // currently held by active reservations
-	Sold          int          `bson:"sold"`                    // permanently sold units
-	MaxPerUser    int          `bson:"maxPerUser"`              // per-user purchase cap
-	Version       int          `bson:"version"`
-	CreatedAt     time.Time    `bson:"createdAt"`
-	UpdatedAt     time.Time    `bson:"updatedAt"`
-	Event         *TicketEvent `bson:"event,omitempty"` // WS8: nullable; old tickets have nil
+	ID            string              `bson:"_id"`
+	Title         string              `bson:"title"`
+	Price         string              `bson:"price"` // decimal string; migrated from float64
+	UserID        string              `bson:"userId"`
+	OrderID       string              `bson:"orderId,omitempty"`       // deprecated: kept for backward compat during migration
+	SeatingPlanID string              `bson:"seatingPlanId,omitempty"` // CP-13: venue seating plan UUID; empty = GA ticket
+	TicketType    string              `bson:"ticket_type,omitempty"`   // WS3: "GA" | "SEATED_MANUAL" | "SEATED_AUTO"
+	Quota         int                 `bson:"quota"`                   // total available inventory (GA tickets only)
+	Reserved      int                 `bson:"reserved"`                // currently held by active reservations
+	Sold          int                 `bson:"sold"`                    // permanently sold units
+	MaxPerUser    int                 `bson:"maxPerUser"`              // per-user purchase cap
+	Version       int                 `bson:"version"`
+	CreatedAt     time.Time           `bson:"createdAt"`
+	UpdatedAt     time.Time           `bson:"updatedAt"`
+	Event         *TicketEvent        `bson:"event,omitempty"` // WS8: nullable; old tickets have nil
+	Outbox        []TicketOutboxEvent `bson:"outbox,omitempty" json:"-"`
+	PendingOutbox []TicketOutboxEvent `bson:"-" json:"-"`
+}
+
+// OutboxEventType identifies the durable ticket event queued for relay.
+type OutboxEventType string
+
+const (
+	OutboxEventTypeTicketCreated OutboxEventType = "tickets.ticket.created"
+	OutboxEventTypeTicketUpdated OutboxEventType = "tickets.ticket.updated"
+)
+
+// TicketOutboxPayload is the durable Kafka payload written with the ticket mutation.
+type TicketOutboxPayload struct {
+	ID            string              `bson:"id"`
+	Title         string              `bson:"title"`
+	Price         string              `bson:"price"`
+	UserID        string              `bson:"userId"`
+	SeatingPlanID string              `bson:"seatingPlanId,omitempty"`
+	TicketType    string              `bson:"ticketType,omitempty"`
+	Version       int                 `bson:"version"`
+	Event         *TicketOutboxDetail `bson:"event,omitempty"`
+}
+
+// TicketOutboxDetail stores optional event metadata in durable form.
+type TicketOutboxDetail struct {
+	Title        string `bson:"title,omitempty"`
+	Description  string `bson:"description,omitempty"`
+	StartsAt     string `bson:"startsAt"`
+	EndsAt       string `bson:"endsAt,omitempty"`
+	ImageURL     string `bson:"imageUrl,omitempty"`
+	VenueName    string `bson:"venueName,omitempty"`
+	VenueAddress string `bson:"venueAddress,omitempty"`
+}
+
+// TicketOutboxEvent is a durable relay record embedded in the ticket document.
+type TicketOutboxEvent struct {
+	ID            string              `bson:"id" json:"-"`
+	Type          OutboxEventType     `bson:"type" json:"-"`
+	Payload       TicketOutboxPayload `bson:"payload" json:"-"`
+	Attempts      int                 `bson:"attempts" json:"-"`
+	NextAttemptAt time.Time           `bson:"nextAttemptAt" json:"-"`
+	CreatedAt     time.Time           `bson:"createdAt" json:"-"`
+	ClaimToken    string              `bson:"claimToken,omitempty" json:"-"`
+	LeaseUntil    *time.Time          `bson:"leaseUntil,omitempty" json:"-"`
+	LastError     string              `bson:"lastError,omitempty" json:"-"`
+}
+
+// ClaimedOutboxEvent is a flattened relay work item claimed from a ticket document.
+type ClaimedOutboxEvent struct {
+	TicketID string
+	Event    TicketOutboxEvent
+}
+
+// NewTicketOutboxEvent creates a durable outbox entry ready for relay.
+func NewTicketOutboxEvent(eventType OutboxEventType, payload TicketOutboxPayload) TicketOutboxEvent {
+	now := time.Now().UTC()
+	return TicketOutboxEvent{
+		ID:            uuid.NewString(),
+		Type:          eventType,
+		Payload:       payload,
+		NextAttemptAt: now,
+		CreatedAt:     now,
+	}
+}
+
+func normalizePendingOutboxEvent(ticket *Ticket, event *TicketOutboxEvent) {
+	event.Payload.ID = ticket.ID
+	event.Payload.Title = ticket.Title
+	event.Payload.Price = ticket.Price
+	event.Payload.UserID = ticket.UserID
+	event.Payload.SeatingPlanID = ticket.SeatingPlanID
+	event.Payload.TicketType = ticket.TicketType
+	event.Payload.Version = ticket.Version
+	if ticket.Event != nil && event.Payload.Event == nil {
+		var endsAt string
+		if ticket.Event.EndsAt != nil {
+			endsAt = ticket.Event.EndsAt.Format(time.RFC3339)
+		}
+		event.Payload.Event = &TicketOutboxDetail{
+			Title:        ticket.Event.Title,
+			Description:  ticket.Event.Description,
+			StartsAt:     ticket.Event.StartsAt.Format(time.RFC3339),
+			EndsAt:       endsAt,
+			ImageURL:     ticket.Event.ImageURL,
+			VenueName:    ticket.Event.VenueName,
+			VenueAddress: ticket.Event.VenueAddress,
+		}
+	}
 }
 
 // ReservationStatus represents the lifecycle state of a TicketReservation.
@@ -193,15 +282,15 @@ type TicketRepository interface {
 
 	// --- Seating plan attachment (CP-13) ---
 
-	// AttachSeatingPlan sets seatingPlanId on a ticket. The caller must own the ticket
-	// (userID must match ticket.UserID). Returns ErrTicketNotFound if the ticket does
-	// not exist, ErrUnauthorized if the user doesn't own it, and
+	// AttachSeatingPlan atomically sets seatingPlanId and ticketType on a ticket in a
+	// single MongoDB update. The caller must own the ticket. Returns ErrTicketNotFound
+	// if the ticket does not exist, ErrOwnership if the user doesn't own it, and
 	// ErrSeatingPlanAlreadyAttached if a plan is already attached.
-	AttachSeatingPlan(ctx context.Context, ticketID, planID, userID string) error
+	AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string, outbox *TicketOutboxEvent) error
 
-	// DetachSeatingPlan clears seatingPlanId from a ticket. The caller must own the
-	// ticket. Idempotent: if no plan is attached this is a no-op success.
-	DetachSeatingPlan(ctx context.Context, ticketID, userID string) error
+	// DetachSeatingPlan clears both seatingPlanId and ticketType from a ticket. The
+	// caller must own the ticket. Idempotent: if no plan is attached this is a no-op.
+	DetachSeatingPlan(ctx context.Context, ticketID, userID string, outbox *TicketOutboxEvent) error
 }
 
 // MongoTicketRepository implements TicketRepository against MongoDB.
@@ -434,6 +523,12 @@ func (r *MongoTicketRepository) Create(ctx context.Context, t *Ticket) error {
 	if t.MaxPerUser == 0 {
 		t.MaxPerUser = 1
 	}
+	if len(t.PendingOutbox) > 0 {
+		for index := range t.PendingOutbox {
+			normalizePendingOutboxEvent(t, &t.PendingOutbox[index])
+		}
+		t.Outbox = append(t.Outbox, t.PendingOutbox...)
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -539,6 +634,11 @@ func (r *MongoTicketRepository) Update(ctx context.Context, t *Ticket) error {
 	previousVersion := t.Version
 	t.Version++
 	t.UpdatedAt = time.Now().UTC()
+	if len(t.PendingOutbox) > 0 {
+		for index := range t.PendingOutbox {
+			normalizePendingOutboxEvent(t, &t.PendingOutbox[index])
+		}
+	}
 
 	filter := bson.M{"_id": t.ID, "version": previousVersion}
 	update := bson.M{"$set": bson.M{
@@ -550,6 +650,9 @@ func (r *MongoTicketRepository) Update(ctx context.Context, t *Ticket) error {
 		"version":    t.Version,
 		"updatedAt":  t.UpdatedAt,
 	}}
+	if len(t.PendingOutbox) > 0 {
+		update["$push"] = bson.M{"outbox": bson.M{"$each": t.PendingOutbox}}
+	}
 
 	result, err := r.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
@@ -988,13 +1091,15 @@ func (r *MongoTicketRepository) SweepExpiredReservations(ctx context.Context) (i
 
 // ─── Seating plan attachment methods (CP-13) ──────────────────────────────────
 
-// AttachSeatingPlan sets seatingPlanId on a ticket. The caller must own the ticket.
-// Returns ErrTicketNotFound if the ticket does not exist, ErrUnauthorized if the
-// user doesn't own it, and ErrSeatingPlanAlreadyAttached if a plan is already set.
+// AttachSeatingPlan atomically sets seatingPlanId and ticketType on a ticket in a
+// single MongoDB update. The caller must own the ticket. Returns ErrTicketNotFound
+// if the ticket does not exist, ErrOwnership if the user doesn't own it, and
+// ErrSeatingPlanAlreadyAttached if a plan is already set.
 //
 // Uses a conditional filter ($and) so the update is atomic: the seatingPlanId field
-// must be absent or empty, ensuring two concurrent callers cannot both attach.
-func (r *MongoTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID string) error {
+// must be absent or empty, ensuring two concurrent callers cannot both attach. Both
+// seatingPlanId and ticketType are set in the same $set to avoid a separate Update call.
+func (r *MongoTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string, outbox *TicketOutboxEvent) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -1012,9 +1117,13 @@ func (r *MongoTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID,
 	update := bson.M{
 		"$set": bson.M{
 			"seatingPlanId": planID,
+			"ticket_type":   ticketType,
 			"updatedAt":     now,
 		},
 		"$inc": bson.M{"version": 1},
+	}
+	if outbox != nil {
+		update["$push"] = bson.M{"outbox": outbox}
 	}
 
 	result, err := r.collection.UpdateOne(ctx, filter, update)
@@ -1040,9 +1149,9 @@ func (r *MongoTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID,
 	return nil
 }
 
-// DetachSeatingPlan clears seatingPlanId from a ticket. The caller must own the
-// ticket. Idempotent: if no plan is attached the update is a no-op success.
-func (r *MongoTicketRepository) DetachSeatingPlan(ctx context.Context, ticketID, userID string) error {
+// DetachSeatingPlan clears both seatingPlanId and ticketType from a ticket atomically.
+// The caller must own the ticket. Idempotent: if no plan is attached the update is a no-op.
+func (r *MongoTicketRepository) DetachSeatingPlan(ctx context.Context, ticketID, userID string, outbox *TicketOutboxEvent) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -1050,9 +1159,15 @@ func (r *MongoTicketRepository) DetachSeatingPlan(ctx context.Context, ticketID,
 
 	filter := bson.M{"_id": ticketID, "userId": userID}
 	update := bson.M{
-		"$unset": bson.M{"seatingPlanId": ""},
+		// Clear both seatingPlanId and ticket_type in the same operation so the
+		// document is never left in a state where ticketType implies seated but
+		// no seatingPlanId exists.
+		"$unset": bson.M{"seatingPlanId": "", "ticket_type": ""},
 		"$set":   bson.M{"updatedAt": now},
 		"$inc":   bson.M{"version": 1},
+	}
+	if outbox != nil {
+		update["$push"] = bson.M{"outbox": outbox}
 	}
 
 	result, err := r.collection.UpdateOne(ctx, filter, update)
@@ -1070,6 +1185,126 @@ func (r *MongoTicketRepository) DetachSeatingPlan(ctx context.Context, ticketID,
 			return fmt.Errorf("detach seating plan: lookup ticket: %w", findErr)
 		}
 		return ErrOwnership
+	}
+	return nil
+}
+
+// ClaimPendingOutboxEvents claims up to limit pending outbox events for relay.
+// It uses a lease token on the embedded outbox item so multiple workers do not
+// process the same event concurrently.
+func (r *MongoTicketRepository) ClaimPendingOutboxEvents(ctx context.Context, leaseDuration time.Duration, limit int) ([]ClaimedOutboxEvent, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	now := time.Now().UTC()
+	claimed := make([]ClaimedOutboxEvent, 0, limit)
+
+	for len(claimed) < limit {
+		claimToken := uuid.NewString()
+		leaseUntil := now.Add(leaseDuration)
+
+		filter := bson.M{
+			"outbox": bson.M{"$elemMatch": bson.M{
+				"nextAttemptAt": bson.M{"$lte": now},
+				"$or": bson.A{
+					bson.M{"claimToken": bson.M{"$exists": false}},
+					bson.M{"leaseUntil": bson.M{"$lt": now}},
+				},
+			}},
+		}
+		update := bson.M{"$set": bson.M{
+			"outbox.$.claimToken": claimToken,
+			"outbox.$.leaseUntil": leaseUntil,
+		}}
+
+		var ticket Ticket
+		err := r.collection.FindOneAndUpdate(
+			ctx,
+			filter,
+			update,
+			options.FindOneAndUpdate().SetReturnDocument(options.After),
+		).Decode(&ticket)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("claim outbox event: %w", err)
+		}
+
+		matched := false
+		for _, event := range ticket.Outbox {
+			if event.ClaimToken == claimToken {
+				claimed = append(claimed, ClaimedOutboxEvent{TicketID: ticket.ID, Event: event})
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return nil, fmt.Errorf("claim outbox event: claim token %s not found", claimToken)
+		}
+	}
+
+	return claimed, nil
+}
+
+// AcknowledgeOutboxEvent removes a delivered outbox event from the ticket document.
+func (r *MongoTicketRepository) AcknowledgeOutboxEvent(ctx context.Context, ticketID, eventID, claimToken string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	filter := bson.M{
+		"_id": ticketID,
+		"outbox": bson.M{"$elemMatch": bson.M{
+			"id":         eventID,
+			"claimToken": claimToken,
+		}},
+	}
+	update := bson.M{"$pull": bson.M{"outbox": bson.M{"id": eventID}}}
+
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("ack outbox event: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("ack outbox event: event %s not claimed", eventID)
+	}
+	return nil
+}
+
+// RequeueOutboxEvent clears a claim and schedules the event for a later retry.
+func (r *MongoTicketRepository) RequeueOutboxEvent(ctx context.Context, ticketID, eventID, claimToken, lastErr string, attempts int, nextAttemptAt time.Time) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	filter := bson.M{
+		"_id": ticketID,
+		"outbox": bson.M{"$elemMatch": bson.M{
+			"id":         eventID,
+			"claimToken": claimToken,
+		}},
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"outbox.$.attempts":      attempts,
+			"outbox.$.lastError":     lastErr,
+			"outbox.$.nextAttemptAt": nextAttemptAt,
+		},
+		"$unset": bson.M{
+			"outbox.$.claimToken": "",
+			"outbox.$.leaseUntil": "",
+		},
+	}
+
+	result, err := r.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("requeue outbox event: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("requeue outbox event: event %s not claimed", eventID)
 	}
 	return nil
 }

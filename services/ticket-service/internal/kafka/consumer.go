@@ -160,6 +160,7 @@ func (oc *OrderConsumer) Start(ctx context.Context) {
 				zap.String("topic", topic),
 				zap.Error(err),
 			)
+			continue
 		}
 
 		// Commit offset only after successful processing or after DLQ routing.

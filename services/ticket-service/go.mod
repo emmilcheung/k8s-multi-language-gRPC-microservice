@@ -11,6 +11,7 @@ require (
 	github.com/labstack/echo/v4 v4.15.1
 	github.com/org/ticketing/libs/grpc-stubs/go v0.0.0
 	github.com/redis/go-redis/v9 v9.17.0
+	github.com/sony/gobreaker/v2 v2.3.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/mongodb v0.41.0
@@ -100,7 +101,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/net v0.51.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sync v0.19.0
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/time v0.14.0 // indirect

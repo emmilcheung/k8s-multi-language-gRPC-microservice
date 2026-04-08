@@ -154,7 +154,7 @@ func (n *nopPlanRepo) AttachTicket(ctx context.Context, planID, ticketID string,
 func (n *nopPlanRepo) Activate(ctx context.Context, planID string, expectedVersion int) error {
 	return nil
 }
-func (n *nopPlanRepo) Deactivate(_ context.Context, _, _ string) error                       { return nil }
+func (n *nopPlanRepo) Deactivate(_ context.Context, _, _ string) error             { return nil }
 func (n *nopPlanRepo) Update(ctx context.Context, p *repository.SeatingPlan) error { return nil }
 func (n *nopPlanRepo) ListActivePlans(_ context.Context) ([]*repository.SeatingPlan, error) {
 	return nil, nil

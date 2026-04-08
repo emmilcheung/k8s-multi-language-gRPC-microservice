@@ -90,10 +90,10 @@ type SeatingPlan struct {
 	MaxSeatsPerOrder int        `db:"max_seats_per_order" json:"maxSeatsPerOrder"`
 	// LayoutJSON stores the 2-D canvas layout for the seating plan editor.
 	// It is a free-form JSON blob (section node positions + row offsets).
-	LayoutJSON   json.RawMessage `db:"layout_json"      json:"layoutJson"`
-	AssignmentMode string         `db:"assignment_mode"  json:"assignmentMode"` // "manual" or "auto"
-	PricingMode    string         `db:"pricing_mode"     json:"pricingMode"`    // "single", "section", or "seat"
-	Sections     []*Section      `json:"sections,omitempty"`
+	LayoutJSON     json.RawMessage `db:"layout_json"      json:"layoutJson"`
+	AssignmentMode string          `db:"assignment_mode"  json:"assignmentMode"` // "manual" or "auto"
+	PricingMode    string          `db:"pricing_mode"     json:"pricingMode"`    // "single", "section", or "seat"
+	Sections       []*Section      `json:"sections,omitempty"`
 	// TotalCapacity is the computed sum of all section capacities (rowCount * columnCount).
 	// Populated when sections are loaded.
 	TotalCapacity int       `json:"totalCapacity"` // computed, not persisted

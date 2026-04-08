@@ -30,17 +30,17 @@ func (h *VenueHandler) RegisterRoutes(g *echo.Group) {
 
 // createVenueRequest is the request body for creating a venue.
 type createVenueRequest struct {
-	Name     string `json:"name"`
-	Capacity int    `json:"capacity"`
-	Timezone string `json:"timezone"`
+	Name     string  `json:"name"`
+	Capacity int     `json:"capacity"`
+	Timezone string  `json:"timezone"`
 	Address  *string `json:"address"`
 }
 
 // updateVenueRequest is the request body for updating a venue.
 type updateVenueRequest struct {
-	Name     string `json:"name"`
-	Capacity int    `json:"capacity"`
-	Timezone string `json:"timezone"`
+	Name     string  `json:"name"`
+	Capacity int     `json:"capacity"`
+	Timezone string  `json:"timezone"`
 	Address  *string `json:"address"`
 }
 

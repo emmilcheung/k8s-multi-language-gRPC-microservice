@@ -64,12 +64,12 @@ func (r *countingRepo) FinalizeReservation(ctx context.Context, reservationID, o
 	return r.repo.FinalizeReservation(ctx, reservationID, orderID)
 }
 
-func (r *countingRepo) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID string) error {
-	return r.repo.AttachSeatingPlan(ctx, ticketID, planID, userID)
+func (r *countingRepo) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string, outbox *repository.TicketOutboxEvent) error {
+	return r.repo.AttachSeatingPlan(ctx, ticketID, planID, userID, ticketType, outbox)
 }
 
-func (r *countingRepo) DetachSeatingPlan(ctx context.Context, ticketID, userID string) error {
-	return r.repo.DetachSeatingPlan(ctx, ticketID, userID)
+func (r *countingRepo) DetachSeatingPlan(ctx context.Context, ticketID, userID string, outbox *repository.TicketOutboxEvent) error {
+	return r.repo.DetachSeatingPlan(ctx, ticketID, userID, outbox)
 }
 
 func (r *countingRepo) Ping(ctx context.Context) error {

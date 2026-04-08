@@ -16,20 +16,23 @@ import (
 	"github.com/acme/ticket-service/internal/health"
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/middleware"
+	"github.com/acme/ticket-service/internal/outbox"
 	"github.com/acme/ticket-service/internal/reconciler"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
 	"github.com/acme/ticket-service/internal/tracing"
 	"github.com/acme/ticket-service/pkg/logger"
-	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 func main() {
@@ -102,6 +105,7 @@ func main() {
 	}
 	defer producer.Close()
 	kafkaChecker = health.NewKafkaChecker(cfg.KafkaBrokers)
+	outboxRelay := outbox.NewRelay(mongoRepo, producer, log)
 
 	// Kafka consumer — listens to order events and keeps ticket reservation state in sync.
 	// The producer is passed so the consumer can route failed messages to the DLQ.
@@ -113,13 +117,26 @@ func main() {
 	defer consumerCancel()
 	go orderConsumer.Start(consumerCtx)
 
+	relayCtx, relayCancel := context.WithCancel(context.Background())
+	defer relayCancel()
+	go outboxRelay.Start(relayCtx)
+
 	// WS3: Venue-service gRPC client for fetching seating plan assignment mode
-	venueConn, err := grpc.NewClient(cfg.VenueServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	venueConn, err := grpc.NewClient(
+		cfg.VenueServiceAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10*1024*1024)),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                30 * time.Second,
+			Timeout:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	)
 	if err != nil {
 		log.Fatal("failed to dial venue-service", zap.Error(err), zap.String("addr", cfg.VenueServiceAddr))
 	}
 	defer venueConn.Close() //nolint:errcheck
-	venueClient := venuev1.NewVenueServiceClient(venueConn)
+	venueClient := service.NewResilientVenueClient(venuev1.NewVenueServiceClient(venueConn), log)
 	log.Info("connected to venue-service", zap.String("addr", cfg.VenueServiceAddr))
 
 	// Business logic service
@@ -130,11 +147,6 @@ func main() {
 	defer grpcCancel()
 	grpcAddr := fmt.Sprintf(":%d", cfg.GrpcPort)
 	grpcSrv := grpcserver.NewTicketGrpcServer(ticketRepo, log)
-	go func() {
-		if err := grpcserver.Start(grpcCtx, grpcAddr, grpcSrv, log); err != nil {
-			log.Fatal("gRPC server error", zap.Error(err))
-		}
-	}()
 
 	// Echo HTTP server
 	e := echo.New()
@@ -167,24 +179,42 @@ func main() {
 	v1.PUT("/:id/seating-plan", ticketHandler.AttachSeatingPlan)
 	v1.DELETE("/:id/seating-plan", ticketHandler.DetachSeatingPlan)
 
-	// Graceful shutdown
+	// R-06: Use errgroup to propagate server errors back to main instead of
+	// calling log.Fatal inside goroutines (which calls os.Exit, skipping all deferred cleanup).
+	eg, egCtx := errgroup.WithContext(context.Background())
+
+	eg.Go(func() error {
+		return grpcserver.Start(grpcCtx, grpcAddr, grpcSrv, log)
+	})
+
 	addr := fmt.Sprintf(":%d", cfg.Port)
-	go func() {
+	eg.Go(func() error {
 		log.Info("ticket-service listening", zap.String("addr", addr))
 		if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
-			log.Fatal("server error", zap.Error(err))
+			return fmt.Errorf("HTTP server: %w", err)
 		}
-	}()
+		return nil
+	})
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
 
-	log.Info("shutting down ticket-service")
+	select {
+	case <-quit:
+		log.Info("shutting down ticket-service (signal received)")
+	case <-egCtx.Done():
+		log.Error("server error — initiating shutdown")
+	}
+
 	grpcCancel() // signal gRPC server to stop
+	relayCancel()
+	consumerCancel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := e.Shutdown(ctx); err != nil {
 		log.Error("shutdown error", zap.Error(err))
+	}
+	if err := eg.Wait(); err != nil {
+		log.Error("server exited with error", zap.Error(err))
 	}
 }
