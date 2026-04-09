@@ -16,12 +16,10 @@ import { AuthService } from './auth.service';
 import { SignupDto, SigninDto } from './auth.dto';
 import { RefreshTokenService } from './refresh-token.service';
 
-// Cookie names
-const ACCESS_TOKEN_COOKIE = 'token';
-const REFRESH_TOKEN_COOKIE = 'refreshToken';
-
-// Refresh token TTL in ms (7 days — must match Redis TTL in RefreshTokenService)
-const REFRESH_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_ACCESS_TOKEN_COOKIE = 'token';
+const DEFAULT_REFRESH_TOKEN_COOKIE = 'refreshToken';
+const DEFAULT_REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
+const DEFAULT_REFRESH_COOKIE_PATH = '/';
 
 @Controller()
 export class AuthController {
@@ -70,7 +68,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const oldRefreshToken = req.cookies[REFRESH_TOKEN_COOKIE] as
+    const oldRefreshToken = req.cookies[this.refreshTokenCookieName()] as
       | string
       | undefined;
     if (oldRefreshToken) {
@@ -81,13 +79,14 @@ export class AuthController {
     // Blacklist the access token so it cannot be reused before it naturally
     // expires. This is a defence-in-depth measure — the primary defence is the
     // short (15 min) token lifetime (S-04).
-    const accessToken = req.cookies[ACCESS_TOKEN_COOKIE] as string | undefined;
+    const accessToken = req.cookies[this.accessTokenCookieName()] as
+      | string
+      | undefined;
     if (accessToken) {
       await this.authService.blacklistAccessToken(accessToken);
     }
 
-    res.clearCookie(ACCESS_TOKEN_COOKIE);
-    res.clearCookie(REFRESH_TOKEN_COOKIE);
+    this.clearAuthCookies(res);
   }
 
   // POST /api/auth/refresh — rotate refresh token and issue new access token
@@ -97,7 +96,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const oldRefreshToken = req.cookies[REFRESH_TOKEN_COOKIE] as
+    const oldRefreshToken = req.cookies[this.refreshTokenCookieName()] as
       | string
       | undefined;
     if (!oldRefreshToken) {
@@ -133,7 +132,9 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async currentUser(@Req() req: Request) {
     const kongUserId = req.headers['x-user-id'] as string | undefined;
-    const token = req.cookies['token'] as string | undefined;
+    const token = req.cookies[this.accessTokenCookieName()] as
+      | string
+      | undefined;
 
     // Fast path: no token and no Kong-injected header → not authenticated.
     if (!token && !kongUserId) {
@@ -175,28 +176,124 @@ export class AuthController {
     return this.config.get('NODE_ENV') === 'production';
   }
 
+  private accessTokenCookieName(): string {
+    return this.config.get<string>(
+      'JWT_COOKIE_NAME',
+      DEFAULT_ACCESS_TOKEN_COOKIE,
+    );
+  }
+
+  private refreshTokenCookieName(): string {
+    return this.config.get<string>(
+      'REFRESH_COOKIE_NAME',
+      DEFAULT_REFRESH_TOKEN_COOKIE,
+    );
+  }
+
+  private refreshTokenTtlSeconds(): number {
+    const raw = this.config.get<number | string>(
+      'REFRESH_TOKEN_TTL_SECONDS',
+      DEFAULT_REFRESH_TOKEN_TTL_SECONDS,
+    );
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0
+      ? Math.floor(parsed)
+      : DEFAULT_REFRESH_TOKEN_TTL_SECONDS;
+  }
+
+  private refreshCookiePath(): string {
+    return this.config.get<string>(
+      'REFRESH_COOKIE_PATH',
+      DEFAULT_REFRESH_COOKIE_PATH,
+    );
+  }
+
+  private parseSameSite(
+    raw: string | undefined,
+    fallback: 'strict' | 'lax' | 'none',
+  ): 'strict' | 'lax' | 'none' {
+    const value = raw?.toLowerCase();
+    if (value === 'strict' || value === 'lax' || value === 'none') {
+      return value;
+    }
+    return fallback;
+  }
+
+  private accessTokenSameSite(): 'strict' | 'lax' | 'none' {
+    return this.parseSameSite(
+      this.config.get<string>('ACCESS_TOKEN_COOKIE_SAME_SITE'),
+      'strict',
+    );
+  }
+
+  private refreshTokenSameSite(): 'strict' | 'lax' | 'none' {
+    return this.parseSameSite(
+      this.config.get<string>('REFRESH_TOKEN_COOKIE_SAME_SITE'),
+      'strict',
+    );
+  }
+
+  private cookieDomain(): string | undefined {
+    const domain = this.config.get<string>('COOKIE_DOMAIN');
+    return domain?.trim() ? domain : undefined;
+  }
+
+  private clearAuthCookies(res: Response): void {
+    const accessCookieName = this.accessTokenCookieName();
+    const refreshCookieName = this.refreshTokenCookieName();
+    const domain = this.cookieDomain();
+    const refreshPath = this.refreshCookiePath();
+
+    res.clearCookie(accessCookieName, {
+      path: '/',
+      ...(domain ? { domain } : {}),
+    });
+    res.clearCookie(refreshCookieName, {
+      path: refreshPath,
+      ...(domain ? { domain } : {}),
+    });
+
+    // Compatibility clean-up for older deployments that scoped refresh cookies
+    // to a different path.
+    if (refreshPath !== '/') {
+      res.clearCookie(refreshCookieName, {
+        path: '/',
+        ...(domain ? { domain } : {}),
+      });
+    }
+    if (refreshPath !== '/api/auth/refresh') {
+      res.clearCookie(refreshCookieName, {
+        path: '/api/auth/refresh',
+        ...(domain ? { domain } : {}),
+      });
+    }
+  }
+
   private setAccessTokenCookie(res: Response, token: string): void {
     // Derive maxAge from JWT_EXPIRY config so cookie lifetime stays in sync
     // with the token's actual validity window (S-06).
     const expiry = this.config.get<string>('JWT_EXPIRY', '15m');
     const maxAgeMs = ms(expiry as Parameters<typeof ms>[0]) ?? 15 * 60 * 1000;
-    res.cookie(ACCESS_TOKEN_COOKIE, token, {
+    const domain = this.cookieDomain();
+    res.cookie(this.accessTokenCookieName(), token, {
       httpOnly: true,
       secure: this.isProduction(),
-      sameSite: 'strict',
+      sameSite: this.accessTokenSameSite(),
       maxAge: maxAgeMs,
+      path: '/',
+      ...(domain ? { domain } : {}),
     });
   }
 
   private setRefreshTokenCookie(res: Response, token: string): void {
-    res.cookie(REFRESH_TOKEN_COOKIE, token, {
+    const domain = this.cookieDomain();
+    res.cookie(this.refreshTokenCookieName(), token, {
       httpOnly: true,
       secure: this.isProduction(),
-      sameSite: 'strict',
-      maxAge: REFRESH_COOKIE_MAX_AGE_MS,
-      // Scope refresh cookie to the refresh endpoint only — prevents it being
-      // sent on every API request and limits exposure surface.
-      path: '/api/auth/refresh',
+      sameSite: this.refreshTokenSameSite(),
+      maxAge: this.refreshTokenTtlSeconds() * 1000,
+      path: this.refreshCookiePath(),
+      ...(domain ? { domain } : {}),
     });
   }
 }

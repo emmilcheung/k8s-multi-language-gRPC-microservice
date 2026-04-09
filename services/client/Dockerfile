@@ -17,7 +17,8 @@ RUN pnpm build
 
 # ─── Stage 3: runtime ──────────────────────────────────────────────────────────
 FROM node:24-alpine@sha256:01743339035a5c3c11a373cd7c83aeab6ed1457b55da6a69e014a95ac4e4700b AS runtime
-RUN addgroup -S app && adduser -S app -G app
+ARG NPM_VERSION=11.12.1
+RUN apk upgrade --no-cache && npm install -g "npm@${NPM_VERSION}" && addgroup -S app && adduser -S app -G app
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

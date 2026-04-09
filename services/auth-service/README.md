@@ -22,6 +22,7 @@ Handles user identity for the platform. Issues short-lived RS256 JWTs stored in 
 | `POST` | `/api/users/signup` | Create account; sets `token` cookie |
 | `POST` | `/api/users/signin` | Authenticate; sets `token` cookie |
 | `POST` | `/api/users/signout` | Clears `token` cookie |
+| `POST` | `/api/auth/refresh` | Rotates refresh token and reissues access token |
 | `GET` | `/api/users/currentuser` | Returns user from `X-User-Id` header |
 | `GET` | `/.well-known/jwks.json` | Public key for Kong JWT plugin |
 | `GET` | `/healthz/live` | Liveness probe |
@@ -37,6 +38,12 @@ See `.env.example` for the full list with descriptions.
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `RSA_PRIVATE_KEY` | Yes | RSA 4096 private key (PEM or base64-encoded PEM) |
 | `JWT_EXPIRY` | No | Token TTL (default: `15m`) |
+| `JWT_COOKIE_NAME` | No | Access-token cookie name (default: `token`) |
+| `REFRESH_COOKIE_NAME` | No | Refresh-token cookie name (default: `refreshToken`) |
+| `REFRESH_TOKEN_TTL_SECONDS` | No | Refresh-token TTL and cookie max-age (default: `604800`) |
+| `REFRESH_COOKIE_PATH` | No | Refresh cookie path scope (default: `/`) |
+| `ACCESS_TOKEN_COOKIE_SAME_SITE` | No | Access-token SameSite policy (`strict/lax/none`) |
+| `REFRESH_TOKEN_COOKIE_SAME_SITE` | No | Refresh-token SameSite policy (`strict/lax/none`) |
 | `PORT` | No | HTTP port (default: `3000`) |
 | `NODE_ENV` | No | `development` / `production` / `test` |
 

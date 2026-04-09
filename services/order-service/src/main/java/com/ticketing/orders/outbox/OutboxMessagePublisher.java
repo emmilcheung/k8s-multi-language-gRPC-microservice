@@ -29,7 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class OutboxMessagePublisher {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxMessagePublisher.class);
-    private static final Tracer tracer = GlobalOpenTelemetry.getTracer("order-service");
+    private static final Tracer TRACER = GlobalOpenTelemetry.getTracer("order-service");
 
     private final OutboxRepository outboxRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
@@ -56,7 +56,7 @@ public class OutboxMessagePublisher {
     @Transactional
     public void publishOne(OutboxMessage msg) {
         Context parentContext = KafkaTraceContext.extractContext(msg.getTraceHeaders());
-        Span span = tracer.spanBuilder("kafka publish " + msg.getTopic())
+        Span span = TRACER.spanBuilder("kafka publish " + msg.getTopic())
                 .setParent(parentContext)
                 .setSpanKind(SpanKind.PRODUCER)
                 .startSpan();

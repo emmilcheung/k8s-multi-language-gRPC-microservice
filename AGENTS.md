@@ -46,6 +46,7 @@ This document is a lightweight **table of contents** for a comprehensive microse
 | 14 | Git & Collaboration | [`docs/14-git-collaboration.md`](docs/14-git-collaboration.md) | Trunk-based development, Conventional Commits, PR rules, what never goes in git |
 | 15 | Agent Hard Stops | [`docs/15-agent-hard-stops.md`](docs/15-agent-hard-stops.md) | 10 operations requiring explicit user confirmation (kubectl delete, force push, migrations, etc.) |
 | 16 | Session Progress Log | [`docs/16-session-progress-log.md`](docs/16-session-progress-log.md) | Chronological record of implementation sessions, PRs, and state transitions |
+| 17 | Agent Workflow | [`docs/17-agent-workflow.md`](docs/17-agent-workflow.md) | Agent workflow guidance and post-harness validation guard |
 
 ---
 
@@ -143,17 +144,7 @@ For the latest session notes, deployment status, and known issues, see [`docs/16
 
 ## Agent Workflow Notes
 
-See [§16 Implementation Conventions](docs/16-session-progress-log.md#implementation-conventions-agent-workflow-notes) in the original AGENTS.md for active implementation guidance, including:
-- Language & framework choices
-- Security choices (password hashing, JWT, JWKS)
-- Local development approach (Docker Compose)
-- NestJS conventions
-- Go conventions
-- Dependency installation logging
-- Testing conventions
-- Environment variable naming
-- Local Kubernetes dev environment setup
-- Merge workflow & CI discipline
+See [`docs/17-agent-workflow.md`](docs/17-agent-workflow.md) for agent workflow guidance, implementation conventions, and the post-harness validation guard.
 
 ---
 

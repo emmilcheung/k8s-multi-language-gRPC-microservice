@@ -20,3 +20,4 @@ The general-purpose orchestration strategy lives in `.claude/skills/orchestrate/
 - [Orchestration reference](SUBAGENT_ORCHESTRATION.md) — how this project coordinates parallel agents
 - [Ticketing workstreams](ticketing/workstreams.md) — problem, solution, files, and verification for each feature
 - [Ticketing status](ticketing/status.md) — what is done, in-progress, and pending
+- [Agent workflow](17-agent-workflow.md) — agent workflow guidance and post-harness validation loop

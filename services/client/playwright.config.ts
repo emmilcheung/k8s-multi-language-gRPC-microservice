@@ -20,6 +20,16 @@ export default defineConfig({
       NEXT_TELEMETRY_DISABLED: "1",
       NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000",
       INTERNAL_API_URL: process.env.INTERNAL_API_URL ?? "http://localhost:8000",
+      JWT_COOKIE_NAME: process.env.JWT_COOKIE_NAME ?? "token",
+      REFRESH_COOKIE_NAME: process.env.REFRESH_COOKIE_NAME ?? "refreshToken",
+      ACCESS_TOKEN_COOKIE_SAME_SITE:
+        process.env.ACCESS_TOKEN_COOKIE_SAME_SITE ?? "strict",
+      REFRESH_TOKEN_COOKIE_SAME_SITE:
+        process.env.REFRESH_TOKEN_COOKIE_SAME_SITE ?? "strict",
+      ACCESS_TOKEN_COOKIE_PATH: process.env.ACCESS_TOKEN_COOKIE_PATH ?? "/",
+      REFRESH_COOKIE_PATH: process.env.REFRESH_COOKIE_PATH ?? "/",
+      SESSION_REFRESH_SKEW_SECONDS:
+        process.env.SESSION_REFRESH_SKEW_SECONDS ?? "30",
     },
   },
   projects: [

@@ -24,8 +24,10 @@ RUN pnpm prune --prod --silent
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM node:24-alpine@sha256:01743339035a5c3c11a373cd7c83aeab6ed1457b55da6a69e014a95ac4e4700b AS runtime
 
-# Create non-root user
-RUN addgroup -S app && adduser -S app -G app
+ARG NPM_VERSION=11.12.1
+
+# Refresh base packages and bundled npm before dropping privileges.
+RUN apk upgrade --no-cache && npm install -g "npm@${NPM_VERSION}" && addgroup -S app && adduser -S app -G app
 
 WORKDIR /app
 

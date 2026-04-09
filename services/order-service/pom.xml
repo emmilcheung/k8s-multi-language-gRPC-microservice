@@ -7,7 +7,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.4.3</version>
+    <version>3.4.7</version>
     <relativePath/>
   </parent>
 
@@ -19,10 +19,16 @@
 
   <properties>
     <java.version>21</java.version>
-    <grpc.version>1.68.1</grpc.version>
-    <protobuf.version>4.29.1</protobuf.version>
-    <testcontainers.version>1.20.4</testcontainers.version>
+    <grpc.version>1.80.0</grpc.version>
+    <protobuf.version>4.34.1</protobuf.version>
+    <testcontainers.version>1.21.4</testcontainers.version>
+    <jackson-bom.version>2.21.2</jackson-bom.version>
+    <kafka.version>3.9.1</kafka.version>
+    <logback.version>1.5.32</logback.version>
     <logstash-logback.version>8.0</logstash-logback.version>
+    <postgresql.version>42.7.7</postgresql.version>
+    <spring-framework.version>6.2.17</spring-framework.version>
+    <tomcat.version>10.1.54</tomcat.version>
   </properties>
 
   <dependencies>

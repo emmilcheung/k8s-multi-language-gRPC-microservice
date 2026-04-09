@@ -16,9 +16,9 @@ COPY services/order-service/pom.xml .
 RUN mvn dependency:go-offline -q
 
 # Download OpenTelemetry Java agent — zero-code auto-instrumentation (O-01).
-# Pinned to v2.13.3. curl -fL follows GitHub's CDN redirect and fails loudly
+# Pinned to v2.26.1. curl -fL follows GitHub's CDN redirect and fails loudly
 # on non-2xx responses, unlike Docker ADD which silently writes empty files.
-ARG OTEL_AGENT_VERSION=2.13.3
+ARG OTEL_AGENT_VERSION=2.26.1
 RUN curl -fL -o /build/otel-agent.jar \
     "https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v${OTEL_AGENT_VERSION}/opentelemetry-javaagent.jar"
 
@@ -30,7 +30,7 @@ RUN mvn package -DskipTests -q
 FROM eclipse-temurin:21-jre-alpine@sha256:6ad8ed080d9be96b61438ec3ce99388e294af216ed57356000c06070e85c5d5d AS runtime
 
 # Non-root user (AGENTS.md §10.1)
-RUN addgroup -S app && adduser -S app -G app
+RUN apk upgrade --no-cache && addgroup -S app && adduser -S app -G app
 
 WORKDIR /app
 

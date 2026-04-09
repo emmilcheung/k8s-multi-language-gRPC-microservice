@@ -1,9 +1,10 @@
 import { Injectable, Inject, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import type Redis from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.module';
 
-const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const DEFAULT_REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 /**
  * Manages opaque refresh tokens stored in Redis.
@@ -17,7 +18,21 @@ const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
  */
 @Injectable()
 export class RefreshTokenService {
-  constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
+  constructor(
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly config: ConfigService,
+  ) {}
+
+  private refreshTtlSeconds(): number {
+    const raw = this.config.get<number | string>(
+      'REFRESH_TOKEN_TTL_SECONDS',
+      DEFAULT_REFRESH_TTL_SECONDS,
+    );
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0
+      ? Math.floor(parsed)
+      : DEFAULT_REFRESH_TTL_SECONDS;
+  }
 
   /** Issue a new refresh token for the given userId; returns the opaque token ID. */
   async issue(userId: string): Promise<string> {
@@ -26,7 +41,7 @@ export class RefreshTokenService {
       `auth-service:refresh:${tokenId}`,
       userId,
       'EX',
-      REFRESH_TTL_SECONDS,
+      this.refreshTtlSeconds(),
     );
     return tokenId;
   }

@@ -35,6 +35,22 @@ const envSchema = z.object({
   DATABASE_URL: z.string(),
   RSA_PRIVATE_KEY: z.string(),
   JWT_EXPIRY: z.string().default('15m'),
+  JWT_COOKIE_NAME: z.string().default('token'),
+  REFRESH_COOKIE_NAME: z.string().default('refreshToken'),
+  REFRESH_TOKEN_TTL_SECONDS: z
+    .preprocess(
+      (value) => (typeof value === 'string' ? Number(value.trim()) : value),
+      z.number().int().positive(),
+    )
+    .default(7 * 24 * 60 * 60),
+  REFRESH_COOKIE_PATH: z.string().default('/'),
+  ACCESS_TOKEN_COOKIE_SAME_SITE: z
+    .enum(['strict', 'lax', 'none'])
+    .default('strict'),
+  REFRESH_TOKEN_COOKIE_SAME_SITE: z
+    .enum(['strict', 'lax', 'none'])
+    .default('strict'),
+  COOKIE_DOMAIN: z.string().optional(),
   REDIS_URL: z.string(),
 });
 
