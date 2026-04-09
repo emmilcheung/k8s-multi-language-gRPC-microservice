@@ -6,6 +6,11 @@
   "private": true,
   "license": "UNLICENSED",
   "packageManager": "pnpm@10.32.1",
+  "pnpm": {
+    "overrides": {
+      "yaml": "2.8.3"
+    }
+  },
   "engines": {
     "node": ">=24.0.0",
     "pnpm": ">=10.0.0"
@@ -26,10 +31,10 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
-    "@nestjs/common": "^11.0.1",
-    "@nestjs/config": "^4.0.3",
-    "@nestjs/core": "^11.0.1",
-    "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/common": "^11.1.18",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "^11.1.18",
+    "@nestjs/platform-express": "^11.1.18",
     "@nestjs/schedule": "^6.1.1",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/auto-instrumentations-node": "^0.72.0",
@@ -57,9 +62,9 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
     "@eslint/js": "^9.18.0",
-    "@nestjs/cli": "^11.0.0",
+    "@nestjs/cli": "^11.0.19",
     "@nestjs/schematics": "^11.0.0",
-    "@nestjs/testing": "^11.0.1",
+    "@nestjs/testing": "^11.1.18",
     "@swc/core": "^1.15.18",
     "@testcontainers/postgresql": "^11.13.0",
     "@types/express": "^5.0.0",
