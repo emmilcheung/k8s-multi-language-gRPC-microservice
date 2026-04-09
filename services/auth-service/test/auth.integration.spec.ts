@@ -117,6 +117,23 @@ beforeAll(async () => {
               REDIS_URL: z.string(),
               RSA_PRIVATE_KEY: z.string(),
               JWT_EXPIRY: z.string().default('15m'),
+              JWT_COOKIE_NAME: z.string().default('token'),
+              REFRESH_COOKIE_NAME: z.string().default('refreshToken'),
+              REFRESH_TOKEN_TTL_SECONDS: z
+                .preprocess(
+                  (value) =>
+                    typeof value === 'string' ? Number(value.trim()) : value,
+                  z.number().int().positive(),
+                )
+                .default(7 * 24 * 60 * 60),
+              REFRESH_COOKIE_PATH: z.string().default('/'),
+              ACCESS_TOKEN_COOKIE_SAME_SITE: z
+                .enum(['strict', 'lax', 'none'])
+                .default('strict'),
+              REFRESH_TOKEN_COOKIE_SAME_SITE: z
+                .enum(['strict', 'lax', 'none'])
+                .default('strict'),
+              COOKIE_DOMAIN: z.string().optional(),
               NODE_ENV: z.string().default('test'),
             })
             .safeParse(config);
@@ -204,7 +221,7 @@ describe('POST /api/users/signup returns 201 Created given valid credentials', (
     expect(tokenCookie).toMatch(/HttpOnly/i);
   });
 
-  it('should also set an httpOnly refreshToken cookie scoped to /api/auth/refresh', async () => {
+  it('should also set an httpOnly refreshToken cookie scoped to / by default', async () => {
     const res = await request
       .post('/api/users/signup')
       .send({ email: 'signup-refresh@example.com', password: 'password123' });
@@ -219,7 +236,7 @@ describe('POST /api/users/signup returns 201 Created given valid credentials', (
     );
     expect(refreshCookie).toBeDefined();
     expect(refreshCookie).toMatch(/HttpOnly/i);
-    expect(refreshCookie).toMatch(/Path=\/api\/auth\/refresh/i);
+    expect(refreshCookie).toMatch(/Path=\//i);
   });
 });
 

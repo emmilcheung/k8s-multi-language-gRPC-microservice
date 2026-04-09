@@ -247,6 +247,13 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://auth_user:auth_pass@postgres-auth:5432/auth_db
       JWT_SECRET: "dev-jwt-secret-change-in-production"
+      JWT_COOKIE_NAME: ${JWT_COOKIE_NAME:-token}
+      REFRESH_COOKIE_NAME: ${REFRESH_COOKIE_NAME:-refreshToken}
+      REFRESH_TOKEN_TTL_SECONDS: ${REFRESH_TOKEN_TTL_SECONDS:-604800}
+      REFRESH_COOKIE_PATH: ${REFRESH_COOKIE_PATH:-/}
+      ACCESS_TOKEN_COOKIE_SAME_SITE: ${ACCESS_TOKEN_COOKIE_SAME_SITE:-strict}
+      REFRESH_TOKEN_COOKIE_SAME_SITE: ${REFRESH_TOKEN_COOKIE_SAME_SITE:-strict}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317

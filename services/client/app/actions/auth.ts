@@ -3,9 +3,53 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { parse } from "set-cookie-parser";
 import { ApiError } from "@/lib/api";
 import { base } from "@/lib/server-utils";
+import {
+  ACCESS_TOKEN_COOKIE,
+  REFRESH_TOKEN_COOKIE,
+  ACCESS_COOKIE_PATH,
+  REFRESH_COOKIE_PATH,
+  ACCESS_COOKIE_SAME_SITE,
+  REFRESH_COOKIE_SAME_SITE,
+  parseAuthCookies,
+  toCookieOptions,
+} from "@/lib/session-cookies";
+
+async function persistAuthCookies(setCookieHeader: string | null): Promise<void> {
+  if (!setCookieHeader) return;
+
+  const cookieStore = await cookies();
+  const parsed = parseAuthCookies(setCookieHeader);
+
+  const tokenEntry = parsed[ACCESS_TOKEN_COOKIE];
+  if (tokenEntry?.value) {
+    cookieStore.set(
+      ACCESS_TOKEN_COOKIE,
+      tokenEntry.value,
+      toCookieOptions(tokenEntry, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: ACCESS_COOKIE_SAME_SITE,
+        path: ACCESS_COOKIE_PATH,
+      })
+    );
+  }
+
+  const refreshEntry = parsed[REFRESH_TOKEN_COOKIE];
+  if (refreshEntry?.value) {
+    cookieStore.set(
+      REFRESH_TOKEN_COOKIE,
+      refreshEntry.value,
+      toCookieOptions(refreshEntry, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: REFRESH_COOKIE_SAME_SITE,
+        path: REFRESH_COOKIE_PATH,
+      })
+    );
+  }
+}
 
 // ─── Signup ───────────────────────────────────────────────────────────────────
 
@@ -42,24 +86,8 @@ export async function signup(
       return { error: body?.error?.message ?? "Signup failed." };
     }
 
-    // Forward the httpOnly token cookie from auth-service to the browser.
-    // Use set-cookie-parser for robust parsing (S-08) and set maxAge to match
-    // the 15-minute JWT lifetime (S-07).
-    const setCookieHeader = res.headers.get("set-cookie");
-    if (setCookieHeader) {
-      const cookieStore = await cookies();
-      const parsed = parse(setCookieHeader, { map: true });
-      const tokenEntry = parsed["token"];
-      if (tokenEntry?.value) {
-        cookieStore.set("token", tokenEntry.value, {
-          httpOnly: true,
-          path: "/",
-          sameSite: "lax",
-          secure: process.env.NODE_ENV === "production",
-          maxAge: 900, // 15 minutes — matches JWT expiry (S-07)
-        });
-      }
-    }
+    // Forward auth cookies from auth-service to browser (access + refresh).
+    await persistAuthCookies(res.headers.get("set-cookie"));
   } catch (err) {
     if (err instanceof ApiError) return { error: err.message };
     return { error: "An unexpected error occurred." };
@@ -98,24 +126,8 @@ export async function signin(
       return { error: body?.error?.message ?? "Signin failed." };
     }
 
-    // Forward the httpOnly token cookie from auth-service to the browser.
-    // Use set-cookie-parser for robust parsing (S-08) and set maxAge to match
-    // the 15-minute JWT lifetime (S-07).
-    const setCookieHeader = res.headers.get("set-cookie");
-    if (setCookieHeader) {
-      const cookieStore = await cookies();
-      const parsed = parse(setCookieHeader, { map: true });
-      const tokenEntry = parsed["token"];
-      if (tokenEntry?.value) {
-        cookieStore.set("token", tokenEntry.value, {
-          httpOnly: true,
-          path: "/",
-          sameSite: "lax",
-          secure: process.env.NODE_ENV === "production",
-          maxAge: 900, // 15 minutes — matches JWT expiry (S-07)
-        });
-      }
-    }
+    // Forward auth cookies from auth-service to browser (access + refresh).
+    await persistAuthCookies(res.headers.get("set-cookie"));
   } catch (err) {
     if (err instanceof ApiError) return { error: err.message };
     return { error: "An unexpected error occurred." };
@@ -128,6 +140,24 @@ export async function signin(
 
 export async function signout(): Promise<void> {
   const cookieStore = await cookies();
-  cookieStore.delete("token");
+
+  const token = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
+  const refreshToken = cookieStore.get(REFRESH_TOKEN_COOKIE)?.value;
+  const cookiePairs: string[] = [];
+  if (token) cookiePairs.push(`${ACCESS_TOKEN_COOKIE}=${token}`);
+  if (refreshToken) cookiePairs.push(`${REFRESH_TOKEN_COOKIE}=${refreshToken}`);
+
+  // Best-effort upstream signout to revoke refresh token + blacklist access token.
+  await fetch(`${base()}/api/users/signout`, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      ...(cookiePairs.length > 0 ? { Cookie: cookiePairs.join("; ") } : {}),
+    },
+  }).catch(() => undefined);
+
+  cookieStore.delete(ACCESS_TOKEN_COOKIE);
+  cookieStore.delete(REFRESH_TOKEN_COOKIE);
   redirect("/auth/signin");
 }

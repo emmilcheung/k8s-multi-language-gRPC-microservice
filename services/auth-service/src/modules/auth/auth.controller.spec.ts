@@ -42,11 +42,23 @@ function makeRefreshTokenService(
   } as unknown as RefreshTokenService;
 }
 
-function makeConfigService(env = 'test', expiry = '15m'): ConfigService {
+function makeConfigService(
+  env = 'test',
+  expiry = '15m',
+  overrides: Record<string, unknown> = {},
+): ConfigService {
   return {
     get: vi.fn().mockImplementation((key: string) => {
+      if (key in overrides) return overrides[key];
       if (key === 'NODE_ENV') return env;
       if (key === 'JWT_EXPIRY') return expiry;
+      if (key === 'JWT_COOKIE_NAME') return 'token';
+      if (key === 'REFRESH_COOKIE_NAME') return 'refreshToken';
+      if (key === 'REFRESH_TOKEN_TTL_SECONDS') return 604800;
+      if (key === 'REFRESH_COOKIE_PATH') return '/';
+      if (key === 'ACCESS_TOKEN_COOKIE_SAME_SITE') return 'strict';
+      if (key === 'REFRESH_TOKEN_COOKIE_SAME_SITE') return 'strict';
+      if (key === 'COOKIE_DOMAIN') return undefined;
       return undefined;
     }),
     getOrThrow: vi.fn(),
@@ -177,8 +189,13 @@ describe('AuthController', () => {
       expect(authService.blacklistAccessToken).toHaveBeenCalledWith(
         'old.access.token',
       );
-      expect(res.clearCookie).toHaveBeenCalledWith('token');
-      expect(res.clearCookie).toHaveBeenCalledWith('refreshToken');
+      expect(res.clearCookie).toHaveBeenCalledWith('token', { path: '/' });
+      expect(res.clearCookie).toHaveBeenCalledWith('refreshToken', {
+        path: '/',
+      });
+      expect(res.clearCookie).toHaveBeenCalledWith('refreshToken', {
+        path: '/api/auth/refresh',
+      });
     });
 
     it('should succeed gracefully when there is no refresh token cookie', async () => {
@@ -189,7 +206,7 @@ describe('AuthController', () => {
       await controller.signout(req, res);
 
       expect(refreshTokenService.revoke).not.toHaveBeenCalled();
-      expect(res.clearCookie).toHaveBeenCalledTimes(2);
+      expect(res.clearCookie).toHaveBeenCalledTimes(3);
     });
 
     it('should not throw if revoke fails (best-effort revocation)', async () => {
@@ -346,8 +363,23 @@ describe('AuthController', () => {
       expect(opts.maxAge).toBe(30 * 60 * 1000);
     });
 
-    it('should scope refresh token cookie to /api/auth/refresh path', async () => {
+    it('should default refresh token cookie path to /', async () => {
       const { controller } = makeController();
+      const res = makeRes();
+
+      await controller.signup({ email: 'a@b.com', password: 'p' }, res);
+
+      const [, , opts] = (res.cookie as ReturnType<typeof vi.fn>).mock
+        .calls[1] as [string, string, { path: string }];
+      expect(opts.path).toBe('/');
+    });
+
+    it('should honour REFRESH_COOKIE_PATH from config', async () => {
+      const { controller } = makeController({
+        configService: makeConfigService('test', '15m', {
+          REFRESH_COOKIE_PATH: '/api/auth/refresh',
+        }),
+      });
       const res = makeRes();
 
       await controller.signup({ email: 'a@b.com', password: 'p' }, res);
