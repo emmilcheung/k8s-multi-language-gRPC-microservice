@@ -6,14 +6,34 @@
     "red"
   ],
   "schemaVersion": 36,
-  "version": 2,
+  "version": 3,
   "refresh": "30s",
   "time": {
     "from": "now-1h",
     "to": "now"
   },
   "templating": {
-    "list": []
+    "list": [
+      {
+        "name": "service",
+        "type": "query",
+        "label": "Service",
+        "query": "label_values(http_requests_total, service)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "refresh": 1,
+        "includeAll": true,
+        "multi": false,
+        "allValue": ".*",
+        "sort": 1,
+        "current": {
+          "text": "All",
+          "value": "All"
+        }
+      }
+    ]
   },
   "annotations": {
     "list": []
@@ -21,7 +41,7 @@
   "panels": [
     {
       "id": 1,
-      "title": "Request Rate (req/s)",
+      "title": "Request Rate by Service",
       "type": "timeseries",
       "gridPos": {
         "x": 0,
@@ -50,34 +70,14 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(http_requests_total[5m])) by (job)",
-          "legendFormat": "{{job}}"
-        },
-        {
-          "refId": "B",
-          "expr": "sum(rate(ticket_service_requests_total[5m])) by (job)",
-          "legendFormat": "{{job}}"
-        },
-        {
-          "refId": "C",
-          "expr": "sum(rate(venue_service_requests_total[5m])) by (job)",
-          "legendFormat": "{{job}}"
-        },
-        {
-          "refId": "D",
-          "expr": "sum(rate(expiration_service_requests_total[5m])) by (job)",
-          "legendFormat": "{{job}}"
-        },
-        {
-          "refId": "E",
-          "expr": "sum(rate(http_server_requests_seconds_count[5m])) by (job)",
-          "legendFormat": "{{job}}"
+          "expr": "sum(rate(http_requests_total{service=~\"$service\"}[5m])) by (service)",
+          "legendFormat": "{{service}}"
         }
       ]
     },
     {
       "id": 2,
-      "title": "Error Rate (%)",
+      "title": "Error Rate by Service",
       "type": "timeseries",
       "gridPos": {
         "x": 12,
@@ -108,29 +108,14 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(http_requests_total{status_code=~\"5..\"}[5m])) by (job) / sum(rate(http_requests_total[5m])) by (job) * 100",
-          "legendFormat": "{{job}}"
-        },
-        {
-          "refId": "B",
-          "expr": "sum(rate(ticket_service_requests_total{code=~\"5..\"}[5m])) by (job) / sum(rate(ticket_service_requests_total[5m])) by (job) * 100",
-          "legendFormat": "{{job}}"
-        },
-        {
-          "refId": "C",
-          "expr": "sum(rate(venue_service_requests_total{code=~\"5..\"}[5m])) by (job) / sum(rate(venue_service_requests_total[5m])) by (job) * 100",
-          "legendFormat": "{{job}}"
-        },
-        {
-          "refId": "D",
-          "expr": "sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[5m])) by (job) / sum(rate(http_server_requests_seconds_count[5m])) by (job) * 100",
-          "legendFormat": "{{job}}"
+          "expr": "sum(rate(http_requests_total{service=~\"$service\",status_code=~\"5..\"}[5m])) by (service) / sum(rate(http_requests_total{service=~\"$service\"}[5m])) by (service) * 100",
+          "legendFormat": "{{service}}"
         }
       ]
     },
     {
       "id": 3,
-      "title": "P99 Latency",
+      "title": "Service p95 Latency",
       "type": "timeseries",
       "gridPos": {
         "x": 0,
@@ -159,34 +144,14 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job))",
-          "legendFormat": "{{job}} p99"
-        },
-        {
-          "refId": "B",
-          "expr": "histogram_quantile(0.99, sum(rate(ticket_service_request_duration_seconds_bucket[5m])) by (le, job))",
-          "legendFormat": "{{job}} p99"
-        },
-        {
-          "refId": "C",
-          "expr": "histogram_quantile(0.99, sum(rate(venue_service_request_duration_seconds_bucket[5m])) by (le, job))",
-          "legendFormat": "{{job}} p99"
-        },
-        {
-          "refId": "D",
-          "expr": "histogram_quantile(0.99, sum(rate(expiration_service_request_duration_seconds_bucket[5m])) by (le, job))",
-          "legendFormat": "{{job}} p99"
-        },
-        {
-          "refId": "E",
-          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[5m])) by (le, job))",
-          "legendFormat": "{{job}} p99"
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{service=~\"$service\"}[5m])) by (le, service))",
+          "legendFormat": "{{service}}"
         }
       ]
     },
     {
       "id": 4,
-      "title": "Go Goroutines (runtime health)",
+      "title": "Service p99 Latency",
       "type": "timeseries",
       "gridPos": {
         "x": 12,
@@ -200,7 +165,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "s",
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10
@@ -215,14 +180,14 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "go_goroutines",
-          "legendFormat": "{{job}}"
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{service=~\"$service\"}[5m])) by (le, service))",
+          "legendFormat": "{{service}}"
         }
       ]
     },
     {
       "id": 5,
-      "title": "Kafka Consumer Commits/s (order-service)",
+      "title": "Top Routes by Request Rate",
       "type": "timeseries",
       "gridPos": {
         "x": 0,
@@ -236,7 +201,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ops",
+          "unit": "reqps",
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10
@@ -251,18 +216,54 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(kafka_consumer_fetch_manager_fetch_total[5m])) by (job, client_id)",
-          "legendFormat": "{{job}} {{client_id}}"
+          "expr": "topk(15, sum(rate(http_requests_total{service=~\"$service\"}[5m])) by (service, route))",
+          "legendFormat": "{{service}} {{route}}"
         }
       ]
     },
     {
       "id": 6,
-      "title": "Node.js Event Loop Lag p99 (ms)",
+      "title": "Top Error Routes",
       "type": "timeseries",
       "gridPos": {
         "x": 12,
         "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        }
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(15, sum(rate(http_requests_total{service=~\"$service\",status_code=~\"5..\"}[5m])) by (service, route))",
+          "legendFormat": "{{service}} {{route}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Node.js Event Loop Lag p99 (ms)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
         "w": 12,
         "h": 8
       },
@@ -289,6 +290,42 @@
           "refId": "A",
           "expr": "nodejs_eventloop_lag_p99_seconds * 1000",
           "legendFormat": "{{job}} event-loop p99"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Go Goroutines",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        }
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "go_goroutines",
+          "legendFormat": "{{job}}"
         }
       ]
     }
