@@ -18,10 +18,21 @@ const (
 	maxRetryDelay        = 30 * time.Second
 )
 
+type relayRepository interface {
+	ClaimPendingOutboxEvents(ctx context.Context, leaseDuration time.Duration, limit int) ([]repository.ClaimedOutboxEvent, error)
+	AcknowledgeOutboxEvent(ctx context.Context, ticketID, eventID, claimToken string) error
+	RequeueOutboxEvent(ctx context.Context, ticketID, eventID, claimToken, lastErr string, attempts int, nextAttemptAt time.Time) error
+}
+
+type relayProducer interface {
+	PublishTicketCreated(ctx context.Context, data kafka.TicketEventData) error
+	PublishTicketUpdated(ctx context.Context, data kafka.TicketEventData) error
+}
+
 // Relay publishes durable ticket outbox events to Kafka and acknowledges them.
 type Relay struct {
-	repo          *repository.MongoTicketRepository
-	producer      *kafka.Producer
+	repo          relayRepository
+	producer      relayProducer
 	log           *zap.Logger
 	pollInterval  time.Duration
 	leaseDuration time.Duration
@@ -29,7 +40,7 @@ type Relay struct {
 }
 
 // NewRelay creates a new ticket outbox relay.
-func NewRelay(repo *repository.MongoTicketRepository, producer *kafka.Producer, log *zap.Logger) *Relay {
+func NewRelay(repo relayRepository, producer relayProducer, log *zap.Logger) *Relay {
 	return &Relay{
 		repo:          repo,
 		producer:      producer,

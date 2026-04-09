@@ -8,6 +8,14 @@ global:
   imagePullPolicy: IfNotPresent
   # Namespace all resources land in
   namespace: ticketing
+  serviceMesh:
+    enabled: true
+    provider: linkerd
+    linkerd:
+      skipOutboundPorts: "9092"
+      grpcServerPolicy:
+        enabled: true
+      identityDomain: cluster.local
 
 # ── auth-service ──────────────────────────────────────────────────────────────
 auth-service:

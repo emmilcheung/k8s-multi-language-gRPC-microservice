@@ -2,8 +2,9 @@
 # infra/local/setup.sh — Local Kubernetes (minikube) bootstrap script
 #
 # What this script does:
-#   1. Verifies required tools are installed (minikube, helm, kubectl, docker)
+#   1. Verifies required tools are installed (minikube, helm, kubectl, docker, linkerd)
 #   2. Starts minikube if not already running
+#   2.5 Installs or upgrades the Linkerd control plane for in-cluster mTLS
 #   3. Loads service images into minikube via `minikube image load`
 #      (host Docker client v1.43 is too old to talk to minikube's daemon directly)
 #   4. Creates the `ticketing` namespace (idempotent)
@@ -33,6 +34,7 @@
 #   - helm       https://helm.sh/docs/intro/install/
 #   - kubectl    https://kubernetes.io/docs/tasks/tools/
 #   - docker     https://docs.docker.com/get-docker/
+#   - linkerd    https://linkerd.io/2/getting-started/
 #
 # This script is idempotent — safe to re-run after code changes.
 
@@ -52,8 +54,8 @@ warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
 # ── 1. Verify required tools ──────────────────────────────────────────────────
-step "1/7  Checking required tools..."
-for tool in minikube helm kubectl docker; do
+step "1/8  Checking required tools..."
+for tool in minikube helm kubectl docker linkerd; do
   command -v "$tool" &>/dev/null || error "'$tool' is not installed. See script header for install links."
 done
 info "All required tools found."
@@ -87,7 +89,7 @@ for var in RSA_PRIVATE_KEY STRIPE_SECRET_KEY KONG_RSA_PUBLIC_KEY; do
 done
 
 # ── 2. Start minikube ─────────────────────────────────────────────────────────
-step "2/7  Starting minikube..."
+step "2/8  Starting minikube..."
 if minikube status --profile minikube 2>/dev/null | grep -q "Running"; then
   info "minikube is already running."
 else
@@ -99,8 +101,16 @@ else
     --driver=docker
 fi
 
+# ── 2.5 Install Linkerd ──────────────────────────────────────────────────────
+step "2.5/8  Installing or upgrading Linkerd control plane..."
+linkerd check --pre
+linkerd install --crds | kubectl apply -f -
+linkerd install | kubectl apply -f -
+linkerd check
+info "Linkerd control plane is ready."
+
 # ── 3. Build + load service images into minikube ──────────────────────────────
-step "3/7  Building and loading service images into minikube..."
+step "3/8  Building and loading service images into minikube..."
 
 # order-service must be built from repo root — its Dockerfile copies /proto
 info "  Building order-service (build context: repo root)..."
@@ -138,7 +148,7 @@ done
 info "All service images loaded into minikube."
 
 # ── 4. Create namespace ───────────────────────────────────────────────────────
-step "4/7  Creating namespace '${NAMESPACE}'..."
+step "4/8  Creating namespace '${NAMESPACE}'..."
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 info "Namespace '${NAMESPACE}' is ready."
 
@@ -147,14 +157,14 @@ info "Namespace '${NAMESPACE}' is ready."
 # protocol connections on reconnect (attempts TLS handshake on a raw TCP stream).
 # Annotating the namespace tells Linkerd to skip mTLS on all outbound port-9092
 # connections from every pod in this namespace, so Kafka clients connect cleanly.
-step "4.5/7  Annotating namespace for Linkerd Kafka skip..."
+step "4.5/8  Annotating namespace for Linkerd Kafka skip..."
 kubectl annotate namespace "${NAMESPACE}" \
   config.linkerd.io/skip-outbound-ports="9092" \
   --overwrite
 info "Linkerd skip-outbound-ports=9092 annotation applied to namespace '${NAMESPACE}'."
 
 # ── 5. Create K8s Secrets ─────────────────────────────────────────────────────
-step "5/7  Creating Kubernetes Secrets..."
+step "5/8  Creating Kubernetes Secrets..."
 
 # In-cluster hostnames (Bitnami sub-chart service names, namespace: ticketing)
 PG_AUTH_HOST="ticketing-postgres-auth"
@@ -229,14 +239,14 @@ info "All secrets created."
 # ── 5.5 Render Kong config ────────────────────────────────────────────────────
 # Build the declarative kong.yml from the base template + minikube values.
 # The rendered file is passed to helm via --set-file so no ConfigMap is needed.
-step "5.5/7  Rendering Kong config for minikube..."
+step "5.5/8  Rendering Kong config for minikube..."
 RENDERED_KONG_YML="${REPO_ROOT}/services/kong-gateway/kong.yml"
 KONG_RSA_PUBLIC_KEY="${KONG_RSA_PUBLIC_KEY}" \
   bash "${GATEWAY_DIR}/scripts/build.sh" minikube "${RENDERED_KONG_YML}"
 info "Kong config rendered: ${RENDERED_KONG_YML}"
 
 # ── 6. Helm install/upgrade ───────────────────────────────────────────────────
-step "6/7  Running helm upgrade --install..."
+step "6/8  Running helm upgrade --install..."
 
 # Ensure dependencies are up-to-date (no-op if already fetched)
 helm dependency update "${HELM_CHART}" --skip-refresh 2>/dev/null || \
@@ -260,7 +270,7 @@ helm upgrade --install ticketing "${HELM_CHART}" \
 info "Helm release 'ticketing' is up."
 
 # ── 7. Start minikube tunnel ──────────────────────────────────────────────────
-step "7/7  Starting minikube tunnel..."
+step "7/8  Starting minikube tunnel..."
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗
 ║              Local Kubernetes stack is ready!              ║

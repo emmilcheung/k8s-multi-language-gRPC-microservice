@@ -75,6 +75,8 @@ serviceAccount:
   name: ""
   annotations: {}
 
+podAnnotations: {}
+
 podAntiAffinity:
   enabled: true
 

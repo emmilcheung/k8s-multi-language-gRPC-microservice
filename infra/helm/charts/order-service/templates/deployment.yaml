@@ -19,6 +19,14 @@ spec:
       {{- include "order-service.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if and .Values.global.serviceMesh.enabled (eq .Values.global.serviceMesh.provider "linkerd") }}
+        linkerd.io/inject: enabled
+        config.linkerd.io/skip-outbound-ports: {{ .Values.global.serviceMesh.linkerd.skipOutboundPorts | quote }}
+        {{- end }}
       labels:
         {{- include "order-service.selectorLabels" . | nindent 8 }}
     spec:

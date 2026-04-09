@@ -4,6 +4,46 @@
 
 ---
 
+## Session: 2026-04-09 — Linkerd gRPC transport hardening + ticket outbox relay tests ✅ COMPLETE
+
+**Branch:** `copilot/worktree-2026-04-08T16-22-48`
+
+### What was done
+
+1. **Ticket-service outbox relay test coverage added**
+- Added focused package tests in `services/ticket-service/internal/outbox/relay_test.go`.
+- Covered publish routing, success ack flow, failed publish requeue flow, payload mapping, and retry backoff capping.
+- Refactored `internal/outbox/relay.go` to depend on narrow repo/producer interfaces so the relay is directly testable without concrete Mongo/Kafka implementations.
+
+2. **Mongo-backed outbox integration tests added**
+- Added `services/ticket-service/test/outbox_relay_integration_test.go` using the existing Testcontainers Mongo fixture.
+- Covered claim leasing, ack removal, requeue state updates, expired-lease reclaim, and wrong-token rejection.
+
+3. **Internal gRPC transport moved onto a Linkerd mesh story in Kubernetes**
+- Added global Helm values for service-mesh configuration in `infra/helm/values.yaml` and `infra/helm/values-local.yaml`.
+- Injected the gRPC participants into Linkerd via pod annotations in:
+   - `infra/helm/charts/ticket-service/templates/deployment.yaml`
+   - `infra/helm/charts/venue-service/templates/deployment.yaml`
+   - `infra/helm/charts/order-service/templates/deployment.yaml`
+- Added port-scoped Linkerd `Server` + `ServerAuthorization` resources for the ticket-service and venue-service gRPC ports so HTTP ingress via Kong is not blocked.
+
+4. **Local Kubernetes bootstrap updated**
+- `infra/local/setup.sh` now requires the `linkerd` CLI and installs or upgrades the Linkerd control plane before Helm deploy.
+- Existing Kafka skip-port behavior remains in place for Linkerd.
+
+### Verification
+
+- `go test ./internal/outbox ./test -run 'Outbox|Relay|Claim|Acknowledge|Requeue'` in `services/ticket-service` ✅
+- `go test ./... && go vet ./...` in `services/ticket-service` ✅
+- `helm dependency build ./infra/helm` ✅
+- `helm template ticketing ./infra/helm -f ./infra/helm/values-local.yaml` ✅
+
+### Follow-up
+
+- A full local Kubernetes run of `./infra/local/setup.sh` was not executed in this session, so live cluster verification of Linkerd-enforced traffic remains the next operational check.
+
+---
+
 ## Session: 2026-04-01 — Quota & Seating Plan Design: Open Questions Resolved ✅ READY FOR IMPLEMENTATION
 
 **Branch:** N/A (design documents only)
