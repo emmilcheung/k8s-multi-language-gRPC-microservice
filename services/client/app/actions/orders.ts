@@ -57,19 +57,15 @@ export async function cancelOrder(
 
 export async function submitPayment(
   orderId: string,
-  amountDollars: number,
   _prev: OrderState,
   _formData: FormData
 ): Promise<OrderState> {
-  // payment-service expects amount in the smallest currency unit (cents).
-  // In dev/test we use Stripe's test payment method token directly.
-  const amountCents = Math.round(amountDollars * 100);
   const token = process.env.STRIPE_TEST_TOKEN ?? "pm_card_visa";
 
   const res = await fetch(`${base()}/api/payments`, {
     method: "POST",
     headers: await authHeaders(),
-    body: JSON.stringify({ orderId, amount: amountCents, token }),
+    body: JSON.stringify({ orderId, token }),
   });
 
   if (!res.ok) {

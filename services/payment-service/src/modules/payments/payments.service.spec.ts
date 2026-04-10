@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { ConflictException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { PAYMENT_STATUS } from '../../database/schema';
 import type { Payment } from '../../database/schema';
+import type { OrderSnapshot } from './order-service.client';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,26 @@ function makeStripe() {
     paymentIntents: {
       create: vi.fn(),
     },
+    webhooks: {
+      constructEvent: vi.fn(),
+    },
+  };
+}
+
+function makeOrderSnapshot(overrides: Partial<OrderSnapshot> = {}): OrderSnapshot {
+  return {
+    orderId: '11111111-1111-4111-8111-111111111111',
+    userId: '22222222-2222-4222-8222-222222222222',
+    status: 'created',
+    amount: 1000,
+    currency: 'usd',
+    ...overrides,
+  };
+}
+
+function makeOrderServiceClient() {
+  return {
+    getOrderSnapshot: vi.fn(),
   };
 }
 
@@ -101,6 +122,7 @@ describe('PaymentsService.charge', () => {
   let logger: ReturnType<typeof makeLogger>;
   let config: ReturnType<typeof makeConfig>;
   let db: ReturnType<typeof makeDb>;
+  let orderServiceClient: ReturnType<typeof makeOrderServiceClient>;
   let service: PaymentsService;
 
   beforeEach(() => {
@@ -109,10 +131,12 @@ describe('PaymentsService.charge', () => {
     logger = makeLogger();
     config = makeConfig();
     db = makeDb();
+    orderServiceClient = makeOrderServiceClient();
 
     service = new PaymentsService(
       logger as any,
       repo as any,
+      orderServiceClient as any,
       stripe as any,
       config as any,
       db as any,
@@ -126,21 +150,36 @@ describe('PaymentsService.charge', () => {
     const result = await service.charge({
       orderId: 'order-uuid-1',
       userId: 'user-uuid-1',
-      amount: 1000,
       token: 'pm_test',
     });
 
     expect(result).toEqual(existing);
     expect(repo.create).not.toHaveBeenCalled();
     expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+    expect(orderServiceClient.getOrderSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('should reject a duplicate payment request from a different user', async () => {
+    repo.findByOrderId.mockResolvedValue(makePayment({ userId: 'owner-uuid' }));
+
+    await expect(
+      service.charge({
+        orderId: 'order-uuid-1',
+        userId: 'attacker-uuid',
+        token: 'pm_test',
+      }),
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('should complete payment via mock path when STRIPE_SECRET_KEY contains test_mock', async () => {
-    // Use sk_test_mock — the real .env value — to verify the prefix-inclusive check
     const mockConfig = makeConfig('sk_test_mock');
     const mockDb = makeDb();
-    const completed = makePayment({ status: PAYMENT_STATUS.COMPLETED });
-    // First insert (payments) returns the completed payment; second (outbox) returns a row
+    const completed = makePayment({
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+      status: PAYMENT_STATUS.COMPLETED,
+      stripePaymentIntentId: 'mock_pi_11111111-1111-4111-8111-111111111111',
+    });
     mockDb._tx.insert
       .mockReturnValueOnce({
         values: vi.fn().mockReturnThis(),
@@ -154,32 +193,42 @@ describe('PaymentsService.charge', () => {
     const svc = new PaymentsService(
       makeLogger() as any,
       repo as any,
+      orderServiceClient as any,
       stripe as any,
       mockConfig as any,
       mockDb as any,
     );
     repo.findByOrderId.mockResolvedValue(null);
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(makeOrderSnapshot());
 
     const result = await svc.charge({
-      orderId: 'order-uuid-1',
-      userId: 'user-uuid-1',
-      amount: 1000,
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
       token: 'pm_test',
     });
 
     expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
-    expect(mockDb.transaction).toHaveBeenCalled();
+    expect(mockDb.transaction).toHaveBeenCalledOnce();
     expect(result).toEqual(completed);
   });
 
-  it('should create payment and initiate Stripe PaymentIntent when no existing payment (real mode)', async () => {
+  it('should create payment and initiate Stripe PaymentIntent using authoritative order data', async () => {
     const pending = makePayment();
     repo.findByOrderId.mockResolvedValue(null);
     repo.create.mockResolvedValue(pending);
     stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_abc' });
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(
+      makeOrderSnapshot({
+        orderId: '11111111-1111-4111-8111-111111111111',
+        userId: '22222222-2222-4222-8222-222222222222',
+        amount: 2750,
+      }),
+    );
 
-    // completePaymentWithOutbox uses db.transaction
     const completed = makePayment({
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+      amount: 2750,
       status: PAYMENT_STATUS.COMPLETED,
       stripePaymentIntentId: 'pi_abc',
     });
@@ -190,24 +239,24 @@ describe('PaymentsService.charge', () => {
     });
 
     const result = await service.charge({
-      orderId: 'order-uuid-1',
-      userId: 'user-uuid-1',
-      amount: 1000,
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
       token: 'pm_test',
     });
 
     expect(repo.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        orderId: 'order-uuid-1',
-        amount: 1000,
+        orderId: '11111111-1111-4111-8111-111111111111',
+        amount: 2750,
+        currency: 'usd',
         status: PAYMENT_STATUS.PENDING,
       }),
     );
     expect(stripe.paymentIntents.create).toHaveBeenCalledWith(
-      expect.objectContaining({ amount: 1000, currency: 'usd' }),
-      expect.objectContaining({ idempotencyKey: 'order-uuid-1' }),
+      expect.objectContaining({ amount: 2750, currency: 'usd' }),
+      expect.objectContaining({ idempotencyKey: '11111111-1111-4111-8111-111111111111' }),
     );
-    expect(db.transaction).toHaveBeenCalled();
+    expect(db.transaction).toHaveBeenCalledTimes(2);
     expect(result).toEqual(completed);
   });
 
@@ -217,12 +266,12 @@ describe('PaymentsService.charge', () => {
     repo.create.mockResolvedValue(pending);
     stripe.paymentIntents.create.mockRejectedValue(new Error('Card declined'));
     repo.updateStatus.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.FAILED }));
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(makeOrderSnapshot());
 
     await expect(
       service.charge({
-        orderId: 'order-uuid-1',
-        userId: 'user-uuid-1',
-        amount: 1000,
+        orderId: '11111111-1111-4111-8111-111111111111',
+        userId: '22222222-2222-4222-8222-222222222222',
         token: 'pm_bad',
       }),
     ).rejects.toThrow(InternalServerErrorException);
@@ -230,39 +279,34 @@ describe('PaymentsService.charge', () => {
     expect(repo.updateStatus).toHaveBeenCalledWith(pending.id, PAYMENT_STATUS.FAILED);
   });
 
-  it('should default currency to usd when not specified', async () => {
-    const pending = makePayment();
+  it('should reject orders that are not in a payable state', async () => {
     repo.findByOrderId.mockResolvedValue(null);
-    repo.create.mockResolvedValue(pending);
-    stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_xyz' });
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(
+      makeOrderSnapshot({ status: 'cancelled' }),
+    );
 
-    const completed = makePayment({ status: PAYMENT_STATUS.COMPLETED });
-    db._tx.update.mockReturnValue({
-      set: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      returning: vi.fn().mockResolvedValue([completed]),
-    });
-
-    await service.charge({
-      orderId: 'order-uuid-1',
-      userId: 'user-uuid-1',
-      amount: 500,
-      token: 'pm_x',
-    });
-
-    expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ currency: 'usd' }));
+    await expect(
+      service.charge({
+        orderId: '11111111-1111-4111-8111-111111111111',
+        userId: '22222222-2222-4222-8222-222222222222',
+        token: 'pm_x',
+      }),
+    ).rejects.toThrow(ConflictException);
   });
 });
 
 describe('PaymentsService.findById', () => {
   let repo: ReturnType<typeof makeRepo>;
+  let orderServiceClient: ReturnType<typeof makeOrderServiceClient>;
   let service: PaymentsService;
 
   beforeEach(() => {
     repo = makeRepo();
+    orderServiceClient = makeOrderServiceClient();
     service = new PaymentsService(
       makeLogger() as any,
       repo as any,
+      orderServiceClient as any,
       makeStripe() as any,
       makeConfig() as any,
       makeDb() as any,
@@ -285,9 +329,13 @@ describe('PaymentsService.findById', () => {
 
 describe('PaymentsService.processOrderCreatedEvent', () => {
   let repo: ReturnType<typeof makeRepo>;
+  let orderServiceClient: ReturnType<typeof makeOrderServiceClient>;
+  let stripe: ReturnType<typeof makeStripe>;
 
   beforeEach(() => {
     repo = makeRepo();
+    orderServiceClient = makeOrderServiceClient();
+    stripe = makeStripe();
   });
 
   it('should create a completed payment via mock path when STRIPE_SECRET_KEY is test_mock', async () => {
@@ -307,7 +355,8 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
     const service = new PaymentsService(
       makeLogger() as any,
       repo as any,
-      makeStripe() as any,
+      orderServiceClient as any,
+      stripe as any,
       makeConfig('test_mock') as any,
       mockDb as any,
     );
@@ -339,7 +388,8 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
     const service = new PaymentsService(
       makeLogger() as any,
       repo as any,
-      makeStripe() as any,
+      orderServiceClient as any,
+      stripe as any,
       makeConfig('sk_test_mock') as any, // Docker-compose value with sk_ prefix
       mockDb as any,
     );
@@ -349,7 +399,7 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
 
     // Should have used mock path (transaction called) and NOT called Stripe
     expect(mockDb.transaction).toHaveBeenCalled();
-    expect(makeStripe().paymentIntents.create).not.toHaveBeenCalled();
+    expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
   });
 
   it('should skip processing when orderId already has a payment (idempotent)', async () => {
@@ -357,7 +407,8 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
     const service = new PaymentsService(
       makeLogger() as any,
       repo as any,
-      makeStripe() as any,
+      orderServiceClient as any,
+      stripe as any,
       makeConfig('test_mock') as any,
       mockDb as any,
     );
@@ -375,7 +426,8 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
     const service = new PaymentsService(
       makeLogger() as any,
       repo as any,
-      makeStripe() as any,
+      orderServiceClient as any,
+      stripe as any,
       makeConfig('test_mock') as any,
       mockDb as any,
     );

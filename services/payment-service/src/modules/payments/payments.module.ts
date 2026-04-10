@@ -6,6 +6,7 @@ import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 import { PaymentsRepository } from './payments.repository';
 import { OutboxRelayService } from './outbox-relay.service';
+import { OrderServiceClient } from './order-service.client';
 import { STRIPE_CLIENT } from './stripe.constants';
 
 @Module({
@@ -15,6 +16,7 @@ import { STRIPE_CLIENT } from './stripe.constants';
     PaymentsService,
     PaymentsRepository,
     OutboxRelayService,
+    OrderServiceClient,
     {
       provide: STRIPE_CLIENT,
       inject: [ConfigService],

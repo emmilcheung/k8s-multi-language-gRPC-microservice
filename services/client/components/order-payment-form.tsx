@@ -193,7 +193,6 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
         },
         body: JSON.stringify({
           orderId,
-          amount,
           paymentMethodId,
         }),
       });

@@ -44,7 +44,7 @@ describe('PaymentsController.charge', () => {
 
   it('should throw BadRequestException when X-User-Id header is missing', async () => {
     await expect(
-      controller.charge(undefined, { orderId: 'order-1', amount: 1000, token: 'pm_x' }),
+      controller.charge(undefined, { orderId: 'order-1', token: 'pm_x' }),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -54,12 +54,11 @@ describe('PaymentsController.charge', () => {
 
     const result = await controller.charge('user-1', {
       orderId: 'order-1',
-      amount: 1000,
       token: 'pm_x',
     });
 
     expect(service.charge).toHaveBeenCalledWith(
-      expect.objectContaining({ orderId: 'order-1', userId: 'user-1', amount: 1000 }),
+      expect.objectContaining({ orderId: 'order-1', userId: 'user-1', token: 'pm_x' }),
     );
     expect(result).toEqual({ payment });
   });
@@ -68,7 +67,7 @@ describe('PaymentsController.charge', () => {
     service.charge.mockRejectedValue(new InternalServerErrorException('fail'));
 
     await expect(
-      controller.charge('user-1', { orderId: 'order-1', amount: 1000, token: 'pm_bad' }),
+      controller.charge('user-1', { orderId: 'order-1', token: 'pm_bad' }),
     ).rejects.toThrow(InternalServerErrorException);
   });
 });

@@ -37,8 +37,6 @@ export class PaymentsController {
     const payment = await this.paymentsService.charge({
       orderId: dto.orderId,
       userId,
-      amount: dto.amount,
-      currency: dto.currency,
       token: dto.token,
     });
 

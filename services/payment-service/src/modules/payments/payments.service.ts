@@ -3,6 +3,7 @@ import {
   NotFoundException,
   InternalServerErrorException,
   Inject,
+  ConflictException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
@@ -10,6 +11,7 @@ import Stripe from 'stripe';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { PaymentsRepository } from './payments.repository';
+import { OrderServiceClient } from './order-service.client';
 import { STRIPE_CLIENT } from './stripe.constants';
 import { type Payment, PAYMENT_STATUS, outbox, payments } from '../../database/schema';
 import { DRIZZLE_DB, type DrizzleDB } from '../../database/database.module';
@@ -18,12 +20,11 @@ import { captureTraceHeaders } from '../../kafka/trace-context';
 export interface ChargePaymentDto {
   orderId: string;
   userId: string;
-  /** Amount in the smallest currency unit (cents). */
-  amount: number;
-  currency?: string;
   /** Stripe token or paymentMethodId from the client. */
   token: string;
 }
+
+const PAYABLE_ORDER_STATUSES = new Set(['created', 'awaiting_payment']);
 
 @Injectable()
 export class PaymentsService {
@@ -31,6 +32,7 @@ export class PaymentsService {
     @InjectPinoLogger(PaymentsService.name)
     private readonly logger: PinoLogger,
     private readonly paymentsRepo: PaymentsRepository,
+    private readonly orderServiceClient: OrderServiceClient,
     @Inject(STRIPE_CLIENT) private readonly stripe: Stripe,
     private readonly config: ConfigService,
     @Inject(DRIZZLE_DB) private readonly db: DrizzleDB,
@@ -55,6 +57,11 @@ export class PaymentsService {
     // Idempotency check — Kafka may redeliver the same event
     const existing = await this.paymentsRepo.findByOrderId(dto.orderId);
     if (existing) {
+      if (existing.userId !== dto.userId) {
+        throw new NotFoundException({
+          error: { code: 'ORDER_NOT_FOUND', message: 'Order not found' },
+        });
+      }
       this.logger.info(
         { orderId: dto.orderId, paymentId: existing.id },
         'Payment already exists — skipping duplicate',
@@ -62,31 +69,44 @@ export class PaymentsService {
       return existing;
     }
 
+    const order = await this.orderServiceClient.getOrderSnapshot(dto.orderId, dto.userId);
+    if (!PAYABLE_ORDER_STATUSES.has(order.status)) {
+      throw new ConflictException({
+        error: {
+          code: 'ORDER_NOT_PAYABLE',
+          message: 'Order is not payable in its current state',
+        },
+      });
+    }
+
     if (this.isMockMode) {
       // Mock path: create payment and write outbox entry atomically
-      return this.completeMockPayment(dto.orderId, dto.userId, dto.amount, dto.currency ?? 'usd');
+      return this.completeMockPayment(order.orderId, order.userId, order.amount, order.currency);
     }
 
     // Real Stripe path: create PENDING first, then attempt charge
     const payment = await this.paymentsRepo.create({
-      orderId: dto.orderId,
-      userId: dto.userId,
-      amount: dto.amount,
-      currency: dto.currency ?? 'usd',
+      orderId: order.orderId,
+      userId: order.userId,
+      amount: order.amount,
+      currency: order.currency,
       status: PAYMENT_STATUS.PENDING,
     });
 
-    this.logger.info({ paymentId: payment.id, orderId: dto.orderId }, 'Payment created (pending)');
+    this.logger.info(
+      { paymentId: payment.id, orderId: order.orderId },
+      'Payment created (pending)',
+    );
 
     // Publish payment.initiated event to notify order-service to transition to AWAITING_PAYMENT
     await this.db.transaction(async (tx) => {
       await tx.insert(outbox).values(
-        this.buildOutboxRow('payments.payment.initiated', dto.orderId, {
-          orderId: dto.orderId,
+        this.buildOutboxRow('payments.payment.initiated', order.orderId, {
+          orderId: order.orderId,
           paymentId: payment.id,
-          userId: dto.userId,
-          amount: dto.amount,
-          currency: dto.currency ?? 'usd',
+          userId: order.userId,
+          amount: order.amount,
+          currency: order.currency,
         }),
       );
     });
@@ -94,23 +114,27 @@ export class PaymentsService {
     try {
       const intent = await this.stripe.paymentIntents.create(
         {
-          amount: dto.amount,
-          currency: dto.currency ?? 'usd',
+          amount: order.amount,
+          currency: order.currency,
           payment_method: dto.token,
           confirm: true,
           automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
-          metadata: { orderId: dto.orderId, userId: dto.userId, paymentId: payment.id },
+          metadata: {
+            orderId: order.orderId,
+            userId: order.userId,
+            paymentId: payment.id,
+          },
         },
-        { idempotencyKey: dto.orderId }, // prevents double-charge on retry (fixes R-12)
+        { idempotencyKey: order.orderId }, // prevents double-charge on retry (fixes R-12)
       );
 
       // Mark complete and write outbox in the same transaction
       return this.completePaymentWithOutbox(
         payment.id,
-        dto.orderId,
-        dto.userId,
-        dto.amount,
-        dto.currency ?? 'usd',
+        order.orderId,
+        order.userId,
+        order.amount,
+        order.currency,
         intent.id,
       );
     } catch (err) {

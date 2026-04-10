@@ -45,16 +45,14 @@ Charge a payment method for an order.
 ```json
 {
   "orderId": "uuid",
-  "amount": 1000,
-  "currency": "usd",
   "token": "pm_card_visa"
 }
 ```
 
-- `orderId` — UUID of the order being paid (must not already have a completed payment)
-- `amount` — amount in smallest currency unit (e.g. cents for USD), minimum 1
-- `currency` — ISO 4217 currency code (default: `usd`)
+- `orderId` — UUID of the order being paid
 - `token` — Stripe PaymentMethod ID from client-side Stripe.js
+
+The service resolves order ownership, status, and amount from order-service before creating a charge. Client-supplied pricing is rejected.
 
 **Responses**
 
@@ -62,8 +60,9 @@ Charge a payment method for an order.
 |---|---|
 | `201 Created` | Payment created and charge initiated |
 | `400 Bad Request` | Validation failure |
-| `409 Conflict` | A completed payment already exists for this order |
-| `422 Unprocessable Entity` | Stripe charge failed |
+| `404 Not Found` | Order not found or not owned by the caller |
+| `409 Conflict` | Order is not payable in its current state |
+| `503 Service Unavailable` | Order verification failed |
 | `500 Internal Server Error` | Unexpected error |
 
 **Success response body**
@@ -116,6 +115,7 @@ Prometheus metrics endpoint (RED method: request rate, error rate, duration).
 | `NODE_ENV` | No | `development` \| `production` (default: `development`) |
 | `PORT` | No | HTTP port (default: `3001`) |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `ORDER_SERVICE_URL` | Yes | Base URL for order-service used to verify order ownership and amount |
 | `STRIPE_SECRET_KEY` | Yes | Stripe secret key. Set to `test_mock` to skip real Stripe calls in tests. |
 | `KAFKA_BROKERS` | Yes | Comma-separated Kafka broker addresses (e.g. `localhost:9092`) |
 

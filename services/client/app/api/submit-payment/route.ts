@@ -5,7 +5,6 @@ import { traceResponseHeaders } from "@/lib/tracing";
 
 interface SubmitPaymentRequest {
   orderId: string;
-  amount: number;
   paymentMethodId: string;
 }
 
@@ -16,10 +15,10 @@ interface SubmitPaymentRequest {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body = (await request.json()) as SubmitPaymentRequest;
-    const { orderId, amount, paymentMethodId } = body;
+    const { orderId, paymentMethodId } = body;
 
     // Validate input
-    if (!orderId || !amount || !paymentMethodId) {
+    if (!orderId || !paymentMethodId) {
       return NextResponse.json(
         { error: { code: "INVALID_INPUT", message: "Missing required fields." } },
         { status: 400, headers: traceResponseHeaders() }
@@ -32,7 +31,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       headers: await authHeaders(request),
       body: JSON.stringify({
         orderId,
-        amount,
         token: paymentMethodId, // Backend expects 'token' field with paymentMethodId
       }),
     });
