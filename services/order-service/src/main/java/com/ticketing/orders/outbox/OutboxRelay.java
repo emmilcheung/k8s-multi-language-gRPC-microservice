@@ -10,7 +10,10 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * Polls the outbox table every 500 ms and publishes unpublished messages to Kafka.
+ * Polls the outbox table at a configurable interval and publishes unpublished messages to Kafka.
+ * Default poll interval is 5 000 ms — override via OUTBOX_RELAY_POLL_INTERVAL_MS env var.
+ * Reducing from 500 ms to 5 000 ms cuts DB queries and OTel spans ~10× while keeping
+ * end-to-end event latency well within the 15-minute order expiry window.
  *
  * Each message is published via {@link OutboxMessagePublisher#publishOne}, which runs
  * in its own Spring-managed transaction. This ensures the mark-published DB update is
@@ -38,7 +41,7 @@ public class OutboxRelay {
         this.publisher = publisher;
     }
 
-    @Scheduled(fixedDelay = 500)
+    @Scheduled(fixedDelayString = "${outbox.relay.poll-interval-ms:5000}")
     public void relay() {
         List<OutboxMessage> pending = outboxRepository.findUnpublished();
         if (pending.isEmpty()) {
