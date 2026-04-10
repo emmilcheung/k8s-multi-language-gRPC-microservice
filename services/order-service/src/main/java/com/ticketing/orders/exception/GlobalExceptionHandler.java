@@ -10,6 +10,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
@@ -69,6 +70,19 @@ public class GlobalExceptionHandler {
             return error(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "Authentication required", List.of());
         }
         return error(HttpStatus.BAD_REQUEST, "BAD_REQUEST", ex.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Map<String, Object>> handleResponseStatus(ResponseStatusException ex) {
+        if (ex.getStatusCode().is5xxServerError()) {
+            log.error("Service error: {}", ex.getReason(), ex);
+        }
+        String code = ex.getStatusCode().is5xxServerError() ? "SERVICE_UNAVAILABLE" : "REQUEST_FAILED";
+        return ResponseEntity.status(ex.getStatusCode()).body(Map.of(
+                "error", Map.of("code", code,
+                        "message", ex.getReason() != null ? ex.getReason() : "Request failed",
+                        "details", List.of())
+        ));
     }
 
     @ExceptionHandler(Exception.class)
