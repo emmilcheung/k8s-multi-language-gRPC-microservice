@@ -1,6 +1,6 @@
 package com.ticketing.orders.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
 import com.ticketing.orders.entity.Order;
@@ -84,7 +84,7 @@ class OrderServiceTest {
 
     @BeforeEach
     void setUp() {
-        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        ObjectMapper objectMapper = new ObjectMapper();
 
         orderTransactionService = new OrderTransactionService(
                 orderRepository, orderTicketRepository, outboxRepository, objectMapper);
