@@ -438,3 +438,60 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
     ).rejects.toThrow('DB connection lost');
   });
 });
+
+describe('PaymentsService Stripe webhook idempotency', () => {
+  let repo: ReturnType<typeof makeRepo>;
+  let orderServiceClient: ReturnType<typeof makeOrderServiceClient>;
+  let stripe: ReturnType<typeof makeStripe>;
+  let db: ReturnType<typeof makeDb>;
+  let service: PaymentsService;
+
+  beforeEach(() => {
+    repo = makeRepo();
+    orderServiceClient = makeOrderServiceClient();
+    stripe = makeStripe();
+    db = makeDb();
+    service = new PaymentsService(
+      makeLogger() as any,
+      repo as any,
+      orderServiceClient as any,
+      stripe as any,
+      makeConfig() as any,
+      db as any,
+    );
+  });
+
+  it('should ignore duplicate succeeded webhooks for completed payments', async () => {
+    repo.findById.mockResolvedValue(
+      makePayment({ status: PAYMENT_STATUS.COMPLETED, stripePaymentIntentId: 'pi_done' }),
+    );
+
+    await service.completeStripePayment('pay-uuid-1', 'pi_done');
+
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('should ignore late succeeded webhooks for failed payments', async () => {
+    repo.findById.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.FAILED }));
+
+    await service.completeStripePayment('pay-uuid-1', 'pi_late');
+
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('should ignore duplicate failed webhooks for failed payments', async () => {
+    repo.findById.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.FAILED }));
+
+    await service.failStripePayment('pay-uuid-1', 'Card declined');
+
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('should ignore late failed webhooks for completed payments', async () => {
+    repo.findById.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.COMPLETED }));
+
+    await service.failStripePayment('pay-uuid-1', 'Late failure');
+
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+});

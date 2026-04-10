@@ -25,6 +25,7 @@ export interface ChargePaymentDto {
 }
 
 const PAYABLE_ORDER_STATUSES = new Set(['created', 'awaiting_payment']);
+const TERMINAL_PAYMENT_STATUSES = new Set([PAYMENT_STATUS.COMPLETED, PAYMENT_STATUS.FAILED]);
 
 @Injectable()
 export class PaymentsService {
@@ -281,6 +282,14 @@ export class PaymentsService {
       return;
     }
 
+    if (TERMINAL_PAYMENT_STATUSES.has(payment.status)) {
+      this.logger.info(
+        { paymentId, currentStatus: payment.status },
+        'failStripePayment: payment already terminal — skipping duplicate transition',
+      );
+      return;
+    }
+
     await this.db.transaction(async (tx) => {
       await tx
         .update(payments)
@@ -310,6 +319,15 @@ export class PaymentsService {
       this.logger.warn({ paymentId }, 'completeStripePayment: payment not found — skipping');
       return;
     }
+
+    if (TERMINAL_PAYMENT_STATUSES.has(payment.status)) {
+      this.logger.info(
+        { paymentId, currentStatus: payment.status },
+        'completeStripePayment: payment already terminal — skipping duplicate transition',
+      );
+      return;
+    }
+
     await this.completePaymentWithOutbox(
       paymentId,
       payment.orderId,
