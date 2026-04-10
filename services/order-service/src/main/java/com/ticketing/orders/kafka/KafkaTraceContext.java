@@ -4,33 +4,27 @@ import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.propagation.TextMapGetter;
 import io.opentelemetry.context.propagation.TextMapSetter;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.common.header.Header;
-import org.apache.kafka.common.header.Headers;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * Utilities for W3C trace-context propagation through the transactional outbox pattern.
+ *
+ * <p>Consumer-side context extraction (from ConsumerRecord headers) is handled natively
+ * by Spring Kafka observation (listener.observation-enabled: true) and is not needed here.
+ *
+ * <p>Only two operations remain:
+ * <ul>
+ *   <li>{@link #captureCurrentTraceHeaders()} — called by the service layer at write-time
+ *       to capture the active trace context into the outbox row.</li>
+ *   <li>{@link #extractContext(Map)} — called by {@link com.ticketing.orders.outbox.OutboxMessagePublisher}
+ *       at publish-time to restore the saved context before sending to Kafka.</li>
+ * </ul>
+ */
 public final class KafkaTraceContext {
 
-    private static final TextMapGetter<ConsumerRecord<String, String>> CONSUMER_RECORD_GETTER =
-            new TextMapGetter<>() {
-                @Override
-                public Iterable<String> keys(ConsumerRecord<String, String> carrier) {
-                    return Arrays.stream(carrier.headers().toArray()).map(Header::key).toList();
-                }
-
-                @Override
-                public String get(ConsumerRecord<String, String> carrier, String key) {
-                    Header header = carrier.headers().lastHeader(key);
-                    if (header == null || header.value() == null) {
-                        return null;
-                    }
-                    return new String(header.value(), StandardCharsets.UTF_8);
-                }
-            };
+    private static final TextMapSetter<Map<String, String>> MAP_SETTER = Map::put;
 
     private static final TextMapGetter<Map<String, String>> MAP_GETTER = new TextMapGetter<>() {
         @Override
@@ -44,16 +38,10 @@ public final class KafkaTraceContext {
         }
     };
 
-    private static final TextMapSetter<Map<String, String>> MAP_SETTER = Map::put;
-
-    private static final TextMapSetter<Headers> HEADERS_SETTER = (headers, key, value) -> {
-        headers.remove(key);
-        headers.add(key, value.getBytes(StandardCharsets.UTF_8));
-    };
-
     private KafkaTraceContext() {
     }
 
+    /** Captures the current W3C trace context headers for storage in the outbox row. */
     public static Map<String, String> captureCurrentTraceHeaders() {
         Map<String, String> carrier = new LinkedHashMap<>();
         GlobalOpenTelemetry.getPropagators().getTextMapPropagator()
@@ -61,19 +49,10 @@ public final class KafkaTraceContext {
         return carrier;
     }
 
-    public static Context extractContext(ConsumerRecord<String, String> record) {
-        return GlobalOpenTelemetry.getPropagators().getTextMapPropagator()
-                .extract(Context.current(), record, CONSUMER_RECORD_GETTER);
-    }
-
+    /** Restores a W3C trace context from headers previously captured by {@link #captureCurrentTraceHeaders()}. */
     public static Context extractContext(Map<String, String> headers) {
         Map<String, String> safeHeaders = headers == null ? Map.of() : headers;
         return GlobalOpenTelemetry.getPropagators().getTextMapPropagator()
                 .extract(Context.current(), safeHeaders, MAP_GETTER);
-    }
-
-    public static void injectContext(Context context, Headers headers) {
-        GlobalOpenTelemetry.getPropagators().getTextMapPropagator()
-                .inject(context, headers, HEADERS_SETTER);
     }
 }
