@@ -336,10 +336,12 @@ services:
       TICKET_SERVICE_GRPC_DEADLINE_MS: "5000"
       VENUE_SERVICE_GRPC_HOST: venue-service
       VENUE_SERVICE_GRPC_PORT: "50052"
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      # Spring Boot uses its own HTTP/protobuf OTLP exporter (not the OTel Java Agent).
+      # It reads OTEL_EXPORTER_OTLP_ENDPOINT directly and applies it to both traces and
+      # metrics — port 4318 (HTTP/protobuf) is required. Other services use the Go/Node
+      # OTel SDKs which support gRPC natively on port 4317.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_LOGS_EXPORTER: none
-      OTEL_METRICS_EXPORTER: none
       OTEL_SERVICE_NAME: order-service
     depends_on:
       postgres-orders:

@@ -54,10 +54,14 @@ spring:
     listener:
       ack-mode: MANUAL_IMMEDIATE
       missing-topics-fatal: false   # do not crash if a subscribed topic doesn't exist yet
+      observation-enabled: true     # SB4/Spring Kafka 4: auto-instrument @KafkaListener with OTel spans
+    template:
+      observation-enabled: true     # SB4/Spring Kafka 4: auto-instrument KafkaTemplate.send()
 
   jackson:
-    serialization:
-      write-dates-as-timestamps: false
+    datatype:
+      datetime:
+        write-dates-as-timestamps: false     # moved from serialization in Jackson 3
     deserialization:
       fail-on-unknown-properties: true
 
@@ -72,8 +76,6 @@ management:
         include: health,prometheus
   endpoint:
     health:
-      probes:
-        enabled: true
       show-details: never
   health:
     livenessstate:
@@ -84,6 +86,15 @@ management:
     metrics:
       export:
         enabled: true
+  tracing:
+    sampling:
+      probability: 1.0          # lower to 0.1 in production
+  otlp:
+    tracing:
+      endpoint: ${OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+    metrics:
+      export:
+        endpoint: ${OTLP_ENDPOINT:http://localhost:4318/v1/metrics}
 
 grpc:
   ticket-service:
@@ -99,6 +110,14 @@ redis:
 order:
   expiration:
     minutes: ${ORDER_EXPIRATION_MINUTES:15}
+
+outbox:
+  relay:
+    # Poll interval for the transactional outbox relay in milliseconds.
+    # Default 5 000 ms (~12×/min) keeps event latency well within the 15-min expiry window
+    # while reducing DB queries and OTel spans ~10× vs the previous 500 ms fixed delay.
+    # Override via OUTBOX_RELAY_POLL_INTERVAL_MS env var for lower-latency environments.
+    poll-interval-ms: ${OUTBOX_RELAY_POLL_INTERVAL_MS:5000}
 
 # ── Resilience4j — circuit breaker on gRPC client (R-01) ─────────────────────
 resilience4j:
@@ -120,6 +139,10 @@ resilience4j:
           - io.grpc.StatusRuntimeException
           - java.util.concurrent.TimeoutException
           - java.io.IOException
+        # ResponseStatusException means the gRPC error was already translated to a
+        # valid HTTP response (e.g. 404, 409) — do not intercept with fallback
+        ignoreExceptions:
+          - org.springframework.web.server.ResponseStatusException
       venueService:
         slidingWindowType: COUNT_BASED
         slidingWindowSize: 10
@@ -131,3 +154,5 @@ resilience4j:
           - io.grpc.StatusRuntimeException
           - java.util.concurrent.TimeoutException
           - java.io.IOException
+        ignoreExceptions:
+          - org.springframework.web.server.ResponseStatusException

@@ -1,7 +1,7 @@
 package com.ticketing.orders.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
 import com.ticketing.orders.entity.Order;
@@ -390,7 +390,7 @@ public class OrderService {
                     partitionKey,
                     KafkaTraceContext.captureCurrentTraceHeaders()
             ));
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             // This should never happen for our simple POJOs — treat as programmer error
             throw new IllegalStateException("Failed to serialise outbox payload", e);
         }

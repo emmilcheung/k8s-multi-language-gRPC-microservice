@@ -73,6 +73,12 @@ order-service:
     VENUE_SERVICE_GRPC_HOST: venue-service
     VENUE_SERVICE_GRPC_PORT: "50052"
     TICKET_SERVICE_GRPC_DEADLINE_MS: "5000"
+    # Spring Boot 4 OTel — HTTP/protobuf exporter (port 4318, not gRPC port 4317).
+    # Set to your collector's HTTP/protobuf receiver; overridden at deploy time via
+    # --set order-service.env.OTEL_EXPORTER_OTLP_ENDPOINT=<url>.
+    OTEL_EXPORTER_OTLP_ENDPOINT: ""
+    OTEL_LOGS_EXPORTER: none
+    OTEL_SERVICE_NAME: order-service
   secretRef: order-service-secrets
   resources:
     requests:

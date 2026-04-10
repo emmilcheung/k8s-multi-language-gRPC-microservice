@@ -21,7 +21,11 @@ public class RedissonConfig {
                 .setConnectTimeout(1000)
                 .setTimeout(1000)
                 .setRetryAttempts(2)
-                .setRetryInterval(500);
+                .setRetryInterval(500)
+                // RedissonClient is used only for distributed locking (currently replaced by
+                // gRPC reserve-quota). Disable keepalive PINGs so Redisson 4.0's built-in
+                // OTel instrumentation does not generate spurious Jaeger spans every 30 s.
+                .setPingConnectionInterval(0);
         return Redisson.create(config);
     }
 }

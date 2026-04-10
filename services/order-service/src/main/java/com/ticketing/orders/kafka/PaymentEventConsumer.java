@@ -1,14 +1,8 @@
 package com.ticketing.orders.kafka;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.ticketing.orders.service.OrderService;
-import io.opentelemetry.api.GlobalOpenTelemetry;
-import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.api.trace.SpanKind;
-import io.opentelemetry.api.trace.StatusCode;
-import io.opentelemetry.context.Context;
-import io.opentelemetry.context.Scope;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +20,8 @@ import java.util.UUID;
  *
  * Idempotent: markComplete is a no-op if the order is already COMPLETE or
  * in a state that does not allow payment (CANCELLED or already COMPLETE).
+ * Tracing: Spring Kafka observation (observation-enabled: true) auto-creates a
+ * CONSUMER span and propagates the W3C trace context from Kafka headers.
  */
 @Component
 public class PaymentEventConsumer {
@@ -46,29 +42,17 @@ public class PaymentEventConsumer {
             containerFactory = "kafkaListenerContainerFactory"
     )
     public void onPaymentCaptured(ConsumerRecord<String, String> record, Acknowledgment ack) {
-        Context parentContext = KafkaTraceContext.extractContext(record);
-        Span span = GlobalOpenTelemetry.getTracer("order-service")
-                .spanBuilder("kafka consume " + record.topic())
-                .setParent(parentContext)
-                .setSpanKind(SpanKind.CONSUMER)
-                .startSpan();
         try {
-            try (Scope ignored = span.makeCurrent()) {
-                JsonNode root = objectMapper.readTree(record.value());
-                JsonNode data = root.path("data");
-                UUID orderId = UUID.fromString(data.path("orderId").asText());
+            JsonNode root = objectMapper.readTree(record.value());
+            JsonNode data = root.path("data");
+            UUID orderId = UUID.fromString(data.path("orderId").asText());
 
-                orderService.markComplete(orderId);
-                log.info("Processed payment captured event orderId={}", orderId);
-                ack.acknowledge();
-            }
+            orderService.markComplete(orderId);
+            log.info("Processed payment captured event orderId={}", orderId);
+            ack.acknowledge();
         } catch (Exception e) {
-            span.recordException(e);
-            span.setStatus(StatusCode.ERROR, e.getMessage());
             log.error("Failed to process payment captured event: {}", e.getMessage(), e);
             throw new RuntimeException("Payment event processing failed", e);
-        } finally {
-            span.end();
         }
     }
 }

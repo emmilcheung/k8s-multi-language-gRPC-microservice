@@ -218,6 +218,11 @@ public class TicketServiceClient {
     @SuppressWarnings("unused")
     private ValidateTicketResponse validateAvailabilityFallback(
             String ticketId, Throwable ex) {
+        // ResponseStatusException means the gRPC error was already translated to a valid HTTP
+        // response (e.g. 404, 409) — re-throw unchanged rather than overwriting with 503.
+        if (ex instanceof ResponseStatusException rse) {
+            throw rse;
+        }
         log.warn("Circuit breaker fallback for ticket-service: ticketId={} reason={}", ticketId, ex.getMessage());
         throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                 "Ticket service is temporarily unavailable. Please try again shortly.");
@@ -236,6 +241,11 @@ public class TicketServiceClient {
     private ReserveQuotaResponse reserveQuotaFallback(
             String ticketId, UUID reservationId, UUID userId, int quantity, Instant expiresAt,
             Throwable ex) {
+        // ResponseStatusException means the gRPC error was already translated to a valid HTTP
+        // response (e.g. 404, 409) — re-throw unchanged rather than overwriting with 503.
+        if (ex instanceof ResponseStatusException rse) {
+            throw rse;
+        }
         log.warn("Circuit breaker fallback for reserveQuota: ticketId={} reason={}", ticketId, ex.getMessage());
         throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                 "Ticket service is temporarily unavailable. Please try again shortly.");
