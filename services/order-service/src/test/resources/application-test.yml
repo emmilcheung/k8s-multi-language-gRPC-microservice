@@ -36,8 +36,9 @@ spring:
       ack-mode: MANUAL_IMMEDIATE
 
   jackson:
-    serialization:
-      write-dates-as-timestamps: false
+    datatype:
+      datetime:
+        write-dates-as-timestamps: false     # moved from serialization in Jackson 3
 
 server:
   port: 0

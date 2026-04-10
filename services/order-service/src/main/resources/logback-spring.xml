@@ -10,6 +10,9 @@
         <thread>thread</thread>
         <level>level</level>
       </fieldNames>
+      <!-- Micrometer tracing bridge auto-populates traceId/spanId in MDC -->
+      <includeMdcKeyName>traceId</includeMdcKeyName>
+      <includeMdcKeyName>spanId</includeMdcKeyName>
     </encoder>
   </appender>
 
