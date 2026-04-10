@@ -82,10 +82,12 @@ order-service:
     TICKET_SERVICE_GRPC_PORT: "50051"
     VENUE_SERVICE_GRPC_HOST: ticketing-venue-service.ticketing.svc.cluster.local
     VENUE_SERVICE_GRPC_PORT: "50052"
-    OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
-    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    # Spring Boot 4's OTel SDK (spring-boot-starter-opentelemetry) uses HTTP/protobuf,
+    # not gRPC. Port 4318 is the collector's HTTP/protobuf receiver. All other services
+    # use Go/Node SDKs which speak gRPC natively on port 4317.
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4318"
+    # Logs are structured JSON shipped via logstash/fluentd — not via OTLP.
     OTEL_LOGS_EXPORTER: none
-    OTEL_METRICS_EXPORTER: none
     OTEL_SERVICE_NAME: order-service
   resources:
     requests:
