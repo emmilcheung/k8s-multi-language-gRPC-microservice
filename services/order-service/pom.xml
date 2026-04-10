@@ -7,7 +7,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.4.7</version>
+    <version>4.0.2</version>
     <relativePath/>
   </parent>
 
@@ -22,13 +22,9 @@
     <grpc.version>1.80.0</grpc.version>
     <protobuf.version>4.34.1</protobuf.version>
     <testcontainers.version>1.21.4</testcontainers.version>
-    <jackson-bom.version>2.21.2</jackson-bom.version>
-    <kafka.version>3.9.1</kafka.version>
     <logback.version>1.5.32</logback.version>
     <logstash-logback.version>8.0</logstash-logback.version>
     <postgresql.version>42.7.7</postgresql.version>
-    <spring-framework.version>6.2.17</spring-framework.version>
-    <tomcat.version>10.1.54</tomcat.version>
   </properties>
 
   <dependencies>
@@ -57,20 +53,20 @@
       <scope>runtime</scope>
     </dependency>
 
-    <!-- ── Flyway migrations ─────────────────────────────────────────────── -->
+    <!-- ── Flyway migrations — SB4 requires explicit starter for auto-configuration ── -->
     <dependency>
-      <groupId>org.flywaydb</groupId>
-      <artifactId>flyway-core</artifactId>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-flyway</artifactId>
     </dependency>
     <dependency>
       <groupId>org.flywaydb</groupId>
       <artifactId>flyway-database-postgresql</artifactId>
     </dependency>
 
-    <!-- ── Kafka ─────────────────────────────────────────────────────────── -->
+    <!-- ── Kafka — SB4 requires explicit starter for auto-configuration ─────── -->
     <dependency>
-      <groupId>org.springframework.kafka</groupId>
-      <artifactId>spring-kafka</artifactId>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-kafka</artifactId>
     </dependency>
 
     <!-- ── gRPC client (stub + netty transport) ──────────────────────────── -->
@@ -94,7 +90,7 @@
       <artifactId>protobuf-java</artifactId>
       <version>${protobuf.version}</version>
     </dependency>
-    <!-- Required for generated gRPC stub annotations (javax.annotation.Generated) -->
+    <!-- Required for generated gRPC stub annotations (javax.annotation.Generated); SB4 is Jakarta EE 11 but this is generated code only -->
     <dependency>
       <groupId>javax.annotation</groupId>
       <artifactId>javax.annotation-api</artifactId>
@@ -118,32 +114,33 @@
       <version>${logstash-logback.version}</version>
     </dependency>
 
+    <!-- ── OpenTelemetry — SB4 native (SDK + OTLP exporter + Micrometer bridge) ── -->
     <dependency>
-      <groupId>io.opentelemetry</groupId>
-      <artifactId>opentelemetry-api</artifactId>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-opentelemetry</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-tracing-bridge-otel</artifactId>
     </dependency>
 
-    <!-- ── Jackson extras ───────────────────────────────────────────────── -->
-    <dependency>
-      <groupId>com.fasterxml.jackson.datatype</groupId>
-      <artifactId>jackson-datatype-jsr310</artifactId>
-    </dependency>
+    <!-- ── Jackson extras — jackson-datatype-jsr310 merged into jackson-databind in Jackson 3 ── -->
 
     <dependency>
       <groupId>org.redisson</groupId>
       <artifactId>redisson-spring-boot-starter</artifactId>
-      <version>3.37.0</version>
+      <version>4.0.0</version>
     </dependency>
 
     <!-- ── Resilience4j — circuit breaker on gRPC client (R-01) ─────────────── -->
     <dependency>
       <groupId>io.github.resilience4j</groupId>
       <artifactId>resilience4j-spring-boot3</artifactId>
-      <version>2.2.0</version>
+      <version>2.3.0</version>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-aop</artifactId>
+      <artifactId>spring-boot-starter-aspectj</artifactId>
     </dependency>
 
     <!-- ── Test ──────────────────────────────────────────────────────────── -->
@@ -152,9 +149,15 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- SB4: @AutoConfigureMockMvc moved from spring-boot-test-autoconfigure to spring-boot-webmvc-test -->
     <dependency>
-      <groupId>org.springframework.kafka</groupId>
-      <artifactId>spring-kafka-test</artifactId>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-webmvc-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-kafka-test</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
