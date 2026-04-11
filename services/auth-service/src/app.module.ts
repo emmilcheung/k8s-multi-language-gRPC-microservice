@@ -43,6 +43,24 @@ const envSchema = z.object({
       z.number().int().positive(),
     )
     .default(7 * 24 * 60 * 60),
+  SIGNIN_FAILURE_WINDOW_SECONDS: z
+    .preprocess(
+      (value) => (typeof value === 'string' ? Number(value.trim()) : value),
+      z.number().int().positive(),
+    )
+    .default(15 * 60),
+  SIGNIN_MAX_FAILURES: z
+    .preprocess(
+      (value) => (typeof value === 'string' ? Number(value.trim()) : value),
+      z.number().int().positive(),
+    )
+    .default(5),
+  SIGNIN_LOCKOUT_SECONDS: z
+    .preprocess(
+      (value) => (typeof value === 'string' ? Number(value.trim()) : value),
+      z.number().int().positive(),
+    )
+    .default(15 * 60),
   REFRESH_COOKIE_PATH: z.string().default('/'),
   ACCESS_TOKEN_COOKIE_SAME_SITE: z
     .enum(['strict', 'lax', 'none'])

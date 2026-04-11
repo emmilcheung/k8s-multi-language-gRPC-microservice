@@ -1,11 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  HttpException,
+  HttpStatus,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import type { UsersRepository } from '../users/users.repository';
 import type { JwtService } from '@nestjs/jwt';
 import type { ConfigService } from '@nestjs/config';
 import type { PinoLogger } from 'nestjs-pino';
 import type { RefreshTokenService } from './refresh-token.service';
+import type { SigninAbuseProtectionService } from './signin-abuse-protection.service';
 import * as argon2 from 'argon2';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -117,12 +123,24 @@ function makeRefreshTokenService(
   } as unknown as RefreshTokenService;
 }
 
+function makeSigninAbuseProtectionService(
+  overrides: Partial<SigninAbuseProtectionService> = {},
+): SigninAbuseProtectionService {
+  return {
+    assertNotThrottled: vi.fn().mockResolvedValue(undefined),
+    recordFailure: vi.fn().mockResolvedValue(undefined),
+    recordSuccess: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  } as unknown as SigninAbuseProtectionService;
+}
+
 function makeAuthService(
   overrides: {
     usersRepo?: Partial<UsersRepository>;
     jwtService?: Partial<JwtService>;
     configService?: ConfigService;
     refreshTokenService?: Partial<RefreshTokenService>;
+    signinAbuseProtectionService?: Partial<SigninAbuseProtectionService>;
     redis?: Partial<{
       get: ReturnType<typeof vi.fn>;
       set: ReturnType<typeof vi.fn>;
@@ -133,12 +151,16 @@ function makeAuthService(
   usersRepo: UsersRepository;
   jwtService: JwtService;
   refreshTokenService: RefreshTokenService;
+  signinAbuseProtectionService: SigninAbuseProtectionService;
 } {
   const usersRepo = makeUsersRepo(overrides.usersRepo);
   const jwtService = makeJwtService(overrides.jwtService);
   const configService = overrides.configService ?? makeConfigService();
   const refreshTokenService = makeRefreshTokenService(
     overrides.refreshTokenService,
+  );
+  const signinAbuseProtectionService = makeSigninAbuseProtectionService(
+    overrides.signinAbuseProtectionService,
   );
   const logger = makeLogger();
   const redis = makeRedis(overrides.redis);
@@ -148,9 +170,16 @@ function makeAuthService(
     jwtService,
     configService,
     refreshTokenService,
+    signinAbuseProtectionService,
     redis as never,
   );
-  return { service, usersRepo, jwtService, refreshTokenService };
+  return {
+    service,
+    usersRepo,
+    jwtService,
+    refreshTokenService,
+    signinAbuseProtectionService,
+  };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -212,7 +241,12 @@ describe('AuthService', () => {
       const passwordHash = await argon2.hash('correctPassword', {
         type: argon2.argon2id,
       });
-      const { service, jwtService, refreshTokenService } = makeAuthService({
+      const {
+        service,
+        jwtService,
+        refreshTokenService,
+        signinAbuseProtectionService,
+      } = makeAuthService({
         usersRepo: {
           findByEmail: vi.fn().mockResolvedValue(makeUser({ passwordHash })),
         },
@@ -227,25 +261,43 @@ describe('AuthService', () => {
       expect(jwtService.sign).toHaveBeenCalledOnce();
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1', {});
+      expect(
+        (
+          signinAbuseProtectionService as unknown as {
+            assertNotThrottled: ReturnType<typeof vi.fn>;
+          }
+        ).assertNotThrottled.mock.calls,
+      ).toContainEqual(['user@example.com', null]);
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(signinAbuseProtectionService.recordSuccess).toHaveBeenCalledWith(
+        'user@example.com',
+        null,
+      );
       expect(result.accessToken).toBe('signed.jwt.token');
       expect(result.refreshToken).toBe('opaque-refresh-token');
     });
 
     it('should throw UnauthorizedException when user does not exist', async () => {
-      const { service } = makeAuthService({
+      const { service, signinAbuseProtectionService } = makeAuthService({
         usersRepo: { findByEmail: vi.fn().mockResolvedValue(null) },
       });
 
       await expect(
         service.signin('nobody@example.com', 'password'),
       ).rejects.toThrow(UnauthorizedException);
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(signinAbuseProtectionService.recordFailure).toHaveBeenCalledWith(
+        'nobody@example.com',
+        null,
+      );
     });
 
     it('should throw UnauthorizedException when password is wrong', async () => {
       const passwordHash = await argon2.hash('correctPassword', {
         type: argon2.argon2id,
       });
-      const { service } = makeAuthService({
+      const { service, signinAbuseProtectionService } = makeAuthService({
         usersRepo: {
           findByEmail: vi.fn().mockResolvedValue(makeUser({ passwordHash })),
         },
@@ -254,6 +306,41 @@ describe('AuthService', () => {
       await expect(
         service.signin('user@example.com', 'wrongPassword'),
       ).rejects.toThrow(UnauthorizedException);
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(signinAbuseProtectionService.recordFailure).toHaveBeenCalledWith(
+        'user@example.com',
+        null,
+      );
+    });
+
+    it('should throw TooManyRequestsException when the abuse protection blocks sign-in', async () => {
+      const { service, signinAbuseProtectionService, usersRepo } =
+        makeAuthService({
+          signinAbuseProtectionService: {
+            assertNotThrottled: vi
+              .fn()
+              .mockRejectedValue(
+                new HttpException('locked', HttpStatus.TOO_MANY_REQUESTS),
+              ),
+          },
+        });
+
+      await expect(
+        service.signin('user@example.com', 'password'),
+      ).rejects.toThrow(HttpException);
+
+      expect(
+        (
+          signinAbuseProtectionService as unknown as {
+            assertNotThrottled: ReturnType<typeof vi.fn>;
+          }
+        ).assertNotThrottled.mock.calls,
+      ).toContainEqual(['user@example.com', null]);
+      expect(
+        (usersRepo as unknown as { findByEmail: ReturnType<typeof vi.fn> })
+          .findByEmail.mock.calls,
+      ).toHaveLength(0);
     });
 
     it('should not reveal whether the email exists in the error response', async () => {

@@ -5,6 +5,7 @@ Handles user identity for the platform. Issues short-lived RS256 JWTs stored in 
 ## Responsibilities
 
 - User signup and signin (argon2id password hashing)
+- Redis-backed sign-in abuse protection with temporary lockouts
 - JWT issuance (RS256, 15-minute access tokens)
 - JWKS endpoint for Kong token validation
 - Current user identity forwarding (reads `X-User-Id` header injected by Kong)
@@ -43,6 +44,9 @@ See `.env.example` for the full list with descriptions.
 | `JWT_COOKIE_NAME` | No | Access-token cookie name (default: `token`) |
 | `REFRESH_COOKIE_NAME` | No | Refresh-token cookie name (default: `refreshToken`) |
 | `REFRESH_TOKEN_TTL_SECONDS` | No | Refresh-token TTL and cookie max-age (default: `604800`) |
+| `SIGNIN_FAILURE_WINDOW_SECONDS` | No | Rolling window for failed sign-in counting (default: `900`) |
+| `SIGNIN_MAX_FAILURES` | No | Failed sign-ins allowed in the window before lockout (default: `5`) |
+| `SIGNIN_LOCKOUT_SECONDS` | No | Temporary lockout duration after too many failures (default: `900`) |
 | `REFRESH_COOKIE_PATH` | No | Refresh cookie path scope (default: `/`) |
 | `ACCESS_TOKEN_COOKIE_SAME_SITE` | No | Access-token SameSite policy (`strict/lax/none`) |
 | `REFRESH_TOKEN_COOKIE_SAME_SITE` | No | Refresh-token SameSite policy (`strict/lax/none`) |

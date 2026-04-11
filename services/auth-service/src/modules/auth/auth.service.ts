@@ -18,6 +18,7 @@ import {
   RefreshTokenService,
   type SessionMetadata,
 } from './refresh-token.service';
+import { SigninAbuseProtectionService } from './signin-abuse-protection.service';
 import { parseRsaPrivateKey } from './rsa-key.util';
 
 export interface JwtPayload {
@@ -49,6 +50,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly refreshTokenService: RefreshTokenService,
+    private readonly signinAbuseProtectionService: SigninAbuseProtectionService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {
     // Load and validate RSA private key at construction time (fail loudly)
@@ -95,10 +97,19 @@ export class AuthService {
     password: string,
     sessionMetadata: SessionMetadata = {},
   ): Promise<AuthTokens> {
+    await this.signinAbuseProtectionService.assertNotThrottled(
+      email,
+      sessionMetadata.ipAddress ?? null,
+    );
+
     const user = await this.usersRepo.findByEmail(email);
     if (!user) {
       // Constant-time failure to prevent user enumeration
       await argon2.hash('dummy-constant-time-comparison');
+      await this.signinAbuseProtectionService.recordFailure(
+        email,
+        sessionMetadata.ipAddress ?? null,
+      );
       throw new UnauthorizedException({
         error: {
           code: 'INVALID_CREDENTIALS',
@@ -109,6 +120,10 @@ export class AuthService {
 
     const valid = await argon2.verify(user.passwordHash, password);
     if (!valid) {
+      await this.signinAbuseProtectionService.recordFailure(
+        email,
+        sessionMetadata.ipAddress ?? null,
+      );
       throw new UnauthorizedException({
         error: {
           code: 'INVALID_CREDENTIALS',
@@ -116,6 +131,11 @@ export class AuthService {
         },
       });
     }
+
+    await this.signinAbuseProtectionService.recordSuccess(
+      email,
+      sessionMetadata.ipAddress ?? null,
+    );
 
     this.logger.info({ userId: user.id }, 'User signed in');
     const accessToken = this.issueToken({ sub: user.id, email: user.email });
