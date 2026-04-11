@@ -1,11 +1,12 @@
 # payment-service
 
-Processes payments for confirmed orders using Stripe PaymentIntents. Consumes `orders.order.created` events from Kafka and exposes a REST API for the client to trigger charges.
+Processes payments for confirmed orders using Stripe PaymentIntents. Observes `orders.order.created` events from Kafka and exposes a REST API for the client to trigger charges.
 
 ## Responsibilities
 
 - Charge a payment method via Stripe (idempotent — one payment per order)
-- Listen to `orders.order.created` Kafka events and pre-create payment records
+- In real mode, initiate payments only from `POST /api/payments`
+- In mock mode, auto-complete `orders.order.created` events for local and integration flows
 - Publish `payments.payment.captured` or `payments.payment.failed` events (future)
 - Own the `payments` PostgreSQL database — no other service accesses it
 
@@ -117,8 +118,11 @@ Prometheus metrics endpoint (RED method: request rate, error rate, duration).
 | `NODE_ENV` | No | `development` \| `production` (default: `development`) |
 | `PORT` | No | HTTP port (default: `3001`) |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `DB_POOL_MAX` | No | PostgreSQL pool max connections (default: `20`) |
 | `ORDER_SERVICE_URL` | Yes | Base URL for order-service used to verify order ownership and amount |
-| `STRIPE_SECRET_KEY` | Yes | Stripe secret key. Set to `test_mock` to skip real Stripe calls in tests. |
+| `ORDER_SERVICE_TIMEOUT_MS` | No | Order lookup timeout in milliseconds (default: `5000`) |
+| `STRIPE_SECRET_KEY` | Yes | Stripe secret key. Set to `test_mock` to skip real Stripe calls in tests. In mock mode, sending token `pm_mock_declined` forces a deterministic failed payment for E2E and QA scenarios. |
+| `STRIPE_WEBHOOK_SECRET` | Conditionally | Required in production for webhook signature verification. |
 | `KAFKA_BROKERS` | Yes | Comma-separated Kafka broker addresses (e.g. `localhost:9092`) |
 
 Copy `.env.example` to `.env` and fill in values. Never commit `.env`.
@@ -147,7 +151,7 @@ Migrations live in `migrations/` and are applied via an init container or CI ste
 
 | Topic | Action |
 |---|---|
-| `orders.order.created` | Pre-create a `pending` payment record for the order |
+| `orders.order.created` | In mock mode, auto-complete a payment for local/test flows; in real mode, record the signal and wait for `POST /api/payments` |
 
 Consumer group: `payment-service`
 

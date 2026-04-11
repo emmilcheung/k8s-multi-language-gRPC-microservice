@@ -19,6 +19,8 @@ export default defineConfig({
     env: {
       NEXT_TELEMETRY_DISABLED: "1",
       NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000",
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:
+        process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "pk_test_mock",
       INTERNAL_API_URL: process.env.INTERNAL_API_URL ?? "http://localhost:8000",
       JWT_COOKIE_NAME: process.env.JWT_COOKIE_NAME ?? "token",
       REFRESH_COOKIE_NAME: process.env.REFRESH_COOKIE_NAME ?? "refreshToken",

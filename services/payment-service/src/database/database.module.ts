@@ -26,7 +26,7 @@ export type DrizzleDB = NodePgDatabase<typeof schema>;
       useFactory: (config: ConfigService): Pool => {
         return new Pool({
           connectionString: config.getOrThrow<string>('DATABASE_URL'),
-          max: 10,
+          max: config.get<number>('DB_POOL_MAX', 20),
           idleTimeoutMillis: 30_000,
           connectionTimeoutMillis: 5_000,
           statement_timeout: 30_000,

@@ -1,5 +1,4 @@
 import { test, expect, type Page } from "@playwright/test";
-import { Kafka } from "kafkajs";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -106,39 +105,48 @@ async function fillInputAndTriggerChange(page: Page, selector: string, value: st
   }, value);
 }
 
-/**
- * Publishes a payments.payment.captured CloudEvent to Kafka so that
- * order-service transitions the order to COMPLETE without needing real Stripe credentials.
- */
-async function publishPaymentCaptured(orderId: string) {
-  // KAFKA_EXTERNAL_BROKER defaults to localhost:9093 — reachable via `minikube tunnel`
-  // (same mechanism as Kong on localhost:8000). Override via env var if needed.
-  const broker = process.env.KAFKA_EXTERNAL_BROKER ?? "localhost:9093";
-  const kafka = new Kafka({
-    clientId: "e2e-test",
-    brokers: [broker], // EXTERNAL listener — reachable from the host via minikube tunnel
-    // Suppress noisy kafkajs logs in test output
-    logLevel: 0,
-  });
-  const producer = kafka.producer();
-  await producer.connect();
+async function installStripeMock(
+  page: Page,
+  options: { paymentMethodId?: string; errorMessage?: string } = {}
+) {
+  await page.addInitScript((mockOptions) => {
+    class MockCardElement {
+      mount(container: HTMLElement | string) {
+        const target =
+          typeof container === "string"
+            ? document.querySelector(container)
+            : container;
 
-  const event = {
-    specversion: "1.0",
-    type: "payments.payment.captured",
-    source: "e2e-test",
-    id: crypto.randomUUID(),
-    time: new Date().toISOString(),
-    datacontenttype: "application/json",
-    data: { orderId },
-  };
+        if (target instanceof HTMLElement) {
+          target.setAttribute("data-stripe-mock", "mounted");
+          target.textContent = "Mock card input";
+        }
+      }
 
-  await producer.send({
-    topic: "payments.payment.captured",
-    messages: [{ key: orderId, value: JSON.stringify(event) }],
-  });
+      unmount() {}
+    }
 
-  await producer.disconnect();
+    Object.defineProperty(window, "Stripe", {
+      configurable: true,
+      writable: true,
+      value: () => ({
+        elements: () => ({
+          create: () => new MockCardElement(),
+        }),
+        createPaymentMethod: async () => {
+          if (mockOptions.errorMessage) {
+            return { error: { message: mockOptions.errorMessage } };
+          }
+
+          return {
+            paymentMethod: {
+              id: mockOptions.paymentMethodId ?? "pm_mock_success",
+            },
+          };
+        },
+      }),
+    });
+  }, options);
 }
 
 
@@ -392,19 +400,19 @@ test.describe("orders", () => {
     ).toBeVisible();
   });
 
-  test("buyer pays — order shows complete with success message", async ({ page }) => {
+  test("buyer pays through mocked Stripe checkout — order shows complete with success message", async ({ page }) => {
+    test.setTimeout(90_000);
+    await installStripeMock(page, { paymentMethodId: "pm_mock_success" });
     await setupPurchase(page);
 
-    // Extract orderId from the current URL (/orders/<uuid>)
-    const orderId = page.url().split("/orders/")[1];
-
-    // Publish payment captured event directly to Kafka — bypasses Stripe (not configured in dev)
-    // Order-service consumes this and transitions the order to COMPLETE
-    await publishPaymentCaptured(orderId);
+    await expect(page.getByText("Mock card input")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: /pay now/i })).toBeEnabled();
+    await page.getByRole("button", { name: /pay now/i }).click();
 
     // Poll the order detail page until the status flips to complete.
-    // The page is server-rendered and reads the order status from order-service;
-    // Kafka consumption has variable latency so we reload until the state is reflected.
+    // The page is server-rendered and reads the order status from order-service.
+    // payment-service completes the payment synchronously in mock mode, but the
+    // downstream order transition still arrives asynchronously via Kafka.
     //
     // IMPORTANT: Next.js App Router streams RSC content after the initial HTML.
     // page.goto() resolves (load event) before streaming completes, so the page
@@ -413,7 +421,7 @@ test.describe("orders", () => {
     await expect
       .poll(
         async () => {
-          await page.goto(page.url());
+          await page.reload();
           // Wait for the streaming RSC content to replace the loading skeleton.
           // "Order Summary" heading only appears in the real page, not the skeleton.
           await page
@@ -428,6 +436,38 @@ test.describe("orders", () => {
 
     await expect(page.getByRole("button", { name: /pay now/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /cancel order/i })).toHaveCount(0);
+  });
+
+  test("buyer sees a payment error when mocked Stripe checkout is declined", async ({ page }) => {
+    test.setTimeout(90_000);
+    await installStripeMock(page, { paymentMethodId: "pm_mock_declined" });
+    await setupPurchase(page);
+
+    await expect(page.getByText("Mock card input")).toBeVisible({ timeout: 10000 });
+    await page.getByRole("button", { name: /pay now/i }).click();
+
+    await expect(
+      page.locator('[role="alert"]:not([id="__next-route-announcer__"])')
+    ).toContainText(/mock payment declined/i, {
+      timeout: 10000,
+    });
+
+    await expect
+      .poll(
+        async () => {
+          await page.reload();
+          await page
+            .getByRole("heading", { name: /order summary|order cancelled/i })
+            .first()
+            .waitFor({ timeout: 10000 })
+            .catch(() => {});
+          return page.getByText(/order cancelled/i).isVisible();
+        },
+        { timeout: 45000, intervals: [2000, 3000, 5000] }
+      )
+      .toBe(true);
+
+    await expect(page.getByRole("button", { name: /pay now/i })).toHaveCount(0);
   });
 
   test("buyer cancels — order list shows cancelled badge", async ({ page }) => {

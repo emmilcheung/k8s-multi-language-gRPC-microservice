@@ -4,7 +4,7 @@ import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { z } from 'zod';
 
 const DEFAULT_CURRENCY = 'usd';
-const ORDER_LOOKUP_TIMEOUT_MS = 5_000;
+const DEFAULT_ORDER_LOOKUP_TIMEOUT_MS = 5_000;
 const DECIMAL_PRICE_RE = /^\d+(?:\.\d{1,2})?$/;
 
 const orderResponseSchema = z.object({
@@ -46,12 +46,16 @@ export class OrderServiceClient {
 
   async getOrderSnapshot(orderId: string, userId: string): Promise<OrderSnapshot> {
     const baseUrl = this.config.getOrThrow<string>('ORDER_SERVICE_URL').replace(/\/$/, '');
+    const timeoutMs = this.config.get<number>(
+      'ORDER_SERVICE_TIMEOUT_MS',
+      DEFAULT_ORDER_LOOKUP_TIMEOUT_MS,
+    );
 
     let response: Response;
     try {
       response = await fetch(`${baseUrl}/api/orders/${orderId}`, {
         headers: { 'X-User-Id': userId },
-        signal: AbortSignal.timeout(ORDER_LOOKUP_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';

@@ -8,6 +8,19 @@ interface SubmitPaymentRequest {
   paymentMethodId: string;
 }
 
+async function readJsonBody(response: Response): Promise<unknown> {
+  const rawBody = await response.text();
+  if (!rawBody) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawBody) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * POST /api/submit-payment
  * Accepts a real Stripe paymentMethodId from the client and submits it to the backend payment service.
@@ -36,19 +49,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
 
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
+      const body = (await readJsonBody(res)) as { error?: unknown } | null;
       return NextResponse.json(
         { error: body?.error ?? { message: "Payment processing failed." } },
         { status: res.status, headers: traceResponseHeaders() }
       );
     }
 
-    const paymentResponse = await res.json();
+    const paymentResponse = await readJsonBody(res);
 
     // Revalidate the order page to reflect payment status
     revalidatePath(`/orders/${orderId}`);
 
-    return NextResponse.json(paymentResponse, {
+    return NextResponse.json(paymentResponse ?? {}, {
       status: 201,
       headers: traceResponseHeaders(),
     });

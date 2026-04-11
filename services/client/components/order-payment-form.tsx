@@ -64,6 +64,7 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
   const cardElementRef = useRef<HTMLDivElement>(null);
   const stripeInstanceRef = useRef<StripeInstance | null>(null);
   const cardElementInstanceRef = useRef<CardElement | null>(null);
+  const stripeMountedRef = useRef(false);
 
   const isTimeRunningOut = secondsRemaining !== null && secondsRemaining < 60;
   const isPending = isProcessing || isCancelling;
@@ -89,6 +90,10 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
     };
 
     const initStripe = () => {
+      if (stripeMountedRef.current || !cardElementRef.current) {
+        return;
+      }
+
       const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
       if (!publishableKey) {
         setPaymentError("Stripe configuration is missing. Please contact support.");
@@ -104,29 +109,27 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
 
       stripeInstanceRef.current = stripe;
 
-      // Create card element
-      if (cardElementRef.current) {
-        const elements = stripe.elements();
-        const cardElement = elements.create("card", {
-          style: {
-            base: {
-              fontSize: "14px",
-              color: "#e5e7eb",
-              "::placeholder": {
-                color: "#6b7280",
-              },
-              backgroundColor: "transparent",
+      const elements = stripe.elements();
+      const cardElement = elements.create("card", {
+        style: {
+          base: {
+            fontSize: "14px",
+            color: "#e5e7eb",
+            "::placeholder": {
+              color: "#6b7280",
             },
-            invalid: {
-              color: "#ef4444",
-            },
+            backgroundColor: "transparent",
           },
-        });
+          invalid: {
+            color: "#ef4444",
+          },
+        },
+      });
 
-        cardElement.mount(cardElementRef.current);
-        cardElementInstanceRef.current = cardElement;
-        setStripeReady(true);
-      }
+      cardElement.mount(cardElementRef.current);
+      cardElementInstanceRef.current = cardElement;
+      stripeMountedRef.current = true;
+      setStripeReady(true);
     };
 
     initializeStripe();
@@ -136,6 +139,8 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
       if (cardElementInstanceRef.current) {
         cardElementInstanceRef.current.unmount();
       }
+      cardElementInstanceRef.current = null;
+      stripeMountedRef.current = false;
     };
   }, []);
 
@@ -279,26 +284,24 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
       )}
 
       {/* Card Element */}
-      {stripeReady && (
-        <div className="flex flex-col gap-2">
-          <label htmlFor="card-element" className="text-sm font-medium text-foreground">
-            Card Details
-          </label>
+      <div className="flex flex-col gap-2">
+        <label htmlFor="card-element" className="text-sm font-medium text-foreground">
+          Card Details
+        </label>
+        <div className="relative">
           <div
             id="card-element"
             ref={cardElementRef}
-            className="border border-white/10 rounded-lg px-4 py-3 bg-white/3 focus-within:bg-white/5 focus-within:border-primary/50 transition-colors"
+            className="border border-white/10 rounded-lg px-4 py-3 bg-white/3 focus-within:bg-white/5 focus-within:border-primary/50 transition-colors min-h-12"
           />
+          {!stripeReady && (
+            <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground bg-card/80 rounded-lg">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Loading payment form...
+            </div>
+          )}
         </div>
-      )}
-
-      {/* Loading state while Stripe loads */}
-      {!stripeReady && (
-        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-8">
-          <Loader2 className="w-4 h-4 animate-spin" />
-          Loading payment form...
-        </div>
-      )}
+      </div>
 
       {/* Security note */}
       <div className="flex items-center gap-2 text-xs text-muted-foreground bg-white/3 rounded-xl px-3 py-2.5 border border-white/6">

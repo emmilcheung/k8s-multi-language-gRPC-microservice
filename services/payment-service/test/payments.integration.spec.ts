@@ -150,7 +150,8 @@ beforeAll(async () => {
   app.useGlobalFilters(new GlobalExceptionFilter(app.get(Logger)));
 
   await app.init();
-  request = supertest(app.getHttpServer());
+  const httpServer = app.getHttpServer() as Parameters<typeof supertest>[0];
+  request = supertest(httpServer);
 }, 60_000);
 
 afterAll(async () => {
@@ -199,6 +200,37 @@ describe('POST /api/payments returns 201 and is idempotent when called twice wit
     expect(r1.status).toBe(201);
     expect(r2.status).toBe(201);
     expect(r1.body.payment.id).toBe(r2.body.payment.id);
+  });
+});
+
+describe('POST /api/payments returns 500 when mock mode receives a declined token', () => {
+  beforeAll(cleanPayments);
+
+  it('should persist a failed payment and emit a failed outbox event', async () => {
+    const orderId = '0f3f98dd-1dc1-4d5c-97f6-12663cda7d25';
+
+    const res = await request.post('/api/payments').set('X-User-Id', 'user-fail-1').send({
+      orderId,
+      token: 'pm_mock_declined',
+    });
+
+    expect(res.status).toBe(500);
+    expect(res.body.error.code).toBe('PAYMENT_FAILED');
+    expect(res.body.error.message).toBe('Mock payment declined');
+
+    const paymentRows = await pool.query(
+      'SELECT status, stripe_payment_intent_id FROM payments WHERE order_id = $1',
+      [orderId],
+    );
+    expect(paymentRows.rows).toHaveLength(1);
+    expect(paymentRows.rows[0]?.status).toBe('failed');
+    expect(paymentRows.rows[0]?.stripe_payment_intent_id).toBe(`mock_pi_failed_${orderId}`);
+
+    const outboxRows = await pool.query<{ topic: string }>(
+      'SELECT topic FROM outbox WHERE partition_key = $1 ORDER BY created_at ASC',
+      [orderId],
+    );
+    expect(outboxRows.rows.map((row) => row.topic)).toContain('payments.payment.failed');
   });
 });
 

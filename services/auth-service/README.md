@@ -39,6 +39,7 @@ See `.env.example` for the full list with descriptions.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `DB_POOL_MAX` | No | PostgreSQL pool max connections (default: `20`) |
 | `RSA_PRIVATE_KEY` | Yes | RSA 4096 private key (PEM or base64-encoded PEM) |
 | `JWT_EXPIRY` | No | Token TTL (default: `15m`) |
 | `JWT_COOKIE_NAME` | No | Access-token cookie name (default: `token`) |
@@ -64,32 +65,32 @@ cp .env.example .env
 # Edit .env — add RSA private key (see .env.example for generation command)
 
 # 3. Apply database migrations
-npm run migrate
+pnpm migrate
 
 # 4. Start the service in watch mode
-npm run start:dev
+pnpm start:dev
 ```
 
 ## Testing
 
 ```bash
 # Unit tests
-npm test
+pnpm test
 
 # Integration tests (requires Docker — spins up a real Postgres via Testcontainers)
-npm run test:integration
+pnpm test:integration
 
 # Coverage report
-npm run test:cov
+pnpm test:cov
 ```
 
 ## Database Migrations
 
-Migrations are plain SQL files in `migrations/`. Managed by `node-pg-migrate`.
+Migrations are plain SQL files in `migrations/`. Managed by `drizzle-kit`.
 
 ```bash
 # Apply all pending migrations
-DATABASE_URL=<url> npm run migrate
+DATABASE_URL=<url> pnpm migrate
 ```
 
 In production, migrations are applied by an init container before the service pod starts.
@@ -98,7 +99,7 @@ In production, migrations are applied by an init container before the service po
 
 ```bash
 # TypeScript compile check
-npm run build
+pnpm build
 
 # Docker image (multi-stage, non-root, pinned digest)
 docker build -t auth-service:local .

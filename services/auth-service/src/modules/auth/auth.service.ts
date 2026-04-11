@@ -11,6 +11,7 @@ import * as argon2 from 'argon2';
 import { createHash, createPublicKey, randomUUID } from 'crypto';
 import type Redis from 'ioredis';
 import { Inject } from '@nestjs/common';
+import { z } from 'zod';
 import { REDIS_CLIENT } from '../redis/redis.module';
 import { UsersRepository } from '../users/users.repository';
 import {
@@ -37,6 +38,19 @@ export interface AuthTokens {
   accessToken: string;
   refreshToken: string;
 }
+
+const blacklisableAccessTokenSchema = z.object({
+  jti: z.string().min(1),
+  exp: z.number().int().positive(),
+});
+
+const jwtPayloadSchema = z.object({
+  sub: z.string().min(1),
+  email: z.string().email(),
+  jti: z.string().min(1),
+  iat: z.number().int().optional(),
+  exp: z.number().int().optional(),
+});
 
 @Injectable()
 export class AuthService {
@@ -215,7 +229,10 @@ export class AuthService {
         ],
       };
     } catch (err) {
-      this.logger.error({ err }, 'Failed to export JWKS public key');
+      this.logger.error(
+        { err: err instanceof Error ? err : undefined },
+        'Failed to export JWKS public key',
+      );
       throw new InternalServerErrorException({
         error: { code: 'JWKS_ERROR', message: 'Failed to load JWKS' },
       });
@@ -237,7 +254,11 @@ export class AuthService {
   async verifyAccessToken(token: string): Promise<JwtPayload> {
     let payload: JwtPayload;
     try {
-      payload = await this.jwtService.verifyAsync<JwtPayload>(token);
+      payload = jwtPayloadSchema.parse(
+        await (
+          this.jwtService.verifyAsync as (value: string) => Promise<unknown>
+        )(token),
+      );
     } catch {
       throw new UnauthorizedException({
         error: {
@@ -279,25 +300,19 @@ export class AuthService {
    */
   async blacklistAccessToken(token: string): Promise<void> {
     try {
-      // Decode without verification — we only need the JTI and expiry claims
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      const decoded = this.jwtService.decode(token);
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      if (!decoded?.jti || !decoded?.exp) {
+      const decoded = this.decodeBlacklisableAccessToken(token);
+      if (!decoded) {
         // Token is missing required claims — nothing to blacklist
         return;
       }
 
-      const ttlSeconds =
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-        (decoded.exp as number) - Math.floor(Date.now() / 1000);
+      const ttlSeconds = decoded.exp - Math.floor(Date.now() / 1000);
       if (ttlSeconds <= 0) {
         // Already expired — no need to blacklist
         return;
       }
       await this.redis.set(
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-        `auth-service:blacklist:${decoded.jti as string}`,
+        `auth-service:blacklist:${decoded.jti}`,
         '1',
         'EX',
         ttlSeconds,
@@ -325,5 +340,15 @@ export class AuthService {
       return null;
     }
     return createHash('sha256').update(normalized.toLowerCase()).digest('hex');
+  }
+
+  private decodeBlacklisableAccessToken(
+    token: string,
+  ): z.infer<typeof blacklisableAccessTokenSchema> | null {
+    const decoded = (this.jwtService.decode as (value: string) => unknown)(
+      token,
+    );
+    const parsed = blacklisableAccessTokenSchema.safeParse(decoded);
+    return parsed.success ? parsed.data : null;
   }
 }

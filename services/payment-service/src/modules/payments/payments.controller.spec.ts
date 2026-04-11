@@ -7,8 +7,20 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { PaymentsController } from './payments.controller';
+import { PaymentsService } from './payments.service';
 import { PAYMENT_STATUS } from '../../database/schema';
 import type { Payment } from '../../database/schema';
+
+type MockFn = ReturnType<typeof vi.fn>;
+type PaymentsServiceMock = {
+  charge: MockFn;
+  findById: MockFn;
+  processOrderCreatedEvent: MockFn;
+  constructWebhookEvent: MockFn;
+  handleStripeEvent: MockFn;
+  failStripePayment: MockFn;
+  completeStripePayment: MockFn;
+};
 
 function makePayment(overrides: Partial<Payment> = {}): Payment {
   return {
@@ -30,16 +42,20 @@ function makeService() {
     charge: vi.fn(),
     findById: vi.fn(),
     processOrderCreatedEvent: vi.fn(),
+    constructWebhookEvent: vi.fn(),
+    handleStripeEvent: vi.fn(),
+    failStripePayment: vi.fn(),
+    completeStripePayment: vi.fn(),
   };
 }
 
 describe('PaymentsController.charge', () => {
-  let service: ReturnType<typeof makeService>;
+  let service: PaymentsServiceMock;
   let controller: PaymentsController;
 
   beforeEach(() => {
     service = makeService();
-    controller = new PaymentsController(service as any);
+    controller = new PaymentsController(service as unknown as PaymentsService);
   });
 
   it('should throw BadRequestException when X-User-Id header is missing', async () => {
@@ -73,12 +89,12 @@ describe('PaymentsController.charge', () => {
 });
 
 describe('PaymentsController.findOne', () => {
-  let service: ReturnType<typeof makeService>;
+  let service: PaymentsServiceMock;
   let controller: PaymentsController;
 
   beforeEach(() => {
     service = makeService();
-    controller = new PaymentsController(service as any);
+    controller = new PaymentsController(service as unknown as PaymentsService);
   });
 
   it('should return payment when authenticated owner requests it', async () => {

@@ -485,6 +485,27 @@ class OrderIntegrationTest {
         awaitOrderStatus(orderId, OrderStatus.CANCELLED);
     }
 
+        @Test
+        void paymentFailedEvent_cancels_payable_order() throws Exception {
+                UUID orderId = createOrderAndReturnId(ticketId, userId);
+                orderService.markAwaitingPayment(orderId);
+
+                String event = """
+                                {
+                                  "specversion":"1.0",
+                                  "type":"payments.payment.failed",
+                                  "source":"payment-service",
+                                  "id":"%s",
+                                  "time":"%s",
+                                  "datacontenttype":"application/json",
+                                  "data":{"orderId":"%s","reason":"Mock payment declined"}
+                                }
+                                """.formatted(UUID.randomUUID(), OffsetDateTime.now(), orderId);
+
+                publish("payments.payment.failed", event);
+                awaitOrderStatus(orderId, OrderStatus.CANCELLED);
+        }
+
     @Test
     void ticketUpdatedEvent_updates_local_ticket_replica() throws Exception {
         String updatedTitle = "Updated Concert Title";

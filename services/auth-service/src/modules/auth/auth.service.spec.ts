@@ -83,6 +83,10 @@ function makeUsersRepo(
 function makeJwtService(overrides: Partial<JwtService> = {}): JwtService {
   return {
     sign: vi.fn().mockReturnValue('signed.jwt.token'),
+    decode: vi.fn().mockReturnValue({
+      jti: 'jti-1',
+      exp: Math.floor(Date.now() / 1000) + 300,
+    }),
     verifyAsync: vi.fn().mockResolvedValue({
       sub: 'uuid-1',
       email: 'user@example.com',
@@ -184,6 +188,23 @@ function makeAuthService(
   };
 }
 
+function expectSha256Hex(value: unknown): void {
+  expect(typeof value).toBe('string');
+  if (typeof value === 'string') {
+    expect(value).toMatch(/^[a-f0-9]{64}$/);
+  }
+}
+
+function getLoggerMocks(logger: PinoLogger): {
+  info: ReturnType<typeof vi.fn>;
+  warn: ReturnType<typeof vi.fn>;
+} {
+  return logger as unknown as {
+    info: ReturnType<typeof vi.fn>;
+    warn: ReturnType<typeof vi.fn>;
+  };
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('AuthService', () => {
@@ -198,6 +219,7 @@ describe('AuthService', () => {
         });
 
       const result = await service.signup('user@example.com', 'password123');
+      const loggerMock = getLoggerMocks(logger);
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(usersRepo.findByEmail).toHaveBeenCalledWith('user@example.com');
@@ -212,10 +234,13 @@ describe('AuthService', () => {
         expect.objectContaining({
           event: 'auth.signup.succeeded',
           userId: 'uuid-1',
-          emailHash: expect.any(String),
         }),
         'Auth audit event',
       );
+      const signupAudit = loggerMock.info.mock.lastCall?.[0] as
+        | { emailHash?: unknown }
+        | undefined;
+      expectSha256Hex(signupAudit?.emailHash);
       expect(result.accessToken).toBe('signed.jwt.token');
       expect(result.refreshToken).toBe('opaque-refresh-token');
     });
@@ -228,15 +253,19 @@ describe('AuthService', () => {
       await expect(
         service.signup('user@example.com', 'password123'),
       ).rejects.toThrow(ConflictException);
+      const loggerMock = getLoggerMocks(logger);
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(logger.warn).toHaveBeenCalledWith(
         expect.objectContaining({
           event: 'auth.signup.conflict',
-          emailHash: expect.any(String),
         }),
         'Auth audit event',
       );
+      const signupConflictAudit = loggerMock.warn.mock.lastCall?.[0] as
+        | { emailHash?: unknown }
+        | undefined;
+      expectSha256Hex(signupConflictAudit?.emailHash);
     });
 
     it('should not store the plaintext password', async () => {
@@ -277,6 +306,7 @@ describe('AuthService', () => {
         'user@example.com',
         'correctPassword',
       );
+      const loggerMock = getLoggerMocks(logger);
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
@@ -299,10 +329,13 @@ describe('AuthService', () => {
         expect.objectContaining({
           event: 'auth.signin.succeeded',
           userId: 'uuid-1',
-          emailHash: expect.any(String),
         }),
         'Auth audit event',
       );
+      const signinAudit = loggerMock.info.mock.lastCall?.[0] as
+        | { emailHash?: unknown }
+        | undefined;
+      expectSha256Hex(signinAudit?.emailHash);
       expect(result.accessToken).toBe('signed.jwt.token');
       expect(result.refreshToken).toBe('opaque-refresh-token');
     });
@@ -317,6 +350,7 @@ describe('AuthService', () => {
       await expect(
         service.signin('nobody@example.com', 'password'),
       ).rejects.toThrow(UnauthorizedException);
+      const loggerMock = getLoggerMocks(logger);
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(signinAbuseProtectionService.recordFailure).toHaveBeenCalledWith(
@@ -328,10 +362,13 @@ describe('AuthService', () => {
         expect.objectContaining({
           event: 'auth.signin.failed',
           reason: 'user_not_found',
-          emailHash: expect.any(String),
         }),
         'Auth audit event',
       );
+      const signinFailedAudit = loggerMock.warn.mock.lastCall?.[0] as
+        | { emailHash?: unknown }
+        | undefined;
+      expectSha256Hex(signinFailedAudit?.emailHash);
     });
 
     it('should throw UnauthorizedException when password is wrong', async () => {
@@ -464,6 +501,43 @@ describe('AuthService', () => {
       });
 
       expect(() => service.getJwks()).toThrow();
+    });
+  });
+
+  describe('blacklistAccessToken', () => {
+    it('should persist the token jti in Redis until the token expires', async () => {
+      const redisSet = vi.fn().mockResolvedValue('OK');
+      const now = Math.floor(Date.now() / 1000);
+      const { service } = makeAuthService({
+        jwtService: {
+          decode: vi.fn().mockReturnValue({ jti: 'jti-123', exp: now + 120 }),
+        },
+        redis: { set: redisSet },
+      });
+
+      await service.blacklistAccessToken('signed.jwt.token');
+
+      expect(redisSet).toHaveBeenCalledWith(
+        'auth-service:blacklist:jti-123',
+        '1',
+        'EX',
+        expect.any(Number),
+      );
+      expect(
+        (redisSet.mock.calls[0] as [string, string, string, number])[3],
+      ).toBeGreaterThan(0);
+    });
+
+    it('should ignore decoded tokens without jti and exp claims', async () => {
+      const redisSet = vi.fn().mockResolvedValue('OK');
+      const { service } = makeAuthService({
+        jwtService: { decode: vi.fn().mockReturnValue({ foo: 'bar' }) },
+        redis: { set: redisSet },
+      });
+
+      await service.blacklistAccessToken('signed.jwt.token');
+
+      expect(redisSet).not.toHaveBeenCalled();
     });
   });
 });

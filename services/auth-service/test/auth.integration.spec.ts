@@ -162,7 +162,7 @@ beforeAll(async () => {
   app.useGlobalFilters(new GlobalExceptionFilter(moduleRef.get(Logger)));
 
   await app.init();
-  request = supertest(app.getHttpServer());
+  request = supertest(app.getHttpServer() as Parameters<typeof supertest>[0]);
 }, 90_000);
 
 afterAll(async () => {
