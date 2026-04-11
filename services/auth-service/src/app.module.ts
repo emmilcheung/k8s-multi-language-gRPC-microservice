@@ -14,35 +14,29 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(['development', 'test', 'production'])
     .default('development'),
-  PORT: z
-    .preprocess((value) => {
-      if (typeof value === 'string') {
-        const trimmed = value.trim();
-        // Treat empty string as invalid (will fail numeric validation below)
-        if (trimmed === '') {
-          return value;
-        }
-        const parsed = Number(trimmed);
-        if (Number.isInteger(parsed)) {
-          return parsed;
-        }
-        // Non-integer strings remain as-is and will fail validation
-        return value;
-      }
-      return value;
-    }, z.number().int().min(1).max(65535))
-    .default(3000),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   DATABASE_URL: z.string(),
+  DB_POOL_MAX: z.coerce.number().int().positive().default(20),
   RSA_PRIVATE_KEY: z.string(),
   JWT_EXPIRY: z.string().default('15m'),
   JWT_COOKIE_NAME: z.string().default('token'),
   REFRESH_COOKIE_NAME: z.string().default('refreshToken'),
-  REFRESH_TOKEN_TTL_SECONDS: z
-    .preprocess(
-      (value) => (typeof value === 'string' ? Number(value.trim()) : value),
-      z.number().int().positive(),
-    )
+  REFRESH_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
     .default(7 * 24 * 60 * 60),
+  SIGNIN_FAILURE_WINDOW_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(15 * 60),
+  SIGNIN_MAX_FAILURES: z.coerce.number().int().positive().default(5),
+  SIGNIN_LOCKOUT_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(15 * 60),
   REFRESH_COOKIE_PATH: z.string().default('/'),
   ACCESS_TOKEN_COOKIE_SAME_SITE: z
     .enum(['strict', 'lax', 'none'])

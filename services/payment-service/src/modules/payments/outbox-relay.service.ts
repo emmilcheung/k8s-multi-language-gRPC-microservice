@@ -76,6 +76,21 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private auditError(event: string, context: Record<string, unknown>): void {
+    this.logger.error({ event, ...context }, 'Payment audit event');
+  }
+
+  private errorAuditDetails(err: unknown): Record<string, unknown> {
+    if (err instanceof Error) {
+      return {
+        errorName: err.name,
+        errorMessage: err.message,
+      };
+    }
+
+    return { errorMessage: String(err) };
+  }
+
   /**
    * Poll outbox every second. Publishes up to RELAY_BATCH_SIZE unpublished rows per tick.
    * Each row is published and marked individually — partial batch success is safe
@@ -126,6 +141,16 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        this.auditError('payment.outbox.publish_failed', {
+          outboxId: row.id,
+          topic: row.topic,
+          partitionKey: row.partitionKey,
+          cloudEventType:
+            typeof row.payload === 'object' && row.payload !== null && 'type' in row.payload
+              ? (row.payload.type as string)
+              : undefined,
+          ...this.errorAuditDetails(err),
+        });
         this.logger.error(
           { outboxId: row.id, topic: row.topic, err: msg },
           'Outbox relay: failed to publish row — will retry on next tick',

@@ -334,6 +334,29 @@ public class OrderService {
     }
 
     /**
+     * Cancel an order after a payment failure event from payment-service.
+     *
+     * <p>Idempotent: only non-terminal payable orders are cancelled. This mirrors the
+     * expiration-driven cancellation path but is triggered explicitly by payment failure.
+     */
+    @Transactional
+    public void markPaymentFailed(UUID orderId) {
+        orderRepository.findByIdWithTicket(orderId).ifPresent(order -> {
+            if (order.isAwaitingPayment() && !order.isTerminal()) {
+                order.setStatus(OrderStatus.CANCELLED);
+                orderRepository.save(order);
+
+                List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
+                writeOutbox("orders.order.cancelled", order.getId().toString(),
+                        buildCancelledEventWithSeats(order, seats));
+
+                log.info("Order cancelled after payment failure orderId={} reservationId={} orderType={}",
+                        orderId, order.getReservationId(), order.getOrderType());
+            }
+        });
+    }
+
+    /**
      * Cancel an order due to expiration (called by ExpirationEventConsumer).
      * Emits an outbox cancellation event so other services react.
      */

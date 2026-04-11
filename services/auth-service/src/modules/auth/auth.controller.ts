@@ -2,19 +2,27 @@ import {
   Controller,
   Post,
   Get,
+  Delete,
   Body,
+  Param,
+  ParseUUIDPipe,
   Res,
   Req,
   HttpCode,
   HttpStatus,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import ms from 'ms';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { AuthService } from './auth.service';
 import { SignupDto, SigninDto } from './auth.dto';
-import { RefreshTokenService } from './refresh-token.service';
+import {
+  RefreshTokenService,
+  type SessionMetadata,
+} from './refresh-token.service';
 
 const DEFAULT_ACCESS_TOKEN_COOKIE = 'token';
 const DEFAULT_REFRESH_TOKEN_COOKIE = 'refreshToken';
@@ -24,6 +32,8 @@ const DEFAULT_REFRESH_COOKIE_PATH = '/';
 @Controller()
 export class AuthController {
   constructor(
+    @InjectPinoLogger(AuthController.name)
+    private readonly logger: PinoLogger,
     private readonly authService: AuthService,
     private readonly refreshTokenService: RefreshTokenService,
     private readonly config: ConfigService,
@@ -34,11 +44,13 @@ export class AuthController {
   @HttpCode(HttpStatus.CREATED)
   async signup(
     @Body() dto: SignupDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const { accessToken, refreshToken } = await this.authService.signup(
       dto.email,
       dto.password,
+      this.sessionMetadataFromRequest(req),
     );
     this.setAccessTokenCookie(res, accessToken);
     this.setRefreshTokenCookie(res, refreshToken);
@@ -50,11 +62,13 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async signin(
     @Body() dto: SigninDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const { accessToken, refreshToken } = await this.authService.signin(
       dto.email,
       dto.password,
+      this.sessionMetadataFromRequest(req),
     );
     this.setAccessTokenCookie(res, accessToken);
     this.setRefreshTokenCookie(res, refreshToken);
@@ -71,6 +85,8 @@ export class AuthController {
     const oldRefreshToken = req.cookies[this.refreshTokenCookieName()] as
       | string
       | undefined;
+    const currentSessionId =
+      this.refreshTokenService.extractSessionId(oldRefreshToken);
     if (oldRefreshToken) {
       // Best-effort revocation — don't throw if the token is already gone
       await this.refreshTokenService.revoke(oldRefreshToken).catch(() => {});
@@ -87,6 +103,14 @@ export class AuthController {
     }
 
     this.clearAuthCookies(res);
+    this.logger.info(
+      {
+        event: 'auth.signout.completed',
+        sessionId: currentSessionId,
+        hadAccessToken: Boolean(accessToken),
+      },
+      'Auth audit event',
+    );
   }
 
   // POST /api/auth/refresh — rotate refresh token and issue new access token
@@ -108,20 +132,92 @@ export class AuthController {
       });
     }
 
-    // Validate — throws 401 if missing or expired
-    const userId = await this.refreshTokenService.validate(oldRefreshToken);
+    const { userId, refreshToken } = await this.refreshTokenService.rotate(
+      oldRefreshToken,
+      this.sessionMetadataFromRequest(req),
+    );
 
-    // Rotate: delete old token before issuing the new one
-    await this.refreshTokenService.revoke(oldRefreshToken);
-
-    const [accessToken, refreshToken] = await Promise.all([
-      this.authService.issueAccessTokenForUser(userId),
-      this.refreshTokenService.issue(userId),
-    ]);
+    const accessToken = await this.authService.issueAccessTokenForUser(userId);
 
     this.setAccessTokenCookie(res, accessToken);
     this.setRefreshTokenCookie(res, refreshToken);
+    this.logger.info(
+      {
+        event: 'auth.refresh.succeeded',
+        userId,
+        sessionId: this.refreshTokenService.extractSessionId(refreshToken),
+      },
+      'Auth audit event',
+    );
     return {};
+  }
+
+  @Get('api/users/sessions')
+  @HttpCode(HttpStatus.OK)
+  async listSessions(@Req() req: Request) {
+    const currentUser = await this.requireAuthenticatedUser(req);
+    const currentSessionId = this.refreshTokenService.extractSessionId(
+      req.cookies[this.refreshTokenCookieName()] as string | undefined,
+    );
+    const sessions = await this.refreshTokenService.listSessions(
+      currentUser.id,
+    );
+
+    return {
+      sessions: sessions.map((session) => ({
+        sessionId: session.sessionId,
+        createdAt: session.createdAt,
+        lastRotatedAt: session.lastRotatedAt,
+        userAgent: session.userAgent,
+        ipAddress: session.ipAddress,
+        current: session.sessionId === currentSessionId,
+      })),
+    };
+  }
+
+  @Delete('api/users/sessions/:sessionId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async revokeSession(
+    @Param('sessionId', new ParseUUIDPipe({ version: '4' })) sessionId: string,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const currentUser = await this.requireAuthenticatedUser(req);
+    const revoked = await this.refreshTokenService.revokeSession(
+      currentUser.id,
+      sessionId,
+    );
+
+    if (!revoked) {
+      this.logger.warn(
+        {
+          event: 'auth.session.revoke.missed',
+          userId: currentUser.id,
+          sessionId,
+        },
+        'Auth audit event',
+      );
+      throw new NotFoundException({
+        error: { code: 'SESSION_NOT_FOUND', message: 'Session not found' },
+      });
+    }
+
+    const currentSessionId = this.refreshTokenService.extractSessionId(
+      req.cookies[this.refreshTokenCookieName()] as string | undefined,
+    );
+    if (currentSessionId === sessionId) {
+      this.clearAuthCookies(res);
+    }
+
+    this.logger.info(
+      {
+        event: 'auth.session.revoked',
+        userId: currentUser.id,
+        sessionId,
+        currentSessionRevoked: currentSessionId === sessionId,
+      },
+      'Auth audit event',
+    );
   }
 
   // GET /api/users/currentuser
@@ -236,6 +332,75 @@ export class AuthController {
   private cookieDomain(): string | undefined {
     const domain = this.config.get<string>('COOKIE_DOMAIN');
     return domain?.trim() ? domain : undefined;
+  }
+
+  private sessionMetadataFromRequest(req: Request): SessionMetadata {
+    return {
+      userAgent: this.firstHeaderValue(req.headers['user-agent']),
+      ipAddress: this.extractClientIp(req),
+    };
+  }
+
+  private firstHeaderValue(
+    value: string | string[] | undefined,
+  ): string | null {
+    if (Array.isArray(value)) {
+      return value[0]?.trim() || null;
+    }
+    return value?.trim() || null;
+  }
+
+  private extractClientIp(req: Request): string | null {
+    const forwarded = this.firstHeaderValue(req.headers['x-forwarded-for']);
+    if (forwarded) {
+      return forwarded.split(',')[0]?.trim() || null;
+    }
+
+    const realIp = this.firstHeaderValue(req.headers['x-real-ip']);
+    if (realIp) {
+      return realIp;
+    }
+
+    return req.ip?.trim() || null;
+  }
+
+  private async requireAuthenticatedUser(
+    req: Request,
+  ): Promise<{ id: string }> {
+    const kongUserId = req.headers['x-user-id'] as string | undefined;
+    const token = req.cookies[this.accessTokenCookieName()] as
+      | string
+      | undefined;
+
+    if (!token && !kongUserId) {
+      throw new UnauthorizedException({
+        error: { code: 'UNAUTHENTICATED', message: 'Authentication required' },
+      });
+    }
+
+    if (token) {
+      try {
+        const payload = await this.authService.verifyAccessToken(token);
+        if (kongUserId && kongUserId !== payload.sub) {
+          throw new UnauthorizedException({
+            error: {
+              code: 'UNAUTHENTICATED',
+              message: 'Authentication required',
+            },
+          });
+        }
+        return { id: payload.sub };
+      } catch {
+        throw new UnauthorizedException({
+          error: {
+            code: 'UNAUTHENTICATED',
+            message: 'Authentication required',
+          },
+        });
+      }
+    }
+
+    return { id: kongUserId! };
   }
 
   private clearAuthCookies(res: Response): void {

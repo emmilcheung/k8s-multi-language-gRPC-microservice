@@ -67,17 +67,17 @@ describe("order server actions", () => {
     expect(redirectMock).toHaveBeenCalledWith("/orders");
   });
 
-  it("submitPayment converts dollars to cents", async () => {
+  it("submitPayment sends only the order id and token", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) });
     vi.stubGlobal("fetch", fetchMock);
 
-    await submitPayment("order-3", 12.34, {}, new FormData());
+    await submitPayment("order-3", {}, new FormData());
 
     const [, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(String(requestInit.body)) as { amount: number; token: string };
-    expect(body.amount).toBe(1234);
+    const body = JSON.parse(String(requestInit.body)) as { orderId: string; token: string };
+    expect(body.orderId).toBe("order-3");
     expect(body.token).toBe("pm_card_visa");
     expect(redirectMock).toHaveBeenCalledWith("/orders/order-3");
   });

@@ -1,8 +1,46 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { ConflictException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PinoLogger } from 'nestjs-pino';
+import Stripe from 'stripe';
 import { PaymentsService } from './payments.service';
 import { PAYMENT_STATUS } from '../../database/schema';
 import type { Payment } from '../../database/schema';
+import type { OrderSnapshot } from './order-service.client';
+import { PaymentsRepository } from './payments.repository';
+import { OrderServiceClient } from './order-service.client';
+import { type DrizzleDB } from '../../database/database.module';
+
+type RepoMock = Pick<PaymentsRepository, 'create' | 'findById' | 'findByOrderId' | 'updateStatus'>;
+type OrderServiceClientMock = Pick<OrderServiceClient, 'getOrderSnapshot'>;
+type LoggerMock = Pick<PinoLogger, 'info' | 'warn' | 'error' | 'debug'>;
+type ConfigMock = Pick<ConfigService, 'get' | 'getOrThrow'>;
+type StripeMock = {
+  paymentIntents: {
+    create: ReturnType<typeof vi.fn>;
+    confirm: ReturnType<typeof vi.fn>;
+  };
+  webhooks: {
+    constructEvent: ReturnType<typeof vi.fn>;
+  };
+};
+type MockTx = {
+  insert: ReturnType<typeof vi.fn>;
+  update: ReturnType<typeof vi.fn>;
+};
+type DbMock = {
+  transaction: ReturnType<typeof vi.fn>;
+  _tx: MockTx;
+  _insertChain: {
+    values: ReturnType<typeof vi.fn>;
+    returning: ReturnType<typeof vi.fn>;
+  };
+  _updateChain: {
+    set: ReturnType<typeof vi.fn>;
+    where: ReturnType<typeof vi.fn>;
+    returning: ReturnType<typeof vi.fn>;
+  };
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -34,7 +72,28 @@ function makeStripe() {
   return {
     paymentIntents: {
       create: vi.fn(),
+      confirm: vi.fn(),
     },
+    webhooks: {
+      constructEvent: vi.fn(),
+    },
+  };
+}
+
+function makeOrderSnapshot(overrides: Partial<OrderSnapshot> = {}): OrderSnapshot {
+  return {
+    orderId: '11111111-1111-4111-8111-111111111111',
+    userId: '22222222-2222-4222-8222-222222222222',
+    status: 'created',
+    amount: 1000,
+    currency: 'usd',
+    ...overrides,
+  };
+}
+
+function makeOrderServiceClient() {
+  return {
+    getOrderSnapshot: vi.fn(),
   };
 }
 
@@ -77,11 +136,6 @@ function makeDb(txInsertReturn: Payment | null = null) {
     update: vi.fn().mockReturnValue(updateChain),
   };
 
-  type MockTx = {
-    insert: typeof tx.insert;
-    update: typeof tx.update;
-  };
-
   return {
     // Execute the callback synchronously with the mock tx
     transaction: vi.fn().mockImplementation(async (cb: (tx: MockTx) => Promise<void>) => {
@@ -93,6 +147,24 @@ function makeDb(txInsertReturn: Payment | null = null) {
   };
 }
 
+function createService(params: {
+  logger: LoggerMock;
+  repo: RepoMock;
+  orderServiceClient: OrderServiceClientMock;
+  stripe: StripeMock;
+  config: ConfigMock;
+  db: DbMock;
+}): PaymentsService {
+  return new PaymentsService(
+    params.logger as unknown as PinoLogger,
+    params.repo as unknown as PaymentsRepository,
+    params.orderServiceClient as unknown as OrderServiceClient,
+    params.stripe as unknown as Stripe,
+    params.config as unknown as ConfigService,
+    params.db as unknown as DrizzleDB,
+  );
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('PaymentsService.charge', () => {
@@ -101,6 +173,7 @@ describe('PaymentsService.charge', () => {
   let logger: ReturnType<typeof makeLogger>;
   let config: ReturnType<typeof makeConfig>;
   let db: ReturnType<typeof makeDb>;
+  let orderServiceClient: ReturnType<typeof makeOrderServiceClient>;
   let service: PaymentsService;
 
   beforeEach(() => {
@@ -109,14 +182,9 @@ describe('PaymentsService.charge', () => {
     logger = makeLogger();
     config = makeConfig();
     db = makeDb();
+    orderServiceClient = makeOrderServiceClient();
 
-    service = new PaymentsService(
-      logger as any,
-      repo as any,
-      stripe as any,
-      config as any,
-      db as any,
-    );
+    service = createService({ logger, repo, orderServiceClient, stripe, config, db });
   });
 
   it('should return existing payment when orderId already has a payment (idempotent)', async () => {
@@ -126,21 +194,69 @@ describe('PaymentsService.charge', () => {
     const result = await service.charge({
       orderId: 'order-uuid-1',
       userId: 'user-uuid-1',
-      amount: 1000,
       token: 'pm_test',
     });
 
     expect(result).toEqual(existing);
     expect(repo.create).not.toHaveBeenCalled();
     expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+    expect(orderServiceClient.getOrderSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('should reject a duplicate payment request from a different user', async () => {
+    repo.findByOrderId.mockResolvedValue(makePayment({ userId: 'owner-uuid' }));
+
+    await expect(
+      service.charge({
+        orderId: 'order-uuid-1',
+        userId: 'attacker-uuid',
+        token: 'pm_test',
+      }),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('should continue an existing pending payment instead of returning it unchanged', async () => {
+    const existingPending = makePayment({
+      status: PAYMENT_STATUS.PENDING,
+      stripePaymentIntentId: 'pi_pending',
+    });
+    const completed = makePayment({
+      status: PAYMENT_STATUS.COMPLETED,
+      stripePaymentIntentId: 'pi_pending',
+    });
+    repo.findByOrderId.mockResolvedValue(existingPending);
+    stripe.paymentIntents.confirm.mockResolvedValue({
+      id: 'pi_pending',
+      status: 'succeeded',
+    });
+    db._tx.update.mockReturnValue({
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      returning: vi.fn().mockResolvedValue([completed]),
+    });
+
+    const result = await service.charge({
+      orderId: 'order-uuid-1',
+      userId: 'user-uuid-1',
+      token: 'pm_test',
+    });
+
+    expect(stripe.paymentIntents.confirm).toHaveBeenCalledWith('pi_pending', {
+      payment_method: 'pm_test',
+    });
+    expect(result).toEqual(completed);
+    expect(orderServiceClient.getOrderSnapshot).not.toHaveBeenCalled();
   });
 
   it('should complete payment via mock path when STRIPE_SECRET_KEY contains test_mock', async () => {
-    // Use sk_test_mock — the real .env value — to verify the prefix-inclusive check
     const mockConfig = makeConfig('sk_test_mock');
     const mockDb = makeDb();
-    const completed = makePayment({ status: PAYMENT_STATUS.COMPLETED });
-    // First insert (payments) returns the completed payment; second (outbox) returns a row
+    const completed = makePayment({
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+      status: PAYMENT_STATUS.COMPLETED,
+      stripePaymentIntentId: 'mock_pi_11111111-1111-4111-8111-111111111111',
+    });
     mockDb._tx.insert
       .mockReturnValueOnce({
         values: vi.fn().mockReturnThis(),
@@ -151,35 +267,101 @@ describe('PaymentsService.charge', () => {
         returning: vi.fn().mockResolvedValue([{ id: 'outbox-id' }]),
       });
 
-    const svc = new PaymentsService(
-      makeLogger() as any,
-      repo as any,
-      stripe as any,
-      mockConfig as any,
-      mockDb as any,
-    );
+    const svc = createService({
+      logger: makeLogger(),
+      repo,
+      orderServiceClient,
+      stripe,
+      config: mockConfig,
+      db: mockDb,
+    });
     repo.findByOrderId.mockResolvedValue(null);
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(makeOrderSnapshot());
 
     const result = await svc.charge({
-      orderId: 'order-uuid-1',
-      userId: 'user-uuid-1',
-      amount: 1000,
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
       token: 'pm_test',
     });
 
     expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
-    expect(mockDb.transaction).toHaveBeenCalled();
+    expect(mockDb.transaction).toHaveBeenCalledOnce();
     expect(result).toEqual(completed);
   });
 
-  it('should create payment and initiate Stripe PaymentIntent when no existing payment (real mode)', async () => {
-    const pending = makePayment();
+  it('should fail payment via mock path when token requests a declined outcome', async () => {
+    const mockConfig = makeConfig('sk_test_mock');
+    const mockDb = makeDb();
+    const failed = makePayment({
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+      status: PAYMENT_STATUS.FAILED,
+      stripePaymentIntentId: 'mock_pi_failed_11111111-1111-4111-8111-111111111111',
+    });
+    const mockLogger = makeLogger();
+    mockDb._tx.insert
+      .mockReturnValueOnce({
+        values: vi.fn().mockReturnThis(),
+        returning: vi.fn().mockResolvedValue([failed]),
+      })
+      .mockReturnValueOnce({
+        values: vi.fn().mockReturnThis(),
+        returning: vi.fn().mockResolvedValue([{ id: 'outbox-id' }]),
+      });
+
+    const svc = createService({
+      logger: mockLogger,
+      repo,
+      orderServiceClient,
+      stripe,
+      config: mockConfig,
+      db: mockDb,
+    });
+    repo.findByOrderId.mockResolvedValue(null);
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(makeOrderSnapshot());
+
+    await expect(
+      svc.charge({
+        orderId: '11111111-1111-4111-8111-111111111111',
+        userId: '22222222-2222-4222-8222-222222222222',
+        token: 'pm_mock_declined',
+      }),
+    ).rejects.toThrow(InternalServerErrorException);
+
+    expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+    expect(mockDb.transaction).toHaveBeenCalledOnce();
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'payment.charge.failed',
+        orderId: '11111111-1111-4111-8111-111111111111',
+        mode: 'mock',
+        reason: 'Mock payment declined',
+      }),
+      'Payment audit event',
+    );
+  });
+
+  it('should create payment and initiate Stripe PaymentIntent using authoritative order data', async () => {
+    const pending = makePayment({
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+      amount: 2750,
+    });
     repo.findByOrderId.mockResolvedValue(null);
     repo.create.mockResolvedValue(pending);
-    stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_abc' });
+    stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_abc', status: 'succeeded' });
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(
+      makeOrderSnapshot({
+        orderId: '11111111-1111-4111-8111-111111111111',
+        userId: '22222222-2222-4222-8222-222222222222',
+        amount: 2750,
+      }),
+    );
 
-    // completePaymentWithOutbox uses db.transaction
     const completed = makePayment({
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+      amount: 2750,
       status: PAYMENT_STATUS.COMPLETED,
       stripePaymentIntentId: 'pi_abc',
     });
@@ -190,25 +372,95 @@ describe('PaymentsService.charge', () => {
     });
 
     const result = await service.charge({
-      orderId: 'order-uuid-1',
-      userId: 'user-uuid-1',
-      amount: 1000,
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
       token: 'pm_test',
     });
 
     expect(repo.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        orderId: 'order-uuid-1',
-        amount: 1000,
+        orderId: '11111111-1111-4111-8111-111111111111',
+        amount: 2750,
+        currency: 'usd',
         status: PAYMENT_STATUS.PENDING,
       }),
     );
     expect(stripe.paymentIntents.create).toHaveBeenCalledWith(
-      expect.objectContaining({ amount: 1000, currency: 'usd' }),
-      expect.objectContaining({ idempotencyKey: 'order-uuid-1' }),
+      expect.objectContaining({ amount: 2750, currency: 'usd' }),
+      expect.objectContaining({ idempotencyKey: '11111111-1111-4111-8111-111111111111' }),
     );
-    expect(db.transaction).toHaveBeenCalled();
+    expect(db.transaction).toHaveBeenCalledTimes(2);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'payment.charge.attempted',
+        orderId: '11111111-1111-4111-8111-111111111111',
+        userId: '22222222-2222-4222-8222-222222222222',
+      }),
+      'Payment audit event',
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'payment.charge.completed',
+        orderId: '11111111-1111-4111-8111-111111111111',
+        paymentId: pending.id,
+        stripeIntentId: 'pi_abc',
+      }),
+      'Payment audit event',
+    );
     expect(result).toEqual(completed);
+  });
+
+  it('should keep payment pending when Stripe returns a non-terminal status', async () => {
+    const pending = makePayment();
+    const pendingWithIntent = makePayment({
+      stripePaymentIntentId: 'pi_pending',
+      status: PAYMENT_STATUS.PENDING,
+    });
+    repo.findByOrderId.mockResolvedValue(null);
+    repo.create.mockResolvedValue(pending);
+    repo.updateStatus.mockResolvedValue(pendingWithIntent);
+    stripe.paymentIntents.create.mockResolvedValue({
+      id: 'pi_pending',
+      status: 'processing',
+    });
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(makeOrderSnapshot());
+
+    const result = await service.charge({
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+      token: 'pm_processing',
+    });
+
+    expect(repo.updateStatus).toHaveBeenCalledWith(
+      pending.id,
+      PAYMENT_STATUS.PENDING,
+      'pi_pending',
+    );
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(pendingWithIntent);
+  });
+
+  it('should mark payment as failed when Stripe returns a terminal failure status', async () => {
+    const pending = makePayment();
+    repo.findByOrderId.mockResolvedValue(null);
+    repo.create.mockResolvedValue(pending);
+    repo.updateStatus.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.FAILED }));
+    stripe.paymentIntents.create.mockResolvedValue({
+      id: 'pi_failed',
+      status: 'requires_payment_method',
+    });
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(makeOrderSnapshot());
+
+    await expect(
+      service.charge({
+        orderId: '11111111-1111-4111-8111-111111111111',
+        userId: '22222222-2222-4222-8222-222222222222',
+        token: 'pm_bad',
+      }),
+    ).rejects.toThrow(InternalServerErrorException);
+
+    expect(repo.updateStatus).toHaveBeenCalledWith(pending.id, PAYMENT_STATUS.FAILED, 'pi_failed');
+    expect(db.transaction).toHaveBeenCalledTimes(1);
   });
 
   it('should mark payment as failed and throw when Stripe fails', async () => {
@@ -217,12 +469,12 @@ describe('PaymentsService.charge', () => {
     repo.create.mockResolvedValue(pending);
     stripe.paymentIntents.create.mockRejectedValue(new Error('Card declined'));
     repo.updateStatus.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.FAILED }));
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(makeOrderSnapshot());
 
     await expect(
       service.charge({
-        orderId: 'order-uuid-1',
-        userId: 'user-uuid-1',
-        amount: 1000,
+        orderId: '11111111-1111-4111-8111-111111111111',
+        userId: '22222222-2222-4222-8222-222222222222',
         token: 'pm_bad',
       }),
     ).rejects.toThrow(InternalServerErrorException);
@@ -230,43 +482,38 @@ describe('PaymentsService.charge', () => {
     expect(repo.updateStatus).toHaveBeenCalledWith(pending.id, PAYMENT_STATUS.FAILED);
   });
 
-  it('should default currency to usd when not specified', async () => {
-    const pending = makePayment();
+  it('should reject orders that are not in a payable state', async () => {
     repo.findByOrderId.mockResolvedValue(null);
-    repo.create.mockResolvedValue(pending);
-    stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_xyz' });
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(
+      makeOrderSnapshot({ status: 'cancelled' }),
+    );
 
-    const completed = makePayment({ status: PAYMENT_STATUS.COMPLETED });
-    db._tx.update.mockReturnValue({
-      set: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      returning: vi.fn().mockResolvedValue([completed]),
-    });
-
-    await service.charge({
-      orderId: 'order-uuid-1',
-      userId: 'user-uuid-1',
-      amount: 500,
-      token: 'pm_x',
-    });
-
-    expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ currency: 'usd' }));
+    await expect(
+      service.charge({
+        orderId: '11111111-1111-4111-8111-111111111111',
+        userId: '22222222-2222-4222-8222-222222222222',
+        token: 'pm_x',
+      }),
+    ).rejects.toThrow(ConflictException);
   });
 });
 
 describe('PaymentsService.findById', () => {
   let repo: ReturnType<typeof makeRepo>;
+  let orderServiceClient: ReturnType<typeof makeOrderServiceClient>;
   let service: PaymentsService;
 
   beforeEach(() => {
     repo = makeRepo();
-    service = new PaymentsService(
-      makeLogger() as any,
-      repo as any,
-      makeStripe() as any,
-      makeConfig() as any,
-      makeDb() as any,
-    );
+    orderServiceClient = makeOrderServiceClient();
+    service = createService({
+      logger: makeLogger(),
+      repo,
+      orderServiceClient,
+      stripe: makeStripe(),
+      config: makeConfig(),
+      db: makeDb(),
+    });
   });
 
   it('should return payment when it exists', async () => {
@@ -285,9 +532,44 @@ describe('PaymentsService.findById', () => {
 
 describe('PaymentsService.processOrderCreatedEvent', () => {
   let repo: ReturnType<typeof makeRepo>;
+  let orderServiceClient: ReturnType<typeof makeOrderServiceClient>;
+  let stripe: ReturnType<typeof makeStripe>;
+  let logger: ReturnType<typeof makeLogger>;
 
   beforeEach(() => {
     repo = makeRepo();
+    orderServiceClient = makeOrderServiceClient();
+    stripe = makeStripe();
+    logger = makeLogger();
+  });
+
+  it('should ignore orders.order.created in real mode until charge is requested', async () => {
+    const realDb = makeDb();
+    const service = createService({
+      logger,
+      repo,
+      orderServiceClient,
+      stripe,
+      config: makeConfig('sk_test_live'),
+      db: realDb,
+    });
+    repo.findByOrderId.mockResolvedValue(null);
+
+    await service.processOrderCreatedEvent({ orderId: 'order-1', userId: 'user-1', amount: 2000 });
+
+    expect(realDb.transaction).not.toHaveBeenCalled();
+    expect(repo.create).not.toHaveBeenCalled();
+    expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'payment.order_created.ignored',
+        orderId: 'order-1',
+        userId: 'user-1',
+        mode: 'real',
+        reason: 'awaiting_explicit_charge',
+      }),
+      'Payment audit event',
+    );
   });
 
   it('should create a completed payment via mock path when STRIPE_SECRET_KEY is test_mock', async () => {
@@ -304,13 +586,14 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
         returning: vi.fn().mockResolvedValue([{ id: 'outbox-id' }]),
       });
 
-    const service = new PaymentsService(
-      makeLogger() as any,
-      repo as any,
-      makeStripe() as any,
-      makeConfig('test_mock') as any,
-      mockDb as any,
-    );
+    const service = createService({
+      logger,
+      repo,
+      orderServiceClient,
+      stripe,
+      config: makeConfig('test_mock'),
+      db: mockDb,
+    });
     repo.findByOrderId.mockResolvedValue(null);
 
     await service.processOrderCreatedEvent({ orderId: 'order-1', userId: 'user-1', amount: 2000 });
@@ -336,31 +619,33 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
         returning: vi.fn().mockResolvedValue([{ id: 'outbox-id' }]),
       });
 
-    const service = new PaymentsService(
-      makeLogger() as any,
-      repo as any,
-      makeStripe() as any,
-      makeConfig('sk_test_mock') as any, // Docker-compose value with sk_ prefix
-      mockDb as any,
-    );
+    const service = createService({
+      logger,
+      repo,
+      orderServiceClient,
+      stripe,
+      config: makeConfig('sk_test_mock'),
+      db: mockDb,
+    });
     repo.findByOrderId.mockResolvedValue(null);
 
     await service.processOrderCreatedEvent({ orderId: 'order-1', userId: 'user-1', amount: 2000 });
 
     // Should have used mock path (transaction called) and NOT called Stripe
     expect(mockDb.transaction).toHaveBeenCalled();
-    expect(makeStripe().paymentIntents.create).not.toHaveBeenCalled();
+    expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
   });
 
   it('should skip processing when orderId already has a payment (idempotent)', async () => {
     const mockDb = makeDb();
-    const service = new PaymentsService(
-      makeLogger() as any,
-      repo as any,
-      makeStripe() as any,
-      makeConfig('test_mock') as any,
-      mockDb as any,
-    );
+    const service = createService({
+      logger,
+      repo,
+      orderServiceClient,
+      stripe,
+      config: makeConfig('test_mock'),
+      db: mockDb,
+    });
     repo.findByOrderId.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.COMPLETED }));
 
     await service.processOrderCreatedEvent({ orderId: 'order-1', userId: 'user-1', amount: 2000 });
@@ -372,17 +657,178 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
     const mockDb = makeDb();
     mockDb.transaction.mockRejectedValue(new Error('DB connection lost'));
 
-    const service = new PaymentsService(
-      makeLogger() as any,
-      repo as any,
-      makeStripe() as any,
-      makeConfig('test_mock') as any,
-      mockDb as any,
-    );
+    const service = createService({
+      logger,
+      repo,
+      orderServiceClient,
+      stripe,
+      config: makeConfig('test_mock'),
+      db: mockDb,
+    });
     repo.findByOrderId.mockResolvedValue(null);
 
     await expect(
       service.processOrderCreatedEvent({ orderId: 'order-1', userId: 'user-1', amount: 1000 }),
     ).rejects.toThrow('DB connection lost');
+  });
+});
+
+describe('PaymentsService Stripe webhook idempotency', () => {
+  let repo: ReturnType<typeof makeRepo>;
+  let orderServiceClient: ReturnType<typeof makeOrderServiceClient>;
+  let stripe: ReturnType<typeof makeStripe>;
+  let db: ReturnType<typeof makeDb>;
+  let logger: ReturnType<typeof makeLogger>;
+  let service: PaymentsService;
+
+  beforeEach(() => {
+    repo = makeRepo();
+    orderServiceClient = makeOrderServiceClient();
+    stripe = makeStripe();
+    db = makeDb();
+    logger = makeLogger();
+    service = createService({ logger, repo, orderServiceClient, stripe, config: makeConfig(), db });
+  });
+
+  it('should audit an applied succeeded webhook transition', async () => {
+    repo.findById.mockResolvedValue(
+      makePayment({ status: PAYMENT_STATUS.PENDING, stripePaymentIntentId: 'pi_done' }),
+    );
+
+    await service.completeStripePayment('pay-uuid-1', 'pi_done');
+
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'payment.webhook.transition_applied',
+        transition: 'completed',
+        paymentId: 'pay-uuid-1',
+        stripeIntentId: 'pi_done',
+      }),
+      'Payment audit event',
+    );
+  });
+
+  it('should audit an applied failed webhook transition', async () => {
+    repo.findById.mockResolvedValue(
+      makePayment({ status: PAYMENT_STATUS.PENDING, stripePaymentIntentId: 'pi_failed' }),
+    );
+
+    await service.failStripePayment('pay-uuid-1', 'Card declined', 'pi_failed');
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'payment.webhook.transition_applied',
+        transition: 'failed',
+        paymentId: 'pay-uuid-1',
+        stripeIntentId: 'pi_failed',
+      }),
+      'Payment audit event',
+    );
+  });
+
+  it('should ignore a succeeded webhook when the state changed concurrently before the update', async () => {
+    repo.findById
+      .mockResolvedValueOnce(
+        makePayment({ status: PAYMENT_STATUS.PENDING, stripePaymentIntentId: 'pi_done' }),
+      )
+      .mockResolvedValueOnce(makePayment({ status: PAYMENT_STATUS.COMPLETED }));
+    db._tx.update.mockReturnValue({
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      returning: vi.fn().mockResolvedValue([]),
+    });
+
+    await service.completeStripePayment('pay-uuid-1', 'pi_done');
+
+    expect(db._tx.insert).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'payment.webhook.transition_ignored',
+        transition: 'completed',
+        paymentId: 'pay-uuid-1',
+        reason: 'state_changed_concurrently',
+      }),
+      'Payment audit event',
+    );
+  });
+
+  it('should ignore a failed webhook when the state changed concurrently before the update', async () => {
+    repo.findById
+      .mockResolvedValueOnce(
+        makePayment({ status: PAYMENT_STATUS.PENDING, stripePaymentIntentId: 'pi_failed' }),
+      )
+      .mockResolvedValueOnce(makePayment({ status: PAYMENT_STATUS.COMPLETED }));
+    db._tx.update.mockReturnValue({
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      returning: vi.fn().mockResolvedValue([]),
+    });
+
+    await service.failStripePayment('pay-uuid-1', 'Card declined', 'pi_failed');
+
+    expect(db._tx.insert).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'payment.webhook.transition_ignored',
+        transition: 'failed',
+        paymentId: 'pay-uuid-1',
+        reason: 'state_changed_concurrently',
+      }),
+      'Payment audit event',
+    );
+  });
+
+  it('should ignore duplicate succeeded webhooks for completed payments', async () => {
+    repo.findById.mockResolvedValue(
+      makePayment({ status: PAYMENT_STATUS.COMPLETED, stripePaymentIntentId: 'pi_done' }),
+    );
+
+    await service.completeStripePayment('pay-uuid-1', 'pi_done');
+
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('should ignore late succeeded webhooks for failed payments', async () => {
+    repo.findById.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.FAILED }));
+
+    await service.completeStripePayment('pay-uuid-1', 'pi_late');
+
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('should ignore duplicate failed webhooks for failed payments', async () => {
+    repo.findById.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.FAILED }));
+
+    await service.failStripePayment('pay-uuid-1', 'Card declined');
+
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('should ignore late failed webhooks for completed payments', async () => {
+    repo.findById.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.COMPLETED }));
+
+    await service.failStripePayment('pay-uuid-1', 'Late failure');
+
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('should ignore succeeded webhooks when the Stripe intent does not match the stored payment', async () => {
+    repo.findById.mockResolvedValue(
+      makePayment({ status: PAYMENT_STATUS.PENDING, stripePaymentIntentId: 'pi_expected' }),
+    );
+
+    await service.completeStripePayment('pay-uuid-1', 'pi_other');
+
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('should ignore failed webhooks when the Stripe intent does not match the stored payment', async () => {
+    repo.findById.mockResolvedValue(
+      makePayment({ status: PAYMENT_STATUS.PENDING, stripePaymentIntentId: 'pi_expected' }),
+    );
+
+    await service.failStripePayment('pay-uuid-1', 'Card declined', 'pi_other');
+
+    expect(db.transaction).not.toHaveBeenCalled();
   });
 });

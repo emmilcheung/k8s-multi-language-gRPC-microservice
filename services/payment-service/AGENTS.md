@@ -10,7 +10,7 @@
 
 | Field | Value |
 |---|---|
-| **Role** | Payment processing — consumes `orders.order.created` events, charges via Stripe, emits `payments.payment.captured` |
+| **Role** | Payment processing — observes `orders.order.created`, charges via Stripe, emits `payments.payment.captured` |
 | **Language** | TypeScript / Node.js 24 LTS |
 | **Framework** | NestJS 11 |
 | **Package manager** | pnpm 10 |
@@ -97,6 +97,8 @@ Same base conventions as all NestJS services — see [auth-service AGENTS.md](..
 
 - Consumes: `orders.order.created` (and `orders.order.cancelled` for refund flows if applicable).
 - Consumer group ID: `payment-service`.
+- In real mode, `orders.order.created` is observational only. The single authoritative payment-initiation path is `POST /api/payments`.
+- In mock mode, `orders.order.created` may auto-complete payments to keep local and integration flows fully automated.
 - **Idempotency is mandatory.** The same event can be delivered more than once — check whether a payment record already exists for the `orderId` before processing.
 - Commit offsets **after** successful processing (not before).
 - On failure: retry with exponential back-off (max 3 attempts), then route to DLT `orders.order.created.dlq`. Never discard a message silently.
@@ -180,11 +182,13 @@ Validated at startup via Zod — service refuses to start if any required var is
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string |
+| `DB_POOL_MAX` | PostgreSQL pool max connections (default `20`) |
 | `KAFKA_BROKERS` | Comma-separated Kafka broker list |
 | `KAFKA_CLIENT_ID` | KafkaJS client ID |
 | `KAFKA_GROUP_ID` | Consumer group ID (`payment-service`) |
+| `ORDER_SERVICE_TIMEOUT_MS` | Order lookup timeout in milliseconds (default `5000`) |
 | `STRIPE_SECRET_KEY` | Stripe secret API key |
-| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (required in production) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTel Collector endpoint |
 | `NODE_ENV` | `development` \| `production` \| `test` |
 

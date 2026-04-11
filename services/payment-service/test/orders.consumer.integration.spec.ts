@@ -71,6 +71,7 @@ beforeAll(async () => {
   process.env['DATABASE_URL'] = databaseUrl;
   process.env['STRIPE_SECRET_KEY'] = 'test_mock';
   process.env['KAFKA_BROKERS'] = kafkaBroker;
+  process.env['KAFKAJS_NO_PARTITIONER_WARNING'] = '1';
   process.env['NODE_ENV'] = 'test';
 
   pool = new Pool({ connectionString: databaseUrl });
@@ -84,6 +85,21 @@ beforeAll(async () => {
   );
   await pool.query(migration1Sql);
   await pool.query(migration2Sql);
+
+  const kafka = new Kafka({
+    clientId: 'payments-consumer-it-admin',
+    brokers: [kafkaBroker],
+  });
+  const admin = kafka.admin();
+  await admin.connect();
+  await admin.createTopics({
+    waitForLeaders: true,
+    topics: [
+      { topic: TOPIC, numPartitions: 1, replicationFactor: 1 },
+      { topic: DLQ_TOPIC, numPartitions: 1, replicationFactor: 1 },
+    ],
+  });
+  await admin.disconnect();
 
   const moduleRef = await Test.createTestingModule({
     imports: [
@@ -123,21 +139,6 @@ beforeAll(async () => {
   app.useGlobalFilters(new GlobalExceptionFilter(app.get(Logger)));
 
   await app.init();
-
-  const kafka = new Kafka({
-    clientId: 'payments-consumer-it-admin',
-    brokers: [kafkaBroker],
-  });
-  const admin = kafka.admin();
-  await admin.connect();
-  await admin.createTopics({
-    waitForLeaders: true,
-    topics: [
-      { topic: TOPIC, numPartitions: 1, replicationFactor: 1 },
-      { topic: DLQ_TOPIC, numPartitions: 1, replicationFactor: 1 },
-    ],
-  });
-  await admin.disconnect();
 }, 120_000);
 
 afterAll(async () => {
@@ -241,7 +242,7 @@ async function waitForPayment(orderId: string, timeoutMs = 10_000): Promise<bool
 }
 
 describe('OrdersConsumer integration', () => {
-  it('processes orders.order.created and persists payment row', async () => {
+  it('processes orders.order.created in mock mode and persists payment row', async () => {
     const event = buildOrderCreatedEvent();
     await publish(TOPIC, event);
 

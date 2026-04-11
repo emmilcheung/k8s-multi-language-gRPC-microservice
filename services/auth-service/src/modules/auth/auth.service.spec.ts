@@ -1,11 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  HttpException,
+  HttpStatus,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import type { UsersRepository } from '../users/users.repository';
 import type { JwtService } from '@nestjs/jwt';
 import type { ConfigService } from '@nestjs/config';
 import type { PinoLogger } from 'nestjs-pino';
 import type { RefreshTokenService } from './refresh-token.service';
+import type { SigninAbuseProtectionService } from './signin-abuse-protection.service';
 import * as argon2 from 'argon2';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -77,6 +83,10 @@ function makeUsersRepo(
 function makeJwtService(overrides: Partial<JwtService> = {}): JwtService {
   return {
     sign: vi.fn().mockReturnValue('signed.jwt.token'),
+    decode: vi.fn().mockReturnValue({
+      jti: 'jti-1',
+      exp: Math.floor(Date.now() / 1000) + 300,
+    }),
     verifyAsync: vi.fn().mockResolvedValue({
       sub: 'uuid-1',
       email: 'user@example.com',
@@ -117,12 +127,24 @@ function makeRefreshTokenService(
   } as unknown as RefreshTokenService;
 }
 
+function makeSigninAbuseProtectionService(
+  overrides: Partial<SigninAbuseProtectionService> = {},
+): SigninAbuseProtectionService {
+  return {
+    assertNotThrottled: vi.fn().mockResolvedValue(undefined),
+    recordFailure: vi.fn().mockResolvedValue(undefined),
+    recordSuccess: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  } as unknown as SigninAbuseProtectionService;
+}
+
 function makeAuthService(
   overrides: {
     usersRepo?: Partial<UsersRepository>;
     jwtService?: Partial<JwtService>;
     configService?: ConfigService;
     refreshTokenService?: Partial<RefreshTokenService>;
+    signinAbuseProtectionService?: Partial<SigninAbuseProtectionService>;
     redis?: Partial<{
       get: ReturnType<typeof vi.fn>;
       set: ReturnType<typeof vi.fn>;
@@ -133,12 +155,17 @@ function makeAuthService(
   usersRepo: UsersRepository;
   jwtService: JwtService;
   refreshTokenService: RefreshTokenService;
+  signinAbuseProtectionService: SigninAbuseProtectionService;
+  logger: PinoLogger;
 } {
   const usersRepo = makeUsersRepo(overrides.usersRepo);
   const jwtService = makeJwtService(overrides.jwtService);
   const configService = overrides.configService ?? makeConfigService();
   const refreshTokenService = makeRefreshTokenService(
     overrides.refreshTokenService,
+  );
+  const signinAbuseProtectionService = makeSigninAbuseProtectionService(
+    overrides.signinAbuseProtectionService,
   );
   const logger = makeLogger();
   const redis = makeRedis(overrides.redis);
@@ -148,9 +175,34 @@ function makeAuthService(
     jwtService,
     configService,
     refreshTokenService,
+    signinAbuseProtectionService,
     redis as never,
   );
-  return { service, usersRepo, jwtService, refreshTokenService };
+  return {
+    service,
+    usersRepo,
+    jwtService,
+    refreshTokenService,
+    signinAbuseProtectionService,
+    logger,
+  };
+}
+
+function expectSha256Hex(value: unknown): void {
+  expect(typeof value).toBe('string');
+  if (typeof value === 'string') {
+    expect(value).toMatch(/^[a-f0-9]{64}$/);
+  }
+}
+
+function getLoggerMocks(logger: PinoLogger): {
+  info: ReturnType<typeof vi.fn>;
+  warn: ReturnType<typeof vi.fn>;
+} {
+  return logger as unknown as {
+    info: ReturnType<typeof vi.fn>;
+    warn: ReturnType<typeof vi.fn>;
+  };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -158,7 +210,7 @@ function makeAuthService(
 describe('AuthService', () => {
   describe('signup', () => {
     it('should return accessToken and refreshToken when email is not already in use', async () => {
-      const { service, usersRepo, jwtService, refreshTokenService } =
+      const { service, usersRepo, jwtService, refreshTokenService, logger } =
         makeAuthService({
           usersRepo: {
             findByEmail: vi.fn().mockResolvedValue(null),
@@ -167,6 +219,7 @@ describe('AuthService', () => {
         });
 
       const result = await service.signup('user@example.com', 'password123');
+      const loggerMock = getLoggerMocks(logger);
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(usersRepo.findByEmail).toHaveBeenCalledWith('user@example.com');
@@ -175,19 +228,44 @@ describe('AuthService', () => {
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1');
+      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1', {});
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'auth.signup.succeeded',
+          userId: 'uuid-1',
+        }),
+        'Auth audit event',
+      );
+      const signupAudit = loggerMock.info.mock.lastCall?.[0] as
+        | { emailHash?: unknown }
+        | undefined;
+      expectSha256Hex(signupAudit?.emailHash);
       expect(result.accessToken).toBe('signed.jwt.token');
       expect(result.refreshToken).toBe('opaque-refresh-token');
     });
 
     it('should throw ConflictException when email is already in use', async () => {
-      const { service } = makeAuthService({
+      const { service, logger } = makeAuthService({
         usersRepo: { findByEmail: vi.fn().mockResolvedValue(makeUser()) },
       });
 
       await expect(
         service.signup('user@example.com', 'password123'),
       ).rejects.toThrow(ConflictException);
+      const loggerMock = getLoggerMocks(logger);
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'auth.signup.conflict',
+        }),
+        'Auth audit event',
+      );
+      const signupConflictAudit = loggerMock.warn.mock.lastCall?.[0] as
+        | { emailHash?: unknown }
+        | undefined;
+      expectSha256Hex(signupConflictAudit?.emailHash);
     });
 
     it('should not store the plaintext password', async () => {
@@ -212,7 +290,13 @@ describe('AuthService', () => {
       const passwordHash = await argon2.hash('correctPassword', {
         type: argon2.argon2id,
       });
-      const { service, jwtService, refreshTokenService } = makeAuthService({
+      const {
+        service,
+        jwtService,
+        refreshTokenService,
+        signinAbuseProtectionService,
+        logger,
+      } = makeAuthService({
         usersRepo: {
           findByEmail: vi.fn().mockResolvedValue(makeUser({ passwordHash })),
         },
@@ -222,30 +306,76 @@ describe('AuthService', () => {
         'user@example.com',
         'correctPassword',
       );
+      const loggerMock = getLoggerMocks(logger);
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1');
+      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1', {});
+      expect(
+        (
+          signinAbuseProtectionService as unknown as {
+            assertNotThrottled: ReturnType<typeof vi.fn>;
+          }
+        ).assertNotThrottled.mock.calls,
+      ).toContainEqual(['user@example.com', null]);
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(signinAbuseProtectionService.recordSuccess).toHaveBeenCalledWith(
+        'user@example.com',
+        null,
+      );
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'auth.signin.succeeded',
+          userId: 'uuid-1',
+        }),
+        'Auth audit event',
+      );
+      const signinAudit = loggerMock.info.mock.lastCall?.[0] as
+        | { emailHash?: unknown }
+        | undefined;
+      expectSha256Hex(signinAudit?.emailHash);
       expect(result.accessToken).toBe('signed.jwt.token');
       expect(result.refreshToken).toBe('opaque-refresh-token');
     });
 
     it('should throw UnauthorizedException when user does not exist', async () => {
-      const { service } = makeAuthService({
-        usersRepo: { findByEmail: vi.fn().mockResolvedValue(null) },
-      });
+      const { service, signinAbuseProtectionService, logger } = makeAuthService(
+        {
+          usersRepo: { findByEmail: vi.fn().mockResolvedValue(null) },
+        },
+      );
 
       await expect(
         service.signin('nobody@example.com', 'password'),
       ).rejects.toThrow(UnauthorizedException);
+      const loggerMock = getLoggerMocks(logger);
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(signinAbuseProtectionService.recordFailure).toHaveBeenCalledWith(
+        'nobody@example.com',
+        null,
+      );
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'auth.signin.failed',
+          reason: 'user_not_found',
+        }),
+        'Auth audit event',
+      );
+      const signinFailedAudit = loggerMock.warn.mock.lastCall?.[0] as
+        | { emailHash?: unknown }
+        | undefined;
+      expectSha256Hex(signinFailedAudit?.emailHash);
     });
 
     it('should throw UnauthorizedException when password is wrong', async () => {
       const passwordHash = await argon2.hash('correctPassword', {
         type: argon2.argon2id,
       });
-      const { service } = makeAuthService({
+      const { service, signinAbuseProtectionService } = makeAuthService({
         usersRepo: {
           findByEmail: vi.fn().mockResolvedValue(makeUser({ passwordHash })),
         },
@@ -254,6 +384,41 @@ describe('AuthService', () => {
       await expect(
         service.signin('user@example.com', 'wrongPassword'),
       ).rejects.toThrow(UnauthorizedException);
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(signinAbuseProtectionService.recordFailure).toHaveBeenCalledWith(
+        'user@example.com',
+        null,
+      );
+    });
+
+    it('should throw TooManyRequestsException when the abuse protection blocks sign-in', async () => {
+      const { service, signinAbuseProtectionService, usersRepo } =
+        makeAuthService({
+          signinAbuseProtectionService: {
+            assertNotThrottled: vi
+              .fn()
+              .mockRejectedValue(
+                new HttpException('locked', HttpStatus.TOO_MANY_REQUESTS),
+              ),
+          },
+        });
+
+      await expect(
+        service.signin('user@example.com', 'password'),
+      ).rejects.toThrow(HttpException);
+
+      expect(
+        (
+          signinAbuseProtectionService as unknown as {
+            assertNotThrottled: ReturnType<typeof vi.fn>;
+          }
+        ).assertNotThrottled.mock.calls,
+      ).toContainEqual(['user@example.com', null]);
+      expect(
+        (usersRepo as unknown as { findByEmail: ReturnType<typeof vi.fn> })
+          .findByEmail.mock.calls,
+      ).toHaveLength(0);
     });
 
     it('should not reveal whether the email exists in the error response', async () => {
@@ -336,6 +501,43 @@ describe('AuthService', () => {
       });
 
       expect(() => service.getJwks()).toThrow();
+    });
+  });
+
+  describe('blacklistAccessToken', () => {
+    it('should persist the token jti in Redis until the token expires', async () => {
+      const redisSet = vi.fn().mockResolvedValue('OK');
+      const now = Math.floor(Date.now() / 1000);
+      const { service } = makeAuthService({
+        jwtService: {
+          decode: vi.fn().mockReturnValue({ jti: 'jti-123', exp: now + 120 }),
+        },
+        redis: { set: redisSet },
+      });
+
+      await service.blacklistAccessToken('signed.jwt.token');
+
+      expect(redisSet).toHaveBeenCalledWith(
+        'auth-service:blacklist:jti-123',
+        '1',
+        'EX',
+        expect.any(Number),
+      );
+      expect(
+        (redisSet.mock.calls[0] as [string, string, string, number])[3],
+      ).toBeGreaterThan(0);
+    });
+
+    it('should ignore decoded tokens without jti and exp claims', async () => {
+      const redisSet = vi.fn().mockResolvedValue('OK');
+      const { service } = makeAuthService({
+        jwtService: { decode: vi.fn().mockReturnValue({ foo: 'bar' }) },
+        redis: { set: redisSet },
+      });
+
+      await service.blacklistAccessToken('signed.jwt.token');
+
+      expect(redisSet).not.toHaveBeenCalled();
     });
   });
 });

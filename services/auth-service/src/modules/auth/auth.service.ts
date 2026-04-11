@@ -8,13 +8,17 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 import * as argon2 from 'argon2';
-import { createPublicKey } from 'crypto';
-import { randomUUID } from 'crypto';
+import { createHash, createPublicKey, randomUUID } from 'crypto';
 import type Redis from 'ioredis';
 import { Inject } from '@nestjs/common';
+import { z } from 'zod';
 import { REDIS_CLIENT } from '../redis/redis.module';
 import { UsersRepository } from '../users/users.repository';
-import { RefreshTokenService } from './refresh-token.service';
+import {
+  RefreshTokenService,
+  type SessionMetadata,
+} from './refresh-token.service';
+import { SigninAbuseProtectionService } from './signin-abuse-protection.service';
 import { parseRsaPrivateKey } from './rsa-key.util';
 
 export interface JwtPayload {
@@ -35,6 +39,19 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
+const blacklisableAccessTokenSchema = z.object({
+  jti: z.string().min(1),
+  exp: z.number().int().positive(),
+});
+
+const jwtPayloadSchema = z.object({
+  sub: z.string().min(1),
+  email: z.string().email(),
+  jti: z.string().min(1),
+  iat: z.number().int().optional(),
+  exp: z.number().int().optional(),
+});
+
 @Injectable()
 export class AuthService {
   private readonly rsaPrivateKey: string;
@@ -46,6 +63,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly refreshTokenService: RefreshTokenService,
+    private readonly signinAbuseProtectionService: SigninAbuseProtectionService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {
     // Load and validate RSA private key at construction time (fail loudly)
@@ -54,9 +72,20 @@ export class AuthService {
     );
   }
 
-  async signup(email: string, password: string): Promise<AuthTokens> {
+  async signup(
+    email: string,
+    password: string,
+    sessionMetadata: SessionMetadata = {},
+  ): Promise<AuthTokens> {
     const existing = await this.usersRepo.findByEmail(email);
     if (existing) {
+      this.logger.warn(
+        {
+          event: 'auth.signup.conflict',
+          emailHash: this.hashAuditValue(email),
+        },
+        'Auth audit event',
+      );
       throw new ConflictException({
         error: {
           code: 'EMAIL_IN_USE',
@@ -73,18 +102,50 @@ export class AuthService {
     });
 
     const user = await this.usersRepo.create(email, passwordHash);
-    this.logger.info({ userId: user.id }, 'User created');
+    this.logger.info(
+      {
+        event: 'auth.signup.succeeded',
+        userId: user.id,
+        emailHash: this.hashAuditValue(user.email),
+      },
+      'Auth audit event',
+    );
 
     const accessToken = this.issueToken({ sub: user.id, email: user.email });
-    const refreshToken = await this.refreshTokenService.issue(user.id);
+    const refreshToken = await this.refreshTokenService.issue(
+      user.id,
+      sessionMetadata,
+    );
     return { accessToken, refreshToken };
   }
 
-  async signin(email: string, password: string): Promise<AuthTokens> {
+  async signin(
+    email: string,
+    password: string,
+    sessionMetadata: SessionMetadata = {},
+  ): Promise<AuthTokens> {
+    await this.signinAbuseProtectionService.assertNotThrottled(
+      email,
+      sessionMetadata.ipAddress ?? null,
+    );
+
     const user = await this.usersRepo.findByEmail(email);
     if (!user) {
       // Constant-time failure to prevent user enumeration
       await argon2.hash('dummy-constant-time-comparison');
+      await this.signinAbuseProtectionService.recordFailure(
+        email,
+        sessionMetadata.ipAddress ?? null,
+      );
+      this.logger.warn(
+        {
+          event: 'auth.signin.failed',
+          reason: 'user_not_found',
+          emailHash: this.hashAuditValue(email),
+          ipHash: this.hashAuditValue(sessionMetadata.ipAddress),
+        },
+        'Auth audit event',
+      );
       throw new UnauthorizedException({
         error: {
           code: 'INVALID_CREDENTIALS',
@@ -95,6 +156,20 @@ export class AuthService {
 
     const valid = await argon2.verify(user.passwordHash, password);
     if (!valid) {
+      await this.signinAbuseProtectionService.recordFailure(
+        email,
+        sessionMetadata.ipAddress ?? null,
+      );
+      this.logger.warn(
+        {
+          event: 'auth.signin.failed',
+          reason: 'invalid_password',
+          userId: user.id,
+          emailHash: this.hashAuditValue(email),
+          ipHash: this.hashAuditValue(sessionMetadata.ipAddress),
+        },
+        'Auth audit event',
+      );
       throw new UnauthorizedException({
         error: {
           code: 'INVALID_CREDENTIALS',
@@ -103,9 +178,25 @@ export class AuthService {
       });
     }
 
-    this.logger.info({ userId: user.id }, 'User signed in');
+    await this.signinAbuseProtectionService.recordSuccess(
+      email,
+      sessionMetadata.ipAddress ?? null,
+    );
+
+    this.logger.info(
+      {
+        event: 'auth.signin.succeeded',
+        userId: user.id,
+        emailHash: this.hashAuditValue(user.email),
+        ipHash: this.hashAuditValue(sessionMetadata.ipAddress),
+      },
+      'Auth audit event',
+    );
     const accessToken = this.issueToken({ sub: user.id, email: user.email });
-    const refreshToken = await this.refreshTokenService.issue(user.id);
+    const refreshToken = await this.refreshTokenService.issue(
+      user.id,
+      sessionMetadata,
+    );
     return { accessToken, refreshToken };
   }
 
@@ -138,7 +229,10 @@ export class AuthService {
         ],
       };
     } catch (err) {
-      this.logger.error({ err }, 'Failed to export JWKS public key');
+      this.logger.error(
+        { err: err instanceof Error ? err : undefined },
+        'Failed to export JWKS public key',
+      );
       throw new InternalServerErrorException({
         error: { code: 'JWKS_ERROR', message: 'Failed to load JWKS' },
       });
@@ -160,7 +254,11 @@ export class AuthService {
   async verifyAccessToken(token: string): Promise<JwtPayload> {
     let payload: JwtPayload;
     try {
-      payload = await this.jwtService.verifyAsync<JwtPayload>(token);
+      payload = jwtPayloadSchema.parse(
+        await (
+          this.jwtService.verifyAsync as (value: string) => Promise<unknown>
+        )(token),
+      );
     } catch {
       throw new UnauthorizedException({
         error: {
@@ -202,25 +300,19 @@ export class AuthService {
    */
   async blacklistAccessToken(token: string): Promise<void> {
     try {
-      // Decode without verification — we only need the JTI and expiry claims
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      const decoded = this.jwtService.decode(token);
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      if (!decoded?.jti || !decoded?.exp) {
+      const decoded = this.decodeBlacklisableAccessToken(token);
+      if (!decoded) {
         // Token is missing required claims — nothing to blacklist
         return;
       }
 
-      const ttlSeconds =
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-        (decoded.exp as number) - Math.floor(Date.now() / 1000);
+      const ttlSeconds = decoded.exp - Math.floor(Date.now() / 1000);
       if (ttlSeconds <= 0) {
         // Already expired — no need to blacklist
         return;
       }
       await this.redis.set(
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-        `auth-service:blacklist:${decoded.jti as string}`,
+        `auth-service:blacklist:${decoded.jti}`,
         '1',
         'EX',
         ttlSeconds,
@@ -240,5 +332,23 @@ export class AuthService {
       tokenPayload,
     );
     return token as string;
+  }
+
+  private hashAuditValue(value: string | null | undefined): string | null {
+    const normalized = value?.trim();
+    if (!normalized) {
+      return null;
+    }
+    return createHash('sha256').update(normalized.toLowerCase()).digest('hex');
+  }
+
+  private decodeBlacklisableAccessToken(
+    token: string,
+  ): z.infer<typeof blacklisableAccessTokenSchema> | null {
+    const decoded = (this.jwtService.decode as (value: string) => unknown)(
+      token,
+    );
+    const parsed = blacklisableAccessTokenSchema.safeParse(decoded);
+    return parsed.success ? parsed.data : null;
   }
 }

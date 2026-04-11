@@ -3,13 +3,15 @@ import {
   NotFoundException,
   InternalServerErrorException,
   Inject,
+  ConflictException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import Stripe from 'stripe';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { PaymentsRepository } from './payments.repository';
+import { OrderServiceClient } from './order-service.client';
 import { STRIPE_CLIENT } from './stripe.constants';
 import { type Payment, PAYMENT_STATUS, outbox, payments } from '../../database/schema';
 import { DRIZZLE_DB, type DrizzleDB } from '../../database/database.module';
@@ -18,12 +20,21 @@ import { captureTraceHeaders } from '../../kafka/trace-context';
 export interface ChargePaymentDto {
   orderId: string;
   userId: string;
-  /** Amount in the smallest currency unit (cents). */
-  amount: number;
-  currency?: string;
   /** Stripe token or paymentMethodId from the client. */
   token: string;
 }
+
+const PAYABLE_ORDER_STATUSES = new Set(['created', 'awaiting_payment']);
+const TERMINAL_PAYMENT_STATUSES = new Set<string>([
+  PAYMENT_STATUS.COMPLETED,
+  PAYMENT_STATUS.FAILED,
+]);
+const FAILED_INTENT_STATUSES = new Set<Stripe.PaymentIntent.Status>([
+  'canceled',
+  'requires_payment_method',
+]);
+const MOCK_DECLINED_TOKEN = 'pm_mock_declined';
+const MOCK_DECLINED_REASON = 'Mock payment declined';
 
 @Injectable()
 export class PaymentsService {
@@ -31,6 +42,7 @@ export class PaymentsService {
     @InjectPinoLogger(PaymentsService.name)
     private readonly logger: PinoLogger,
     private readonly paymentsRepo: PaymentsRepository,
+    private readonly orderServiceClient: OrderServiceClient,
     @Inject(STRIPE_CLIENT) private readonly stripe: Stripe,
     private readonly config: ConfigService,
     @Inject(DRIZZLE_DB) private readonly db: DrizzleDB,
@@ -47,14 +59,114 @@ export class PaymentsService {
     return this.config.get<string>('STRIPE_SECRET_KEY')?.includes('test_mock') ?? false;
   }
 
+  private auditInfo(event: string, context: Record<string, unknown>): void {
+    this.logger.info({ event, ...context }, 'Payment audit event');
+  }
+
+  private auditWarn(event: string, context: Record<string, unknown>): void {
+    this.logger.warn({ event, ...context }, 'Payment audit event');
+  }
+
+  private auditError(event: string, context: Record<string, unknown>): void {
+    this.logger.error({ event, ...context }, 'Payment audit event');
+  }
+
+  private errorAuditDetails(err: unknown): Record<string, unknown> {
+    if (err instanceof Stripe.errors.StripeError) {
+      return {
+        errorName: err.name,
+        errorType: err.type,
+        errorCode: err.code,
+      };
+    }
+
+    if (err instanceof Error) {
+      return {
+        errorName: err.name,
+        errorMessage: err.message,
+      };
+    }
+
+    return { errorMessage: String(err) };
+  }
+
+  private isMockDeclinedToken(token: string): boolean {
+    return token === MOCK_DECLINED_TOKEN;
+  }
+
+  private buildMockStripeIntentId(
+    orderId: string,
+    outcome: 'succeeded' | 'failed' = 'succeeded',
+  ): string {
+    return outcome === 'failed' ? `mock_pi_failed_${orderId}` : `mock_pi_${orderId}`;
+  }
+
+  private async resolveMockChargeOutcome(
+    order: {
+      orderId: string;
+      userId: string;
+      amount: number;
+      currency: string;
+    },
+    token: string,
+  ): Promise<Payment> {
+    if (this.isMockDeclinedToken(token)) {
+      return this.failMockCharge(
+        order.orderId,
+        order.userId,
+        order.amount,
+        order.currency,
+        MOCK_DECLINED_REASON,
+      );
+    }
+
+    return this.completeMockPayment(order.orderId, order.userId, order.amount, order.currency);
+  }
+
   /**
    * Create a new payment for an order.
    * Idempotent: if a payment for the given orderId already exists, returns it.
    */
   async charge(dto: ChargePaymentDto): Promise<Payment> {
+    this.auditInfo('payment.charge.attempted', {
+      orderId: dto.orderId,
+      userId: dto.userId,
+    });
+
     // Idempotency check — Kafka may redeliver the same event
     const existing = await this.paymentsRepo.findByOrderId(dto.orderId);
     if (existing) {
+      if (existing.userId !== dto.userId) {
+        this.auditWarn('payment.charge.rejected', {
+          orderId: dto.orderId,
+          paymentId: existing.id,
+          userId: dto.userId,
+          reason: 'user_mismatch',
+        });
+        throw new NotFoundException({
+          error: { code: 'ORDER_NOT_FOUND', message: 'Order not found' },
+        });
+      }
+
+      if (existing.status === PAYMENT_STATUS.PENDING) {
+        this.auditInfo('payment.charge.resumed', {
+          orderId: dto.orderId,
+          paymentId: existing.id,
+          stripeIntentId: existing.stripePaymentIntentId,
+        });
+        this.logger.info(
+          { orderId: dto.orderId, paymentId: existing.id },
+          'Pending payment already exists — attempting to continue charge',
+        );
+        return this.confirmPendingPayment(existing, dto.token);
+      }
+
+      this.auditInfo('payment.charge.returned_existing', {
+        orderId: dto.orderId,
+        paymentId: existing.id,
+        status: existing.status,
+      });
+
       this.logger.info(
         { orderId: dto.orderId, paymentId: existing.id },
         'Payment already exists — skipping duplicate',
@@ -62,62 +174,97 @@ export class PaymentsService {
       return existing;
     }
 
+    const order = await this.orderServiceClient.getOrderSnapshot(dto.orderId, dto.userId);
+    if (!PAYABLE_ORDER_STATUSES.has(order.status)) {
+      this.auditWarn('payment.charge.rejected', {
+        orderId: order.orderId,
+        userId: order.userId,
+        orderStatus: order.status,
+        reason: 'order_not_payable',
+      });
+      throw new ConflictException({
+        error: {
+          code: 'ORDER_NOT_PAYABLE',
+          message: 'Order is not payable in its current state',
+        },
+      });
+    }
+
     if (this.isMockMode) {
-      // Mock path: create payment and write outbox entry atomically
-      return this.completeMockPayment(dto.orderId, dto.userId, dto.amount, dto.currency ?? 'usd');
+      // Mock path: deterministically complete or fail based on the supplied test token.
+      return this.resolveMockChargeOutcome(order, dto.token);
     }
 
     // Real Stripe path: create PENDING first, then attempt charge
     const payment = await this.paymentsRepo.create({
-      orderId: dto.orderId,
-      userId: dto.userId,
-      amount: dto.amount,
-      currency: dto.currency ?? 'usd',
+      orderId: order.orderId,
+      userId: order.userId,
+      amount: order.amount,
+      currency: order.currency,
       status: PAYMENT_STATUS.PENDING,
     });
 
-    this.logger.info({ paymentId: payment.id, orderId: dto.orderId }, 'Payment created (pending)');
+    this.logger.info(
+      { paymentId: payment.id, orderId: order.orderId },
+      'Payment created (pending)',
+    );
+    this.auditInfo('payment.charge.record_created', {
+      orderId: order.orderId,
+      paymentId: payment.id,
+      userId: order.userId,
+      amount: order.amount,
+      currency: order.currency,
+      status: payment.status,
+    });
 
     // Publish payment.initiated event to notify order-service to transition to AWAITING_PAYMENT
     await this.db.transaction(async (tx) => {
       await tx.insert(outbox).values(
-        this.buildOutboxRow('payments.payment.initiated', dto.orderId, {
-          orderId: dto.orderId,
+        this.buildOutboxRow('payments.payment.initiated', order.orderId, {
+          orderId: order.orderId,
           paymentId: payment.id,
-          userId: dto.userId,
-          amount: dto.amount,
-          currency: dto.currency ?? 'usd',
+          userId: order.userId,
+          amount: order.amount,
+          currency: order.currency,
         }),
       );
     });
 
     try {
+      this.auditInfo('payment.charge.stripe_requested', {
+        orderId: order.orderId,
+        paymentId: payment.id,
+        attemptKind: 'create_payment_intent',
+      });
+
       const intent = await this.stripe.paymentIntents.create(
         {
-          amount: dto.amount,
-          currency: dto.currency ?? 'usd',
+          amount: order.amount,
+          currency: order.currency,
           payment_method: dto.token,
           confirm: true,
           automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
-          metadata: { orderId: dto.orderId, userId: dto.userId, paymentId: payment.id },
+          metadata: {
+            orderId: order.orderId,
+            userId: order.userId,
+            paymentId: payment.id,
+          },
         },
-        { idempotencyKey: dto.orderId }, // prevents double-charge on retry (fixes R-12)
+        { idempotencyKey: order.orderId }, // prevents double-charge on retry (fixes R-12)
       );
 
-      // Mark complete and write outbox in the same transaction
-      return this.completePaymentWithOutbox(
-        payment.id,
-        dto.orderId,
-        dto.userId,
-        dto.amount,
-        dto.currency ?? 'usd',
-        intent.id,
-      );
+      return this.resolveStripeIntentOutcome(payment, intent);
     } catch (err) {
       // Mark payment as failed — never leave it in pending state
       await this.paymentsRepo.updateStatus(payment.id, PAYMENT_STATUS.FAILED);
 
       const msg = err instanceof Error ? err.message : 'Unknown error';
+      this.auditError('payment.charge.failed', {
+        orderId: order.orderId,
+        paymentId: payment.id,
+        userId: order.userId,
+        ...this.errorAuditDetails(err),
+      });
       this.logger.error({ paymentId: payment.id, err: msg }, 'Payment failed');
 
       throw new InternalServerErrorException({
@@ -142,8 +289,8 @@ export class PaymentsService {
    * In mock mode: immediately marks the payment as COMPLETED and writes the
    * payments.payment.captured event to the outbox in a single DB transaction.
    *
-   * In real mode: creates a PENDING payment and initiates a Stripe PaymentIntent.
-   * The payment is completed asynchronously via the Stripe webhook handler.
+   * In real mode: records the order-created signal for observability only.
+   * Payment creation and Stripe initiation happen exclusively via POST /api/payments.
    */
   async processOrderCreatedEvent(event: {
     orderId: string;
@@ -160,35 +307,53 @@ export class PaymentsService {
       // Idempotency: if we already processed this order, skip silently
       const existing = await this.paymentsRepo.findByOrderId(event.orderId);
       if (existing) {
+        this.auditInfo('payment.order_created.ignored', {
+          orderId: event.orderId,
+          paymentId: existing.id,
+          mode: this.isMockMode ? 'mock' : 'real',
+          reason: 'payment_exists',
+          status: existing.status,
+        });
         this.logger.info({ orderId: event.orderId }, 'Order already processed — skipping');
         return;
       }
 
-      if (this.isMockMode) {
-        // Mock path: create payment as COMPLETED and write outbox entry atomically.
-        // This allows the full order flow to complete in local dev and test environments.
-        await this.completeMockPayment(
-          event.orderId,
-          event.userId,
-          event.amount,
-          event.currency ?? 'usd',
+      if (!this.isMockMode) {
+        this.auditInfo('payment.order_created.ignored', {
+          orderId: event.orderId,
+          userId: event.userId,
+          mode: 'real',
+          reason: 'awaiting_explicit_charge',
+        });
+        this.logger.info(
+          { orderId: event.orderId },
+          'Observed order.created in real mode — awaiting explicit payment initiation',
         );
         return;
       }
 
-      // Real Stripe path: create a PENDING payment and initiate a PaymentIntent.
-      // The payment will be confirmed via the Stripe webhook (/stripe/webhook).
-      const payment = await this.paymentsRepo.create({
+      this.auditInfo('payment.order_created.mock_autocomplete', {
         orderId: event.orderId,
         userId: event.userId,
         amount: event.amount,
         currency: event.currency ?? 'usd',
-        status: PAYMENT_STATUS.PENDING,
       });
 
-      await this.initiateStripePayment(payment, event.orderId);
+      // Mock path: create payment as COMPLETED and write outbox entry atomically.
+      // This allows the full order flow to complete in local dev and test environments.
+      await this.completeMockPayment(
+        event.orderId,
+        event.userId,
+        event.amount,
+        event.currency ?? 'usd',
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
+      this.auditError('payment.order_created.failed', {
+        orderId: event.orderId,
+        mode: this.isMockMode ? 'mock' : 'real',
+        ...this.errorAuditDetails(err),
+      });
       this.logger.error({ orderId: event.orderId, err: msg }, 'Failed to process order event');
       // Re-throw so the Kafka consumer can route to DLQ
       throw err;
@@ -212,6 +377,12 @@ export class PaymentsService {
    * Unknown event types are logged and ignored (Stripe sends many event types).
    */
   async handleStripeEvent(event: Stripe.Event): Promise<void> {
+    const stripeObject = event.data.object as Stripe.PaymentIntent | undefined;
+    this.auditInfo('payment.webhook.received', {
+      webhookType: event.type,
+      paymentId: stripeObject?.metadata?.paymentId,
+      stripeIntentId: stripeObject?.id,
+    });
     this.logger.info({ type: event.type }, 'Stripe webhook received');
     switch (event.type) {
       case 'payment_intent.succeeded': {
@@ -220,6 +391,11 @@ export class PaymentsService {
         if (paymentId) {
           await this.completeStripePayment(paymentId, pi.id);
         } else {
+          this.auditWarn('payment.webhook.ignored', {
+            webhookType: event.type,
+            stripeIntentId: pi.id,
+            reason: 'missing_payment_id',
+          });
           this.logger.warn(
             { intentId: pi.id },
             'payment_intent.succeeded: missing paymentId in metadata',
@@ -232,8 +408,13 @@ export class PaymentsService {
         const paymentId = pf.metadata?.paymentId;
         const reason = pf.last_payment_error?.message ?? 'Payment failed';
         if (paymentId) {
-          await this.failStripePayment(paymentId, reason);
+          await this.failStripePayment(paymentId, reason, pf.id);
         } else {
+          this.auditWarn('payment.webhook.ignored', {
+            webhookType: event.type,
+            stripeIntentId: pf.id,
+            reason: 'missing_payment_id',
+          });
           this.logger.warn(
             { intentId: pf.id },
             'payment_intent.payment_failed: missing paymentId in metadata',
@@ -242,6 +423,10 @@ export class PaymentsService {
         break;
       }
       default:
+        this.auditInfo('payment.webhook.ignored', {
+          webhookType: event.type,
+          reason: 'unhandled_type',
+        });
         this.logger.info({ type: event.type }, 'Stripe event ignored (not handled)');
     }
   }
@@ -250,18 +435,73 @@ export class PaymentsService {
    * Mark a payment FAILED and write a payments.payment.failed outbox event.
    * This causes order-service to cancel the order and release any seat holds.
    */
-  async failStripePayment(paymentId: string, reason: string): Promise<void> {
+  async failStripePayment(
+    paymentId: string,
+    reason: string,
+    stripeIntentId?: string,
+  ): Promise<void> {
     const payment = await this.paymentsRepo.findById(paymentId);
     if (!payment) {
+      this.auditWarn('payment.webhook.transition_ignored', {
+        transition: 'failed',
+        paymentId,
+        stripeIntentId,
+        reason: 'payment_not_found',
+      });
       this.logger.warn({ paymentId }, 'failStripePayment: payment not found — skipping');
       return;
     }
 
+    if (TERMINAL_PAYMENT_STATUSES.has(payment.status)) {
+      this.auditInfo('payment.webhook.transition_ignored', {
+        transition: 'failed',
+        orderId: payment.orderId,
+        paymentId,
+        stripeIntentId,
+        reason: 'already_terminal',
+        currentStatus: payment.status,
+      });
+      this.logger.info(
+        { paymentId, currentStatus: payment.status },
+        'failStripePayment: payment already terminal — skipping duplicate transition',
+      );
+      return;
+    }
+
+    if (this.hasMismatchedStripeIntentId(payment, stripeIntentId)) {
+      this.auditWarn('payment.webhook.transition_ignored', {
+        transition: 'failed',
+        orderId: payment.orderId,
+        paymentId,
+        stripeIntentId,
+        expectedStripeIntentId: payment.stripePaymentIntentId,
+        reason: 'stripe_intent_mismatch',
+      });
+      this.logger.warn(
+        {
+          paymentId,
+          expectedStripeIntentId: payment.stripePaymentIntentId,
+          receivedStripeIntentId: stripeIntentId,
+        },
+        'failStripePayment: Stripe intent ID mismatch — skipping transition',
+      );
+      return;
+    }
+
+    let transitionApplied = false;
+
     await this.db.transaction(async (tx) => {
-      await tx
+      const [updatedPayment] = await tx
         .update(payments)
         .set({ status: PAYMENT_STATUS.FAILED, updatedAt: new Date() })
-        .where(eq(payments.id, paymentId));
+        .where(and(eq(payments.id, paymentId), eq(payments.status, PAYMENT_STATUS.PENDING)))
+        .returning();
+
+      if (!updatedPayment) {
+        return;
+      }
+
+      transitionApplied = true;
 
       await tx.insert(outbox).values(
         this.buildOutboxRow('payments.payment.failed', payment.orderId, {
@@ -271,6 +511,31 @@ export class PaymentsService {
           reason,
         }),
       );
+    });
+
+    if (!transitionApplied) {
+      const currentPayment = await this.paymentsRepo.findById(paymentId);
+
+      this.auditInfo('payment.webhook.transition_ignored', {
+        transition: 'failed',
+        orderId: payment.orderId,
+        paymentId,
+        stripeIntentId,
+        reason: 'state_changed_concurrently',
+        currentStatus: currentPayment?.status,
+      });
+      this.logger.info(
+        { paymentId, currentStatus: currentPayment?.status },
+        'failStripePayment: payment state changed concurrently — skipping duplicate transition',
+      );
+      return;
+    }
+
+    this.auditWarn('payment.webhook.transition_applied', {
+      transition: 'failed',
+      orderId: payment.orderId,
+      paymentId,
+      stripeIntentId,
     });
 
     this.logger.warn({ paymentId, reason }, 'Payment marked FAILED — outbox entry written');
@@ -283,10 +548,53 @@ export class PaymentsService {
   async completeStripePayment(paymentId: string, stripeIntentId: string): Promise<void> {
     const payment = await this.paymentsRepo.findById(paymentId);
     if (!payment) {
+      this.auditWarn('payment.webhook.transition_ignored', {
+        transition: 'completed',
+        paymentId,
+        stripeIntentId,
+        reason: 'payment_not_found',
+      });
       this.logger.warn({ paymentId }, 'completeStripePayment: payment not found — skipping');
       return;
     }
-    await this.completePaymentWithOutbox(
+
+    if (TERMINAL_PAYMENT_STATUSES.has(payment.status)) {
+      this.auditInfo('payment.webhook.transition_ignored', {
+        transition: 'completed',
+        orderId: payment.orderId,
+        paymentId,
+        stripeIntentId,
+        reason: 'already_terminal',
+        currentStatus: payment.status,
+      });
+      this.logger.info(
+        { paymentId, currentStatus: payment.status },
+        'completeStripePayment: payment already terminal — skipping duplicate transition',
+      );
+      return;
+    }
+
+    if (this.hasMismatchedStripeIntentId(payment, stripeIntentId)) {
+      this.auditWarn('payment.webhook.transition_ignored', {
+        transition: 'completed',
+        orderId: payment.orderId,
+        paymentId,
+        stripeIntentId,
+        expectedStripeIntentId: payment.stripePaymentIntentId,
+        reason: 'stripe_intent_mismatch',
+      });
+      this.logger.warn(
+        {
+          paymentId,
+          expectedStripeIntentId: payment.stripePaymentIntentId,
+          receivedStripeIntentId: stripeIntentId,
+        },
+        'completeStripePayment: Stripe intent ID mismatch — skipping transition',
+      );
+      return;
+    }
+
+    const completedPayment = await this.completePaymentWithOutbox(
       paymentId,
       payment.orderId,
       payment.userId,
@@ -294,6 +602,30 @@ export class PaymentsService {
       payment.currency,
       stripeIntentId,
     );
+
+    if (!completedPayment) {
+      const currentPayment = await this.paymentsRepo.findById(paymentId);
+      this.auditInfo('payment.webhook.transition_ignored', {
+        transition: 'completed',
+        orderId: payment.orderId,
+        paymentId,
+        stripeIntentId,
+        reason: 'state_changed_concurrently',
+        currentStatus: currentPayment?.status,
+      });
+      this.logger.info(
+        { paymentId, currentStatus: currentPayment?.status },
+        'completeStripePayment: payment state changed concurrently — skipping duplicate transition',
+      );
+      return;
+    }
+
+    this.auditInfo('payment.webhook.transition_applied', {
+      transition: 'completed',
+      orderId: payment.orderId,
+      paymentId,
+      stripeIntentId,
+    });
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────
@@ -341,7 +673,285 @@ export class PaymentsService {
       { paymentId: payment!.id, orderId },
       'Payment completed (mock) — outbox entry written',
     );
+    this.auditInfo('payment.charge.completed', {
+      orderId,
+      paymentId: payment!.id,
+      userId,
+      amount,
+      currency,
+      mode: 'mock',
+      stripeIntentId,
+    });
     return payment!;
+  }
+
+  private async confirmPendingPayment(payment: Payment, token: string): Promise<Payment> {
+    if (this.isMockMode) {
+      return this.resolvePendingMockChargeOutcome(payment, token);
+    }
+
+    try {
+      this.auditInfo('payment.charge.stripe_requested', {
+        orderId: payment.orderId,
+        paymentId: payment.id,
+        attemptKind: payment.stripePaymentIntentId
+          ? 'confirm_existing_intent'
+          : 'create_and_confirm_intent',
+      });
+
+      const intent = payment.stripePaymentIntentId
+        ? await this.stripe.paymentIntents.confirm(payment.stripePaymentIntentId, {
+            payment_method: token,
+          })
+        : await this.stripe.paymentIntents.create(
+            {
+              amount: payment.amount,
+              currency: payment.currency,
+              payment_method: token,
+              confirm: true,
+              automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+              metadata: {
+                orderId: payment.orderId,
+                userId: payment.userId,
+                paymentId: payment.id,
+              },
+            },
+            { idempotencyKey: payment.orderId },
+          );
+
+      return this.resolveStripeIntentOutcome(payment, intent);
+    } catch (err) {
+      await this.paymentsRepo.updateStatus(payment.id, PAYMENT_STATUS.FAILED);
+
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      this.auditError('payment.charge.failed', {
+        orderId: payment.orderId,
+        paymentId: payment.id,
+        userId: payment.userId,
+        ...this.errorAuditDetails(err),
+      });
+      this.logger.error({ paymentId: payment.id, err: msg }, 'Pending payment confirmation failed');
+
+      throw new InternalServerErrorException({
+        error: { code: 'PAYMENT_FAILED', message: 'Payment processing failed' },
+      });
+    }
+  }
+
+  private async resolveStripeIntentOutcome(
+    payment: Payment,
+    intent: Pick<Stripe.PaymentIntent, 'id' | 'status'>,
+  ): Promise<Payment> {
+    if (FAILED_INTENT_STATUSES.has(intent.status)) {
+      await this.paymentsRepo.updateStatus(payment.id, PAYMENT_STATUS.FAILED, intent.id);
+      this.auditWarn('payment.charge.failed', {
+        orderId: payment.orderId,
+        paymentId: payment.id,
+        userId: payment.userId,
+        stripeIntentId: intent.id,
+        stripeStatus: intent.status,
+      });
+      this.logger.warn(
+        {
+          paymentId: payment.id,
+          orderId: payment.orderId,
+          stripeIntentId: intent.id,
+          stripeStatus: intent.status,
+        },
+        'Stripe PaymentIntent returned a terminal failure status',
+      );
+      throw new InternalServerErrorException({
+        error: { code: 'PAYMENT_FAILED', message: 'Payment processing failed' },
+      });
+    }
+
+    if (intent.status !== 'succeeded') {
+      const pendingPayment = await this.paymentsRepo.updateStatus(
+        payment.id,
+        PAYMENT_STATUS.PENDING,
+        intent.id,
+      );
+      this.auditInfo('payment.charge.pending', {
+        orderId: payment.orderId,
+        paymentId: payment.id,
+        userId: payment.userId,
+        stripeIntentId: intent.id,
+        stripeStatus: intent.status,
+      });
+      this.logger.info(
+        {
+          paymentId: payment.id,
+          orderId: payment.orderId,
+          stripeIntentId: intent.id,
+          stripeStatus: intent.status,
+        },
+        'Stripe PaymentIntent created without terminal success; awaiting webhook completion',
+      );
+      return pendingPayment;
+    }
+
+    const completedPayment = await this.completePaymentWithOutbox(
+      payment.id,
+      payment.orderId,
+      payment.userId,
+      payment.amount,
+      payment.currency,
+      intent.id,
+    );
+
+    if (!completedPayment) {
+      const currentPayment = await this.paymentsRepo.findById(payment.id);
+      if (currentPayment) {
+        this.auditInfo('payment.charge.returned_existing', {
+          orderId: currentPayment.orderId,
+          paymentId: currentPayment.id,
+          status: currentPayment.status,
+        });
+        return currentPayment;
+      }
+
+      throw new InternalServerErrorException({
+        error: { code: 'PAYMENT_FAILED', message: 'Payment processing failed' },
+      });
+    }
+
+    this.auditInfo('payment.charge.completed', {
+      orderId: payment.orderId,
+      paymentId: payment.id,
+      userId: payment.userId,
+      amount: payment.amount,
+      currency: payment.currency,
+      mode: this.isMockMode ? 'mock' : 'live',
+      stripeIntentId: intent.id,
+    });
+    return completedPayment;
+  }
+
+  private async resolvePendingMockChargeOutcome(payment: Payment, token: string): Promise<Payment> {
+    if (this.isMockDeclinedToken(token)) {
+      return this.failPendingMockCharge(payment, MOCK_DECLINED_REASON);
+    }
+
+    const stripeIntentId = this.buildMockStripeIntentId(payment.orderId);
+    const completedPayment = await this.completePaymentWithOutbox(
+      payment.id,
+      payment.orderId,
+      payment.userId,
+      payment.amount,
+      payment.currency,
+      stripeIntentId,
+    );
+
+    if (!completedPayment) {
+      const currentPayment = await this.paymentsRepo.findById(payment.id);
+      if (currentPayment) {
+        this.auditInfo('payment.charge.returned_existing', {
+          orderId: currentPayment.orderId,
+          paymentId: currentPayment.id,
+          status: currentPayment.status,
+        });
+        return currentPayment;
+      }
+
+      throw new InternalServerErrorException({
+        error: { code: 'PAYMENT_FAILED', message: 'Payment processing failed' },
+      });
+    }
+
+    this.auditInfo('payment.charge.completed', {
+      orderId: payment.orderId,
+      paymentId: payment.id,
+      userId: payment.userId,
+      amount: payment.amount,
+      currency: payment.currency,
+      mode: 'mock',
+      stripeIntentId,
+    });
+    return completedPayment;
+  }
+
+  private async failPendingMockCharge(payment: Payment, reason: string): Promise<never> {
+    const stripeIntentId = this.buildMockStripeIntentId(payment.orderId, 'failed');
+    const failedPayment = await this.failPaymentWithOutbox(
+      payment.id,
+      payment.orderId,
+      payment.userId,
+      payment.amount,
+      payment.currency,
+      reason,
+      stripeIntentId,
+    );
+
+    if (failedPayment) {
+      this.auditWarn('payment.charge.failed', {
+        orderId: payment.orderId,
+        paymentId: payment.id,
+        userId: payment.userId,
+        amount: payment.amount,
+        currency: payment.currency,
+        mode: 'mock',
+        stripeIntentId,
+        reason,
+      });
+    }
+
+    throw new InternalServerErrorException({
+      error: { code: 'PAYMENT_FAILED', message: reason },
+    });
+  }
+
+  private async failMockCharge(
+    orderId: string,
+    userId: string,
+    amount: number,
+    currency: string,
+    reason: string,
+  ): Promise<never> {
+    let payment: Payment | undefined;
+    const stripeIntentId = this.buildMockStripeIntentId(orderId, 'failed');
+
+    await this.db.transaction(async (tx) => {
+      const [inserted] = await tx
+        .insert(payments)
+        .values({
+          orderId,
+          userId,
+          amount,
+          currency,
+          status: PAYMENT_STATUS.FAILED,
+          stripePaymentIntentId: stripeIntentId,
+        })
+        .returning();
+      payment = inserted;
+
+      await tx.insert(outbox).values(
+        this.buildOutboxRow('payments.payment.failed', orderId, {
+          orderId,
+          paymentId: inserted.id,
+          userId,
+          reason,
+        }),
+      );
+    });
+
+    this.auditWarn('payment.charge.failed', {
+      orderId,
+      paymentId: payment?.id,
+      userId,
+      amount,
+      currency,
+      mode: 'mock',
+      stripeIntentId,
+      reason,
+    });
+    this.logger.warn(
+      { orderId, paymentId: payment?.id, reason },
+      'Mock payment declined — outbox entry written',
+    );
+
+    throw new InternalServerErrorException({
+      error: { code: 'PAYMENT_FAILED', message: reason },
+    });
   }
 
   /**
@@ -354,7 +964,7 @@ export class PaymentsService {
     amount: number,
     currency: string,
     stripeIntentId: string,
-  ): Promise<Payment> {
+  ): Promise<Payment | null> {
     let updated: Payment | undefined;
 
     await this.db.transaction(async (tx) => {
@@ -365,8 +975,13 @@ export class PaymentsService {
           stripePaymentIntentId: stripeIntentId,
           updatedAt: new Date(),
         })
-        .where(eq(payments.id, paymentId))
+        .where(and(eq(payments.id, paymentId), eq(payments.status, PAYMENT_STATUS.PENDING)))
         .returning();
+
+      if (!row) {
+        return;
+      }
+
       updated = row;
 
       await tx.insert(outbox).values(
@@ -380,40 +995,60 @@ export class PaymentsService {
       );
     });
 
+    if (!updated) {
+      return null;
+    }
+
     this.logger.info({ paymentId, stripeIntentId }, 'Payment completed — outbox entry written');
-    return updated!;
+    return updated;
   }
 
-  /**
-   * Initiate a Stripe PaymentIntent for a payment that is already in PENDING state.
-   * The actual completion happens via the Stripe webhook.
-   */
-  private async initiateStripePayment(payment: Payment, orderId: string): Promise<void> {
-    try {
-      const intent = await this.stripe.paymentIntents.create(
-        {
-          amount: payment.amount,
-          currency: payment.currency,
-          confirm: false, // confirmed via Stripe.js on the client
-          metadata: { orderId, paymentId: payment.id },
-        },
-        { idempotencyKey: orderId }, // prevents double-charge on retry (fixes R-12)
-      );
+  private async failPaymentWithOutbox(
+    paymentId: string,
+    orderId: string,
+    userId: string,
+    amount: number,
+    currency: string,
+    reason: string,
+    stripeIntentId: string,
+  ): Promise<Payment | null> {
+    let updated: Payment | undefined;
 
-      await this.paymentsRepo.updateStatus(payment.id, PAYMENT_STATUS.PENDING, intent.id);
-      this.logger.info(
-        { paymentId: payment.id, intentId: intent.id },
-        'Stripe PaymentIntent created',
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(payments)
+        .set({
+          status: PAYMENT_STATUS.FAILED,
+          stripePaymentIntentId: stripeIntentId,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(payments.id, paymentId), eq(payments.status, PAYMENT_STATUS.PENDING)))
+        .returning();
+
+      if (!row) {
+        return;
+      }
+
+      updated = row;
+
+      await tx.insert(outbox).values(
+        this.buildOutboxRow('payments.payment.failed', orderId, {
+          orderId,
+          paymentId,
+          userId,
+          reason,
+          amount,
+          currency,
+        }),
       );
-    } catch (err) {
-      await this.paymentsRepo.updateStatus(payment.id, PAYMENT_STATUS.FAILED);
-      const msg = err instanceof Error ? err.message : 'Unknown';
-      this.logger.error(
-        { paymentId: payment.id, err: msg },
-        'Stripe PaymentIntent creation failed',
-      );
-      // Do not re-throw — the payment is now FAILED; the consumer should not retry
+    });
+
+    if (!updated) {
+      return null;
     }
+
+    this.logger.warn({ paymentId, stripeIntentId }, 'Payment failed — outbox entry written');
+    return updated;
   }
 
   private buildOutboxRow(topic: string, partitionKey: string, data: Record<string, unknown>) {
@@ -431,5 +1066,15 @@ export class PaymentsService {
         data,
       },
     };
+  }
+
+  private hasMismatchedStripeIntentId(
+    payment: Pick<Payment, 'stripePaymentIntentId'>,
+    stripeIntentId: string | undefined,
+  ): boolean {
+    if (!payment.stripePaymentIntentId || !stripeIntentId) {
+      return false;
+    }
+    return payment.stripePaymentIntentId !== stripeIntentId;
   }
 }

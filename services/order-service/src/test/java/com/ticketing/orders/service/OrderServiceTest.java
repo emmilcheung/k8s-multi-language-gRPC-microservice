@@ -361,6 +361,30 @@ class OrderServiceTest {
         verify(outboxRepository, never()).save(any());
     }
 
+        @Test
+        void markPaymentFailed_should_cancel_payable_order_and_write_cancelled_outbox_event() {
+                Order order = new Order(userId, OrderStatus.AWAITING_PAYMENT,
+                                OffsetDateTime.now().plusMinutes(5), ticket);
+                when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+                when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
+
+                orderService.markPaymentFailed(orderId);
+
+                assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+                verify(outboxRepository).save(any());
+        }
+
+        @Test
+        void markPaymentFailed_should_be_noop_when_order_is_terminal() {
+                Order order = new Order(userId, OrderStatus.COMPLETE,
+                                OffsetDateTime.now().minusMinutes(5), ticket);
+                when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+
+                orderService.markPaymentFailed(orderId);
+
+                verify(outboxRepository, never()).save(any());
+        }
+
     // ── createSeatedOrder (MANUAL_SEATED) ─────────────────────────────────────
 
     /** Build a minimal {@link SeatDetail} suitable for use in tests. */

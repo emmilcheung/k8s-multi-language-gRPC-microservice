@@ -149,11 +149,20 @@ All required env vars are validated at startup via Zod in `ConfigModule`. The se
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string |
+| `DB_POOL_MAX` | PostgreSQL pool max connections (default `20`) |
 | `REDIS_URL` | Redis connection string |
-| `JWT_PRIVATE_KEY` | RS256 private key (PEM, base64-encoded) |
-| `JWT_PUBLIC_KEY` | RS256 public key (PEM, base64-encoded) |
-| `JWT_ACCESS_EXPIRES_IN` | Access token TTL (e.g. `15m`) |
-| `JWT_REFRESH_EXPIRES_IN` | Refresh token TTL (e.g. `7d`) |
+| `RSA_PRIVATE_KEY` | RS256 private key (PEM, base64-encoded) |
+| `JWT_EXPIRY` | Access token TTL (e.g. `15m`) |
+| `JWT_COOKIE_NAME` | Access-token cookie name |
+| `REFRESH_COOKIE_NAME` | Refresh-token cookie name |
+| `REFRESH_TOKEN_TTL_SECONDS` | Refresh token TTL in seconds |
+| `SIGNIN_FAILURE_WINDOW_SECONDS` | Failed-signin rolling window in seconds |
+| `SIGNIN_MAX_FAILURES` | Failed-signin threshold before lockout |
+| `SIGNIN_LOCKOUT_SECONDS` | Sign-in lockout duration in seconds |
+| `REFRESH_COOKIE_PATH` | Refresh-token cookie path |
+| `ACCESS_TOKEN_COOKIE_SAME_SITE` | Access-token SameSite policy |
+| `REFRESH_TOKEN_COOKIE_SAME_SITE` | Refresh-token SameSite policy |
+| `COOKIE_DOMAIN` | Optional cookie domain override |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTel Collector endpoint |
 | `NODE_ENV` | `development` \| `production` \| `test` |
 
@@ -166,5 +175,5 @@ Never commit `.env` files. Use `infra/local/secrets.env` (git-ignored) locally.
 See [§15 Agent Hard Stops](../../docs/15-agent-hard-stops.md). Key items for this service:
 
 - Do **not** run `pnpm migrate` against a non-local database without explicit confirmation.
-- Do **not** log or print `JWT_PRIVATE_KEY`, `DATABASE_URL`, or any credential at any log level.
+- Do **not** log or print `RSA_PRIVATE_KEY`, `DATABASE_URL`, or any credential at any log level.
 - Do **not** add a new `pnpm` dependency without noting it and explaining why.

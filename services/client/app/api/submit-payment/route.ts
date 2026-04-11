@@ -5,8 +5,20 @@ import { traceResponseHeaders } from "@/lib/tracing";
 
 interface SubmitPaymentRequest {
   orderId: string;
-  amount: number;
   paymentMethodId: string;
+}
+
+async function readJsonBody(response: Response): Promise<unknown> {
+  const rawBody = await response.text();
+  if (!rawBody) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawBody) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -16,10 +28,10 @@ interface SubmitPaymentRequest {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body = (await request.json()) as SubmitPaymentRequest;
-    const { orderId, amount, paymentMethodId } = body;
+    const { orderId, paymentMethodId } = body;
 
     // Validate input
-    if (!orderId || !amount || !paymentMethodId) {
+    if (!orderId || !paymentMethodId) {
       return NextResponse.json(
         { error: { code: "INVALID_INPUT", message: "Missing required fields." } },
         { status: 400, headers: traceResponseHeaders() }
@@ -32,25 +44,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       headers: await authHeaders(request),
       body: JSON.stringify({
         orderId,
-        amount,
         token: paymentMethodId, // Backend expects 'token' field with paymentMethodId
       }),
     });
 
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
+      const body = (await readJsonBody(res)) as { error?: unknown } | null;
       return NextResponse.json(
         { error: body?.error ?? { message: "Payment processing failed." } },
         { status: res.status, headers: traceResponseHeaders() }
       );
     }
 
-    const paymentResponse = await res.json();
+    const paymentResponse = await readJsonBody(res);
 
     // Revalidate the order page to reflect payment status
     revalidatePath(`/orders/${orderId}`);
 
-    return NextResponse.json(paymentResponse, {
+    return NextResponse.json(paymentResponse ?? {}, {
       status: 201,
       headers: traceResponseHeaders(),
     });

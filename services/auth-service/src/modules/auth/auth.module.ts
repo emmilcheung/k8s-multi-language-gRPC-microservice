@@ -7,6 +7,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { RefreshTokenService } from './refresh-token.service';
+import { SigninAbuseProtectionService } from './signin-abuse-protection.service';
 import { RedisModule } from '../redis/redis.module';
 import { parseRsaPrivateKey } from './rsa-key.util';
 
@@ -46,7 +47,7 @@ import { parseRsaPrivateKey } from './rsa-key.util';
       },
     }),
   ],
-  providers: [AuthService, RefreshTokenService],
+  providers: [AuthService, RefreshTokenService, SigninAbuseProtectionService],
   controllers: [AuthController],
 })
 export class AuthModule {}

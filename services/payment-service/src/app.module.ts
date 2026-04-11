@@ -10,14 +10,27 @@ import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { OrdersConsumer } from './kafka/orders.consumer';
 
-const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3001),
-  DATABASE_URL: z.string(),
-  STRIPE_SECRET_KEY: z.string(),
-  STRIPE_WEBHOOK_SECRET: z.string().optional(), // required in production; optional for local dev/mock mode
-  KAFKA_BROKERS: z.string(),
-});
+const envSchema = z
+  .object({
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+    DATABASE_URL: z.string(),
+    DB_POOL_MAX: z.coerce.number().int().positive().default(20),
+    ORDER_SERVICE_URL: z.string().url(),
+    ORDER_SERVICE_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
+    STRIPE_SECRET_KEY: z.string(),
+    STRIPE_WEBHOOK_SECRET: z.string().optional(),
+    KAFKA_BROKERS: z.string(),
+  })
+  .superRefine((config, ctx) => {
+    if (config.NODE_ENV === 'production' && !config.STRIPE_WEBHOOK_SECRET) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['STRIPE_WEBHOOK_SECRET'],
+        message: 'STRIPE_WEBHOOK_SECRET is required in production',
+      });
+    }
+  });
 
 /** Inject the active OTel traceId and spanId into every pino log line (O-02). */
 function otelMixin(): Record<string, string> {
