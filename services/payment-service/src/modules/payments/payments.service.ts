@@ -26,6 +26,10 @@ export interface ChargePaymentDto {
 
 const PAYABLE_ORDER_STATUSES = new Set(['created', 'awaiting_payment']);
 const TERMINAL_PAYMENT_STATUSES = new Set([PAYMENT_STATUS.COMPLETED, PAYMENT_STATUS.FAILED]);
+const FAILED_INTENT_STATUSES = new Set<Stripe.PaymentIntent.Status>([
+  'canceled',
+  'requires_payment_method',
+]);
 
 @Injectable()
 export class PaymentsService {
@@ -128,6 +132,40 @@ export class PaymentsService {
         },
         { idempotencyKey: order.orderId }, // prevents double-charge on retry (fixes R-12)
       );
+
+      if (FAILED_INTENT_STATUSES.has(intent.status)) {
+        await this.paymentsRepo.updateStatus(payment.id, PAYMENT_STATUS.FAILED, intent.id);
+        this.logger.warn(
+          {
+            paymentId: payment.id,
+            orderId: order.orderId,
+            stripeIntentId: intent.id,
+            stripeStatus: intent.status,
+          },
+          'Stripe PaymentIntent returned a terminal failure status',
+        );
+        throw new InternalServerErrorException({
+          error: { code: 'PAYMENT_FAILED', message: 'Payment processing failed' },
+        });
+      }
+
+      if (intent.status !== 'succeeded') {
+        const pendingPayment = await this.paymentsRepo.updateStatus(
+          payment.id,
+          PAYMENT_STATUS.PENDING,
+          intent.id,
+        );
+        this.logger.info(
+          {
+            paymentId: payment.id,
+            orderId: order.orderId,
+            stripeIntentId: intent.id,
+            stripeStatus: intent.status,
+          },
+          'Stripe PaymentIntent created without terminal success; awaiting webhook completion',
+        );
+        return pendingPayment;
+      }
 
       // Mark complete and write outbox in the same transaction
       return this.completePaymentWithOutbox(
@@ -257,7 +295,7 @@ export class PaymentsService {
         const paymentId = pf.metadata?.paymentId;
         const reason = pf.last_payment_error?.message ?? 'Payment failed';
         if (paymentId) {
-          await this.failStripePayment(paymentId, reason);
+          await this.failStripePayment(paymentId, reason, pf.id);
         } else {
           this.logger.warn(
             { intentId: pf.id },
@@ -275,7 +313,11 @@ export class PaymentsService {
    * Mark a payment FAILED and write a payments.payment.failed outbox event.
    * This causes order-service to cancel the order and release any seat holds.
    */
-  async failStripePayment(paymentId: string, reason: string): Promise<void> {
+  async failStripePayment(
+    paymentId: string,
+    reason: string,
+    stripeIntentId?: string,
+  ): Promise<void> {
     const payment = await this.paymentsRepo.findById(paymentId);
     if (!payment) {
       this.logger.warn({ paymentId }, 'failStripePayment: payment not found — skipping');
@@ -286,6 +328,18 @@ export class PaymentsService {
       this.logger.info(
         { paymentId, currentStatus: payment.status },
         'failStripePayment: payment already terminal — skipping duplicate transition',
+      );
+      return;
+    }
+
+    if (this.hasMismatchedStripeIntentId(payment, stripeIntentId)) {
+      this.logger.warn(
+        {
+          paymentId,
+          expectedStripeIntentId: payment.stripePaymentIntentId,
+          receivedStripeIntentId: stripeIntentId,
+        },
+        'failStripePayment: Stripe intent ID mismatch — skipping transition',
       );
       return;
     }
@@ -324,6 +378,18 @@ export class PaymentsService {
       this.logger.info(
         { paymentId, currentStatus: payment.status },
         'completeStripePayment: payment already terminal — skipping duplicate transition',
+      );
+      return;
+    }
+
+    if (this.hasMismatchedStripeIntentId(payment, stripeIntentId)) {
+      this.logger.warn(
+        {
+          paymentId,
+          expectedStripeIntentId: payment.stripePaymentIntentId,
+          receivedStripeIntentId: stripeIntentId,
+        },
+        'completeStripePayment: Stripe intent ID mismatch — skipping transition',
       );
       return;
     }
@@ -473,5 +539,15 @@ export class PaymentsService {
         data,
       },
     };
+  }
+
+  private hasMismatchedStripeIntentId(
+    payment: Pick<Payment, 'stripePaymentIntentId'>,
+    stripeIntentId: string | undefined,
+  ): boolean {
+    if (!payment.stripePaymentIntentId || !stripeIntentId) {
+      return false;
+    }
+    return payment.stripePaymentIntentId !== stripeIntentId;
   }
 }

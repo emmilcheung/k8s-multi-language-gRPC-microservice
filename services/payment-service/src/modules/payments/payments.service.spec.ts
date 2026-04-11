@@ -216,7 +216,7 @@ describe('PaymentsService.charge', () => {
     const pending = makePayment();
     repo.findByOrderId.mockResolvedValue(null);
     repo.create.mockResolvedValue(pending);
-    stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_abc' });
+    stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_abc', status: 'succeeded' });
     orderServiceClient.getOrderSnapshot.mockResolvedValue(
       makeOrderSnapshot({
         orderId: '11111111-1111-4111-8111-111111111111',
@@ -258,6 +258,59 @@ describe('PaymentsService.charge', () => {
     );
     expect(db.transaction).toHaveBeenCalledTimes(2);
     expect(result).toEqual(completed);
+  });
+
+  it('should keep payment pending when Stripe returns a non-terminal status', async () => {
+    const pending = makePayment();
+    const pendingWithIntent = makePayment({
+      stripePaymentIntentId: 'pi_pending',
+      status: PAYMENT_STATUS.PENDING,
+    });
+    repo.findByOrderId.mockResolvedValue(null);
+    repo.create.mockResolvedValue(pending);
+    repo.updateStatus.mockResolvedValue(pendingWithIntent);
+    stripe.paymentIntents.create.mockResolvedValue({
+      id: 'pi_pending',
+      status: 'processing',
+    });
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(makeOrderSnapshot());
+
+    const result = await service.charge({
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+      token: 'pm_processing',
+    });
+
+    expect(repo.updateStatus).toHaveBeenCalledWith(
+      pending.id,
+      PAYMENT_STATUS.PENDING,
+      'pi_pending',
+    );
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(pendingWithIntent);
+  });
+
+  it('should mark payment as failed when Stripe returns a terminal failure status', async () => {
+    const pending = makePayment();
+    repo.findByOrderId.mockResolvedValue(null);
+    repo.create.mockResolvedValue(pending);
+    repo.updateStatus.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.FAILED }));
+    stripe.paymentIntents.create.mockResolvedValue({
+      id: 'pi_failed',
+      status: 'requires_payment_method',
+    });
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(makeOrderSnapshot());
+
+    await expect(
+      service.charge({
+        orderId: '11111111-1111-4111-8111-111111111111',
+        userId: '22222222-2222-4222-8222-222222222222',
+        token: 'pm_bad',
+      }),
+    ).rejects.toThrow(InternalServerErrorException);
+
+    expect(repo.updateStatus).toHaveBeenCalledWith(pending.id, PAYMENT_STATUS.FAILED, 'pi_failed');
+    expect(db.transaction).toHaveBeenCalledTimes(1);
   });
 
   it('should mark payment as failed and throw when Stripe fails', async () => {
@@ -491,6 +544,26 @@ describe('PaymentsService Stripe webhook idempotency', () => {
     repo.findById.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.COMPLETED }));
 
     await service.failStripePayment('pay-uuid-1', 'Late failure');
+
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('should ignore succeeded webhooks when the Stripe intent does not match the stored payment', async () => {
+    repo.findById.mockResolvedValue(
+      makePayment({ status: PAYMENT_STATUS.PENDING, stripePaymentIntentId: 'pi_expected' }),
+    );
+
+    await service.completeStripePayment('pay-uuid-1', 'pi_other');
+
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('should ignore failed webhooks when the Stripe intent does not match the stored payment', async () => {
+    repo.findById.mockResolvedValue(
+      makePayment({ status: PAYMENT_STATUS.PENDING, stripePaymentIntentId: 'pi_expected' }),
+    );
+
+    await service.failStripePayment('pay-uuid-1', 'Card declined', 'pi_other');
 
     expect(db.transaction).not.toHaveBeenCalled();
   });

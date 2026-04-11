@@ -54,6 +54,8 @@ Charge a payment method for an order.
 
 The service resolves order ownership, status, and amount from order-service before creating a charge. Client-supplied pricing is rejected.
 
+Real Stripe charges are status-aware: the service only marks a payment `completed` when Stripe returns a succeeded PaymentIntent or the verified webhook confirms success. Non-terminal Stripe states remain `pending` until the webhook settles them.
+
 **Responses**
 
 | Status | Description |
