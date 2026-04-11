@@ -819,6 +819,9 @@ jobs:
           # to reach Kong from the host runner. Without this it falls back to
           # localhost:8080 which doesn't exist, causing all Server Actions to fail.
           INTERNAL_API_URL: http://localhost:8000
+          # NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: services/client/.env is gitignored;
+          # E2E tests use a Stripe mock so any non-empty pk_test_ value works here.
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_placeholder
 
       - name: Wait for Next.js to be ready
         run: timeout 60 bash -c "until curl -sf http://localhost:4000; do sleep 2; done"
