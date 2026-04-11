@@ -152,6 +152,7 @@ function makeAuthService(
   jwtService: JwtService;
   refreshTokenService: RefreshTokenService;
   signinAbuseProtectionService: SigninAbuseProtectionService;
+  logger: PinoLogger;
 } {
   const usersRepo = makeUsersRepo(overrides.usersRepo);
   const jwtService = makeJwtService(overrides.jwtService);
@@ -179,6 +180,7 @@ function makeAuthService(
     jwtService,
     refreshTokenService,
     signinAbuseProtectionService,
+    logger,
   };
 }
 
@@ -187,7 +189,7 @@ function makeAuthService(
 describe('AuthService', () => {
   describe('signup', () => {
     it('should return accessToken and refreshToken when email is not already in use', async () => {
-      const { service, usersRepo, jwtService, refreshTokenService } =
+      const { service, usersRepo, jwtService, refreshTokenService, logger } =
         makeAuthService({
           usersRepo: {
             findByEmail: vi.fn().mockResolvedValue(null),
@@ -205,18 +207,36 @@ describe('AuthService', () => {
       expect(jwtService.sign).toHaveBeenCalledOnce();
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1', {});
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'auth.signup.succeeded',
+          userId: 'uuid-1',
+          emailHash: expect.any(String),
+        }),
+        'Auth audit event',
+      );
       expect(result.accessToken).toBe('signed.jwt.token');
       expect(result.refreshToken).toBe('opaque-refresh-token');
     });
 
     it('should throw ConflictException when email is already in use', async () => {
-      const { service } = makeAuthService({
+      const { service, logger } = makeAuthService({
         usersRepo: { findByEmail: vi.fn().mockResolvedValue(makeUser()) },
       });
 
       await expect(
         service.signup('user@example.com', 'password123'),
       ).rejects.toThrow(ConflictException);
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'auth.signup.conflict',
+          emailHash: expect.any(String),
+        }),
+        'Auth audit event',
+      );
     });
 
     it('should not store the plaintext password', async () => {
@@ -246,6 +266,7 @@ describe('AuthService', () => {
         jwtService,
         refreshTokenService,
         signinAbuseProtectionService,
+        logger,
       } = makeAuthService({
         usersRepo: {
           findByEmail: vi.fn().mockResolvedValue(makeUser({ passwordHash })),
@@ -273,14 +294,25 @@ describe('AuthService', () => {
         'user@example.com',
         null,
       );
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'auth.signin.succeeded',
+          userId: 'uuid-1',
+          emailHash: expect.any(String),
+        }),
+        'Auth audit event',
+      );
       expect(result.accessToken).toBe('signed.jwt.token');
       expect(result.refreshToken).toBe('opaque-refresh-token');
     });
 
     it('should throw UnauthorizedException when user does not exist', async () => {
-      const { service, signinAbuseProtectionService } = makeAuthService({
-        usersRepo: { findByEmail: vi.fn().mockResolvedValue(null) },
-      });
+      const { service, signinAbuseProtectionService, logger } = makeAuthService(
+        {
+          usersRepo: { findByEmail: vi.fn().mockResolvedValue(null) },
+        },
+      );
 
       await expect(
         service.signin('nobody@example.com', 'password'),
@@ -290,6 +322,15 @@ describe('AuthService', () => {
       expect(signinAbuseProtectionService.recordFailure).toHaveBeenCalledWith(
         'nobody@example.com',
         null,
+      );
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'auth.signin.failed',
+          reason: 'user_not_found',
+          emailHash: expect.any(String),
+        }),
+        'Auth audit event',
       );
     });
 

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 import { describe, it, expect, vi } from 'vitest';
 import { NotFoundException, UnauthorizedException } from '@nestjs/common';
+import type { PinoLogger } from 'nestjs-pino';
 import { AuthController } from './auth.controller';
 import type { AuthService } from './auth.service';
 import type { RefreshTokenService } from './refresh-token.service';
@@ -73,6 +74,15 @@ function makeConfigService(
   } as unknown as ConfigService;
 }
 
+function makeLogger(): PinoLogger {
+  return {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  } as unknown as PinoLogger;
+}
+
 /** Create a minimal Express-like response mock. */
 function makeRes() {
   const res = {
@@ -104,17 +114,25 @@ function makeController(
     configService?: ConfigService;
   } = {},
 ) {
+  const logger = makeLogger();
   const authService = makeAuthService(overrides.authService);
   const refreshTokenService = makeRefreshTokenService(
     overrides.refreshTokenService,
   );
   const configService = overrides.configService ?? makeConfigService();
   const controller = new AuthController(
+    logger,
     authService,
     refreshTokenService,
     configService,
   );
-  return { controller, authService, refreshTokenService, configService };
+  return {
+    controller,
+    authService,
+    refreshTokenService,
+    configService,
+    logger,
+  };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -202,7 +220,8 @@ describe('AuthController', () => {
 
   describe('signout', () => {
     it('should revoke refresh token and blacklist access token, then clear both cookies', async () => {
-      const { controller, authService, refreshTokenService } = makeController();
+      const { controller, authService, refreshTokenService, logger } =
+        makeController();
       const req = makeReq({
         cookies: { token: 'old.access.token', refreshToken: 'old-refresh-id' },
       });
@@ -221,6 +240,10 @@ describe('AuthController', () => {
       expect(res.clearCookie).toHaveBeenCalledWith('refreshToken', {
         path: '/api/auth/refresh',
       });
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'auth.signout.completed' }),
+        'Auth audit event',
+      );
     });
 
     it('should succeed gracefully when there is no refresh token cookie', async () => {
@@ -249,7 +272,8 @@ describe('AuthController', () => {
 
   describe('refresh', () => {
     it('should validate old token, revoke it, issue a new pair, and set both cookies', async () => {
-      const { controller, authService, refreshTokenService } = makeController();
+      const { controller, authService, refreshTokenService, logger } =
+        makeController();
       const req = makeReq({
         cookies: { refreshToken: 'old-refresh-id' },
         headers: { 'user-agent': 'VitestBrowser/2.0' },
@@ -266,6 +290,14 @@ describe('AuthController', () => {
         'user-uuid-1',
       );
       expect(res.cookie).toHaveBeenCalledTimes(2);
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'auth.refresh.succeeded',
+          userId: 'user-uuid-1',
+          sessionId: 'session-uuid-1',
+        }),
+        'Auth audit event',
+      );
     });
 
     it('should throw UnauthorizedException when refresh token cookie is missing', async () => {
@@ -362,7 +394,7 @@ describe('AuthController', () => {
 
   describe('revokeSession', () => {
     it('should revoke a session owned by the current user and clear cookies when revoking the current session', async () => {
-      const { controller, refreshTokenService } = makeController({
+      const { controller, refreshTokenService, logger } = makeController({
         refreshTokenService: {
           revokeSession: vi.fn().mockResolvedValue(true),
           extractSessionId: vi
@@ -389,10 +421,19 @@ describe('AuthController', () => {
         'ec1fd099-cf07-4f1b-930c-173e3a2f4be8',
       );
       expect(res.clearCookie).toHaveBeenCalled();
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'auth.session.revoked',
+          userId: 'user-uuid-1',
+          sessionId: 'ec1fd099-cf07-4f1b-930c-173e3a2f4be8',
+          currentSessionRevoked: true,
+        }),
+        'Auth audit event',
+      );
     });
 
     it('should throw NotFoundException when the session does not exist', async () => {
-      const { controller } = makeController({
+      const { controller, logger } = makeController({
         refreshTokenService: {
           revokeSession: vi.fn().mockResolvedValue(false),
         },
@@ -407,6 +448,11 @@ describe('AuthController', () => {
           res,
         ),
       ).rejects.toThrow(NotFoundException);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'auth.session.revoke.missed' }),
+        'Auth audit event',
+      );
     });
   });
 

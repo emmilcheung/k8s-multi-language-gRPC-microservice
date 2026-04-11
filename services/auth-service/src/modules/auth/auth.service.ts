@@ -8,8 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 import * as argon2 from 'argon2';
-import { createPublicKey } from 'crypto';
-import { randomUUID } from 'crypto';
+import { createHash, createPublicKey, randomUUID } from 'crypto';
 import type Redis from 'ioredis';
 import { Inject } from '@nestjs/common';
 import { REDIS_CLIENT } from '../redis/redis.module';
@@ -66,6 +65,13 @@ export class AuthService {
   ): Promise<AuthTokens> {
     const existing = await this.usersRepo.findByEmail(email);
     if (existing) {
+      this.logger.warn(
+        {
+          event: 'auth.signup.conflict',
+          emailHash: this.hashAuditValue(email),
+        },
+        'Auth audit event',
+      );
       throw new ConflictException({
         error: {
           code: 'EMAIL_IN_USE',
@@ -82,7 +88,14 @@ export class AuthService {
     });
 
     const user = await this.usersRepo.create(email, passwordHash);
-    this.logger.info({ userId: user.id }, 'User created');
+    this.logger.info(
+      {
+        event: 'auth.signup.succeeded',
+        userId: user.id,
+        emailHash: this.hashAuditValue(user.email),
+      },
+      'Auth audit event',
+    );
 
     const accessToken = this.issueToken({ sub: user.id, email: user.email });
     const refreshToken = await this.refreshTokenService.issue(
@@ -110,6 +123,15 @@ export class AuthService {
         email,
         sessionMetadata.ipAddress ?? null,
       );
+      this.logger.warn(
+        {
+          event: 'auth.signin.failed',
+          reason: 'user_not_found',
+          emailHash: this.hashAuditValue(email),
+          ipHash: this.hashAuditValue(sessionMetadata.ipAddress),
+        },
+        'Auth audit event',
+      );
       throw new UnauthorizedException({
         error: {
           code: 'INVALID_CREDENTIALS',
@@ -124,6 +146,16 @@ export class AuthService {
         email,
         sessionMetadata.ipAddress ?? null,
       );
+      this.logger.warn(
+        {
+          event: 'auth.signin.failed',
+          reason: 'invalid_password',
+          userId: user.id,
+          emailHash: this.hashAuditValue(email),
+          ipHash: this.hashAuditValue(sessionMetadata.ipAddress),
+        },
+        'Auth audit event',
+      );
       throw new UnauthorizedException({
         error: {
           code: 'INVALID_CREDENTIALS',
@@ -137,7 +169,15 @@ export class AuthService {
       sessionMetadata.ipAddress ?? null,
     );
 
-    this.logger.info({ userId: user.id }, 'User signed in');
+    this.logger.info(
+      {
+        event: 'auth.signin.succeeded',
+        userId: user.id,
+        emailHash: this.hashAuditValue(user.email),
+        ipHash: this.hashAuditValue(sessionMetadata.ipAddress),
+      },
+      'Auth audit event',
+    );
     const accessToken = this.issueToken({ sub: user.id, email: user.email });
     const refreshToken = await this.refreshTokenService.issue(
       user.id,
@@ -277,5 +317,13 @@ export class AuthService {
       tokenPayload,
     );
     return token as string;
+  }
+
+  private hashAuditValue(value: string | null | undefined): string | null {
+    const normalized = value?.trim();
+    if (!normalized) {
+      return null;
+    }
+    return createHash('sha256').update(normalized.toLowerCase()).digest('hex');
   }
 }

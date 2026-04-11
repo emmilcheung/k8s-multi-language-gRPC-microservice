@@ -16,6 +16,7 @@ import {
 import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import ms from 'ms';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { AuthService } from './auth.service';
 import { SignupDto, SigninDto } from './auth.dto';
 import {
@@ -31,6 +32,8 @@ const DEFAULT_REFRESH_COOKIE_PATH = '/';
 @Controller()
 export class AuthController {
   constructor(
+    @InjectPinoLogger(AuthController.name)
+    private readonly logger: PinoLogger,
     private readonly authService: AuthService,
     private readonly refreshTokenService: RefreshTokenService,
     private readonly config: ConfigService,
@@ -82,6 +85,8 @@ export class AuthController {
     const oldRefreshToken = req.cookies[this.refreshTokenCookieName()] as
       | string
       | undefined;
+    const currentSessionId =
+      this.refreshTokenService.extractSessionId(oldRefreshToken);
     if (oldRefreshToken) {
       // Best-effort revocation — don't throw if the token is already gone
       await this.refreshTokenService.revoke(oldRefreshToken).catch(() => {});
@@ -98,6 +103,14 @@ export class AuthController {
     }
 
     this.clearAuthCookies(res);
+    this.logger.info(
+      {
+        event: 'auth.signout.completed',
+        sessionId: currentSessionId,
+        hadAccessToken: Boolean(accessToken),
+      },
+      'Auth audit event',
+    );
   }
 
   // POST /api/auth/refresh — rotate refresh token and issue new access token
@@ -128,6 +141,14 @@ export class AuthController {
 
     this.setAccessTokenCookie(res, accessToken);
     this.setRefreshTokenCookie(res, refreshToken);
+    this.logger.info(
+      {
+        event: 'auth.refresh.succeeded',
+        userId,
+        sessionId: this.refreshTokenService.extractSessionId(refreshToken),
+      },
+      'Auth audit event',
+    );
     return {};
   }
 
@@ -168,6 +189,14 @@ export class AuthController {
     );
 
     if (!revoked) {
+      this.logger.warn(
+        {
+          event: 'auth.session.revoke.missed',
+          userId: currentUser.id,
+          sessionId,
+        },
+        'Auth audit event',
+      );
       throw new NotFoundException({
         error: { code: 'SESSION_NOT_FOUND', message: 'Session not found' },
       });
@@ -179,6 +208,16 @@ export class AuthController {
     if (currentSessionId === sessionId) {
       this.clearAuthCookies(res);
     }
+
+    this.logger.info(
+      {
+        event: 'auth.session.revoked',
+        userId: currentUser.id,
+        sessionId,
+        currentSessionRevoked: currentSessionId === sessionId,
+      },
+      'Auth audit event',
+    );
   }
 
   // GET /api/users/currentuser
