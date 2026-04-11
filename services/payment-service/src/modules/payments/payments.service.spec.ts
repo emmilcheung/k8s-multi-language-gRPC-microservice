@@ -35,6 +35,7 @@ function makeStripe() {
   return {
     paymentIntents: {
       create: vi.fn(),
+      confirm: vi.fn(),
     },
     webhooks: {
       constructEvent: vi.fn(),
@@ -169,6 +170,39 @@ describe('PaymentsService.charge', () => {
         token: 'pm_test',
       }),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  it('should continue an existing pending payment instead of returning it unchanged', async () => {
+    const existingPending = makePayment({
+      status: PAYMENT_STATUS.PENDING,
+      stripePaymentIntentId: 'pi_pending',
+    });
+    const completed = makePayment({
+      status: PAYMENT_STATUS.COMPLETED,
+      stripePaymentIntentId: 'pi_pending',
+    });
+    repo.findByOrderId.mockResolvedValue(existingPending);
+    stripe.paymentIntents.confirm.mockResolvedValue({
+      id: 'pi_pending',
+      status: 'succeeded',
+    });
+    db._tx.update.mockReturnValue({
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      returning: vi.fn().mockResolvedValue([completed]),
+    });
+
+    const result = await service.charge({
+      orderId: 'order-uuid-1',
+      userId: 'user-uuid-1',
+      token: 'pm_test',
+    });
+
+    expect(stripe.paymentIntents.confirm).toHaveBeenCalledWith('pi_pending', {
+      payment_method: 'pm_test',
+    });
+    expect(result).toEqual(completed);
+    expect(orderServiceClient.getOrderSnapshot).not.toHaveBeenCalled();
   });
 
   it('should complete payment via mock path when STRIPE_SECRET_KEY contains test_mock', async () => {

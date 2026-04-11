@@ -67,6 +67,15 @@ export class PaymentsService {
           error: { code: 'ORDER_NOT_FOUND', message: 'Order not found' },
         });
       }
+
+      if (existing.status === PAYMENT_STATUS.PENDING) {
+        this.logger.info(
+          { orderId: dto.orderId, paymentId: existing.id },
+          'Pending payment already exists — attempting to continue charge',
+        );
+        return this.confirmPendingPayment(existing, dto.token);
+      }
+
       this.logger.info(
         { orderId: dto.orderId, paymentId: existing.id },
         'Payment already exists — skipping duplicate',
@@ -133,49 +142,7 @@ export class PaymentsService {
         { idempotencyKey: order.orderId }, // prevents double-charge on retry (fixes R-12)
       );
 
-      if (FAILED_INTENT_STATUSES.has(intent.status)) {
-        await this.paymentsRepo.updateStatus(payment.id, PAYMENT_STATUS.FAILED, intent.id);
-        this.logger.warn(
-          {
-            paymentId: payment.id,
-            orderId: order.orderId,
-            stripeIntentId: intent.id,
-            stripeStatus: intent.status,
-          },
-          'Stripe PaymentIntent returned a terminal failure status',
-        );
-        throw new InternalServerErrorException({
-          error: { code: 'PAYMENT_FAILED', message: 'Payment processing failed' },
-        });
-      }
-
-      if (intent.status !== 'succeeded') {
-        const pendingPayment = await this.paymentsRepo.updateStatus(
-          payment.id,
-          PAYMENT_STATUS.PENDING,
-          intent.id,
-        );
-        this.logger.info(
-          {
-            paymentId: payment.id,
-            orderId: order.orderId,
-            stripeIntentId: intent.id,
-            stripeStatus: intent.status,
-          },
-          'Stripe PaymentIntent created without terminal success; awaiting webhook completion',
-        );
-        return pendingPayment;
-      }
-
-      // Mark complete and write outbox in the same transaction
-      return this.completePaymentWithOutbox(
-        payment.id,
-        order.orderId,
-        order.userId,
-        order.amount,
-        order.currency,
-        intent.id,
-      );
+      return this.resolveStripeIntentOutcome(payment, intent);
     } catch (err) {
       // Mark payment as failed — never leave it in pending state
       await this.paymentsRepo.updateStatus(payment.id, PAYMENT_STATUS.FAILED);
@@ -450,6 +417,89 @@ export class PaymentsService {
       'Payment completed (mock) — outbox entry written',
     );
     return payment!;
+  }
+
+  private async confirmPendingPayment(payment: Payment, token: string): Promise<Payment> {
+    try {
+      const intent = payment.stripePaymentIntentId
+        ? await this.stripe.paymentIntents.confirm(payment.stripePaymentIntentId, {
+            payment_method: token,
+          })
+        : await this.stripe.paymentIntents.create(
+            {
+              amount: payment.amount,
+              currency: payment.currency,
+              payment_method: token,
+              confirm: true,
+              automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+              metadata: {
+                orderId: payment.orderId,
+                userId: payment.userId,
+                paymentId: payment.id,
+              },
+            },
+            { idempotencyKey: payment.orderId },
+          );
+
+      return this.resolveStripeIntentOutcome(payment, intent);
+    } catch (err) {
+      await this.paymentsRepo.updateStatus(payment.id, PAYMENT_STATUS.FAILED);
+
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      this.logger.error({ paymentId: payment.id, err: msg }, 'Pending payment confirmation failed');
+
+      throw new InternalServerErrorException({
+        error: { code: 'PAYMENT_FAILED', message: 'Payment processing failed' },
+      });
+    }
+  }
+
+  private async resolveStripeIntentOutcome(
+    payment: Payment,
+    intent: Pick<Stripe.PaymentIntent, 'id' | 'status'>,
+  ): Promise<Payment> {
+    if (FAILED_INTENT_STATUSES.has(intent.status)) {
+      await this.paymentsRepo.updateStatus(payment.id, PAYMENT_STATUS.FAILED, intent.id);
+      this.logger.warn(
+        {
+          paymentId: payment.id,
+          orderId: payment.orderId,
+          stripeIntentId: intent.id,
+          stripeStatus: intent.status,
+        },
+        'Stripe PaymentIntent returned a terminal failure status',
+      );
+      throw new InternalServerErrorException({
+        error: { code: 'PAYMENT_FAILED', message: 'Payment processing failed' },
+      });
+    }
+
+    if (intent.status !== 'succeeded') {
+      const pendingPayment = await this.paymentsRepo.updateStatus(
+        payment.id,
+        PAYMENT_STATUS.PENDING,
+        intent.id,
+      );
+      this.logger.info(
+        {
+          paymentId: payment.id,
+          orderId: payment.orderId,
+          stripeIntentId: intent.id,
+          stripeStatus: intent.status,
+        },
+        'Stripe PaymentIntent created without terminal success; awaiting webhook completion',
+      );
+      return pendingPayment;
+    }
+
+    return this.completePaymentWithOutbox(
+      payment.id,
+      payment.orderId,
+      payment.userId,
+      payment.amount,
+      payment.currency,
+      intent.id,
+    );
   }
 
   /**
