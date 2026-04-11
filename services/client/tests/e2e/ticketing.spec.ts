@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { test, expect, type Page } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
@@ -11,7 +12,7 @@ const PASSWORD = "Password123!";
 // ---------------------------------------------------------------------------
 
 function uniqueEmail(prefix: string) {
-  return `${prefix}-${Date.now()}@test.com`;
+  return `${prefix}-${Date.now()}-${randomUUID().slice(0, 8)}@test.com`;
 }
 
 async function signup(page: Page, email: string) {
@@ -19,7 +20,17 @@ async function signup(page: Page, email: string) {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: /sign up/i }).click();
-  await page.waitForURL("/");
+
+  try {
+    await page.waitForURL("/", { timeout: 15000 });
+  } catch {
+    const alertContent = await page
+      .locator('[role="alert"]:not([id="__next-route-announcer__"])')
+      .first()
+      .textContent()
+      .catch(() => null);
+    throw new Error(`Signup failed for ${email}. Alert: ${alertContent}`);
+  }
 }
 
 // async function signin(page: Page, email: string) {
@@ -147,6 +158,21 @@ async function installStripeMock(
       }),
     });
   }, options);
+}
+
+async function clickPayNowAndWaitForSubmitPayment(page: Page) {
+  const submitPaymentResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/submit-payment") &&
+      response.request().method() === "POST",
+    { timeout: 60_000 }
+  );
+
+  await page.getByRole("button", { name: /pay now/i }).click();
+
+  const response = await submitPaymentResponse;
+  await response.finished().catch(() => undefined);
+  return response;
 }
 
 
@@ -405,32 +431,34 @@ test.describe("orders", () => {
     await installStripeMock(page, { paymentMethodId: "pm_mock_success" });
     await setupPurchase(page);
 
-    await expect(page.getByText("Mock card input")).toBeVisible({ timeout: 10000 });
+    await expect(page.locator("#card-element")).toHaveAttribute("data-stripe-mock", "mounted", {
+      timeout: 10000,
+    });
     await expect(page.getByRole("button", { name: /pay now/i })).toBeEnabled();
-    await page.getByRole("button", { name: /pay now/i }).click();
 
-    // Poll the order detail page until the status flips to complete.
-    // The page is server-rendered and reads the order status from order-service.
-    // payment-service completes the payment synchronously in mock mode, but the
-    // downstream order transition still arrives asynchronously via Kafka.
-    //
-    // IMPORTANT: Next.js App Router streams RSC content after the initial HTML.
-    // page.goto() resolves (load event) before streaming completes, so the page
-    // may still show the loading skeleton. We wait for the real content to appear
-    // (Order Summary heading) before checking for the success message.
+    // In CI the App Router route can take a while to compile on first use.
+    // Wait for the submit-payment request to finish before any reload-based polling,
+    // otherwise the reload can abort the in-flight request and leave the order unchanged.
+    const submitPaymentResponse = await clickPayNowAndWaitForSubmitPayment(page);
+    expect(submitPaymentResponse.ok()).toBe(true);
+
+    // The payment API responds before the Kafka-driven order transition is fully
+    // reflected by order-service. Poll with a cache-busting navigation after the
+    // submit request completes so we only refresh once the backend state is ready.
     await expect
       .poll(
         async () => {
-          await page.reload();
-          // Wait for the streaming RSC content to replace the loading skeleton.
-          // "Order Summary" heading only appears in the real page, not the skeleton.
+          await page.waitForLoadState("domcontentloaded").catch(() => {});
+          await page.goto(`${page.url()}?refresh=${Date.now()}`, {
+            waitUntil: "domcontentloaded",
+          });
           await page
             .getByRole("heading", { name: /order summary/i })
-            .waitFor({ timeout: 10000 })
+            .waitFor({ timeout: 5000 })
             .catch(() => {});
           return page.getByText(/payment received/i).isVisible();
         },
-        { timeout: 45000, intervals: [2000, 3000, 5000] }
+        { timeout: 15000, intervals: [1000, 2000, 3000] }
       )
       .toBe(true);
 
@@ -443,8 +471,13 @@ test.describe("orders", () => {
     await installStripeMock(page, { paymentMethodId: "pm_mock_declined" });
     await setupPurchase(page);
 
-    await expect(page.getByText("Mock card input")).toBeVisible({ timeout: 10000 });
-    await page.getByRole("button", { name: /pay now/i }).click();
+    await expect(page.locator("#card-element")).toHaveAttribute("data-stripe-mock", "mounted", {
+      timeout: 10000,
+    });
+    await expect(page.getByRole("button", { name: /pay now/i })).toBeEnabled();
+
+    const submitPaymentResponse = await clickPayNowAndWaitForSubmitPayment(page);
+    expect(submitPaymentResponse.ok()).toBe(false);
 
     await expect(
       page.locator('[role="alert"]:not([id="__next-route-announcer__"])')

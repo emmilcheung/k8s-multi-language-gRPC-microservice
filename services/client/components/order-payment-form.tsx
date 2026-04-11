@@ -29,6 +29,10 @@ interface StripeInstance {
   }): Promise<CreatePaymentMethodResult>;
 }
 
+interface StripeConstructor {
+  (key: string): StripeInstance | null;
+}
+
 interface OrderPaymentFormProps {
   orderId: string;
   amount: number;
@@ -60,53 +64,84 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [stripeReady, setStripeReady] = useState(false);
+  const [stripeScriptReady, setStripeScriptReady] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
-  const cardElementRef = useRef<HTMLDivElement>(null);
+  const [cardElementNode, setCardElementNode] = useState<HTMLDivElement | null>(null);
   const stripeInstanceRef = useRef<StripeInstance | null>(null);
   const cardElementInstanceRef = useRef<CardElement | null>(null);
   const stripeMountedRef = useRef(false);
 
   const isTimeRunningOut = secondsRemaining !== null && secondsRemaining < 60;
   const isPending = isProcessing || isCancelling;
+  const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
 
-  // Load Stripe.js and initialize Payment Element
+  // Load Stripe.js once and track when the constructor is ready.
   useEffect(() => {
-    const initializeStripe = async () => {
-      // Load Stripe.js from CDN
-      const stripeWindow = window as unknown as { Stripe?: unknown };
-      if (stripeWindow.Stripe) {
-        initStripe();
-        return;
-      }
+    let disposed = false;
 
-      const script = document.createElement("script");
-      script.src = "https://js.stripe.com/v3/";
-      script.async = true;
-      script.onload = initStripe;
-      script.onerror = () => {
-        setPaymentError("Failed to load Stripe. Please check your internet connection.");
-      };
-      document.head.appendChild(script);
+    const handleStripeReady = () => {
+      if (!disposed) {
+        setStripeScriptReady(true);
+      }
     };
 
-    const initStripe = () => {
-      if (stripeMountedRef.current || !cardElementRef.current) {
-        return;
+    const handleStripeError = () => {
+      if (!disposed) {
+        setPaymentError("Failed to load Stripe. Please check your internet connection.");
       }
+    };
 
-      const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-      if (!publishableKey) {
-        setPaymentError("Stripe configuration is missing. Please contact support.");
-        return;
-      }
+    const stripeWindow = window as unknown as { Stripe?: StripeConstructor };
+    if (stripeWindow.Stripe) {
+      handleStripeReady();
+      return () => {
+        disposed = true;
+      };
+    }
 
-      const stripeWindow = window as unknown as { Stripe?: (key: string) => StripeInstance | null };
-      const stripe = stripeWindow.Stripe?.(publishableKey);
-      if (!stripe) {
-        setPaymentError("Failed to initialize Stripe. Please try again.");
-        return;
-      }
+    const existingScript = document.querySelector<HTMLScriptElement>(
+      'script[src="https://js.stripe.com/v3/"]'
+    );
+    const script = existingScript ?? document.createElement("script");
 
+    script.addEventListener("load", handleStripeReady);
+    script.addEventListener("error", handleStripeError);
+
+    if (!existingScript) {
+      script.src = "https://js.stripe.com/v3/";
+      script.async = true;
+      document.head.appendChild(script);
+    }
+
+    return () => {
+      disposed = true;
+      script.removeEventListener("load", handleStripeReady);
+      script.removeEventListener("error", handleStripeError);
+    };
+  }, []);
+
+  // Mount the card element only after both the Stripe constructor and the DOM node are ready.
+  useEffect(() => {
+    if (stripeMountedRef.current || !stripeScriptReady || !cardElementNode) {
+      return;
+    }
+
+    if (!publishableKey) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPaymentError("Stripe configuration is missing. Please contact support.");
+      setStripeReady(false);
+      return;
+    }
+
+    const stripeWindow = window as unknown as { Stripe?: StripeConstructor };
+    const stripe = stripeWindow.Stripe?.(publishableKey);
+    if (!stripe) {
+      setPaymentError("Failed to initialize Stripe. Please try again.");
+      setStripeReady(false);
+      return;
+    }
+
+    try {
       stripeInstanceRef.current = stripe;
 
       const elements = stripe.elements();
@@ -126,20 +161,24 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
         },
       });
 
-      cardElement.mount(cardElementRef.current);
+      cardElement.mount(cardElementNode);
       cardElementInstanceRef.current = cardElement;
       stripeMountedRef.current = true;
+      setPaymentError(null);
       setStripeReady(true);
-    };
+    } catch {
+      setPaymentError("Failed to initialize Stripe. Please try again.");
+      setStripeReady(false);
+    }
+  }, [cardElementNode, publishableKey, stripeScriptReady]);
 
-    initializeStripe();
-
+  useEffect(() => {
     return () => {
-      // Cleanup: unmount card element on unmount
       if (cardElementInstanceRef.current) {
         cardElementInstanceRef.current.unmount();
       }
       cardElementInstanceRef.current = null;
+      stripeInstanceRef.current = null;
       stripeMountedRef.current = false;
     };
   }, []);
@@ -291,7 +330,7 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
         <div className="relative">
           <div
             id="card-element"
-            ref={cardElementRef}
+            ref={(node) => setCardElementNode(node)}
             className="border border-white/10 rounded-lg px-4 py-3 bg-white/3 focus-within:bg-white/5 focus-within:border-primary/50 transition-colors min-h-12"
           />
           {!stripeReady && (
