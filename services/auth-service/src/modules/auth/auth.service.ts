@@ -14,7 +14,10 @@ import type Redis from 'ioredis';
 import { Inject } from '@nestjs/common';
 import { REDIS_CLIENT } from '../redis/redis.module';
 import { UsersRepository } from '../users/users.repository';
-import { RefreshTokenService } from './refresh-token.service';
+import {
+  RefreshTokenService,
+  type SessionMetadata,
+} from './refresh-token.service';
 import { parseRsaPrivateKey } from './rsa-key.util';
 
 export interface JwtPayload {
@@ -54,7 +57,11 @@ export class AuthService {
     );
   }
 
-  async signup(email: string, password: string): Promise<AuthTokens> {
+  async signup(
+    email: string,
+    password: string,
+    sessionMetadata: SessionMetadata = {},
+  ): Promise<AuthTokens> {
     const existing = await this.usersRepo.findByEmail(email);
     if (existing) {
       throw new ConflictException({
@@ -76,11 +83,18 @@ export class AuthService {
     this.logger.info({ userId: user.id }, 'User created');
 
     const accessToken = this.issueToken({ sub: user.id, email: user.email });
-    const refreshToken = await this.refreshTokenService.issue(user.id);
+    const refreshToken = await this.refreshTokenService.issue(
+      user.id,
+      sessionMetadata,
+    );
     return { accessToken, refreshToken };
   }
 
-  async signin(email: string, password: string): Promise<AuthTokens> {
+  async signin(
+    email: string,
+    password: string,
+    sessionMetadata: SessionMetadata = {},
+  ): Promise<AuthTokens> {
     const user = await this.usersRepo.findByEmail(email);
     if (!user) {
       // Constant-time failure to prevent user enumeration
@@ -105,7 +119,10 @@ export class AuthService {
 
     this.logger.info({ userId: user.id }, 'User signed in');
     const accessToken = this.issueToken({ sub: user.id, email: user.email });
-    const refreshToken = await this.refreshTokenService.issue(user.id);
+    const refreshToken = await this.refreshTokenService.issue(
+      user.id,
+      sessionMetadata,
+    );
     return { accessToken, refreshToken };
   }
 

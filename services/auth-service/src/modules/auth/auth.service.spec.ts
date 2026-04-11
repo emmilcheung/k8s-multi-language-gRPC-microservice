@@ -175,7 +175,7 @@ describe('AuthService', () => {
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1');
+      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1', {});
       expect(result.accessToken).toBe('signed.jwt.token');
       expect(result.refreshToken).toBe('opaque-refresh-token');
     });
@@ -226,7 +226,7 @@ describe('AuthService', () => {
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1');
+      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1', {});
       expect(result.accessToken).toBe('signed.jwt.token');
       expect(result.refreshToken).toBe('opaque-refresh-token');
     });

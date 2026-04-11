@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 import { describe, it, expect, vi } from 'vitest';
-import { UnauthorizedException } from '@nestjs/common';
+import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { AuthController } from './auth.controller';
 import type { AuthService } from './auth.service';
 import type { RefreshTokenService } from './refresh-token.service';
@@ -36,8 +36,16 @@ function makeRefreshTokenService(
 ): RefreshTokenService {
   return {
     issue: vi.fn().mockResolvedValue('new-refresh-token-id'),
+    rotate: vi.fn().mockResolvedValue({
+      userId: 'user-uuid-1',
+      refreshToken: 'rotated-refresh-token-id',
+      sessionId: 'session-uuid-1',
+    }),
     validate: vi.fn().mockResolvedValue('user-uuid-1'),
     revoke: vi.fn().mockResolvedValue(undefined),
+    listSessions: vi.fn().mockResolvedValue([]),
+    revokeSession: vi.fn().mockResolvedValue(true),
+    extractSessionId: vi.fn().mockReturnValue('session-uuid-1'),
     ...overrides,
   } as unknown as RefreshTokenService;
 }
@@ -79,11 +87,13 @@ function makeReq(
   options: {
     cookies?: Record<string, string>;
     headers?: Record<string, string>;
+    ip?: string;
   } = {},
 ): Request {
   return {
     cookies: options.cookies ?? {},
     headers: options.headers ?? {},
+    ip: options.ip,
   } as unknown as Request;
 }
 
@@ -114,15 +124,26 @@ describe('AuthController', () => {
     it('should call authService.signup with dto fields and set both cookies', async () => {
       const { controller, authService } = makeController();
       const res = makeRes();
+      const req = makeReq({
+        headers: {
+          'user-agent': 'VitestBrowser/1.0',
+          'x-forwarded-for': '203.0.113.10',
+        },
+      });
 
       const result = await controller.signup(
         { email: 'user@example.com', password: 'pass123' },
+        req,
         res,
       );
 
       expect(authService.signup).toHaveBeenCalledWith(
         'user@example.com',
         'pass123',
+        {
+          userAgent: 'VitestBrowser/1.0',
+          ipAddress: '203.0.113.10',
+        },
       );
       expect(res.cookie).toHaveBeenCalledTimes(2);
       // access token cookie
@@ -145,8 +166,9 @@ describe('AuthController', () => {
     it('should set HttpOnly cookies', async () => {
       const { controller } = makeController();
       const res = makeRes();
+      const req = makeReq();
 
-      await controller.signup({ email: 'a@b.com', password: 'p' }, res);
+      await controller.signup({ email: 'a@b.com', password: 'p' }, req, res);
 
       const cookieCalls = (res.cookie as ReturnType<typeof vi.fn>).mock
         .calls as unknown[][];
@@ -160,15 +182,18 @@ describe('AuthController', () => {
     it('should call authService.signin and set both cookies', async () => {
       const { controller, authService } = makeController();
       const res = makeRes();
+      const req = makeReq({ headers: { 'user-agent': 'VitestBrowser/1.0' } });
 
       const result = await controller.signin(
         { email: 'user@example.com', password: 'secret' },
+        req,
         res,
       );
 
       expect(authService.signin).toHaveBeenCalledWith(
         'user@example.com',
         'secret',
+        { userAgent: 'VitestBrowser/1.0', ipAddress: null },
       );
       expect(res.cookie).toHaveBeenCalledTimes(2);
       expect(result).toEqual({ currentUser: { email: 'user@example.com' } });
@@ -225,19 +250,21 @@ describe('AuthController', () => {
   describe('refresh', () => {
     it('should validate old token, revoke it, issue a new pair, and set both cookies', async () => {
       const { controller, authService, refreshTokenService } = makeController();
-      const req = makeReq({ cookies: { refreshToken: 'old-refresh-id' } });
+      const req = makeReq({
+        cookies: { refreshToken: 'old-refresh-id' },
+        headers: { 'user-agent': 'VitestBrowser/2.0' },
+      });
       const res = makeRes();
 
       await controller.refresh(req, res);
 
-      expect(refreshTokenService.validate).toHaveBeenCalledWith(
+      expect(refreshTokenService.rotate).toHaveBeenCalledWith(
         'old-refresh-id',
+        { userAgent: 'VitestBrowser/2.0', ipAddress: null },
       );
-      expect(refreshTokenService.revoke).toHaveBeenCalledWith('old-refresh-id');
       expect(authService.issueAccessTokenForUser).toHaveBeenCalledWith(
         'user-uuid-1',
       );
-      expect(refreshTokenService.issue).toHaveBeenCalledWith('user-uuid-1');
       expect(res.cookie).toHaveBeenCalledTimes(2);
     });
 
@@ -251,10 +278,10 @@ describe('AuthController', () => {
       );
     });
 
-    it('should propagate UnauthorizedException from RefreshTokenService.validate', async () => {
+    it('should propagate UnauthorizedException from RefreshTokenService.rotate', async () => {
       const { controller } = makeController({
         refreshTokenService: {
-          validate: vi
+          rotate: vi
             .fn()
             .mockRejectedValue(new UnauthorizedException('invalid')),
         },
@@ -265,6 +292,121 @@ describe('AuthController', () => {
       await expect(controller.refresh(req, res)).rejects.toThrow(
         UnauthorizedException,
       );
+    });
+  });
+
+  describe('listSessions', () => {
+    it('should return sessions for the authenticated user and mark the current session', async () => {
+      const { controller, refreshTokenService } = makeController({
+        refreshTokenService: {
+          listSessions: vi.fn().mockResolvedValue([
+            {
+              sessionId: 'session-uuid-1',
+              userId: 'user-uuid-1',
+              createdAt: '2026-04-10T00:00:00.000Z',
+              lastRotatedAt: '2026-04-11T00:00:00.000Z',
+              userAgent: 'Browser/1.0',
+              ipAddress: '203.0.113.10',
+            },
+            {
+              sessionId: 'session-uuid-2',
+              userId: 'user-uuid-1',
+              createdAt: '2026-04-09T00:00:00.000Z',
+              lastRotatedAt: '2026-04-10T00:00:00.000Z',
+              userAgent: 'Browser/0.9',
+              ipAddress: '203.0.113.11',
+            },
+          ]),
+          extractSessionId: vi.fn().mockReturnValue('session-uuid-1'),
+        },
+      });
+      const req = makeReq({
+        cookies: { token: 'valid.jwt', refreshToken: 'session-uuid-1.secret' },
+      });
+
+      const result = await controller.listSessions(req);
+
+      expect(refreshTokenService.listSessions).toHaveBeenCalledWith(
+        'user-uuid-1',
+      );
+      expect(result).toEqual({
+        sessions: [
+          {
+            sessionId: 'session-uuid-1',
+            createdAt: '2026-04-10T00:00:00.000Z',
+            lastRotatedAt: '2026-04-11T00:00:00.000Z',
+            userAgent: 'Browser/1.0',
+            ipAddress: '203.0.113.10',
+            current: true,
+          },
+          {
+            sessionId: 'session-uuid-2',
+            createdAt: '2026-04-09T00:00:00.000Z',
+            lastRotatedAt: '2026-04-10T00:00:00.000Z',
+            userAgent: 'Browser/0.9',
+            ipAddress: '203.0.113.11',
+            current: false,
+          },
+        ],
+      });
+    });
+
+    it('should require authentication to list sessions', async () => {
+      const { controller } = makeController();
+
+      await expect(controller.listSessions(makeReq())).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+  });
+
+  describe('revokeSession', () => {
+    it('should revoke a session owned by the current user and clear cookies when revoking the current session', async () => {
+      const { controller, refreshTokenService } = makeController({
+        refreshTokenService: {
+          revokeSession: vi.fn().mockResolvedValue(true),
+          extractSessionId: vi
+            .fn()
+            .mockReturnValue('ec1fd099-cf07-4f1b-930c-173e3a2f4be8'),
+        },
+      });
+      const req = makeReq({
+        cookies: {
+          token: 'valid.jwt',
+          refreshToken: 'ec1fd099-cf07-4f1b-930c-173e3a2f4be8.secret',
+        },
+      });
+      const res = makeRes();
+
+      await controller.revokeSession(
+        'ec1fd099-cf07-4f1b-930c-173e3a2f4be8',
+        req,
+        res,
+      );
+
+      expect(refreshTokenService.revokeSession).toHaveBeenCalledWith(
+        'user-uuid-1',
+        'ec1fd099-cf07-4f1b-930c-173e3a2f4be8',
+      );
+      expect(res.clearCookie).toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException when the session does not exist', async () => {
+      const { controller } = makeController({
+        refreshTokenService: {
+          revokeSession: vi.fn().mockResolvedValue(false),
+        },
+      });
+      const req = makeReq({ cookies: { token: 'valid.jwt' } });
+      const res = makeRes();
+
+      await expect(
+        controller.revokeSession(
+          'ec1fd099-cf07-4f1b-930c-173e3a2f4be8',
+          req,
+          res,
+        ),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -354,8 +496,9 @@ describe('AuthController', () => {
         configService: makeConfigService('test', '30m'),
       });
       const res = makeRes();
+      const req = makeReq();
 
-      await controller.signup({ email: 'a@b.com', password: 'p' }, res);
+      await controller.signup({ email: 'a@b.com', password: 'p' }, req, res);
 
       const [, , opts] = (res.cookie as ReturnType<typeof vi.fn>).mock
         .calls[0] as [string, string, { maxAge: number }];
@@ -366,8 +509,9 @@ describe('AuthController', () => {
     it('should default refresh token cookie path to /', async () => {
       const { controller } = makeController();
       const res = makeRes();
+      const req = makeReq();
 
-      await controller.signup({ email: 'a@b.com', password: 'p' }, res);
+      await controller.signup({ email: 'a@b.com', password: 'p' }, req, res);
 
       const [, , opts] = (res.cookie as ReturnType<typeof vi.fn>).mock
         .calls[1] as [string, string, { path: string }];
@@ -381,8 +525,9 @@ describe('AuthController', () => {
         }),
       });
       const res = makeRes();
+      const req = makeReq();
 
-      await controller.signup({ email: 'a@b.com', password: 'p' }, res);
+      await controller.signup({ email: 'a@b.com', password: 'p' }, req, res);
 
       const [, , opts] = (res.cookie as ReturnType<typeof vi.fn>).mock
         .calls[1] as [string, string, { path: string }];

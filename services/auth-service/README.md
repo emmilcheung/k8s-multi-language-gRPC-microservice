@@ -23,6 +23,8 @@ Handles user identity for the platform. Issues short-lived RS256 JWTs stored in 
 | `POST` | `/api/users/signin` | Authenticate; sets `token` cookie |
 | `POST` | `/api/users/signout` | Clears `token` cookie |
 | `POST` | `/api/auth/refresh` | Rotates refresh token and reissues access token |
+| `GET` | `/api/users/sessions` | List active refresh-token-backed sessions for the current user |
+| `DELETE` | `/api/users/sessions/:sessionId` | Revoke a specific session |
 | `GET` | `/api/users/currentuser` | Returns user from `X-User-Id` header |
 | `GET` | `/.well-known/jwks.json` | Public key for Kong JWT plugin |
 | `GET` | `/healthz/live` | Liveness probe |
