@@ -442,23 +442,26 @@ test.describe("orders", () => {
     const submitPaymentResponse = await clickPayNowAndWaitForSubmitPayment(page);
     expect(submitPaymentResponse.ok()).toBe(true);
 
-    // The payment API responds before the Kafka-driven order transition is fully
-    // reflected by order-service. Poll with a cache-busting navigation after the
-    // submit request completes so we only refresh once the backend state is ready.
+    await page
+      .getByRole("heading", { name: /order summary/i })
+      .waitFor({ state: "visible", timeout: 20000 });
+
+    // Poll for the Kafka-driven order status transition to "complete".
     await expect
       .poll(
         async () => {
-          await page.waitForLoadState("domcontentloaded").catch(() => {});
-          await page.goto(`${page.url()}?refresh=${Date.now()}`, {
-            waitUntil: "domcontentloaded",
-          });
-          await page
+          await page.reload({ waitUntil: "domcontentloaded" });
+          // Same heading guard inside the poll: ensures we're reading real
+          // content (not the loading.tsx skeleton) before checking the status.
+          const hasRealContent = await page
             .getByRole("heading", { name: /order summary/i })
-            .waitFor({ timeout: 5000 })
-            .catch(() => {});
+            .waitFor({ state: "visible", timeout: 10000 })
+            .then(() => true)
+            .catch(() => false);
+          if (!hasRealContent) return false;
           return page.getByText(/payment received/i).isVisible();
         },
-        { timeout: 15000, intervals: [1000, 2000, 3000] }
+        { timeout: 40000, intervals: [2000, 4000] }
       )
       .toBe(true);
 
