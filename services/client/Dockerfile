@@ -17,8 +17,10 @@ RUN pnpm build
 
 # ─── Stage 3: runtime ──────────────────────────────────────────────────────────
 FROM node:24-alpine@sha256:01743339035a5c3c11a373cd7c83aeab6ed1457b55da6a69e014a95ac4e4700b AS runtime
-ARG NPM_VERSION=11.12.1
-RUN apk upgrade --no-cache && npm install -g "npm@${NPM_VERSION}" && addgroup -S app && adduser -S app -G app
+# Refresh OS packages; remove npm (not used at runtime — eliminates CVE-2026-33671/33672/33750).
+RUN apk upgrade --no-cache && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx && \
+    addgroup -S app && adduser -S app -G app
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
