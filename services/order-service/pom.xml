@@ -51,6 +51,14 @@
         <version>3.1.1</version>
       </dependency>
       <!-- GHSA-72hv-8253-57qq: legacy fasterxml jackson-core 2.x (from transitive deps e.g. redisson) -->
+      <!-- jackson-annotations is upgraded to 2.21: SB4 BOM defaults to 2.20, but
+           tools.jackson.databind:3.1.1 (Jackson 3.x) references JsonSerializeAs which was
+           only added in jackson-annotations 2.21. jackson-core/databind stay at 2.18.6 for CVE fix. -->
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-annotations</artifactId>
+        <version>2.21</version>
+      </dependency>
       <dependency>
         <groupId>com.fasterxml.jackson.core</groupId>
         <artifactId>jackson-core</artifactId>
@@ -59,11 +67,6 @@
       <dependency>
         <groupId>com.fasterxml.jackson.core</groupId>
         <artifactId>jackson-databind</artifactId>
-        <version>2.18.6</version>
-      </dependency>
-      <dependency>
-        <groupId>com.fasterxml.jackson.core</groupId>
-        <artifactId>jackson-annotations</artifactId>
         <version>2.18.6</version>
       </dependency>
       <!-- CVE-2025-12183: lz4-java OOB memory DoS (transitive via kafka-clients) -->
