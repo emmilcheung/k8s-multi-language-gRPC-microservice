@@ -47,6 +47,9 @@ const envSchema = z.object({
     .default('strict'),
   COOKIE_DOMAIN: z.string().optional(),
   REDIS_URL: z.string(),
+  // OAuth2 redirect helpers — used by OAuthService to build cross-service URLs.
+  KONG_BASE_URL: z.string().url().default('http://localhost:8000'),
+  OAUTH_CLIENT_BASE_URL: z.string().url().default('http://localhost:4000'),
 });
 
 /** Inject the active OTel traceId and spanId into every pino log line (O-02). */

@@ -74,10 +74,22 @@ export class OAuthService {
       req.cookies as Record<string, string>
     )[cookieName];
 
+    // Build an absolute authorize URL so the browser can return here after login.
+    // KONG_BASE_URL is the external-facing Kong proxy URL (e.g. http://localhost:8000).
+    // OAUTH_CLIENT_BASE_URL is the Next.js client (e.g. http://localhost:4000).
+    const kongBase = this.config.get<string>(
+      'KONG_BASE_URL',
+      'http://localhost:8000',
+    );
+    const clientBase = this.config.get<string>(
+      'OAUTH_CLIENT_BASE_URL',
+      'http://localhost:4000',
+    );
+    const absoluteAuthorizeUrl = `${kongBase}${req.originalUrl}`;
+
     if (!accessToken) {
-      // Not authenticated — redirect to signin, preserving the full authorize URL
-      const next = encodeURIComponent(req.originalUrl);
-      return { redirectUrl: `/auth/signin?next=${next}` };
+      const next = encodeURIComponent(absoluteAuthorizeUrl);
+      return { redirectUrl: `${clientBase}/auth/signin?next=${next}` };
     }
 
     let userId: string;
@@ -85,8 +97,8 @@ export class OAuthService {
       const payload = await this.authService.verifyAccessToken(accessToken);
       userId = payload.sub;
     } catch {
-      const next = encodeURIComponent(req.originalUrl);
-      return { redirectUrl: `/auth/signin?next=${next}` };
+      const next = encodeURIComponent(absoluteAuthorizeUrl);
+      return { redirectUrl: `${clientBase}/auth/signin?next=${next}` };
     }
 
     // 4. Parse and validate requested scopes
