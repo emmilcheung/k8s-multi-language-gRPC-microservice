@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { trace } from '@opentelemetry/api';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { OAuthModule } from './modules/oauth/oauth.module';
 import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { DatabaseModule } from './database/database.module';
@@ -107,6 +108,7 @@ function otelMixin(): Record<string, string> {
     RedisModule,
     UsersModule,
     AuthModule,
+    OAuthModule,
     HealthModule,
     MetricsModule,
   ],

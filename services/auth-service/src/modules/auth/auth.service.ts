@@ -27,6 +27,10 @@ export interface JwtPayload {
   jti: string;
   iat?: number;
   exp?: number;
+  /** Present only on OAuth2 access tokens issued by the token endpoint. */
+  scope?: string;
+  /** Present only on OAuth2 access tokens — identifies the issuing client. */
+  client_id?: string;
 }
 
 export interface CurrentUser {
@@ -46,10 +50,12 @@ const blacklisableAccessTokenSchema = z.object({
 
 const jwtPayloadSchema = z.object({
   sub: z.string().min(1),
-  email: z.string().email(),
+  email: z.email(),
   jti: z.string().min(1),
   iat: z.number().int().optional(),
   exp: z.number().int().optional(),
+  scope: z.string().optional(),
+  client_id: z.string().optional(),
 });
 
 @Injectable()
@@ -212,6 +218,30 @@ export class AuthService {
       });
     }
     return this.issueToken({ sub: user.id, email: user.email });
+  }
+
+  /**
+   * Issue an access token for an OAuth2 client with specific scopes.
+   * Adds `scope` and `client_id` claims to the standard JWT payload.
+   * Used by the OAuth2 token endpoint only.
+   */
+  issueAccessTokenForOAuth(
+    userId: string,
+    email: string,
+    scope: string,
+    clientId: string,
+  ): string {
+    const tokenPayload = {
+      sub: userId,
+      email,
+      jti: randomUUID(),
+      scope,
+      client_id: clientId,
+    };
+    const token: unknown = (this.jwtService.sign as (p: unknown) => unknown)(
+      tokenPayload,
+    );
+    return token as string;
   }
 
   getJwks(): object {

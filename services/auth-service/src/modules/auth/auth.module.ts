@@ -49,5 +49,6 @@ import { parseRsaPrivateKey } from './rsa-key.util';
   ],
   providers: [AuthService, RefreshTokenService, SigninAbuseProtectionService],
   controllers: [AuthController],
+  exports: [AuthService, RefreshTokenService, UsersModule, JwtModule],
 })
 export class AuthModule {}
