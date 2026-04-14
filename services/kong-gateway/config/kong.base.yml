@@ -67,6 +67,7 @@ services:
           - /oauth/authorize
           - /oauth/token
           - /oauth/revoke
+          - /oauth/clients/register
         methods: [GET, POST]
         strip_path: false
         plugins:
@@ -79,6 +80,33 @@ services:
               redis_port: {{RATE_LIMIT_REDIS_PORT}}
               fault_tolerant: true
               hide_client_headers: false
+
+      # OAuth: consent query — public GET so Next.js server can fetch pending consent details.
+      - name: oauth-consent-query
+        paths:
+          - ~/oauth/consent/[^/]+$
+        methods: [GET]
+        strip_path: false
+
+      # OAuth: consent approval — JWT required (cookie); user confirms or denies.
+      # X-User-Id is injected so auth-service can verify the consenting user matches.
+      - name: oauth-consent-approve
+        paths:
+          - ~/oauth/consent/[^/]+$
+        methods: [POST]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
 
       # OAuth: client management — JWT required (cookie or Bearer header).
       # Lists and revokes OAuth sessions for the authenticated user.
@@ -193,11 +221,10 @@ services:
     read_timeout: {{READ_TIMEOUT_MS}}
     write_timeout: {{WRITE_TIMEOUT_MS}}
     routes:
-      - name: orders-collection
+      - name: orders-collection-read
         paths:
           - ~/api/orders$
-          - ~/api/orders/seated$
-        methods: [GET, POST]
+        methods: [GET]
         strip_path: false
         plugins:
           - name: jwt
@@ -206,16 +233,22 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
+          - name: pre-function
+            config:
+              access:
+                - |
+                  {{SCOPE_CHECK_LUA:orders:read}}
           - name: post-function
             config:
               access:
                 - |
                   {{JWT_SUB_LUA}}
 
-      - name: orders-resource
+      - name: orders-collection-write
         paths:
-          - ~/api/orders/[^/]+$
-        methods: [GET, DELETE]
+          - ~/api/orders$
+          - ~/api/orders/seated$
+        methods: [POST]
         strip_path: false
         plugins:
           - name: jwt
@@ -224,6 +257,57 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
+          - name: pre-function
+            config:
+              access:
+                - |
+                  {{SCOPE_CHECK_LUA:orders:create}}
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      - name: orders-resource-read
+        paths:
+          - ~/api/orders/[^/]+$
+        methods: [GET]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: pre-function
+            config:
+              access:
+                - |
+                  {{SCOPE_CHECK_LUA:orders:read}}
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      - name: orders-resource-cancel
+        paths:
+          - ~/api/orders/[^/]+$
+        methods: [DELETE]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: pre-function
+            config:
+              access:
+                - |
+                  {{SCOPE_CHECK_LUA:orders:cancel}}
           - name: post-function
             config:
               access:
@@ -245,10 +329,10 @@ services:
         methods: [POST]
         strip_path: false
 
-      - name: payments-collection
+      - name: payments-collection-read
         paths:
           - ~/api/payments$
-        methods: [GET, POST]
+        methods: [GET]
         strip_path: false
         plugins:
           - name: jwt
@@ -257,6 +341,34 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
+          - name: pre-function
+            config:
+              access:
+                - |
+                  {{SCOPE_CHECK_LUA:payments:read}}
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      - name: payments-collection-write
+        paths:
+          - ~/api/payments$
+        methods: [POST]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: pre-function
+            config:
+              access:
+                - |
+                  {{SCOPE_CHECK_LUA:payments:create}}
           - name: post-function
             config:
               access:
@@ -275,6 +387,11 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
+          - name: pre-function
+            config:
+              access:
+                - |
+                  {{SCOPE_CHECK_LUA:payments:read}}
           - name: post-function
             config:
               access:

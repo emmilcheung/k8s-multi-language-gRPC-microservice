@@ -21,6 +21,7 @@ export interface OAuthClient {
   allowedScopes: OAuthScope[];
   accessTokenLifetimeSeconds: number;
   refreshTokenLifetimeSeconds: number;
+  isFirstParty?: boolean;
 }
 
 export const OAUTH_CLIENTS: OAuthClient[] = [
@@ -46,4 +47,23 @@ export function validateScopes(
 ): OAuthScope[] {
   const allowed = new Set<string>(client.allowedScopes);
   return requestedScopes.filter((s): s is OAuthScope => allowed.has(s));
+}
+
+/** Adapter: converts a DynamicOAuthClient to the shape OAuthService expects. */
+export function dynamicToStaticShape(
+  dynamic: import('./dynamic-client.service.js').DynamicOAuthClient,
+): OAuthClient {
+  return {
+    clientId: dynamic.clientId,
+    clientName: dynamic.clientName,
+    redirectUris: dynamic.redirectUris,
+    grantTypes: dynamic.grantTypes,
+    allowedScopes: dynamic.allowedScopes.filter((s): s is OAuthScope =>
+      (OAUTH_SCOPES as readonly string[]).includes(s),
+    ),
+    pkceRequired: dynamic.pkceRequired,
+    accessTokenLifetimeSeconds: dynamic.accessTokenLifetimeSeconds,
+    refreshTokenLifetimeSeconds: dynamic.refreshTokenLifetimeSeconds,
+    isFirstParty: false,
+  };
 }
