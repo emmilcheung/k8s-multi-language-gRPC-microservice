@@ -10,6 +10,8 @@ import type { OrderState } from "@/app/actions/orders";
 interface CardElement {
   mount(container: HTMLElement | string): void;
   unmount(): void;
+  on?: (event: "change", handler: (event: { error?: { message?: string }; complete: boolean }) => void) => void;
+  off?: (event: "change", handler: (event: { error?: { message?: string }; complete: boolean }) => void) => void;
 }
 
 interface CreatePaymentMethodResult {
@@ -65,6 +67,7 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
   const [isProcessing, setIsProcessing] = useState(false);
   const [stripeReady, setStripeReady] = useState(false);
   const [stripeScriptReady, setStripeScriptReady] = useState(false);
+  const [isCardComplete, setIsCardComplete] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [cardElementNode, setCardElementNode] = useState<HTMLDivElement | null>(null);
   const stripeInstanceRef = useRef<StripeInstance | null>(null);
@@ -73,7 +76,8 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
 
   const isTimeRunningOut = secondsRemaining !== null && secondsRemaining < 60;
   const isPending = isProcessing || isCancelling;
-  const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+  const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?.trim();
+  const validPublishableKey = Boolean(publishableKey && publishableKey.startsWith("pk_"));
 
   // Load Stripe.js once and track when the constructor is ready.
   useEffect(() => {
@@ -126,9 +130,11 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
       return;
     }
 
-    if (!publishableKey) {
+    if (!validPublishableKey || !publishableKey) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setPaymentError("Stripe configuration is missing. Please contact support.");
+      setPaymentError(
+        "Stripe publishable key is missing or invalid. Check NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY in your client .env."
+      );
       setStripeReady(false);
       return;
     }
@@ -161,11 +167,25 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
         },
       });
 
+      const handleCardChange = (event: { error?: { message?: string }; complete: boolean }) => {
+        setIsCardComplete(event.complete);
+        if (event.error?.message) {
+          setPaymentError(event.error.message);
+        } else if (event.complete) {
+          setPaymentError(null);
+        }
+      };
+
+      cardElement.on?.("change", handleCardChange);
       cardElement.mount(cardElementNode);
       cardElementInstanceRef.current = cardElement;
       stripeMountedRef.current = true;
       setPaymentError(null);
       setStripeReady(true);
+
+      return () => {
+        cardElement.off?.("change", handleCardChange);
+      };
     } catch {
       setPaymentError("Failed to initialize Stripe. Please try again.");
       setStripeReady(false);
@@ -340,6 +360,11 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
             </div>
           )}
         </div>
+        {stripeReady && !isCardComplete && !paymentError && (
+          <p className="text-sm text-muted-foreground mt-2">
+            Please complete your card details, including CVC, before paying.
+          </p>
+        )}
       </div>
 
       {/* Security note */}
@@ -352,7 +377,7 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
       <div className="flex flex-col gap-2">
         <button
           onClick={handlePayment}
-          disabled={isPending || !stripeReady}
+          disabled={isPending || !stripeReady || !isCardComplete}
           className="w-full gap-2 bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-primary-foreground rounded-lg px-4 py-2.5 font-medium flex items-center justify-center transition-colors"
         >
           {isProcessing ? (

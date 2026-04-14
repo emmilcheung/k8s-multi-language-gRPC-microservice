@@ -14,15 +14,18 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { OAuthService } from './oauth.service';
-import type {
+import {
   AuthorizeQuery,
   TokenBody,
   RevokeBody,
+  RegisterClientBody,
+  ConsentBody,
+} from './oauth.dto';
+import type {
   RegisterClientResponse,
   ConsentDetails,
   ConsentResult,
 } from './oauth.dto';
-import { RegisterClientBody, ConsentBody } from './oauth.dto';
 
 @Controller()
 export class OAuthController {
