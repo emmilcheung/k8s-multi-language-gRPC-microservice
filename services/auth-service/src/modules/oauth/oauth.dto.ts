@@ -1,4 +1,13 @@
-import { IsString, IsNotEmpty, IsOptional, IsIn } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsIn,
+  IsArray,
+  ArrayNotEmpty,
+  IsUrl,
+  IsBoolean,
+} from 'class-validator';
 
 /** Query params for GET /oauth/authorize */
 export class AuthorizeQuery {
@@ -90,4 +99,56 @@ export interface OAuthClientSession {
   scope: string;
   sessionId: string;
   lastRotatedAt: string;
+}
+
+/** Body for POST /oauth/clients/register — RFC 7591 dynamic client registration */
+export class RegisterClientBody {
+  @IsString()
+  @IsNotEmpty()
+  client_name!: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsUrl({}, { each: true })
+  redirect_uris!: string[];
+
+  @IsString()
+  @IsOptional()
+  scope?: string;
+
+  @IsArray()
+  @IsOptional()
+  @IsString({ each: true })
+  grant_types?: string[];
+}
+
+/** Response shape for POST /oauth/clients/register */
+export interface RegisterClientResponse {
+  client_id: string;
+  client_name: string;
+  redirect_uris: string[];
+  grant_types: string[];
+  scope: string;
+  token_endpoint_auth_method: 'none'; // public client
+  pkce_required: true;
+}
+
+/** Body for POST /oauth/consent/:requestId */
+export class ConsentBody {
+  @IsBoolean()
+  approve!: boolean;
+}
+
+/** Response for GET /oauth/consent/:requestId (public — fetched by Next.js consent page) */
+export interface ConsentDetails {
+  requestId: string;
+  clientId: string;
+  clientName: string;
+  scopes: string[];
+  expiresInSeconds: number;
+}
+
+/** Response for POST /oauth/consent/:requestId */
+export interface ConsentResult {
+  redirectUrl: string;
 }

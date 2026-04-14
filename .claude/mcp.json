@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ticketing": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["packages/ticketing-mcp-server/dist/index.js"],
+      "env": {
+        "TICKETING_API_URL": "http://localhost:8000"
+      }
+    }
+  }
+}

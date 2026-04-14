@@ -122,6 +122,21 @@ async function installStripeMock(
 ) {
   await page.addInitScript((mockOptions) => {
     class MockCardElement {
+      private _changeHandler:
+        | ((event: { error?: { message?: string }; complete: boolean }) => void)
+        | null = null;
+
+      on(
+        event: string,
+        handler: (event: { error?: { message?: string }; complete: boolean }) => void
+      ) {
+        if (event === "change") {
+          this._changeHandler = handler;
+        }
+      }
+
+      off() {}
+
       mount(container: HTMLElement | string) {
         const target =
           typeof container === "string"
@@ -131,6 +146,11 @@ async function installStripeMock(
         if (target instanceof HTMLElement) {
           target.setAttribute("data-stripe-mock", "mounted");
           target.textContent = "Mock card input";
+        }
+
+        // Simulate a completed card entry so isCardComplete becomes true
+        if (this._changeHandler) {
+          this._changeHandler({ complete: true });
         }
       }
 

@@ -51,6 +51,37 @@ async function persistAuthCookies(setCookieHeader: string | null): Promise<void>
   }
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Guard against open-redirect attacks on the ?next parameter.
+ * Allows:
+ *   - Relative paths starting with / (same-origin Next.js routes)
+ *   - Absolute URLs whose origin matches the configured Kong proxy
+ *     (so MCP OAuth callbacks can return the browser to /oauth/authorize)
+ *
+ * In development, any localhost/127.0.0.1 origin is accepted since the Kong
+ * proxy and the Next.js app both run on localhost with different ports.
+ */
+function isSafeRedirect(url: string | null | undefined): url is string {
+  if (!url) return false;
+  // Relative path — same origin, always safe
+  if (url.startsWith("/") && !url.startsWith("//")) return true;
+  try {
+    const parsed = new URL(url);
+    if (process.env.NODE_ENV !== "production") {
+      return parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+    }
+    // Production: only allow the configured Kong gateway origin
+    const kongUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
+    if (!kongUrl) return false;
+    const kongOrigin = new URL(kongUrl).origin;
+    return parsed.origin === kongOrigin;
+  } catch {
+    return false;
+  }
+}
+
 // ─── Signup ───────────────────────────────────────────────────────────────────
 
 export interface AuthState {
@@ -104,6 +135,8 @@ export async function signin(
 ): Promise<AuthState> {
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
+  // Present when the user was redirected here mid-OAuth2 flow (e.g. from MCP server).
+  const next = formData.get("next") as string | null;
 
   if (!email || !password) {
     return { error: "Email and password are required." };
@@ -133,7 +166,9 @@ export async function signin(
     return { error: "An unexpected error occurred." };
   }
 
-  redirect("/");
+  // After OAuth2-initiated signin, return the browser to the authorize endpoint.
+  // Guard against open-redirect: only allow trusted origins.
+  redirect(isSafeRedirect(next) ? next : "/");
 }
 
 // ─── Signout ──────────────────────────────────────────────────────────────────

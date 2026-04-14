@@ -2,6 +2,8 @@ import {
   Injectable,
   BadRequestException,
   UnauthorizedException,
+  NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
@@ -9,7 +11,15 @@ import { AuthService } from '../auth/auth.service';
 import { RefreshTokenService } from '../auth/refresh-token.service';
 import { UsersRepository } from '../users/users.repository';
 import { OAuthCodeStoreService } from './oauth-code-store.service';
-import { findClient, validateScopes } from './oauth-clients.config';
+import {
+  findClient,
+  validateScopes,
+  dynamicToStaticShape,
+} from './oauth-clients.config';
+import type { OAuthClient } from './oauth-clients.config';
+import { DynamicClientService } from './dynamic-client.service';
+import { OAuthConsentStoreService } from './oauth-consent-store.service';
+import type { ConsentSummary } from './oauth-consent-store.service';
 import { verifyPkceChallenge } from './pkce.util';
 import type {
   AuthorizeQuery,
@@ -17,6 +27,8 @@ import type {
   RevokeBody,
   TokenResponse,
   OAuthClientSession,
+  RegisterClientBody,
+  RegisterClientResponse,
 } from './oauth.dto';
 
 @Injectable()
@@ -27,7 +39,17 @@ export class OAuthService {
     private readonly usersRepo: UsersRepository,
     private readonly codeStore: OAuthCodeStoreService,
     private readonly config: ConfigService,
+    private readonly dynamicClientService: DynamicClientService,
+    private readonly consentStore: OAuthConsentStoreService,
   ) {}
+
+  /** Resolve a client by ID — checks static registry first, then dynamic Redis store. */
+  async resolveClient(clientId: string): Promise<OAuthClient | null> {
+    const staticClient = findClient(clientId);
+    if (staticClient) return staticClient;
+    const dynamic = await this.dynamicClientService.findClient(clientId);
+    return dynamic ? dynamicToStaticShape(dynamic) : null;
+  }
 
   /**
    * GET /oauth/authorize
@@ -54,7 +76,7 @@ export class OAuthService {
     }
 
     // 2. Validate client
-    const client = findClient(query.client_id);
+    const client = await this.resolveClient(query.client_id);
     if (!client) {
       throw new BadRequestException({
         error: 'invalid_client',
@@ -74,10 +96,22 @@ export class OAuthService {
       req.cookies as Record<string, string>
     )[cookieName];
 
+    // Build an absolute authorize URL so the browser can return here after login.
+    // KONG_BASE_URL is the external-facing Kong proxy URL (e.g. http://localhost:8000).
+    // OAUTH_CLIENT_BASE_URL is the Next.js client (e.g. http://localhost:4000).
+    const kongBase = this.config.get<string>(
+      'KONG_BASE_URL',
+      'http://localhost:8000',
+    );
+    const clientBase = this.config.get<string>(
+      'OAUTH_CLIENT_BASE_URL',
+      'http://localhost:4000',
+    );
+    const absoluteAuthorizeUrl = `${kongBase}${req.originalUrl}`;
+
     if (!accessToken) {
-      // Not authenticated — redirect to signin, preserving the full authorize URL
-      const next = encodeURIComponent(req.originalUrl);
-      return { redirectUrl: `/auth/signin?next=${next}` };
+      const next = encodeURIComponent(absoluteAuthorizeUrl);
+      return { redirectUrl: `${clientBase}/auth/signin?next=${next}` };
     }
 
     let userId: string;
@@ -85,8 +119,8 @@ export class OAuthService {
       const payload = await this.authService.verifyAccessToken(accessToken);
       userId = payload.sub;
     } catch {
-      const next = encodeURIComponent(req.originalUrl);
-      return { redirectUrl: `/auth/signin?next=${next}` };
+      const next = encodeURIComponent(absoluteAuthorizeUrl);
+      return { redirectUrl: `${clientBase}/auth/signin?next=${next}` };
     }
 
     // 4. Parse and validate requested scopes
@@ -102,7 +136,25 @@ export class OAuthService {
       });
     }
 
-    // 5. Issue authorization code (auto-approve for first-party client)
+    // 5. First-party clients are auto-approved; third-party require explicit consent.
+    if (client.isFirstParty === false) {
+      // Dynamic (third-party) client — store pending consent and redirect to consent UI
+      const requestId = await this.consentStore.storePendingConsent({
+        clientId: client.clientId,
+        clientName: client.clientName,
+        userId,
+        scope: grantedScopes.join(' '),
+        redirectUri: query.redirect_uri,
+        codeChallenge: query.code_challenge,
+        codeChallengeMethod: query.code_challenge_method,
+        state: query.state,
+      });
+      return {
+        redirectUrl: `${clientBase}/oauth/consent?request_id=${requestId}`,
+      };
+    }
+
+    // 6. Auto-approve: issue authorization code immediately
     const code = await this.codeStore.storeCode({
       clientId: client.clientId,
       userId,
@@ -112,7 +164,7 @@ export class OAuthService {
       redirectUri: query.redirect_uri,
     });
 
-    // 6. Redirect to client with code + state
+    // 7. Redirect to client with code + state
     const redirectUrl = new URL(query.redirect_uri);
     redirectUrl.searchParams.set('code', code);
     if (query.state) redirectUrl.searchParams.set('state', query.state);
@@ -149,7 +201,7 @@ export class OAuthService {
       });
     }
 
-    const client = findClient(body.client_id);
+    const client = await this.resolveClient(body.client_id);
     if (!client) {
       throw new BadRequestException({
         error: 'invalid_client',
@@ -251,7 +303,7 @@ export class OAuthService {
       });
     }
 
-    const client = findClient(body.client_id);
+    const client = await this.resolveClient(body.client_id);
     if (!client) {
       throw new BadRequestException({
         error: 'invalid_client',
@@ -379,5 +431,124 @@ export class OAuthService {
         ]);
       }),
     );
+  }
+
+  /** GET /oauth/consent/:requestId — return pending consent details for the UI */
+  async getConsentRequest(requestId: string): Promise<ConsentSummary> {
+    const record = await this.consentStore.getConsent(requestId);
+    if (!record) {
+      throw new NotFoundException({
+        error: 'consent_request_not_found',
+        error_description:
+          'Consent request not found or expired. Please restart the authorization flow.',
+      });
+    }
+    return {
+      requestId: record.requestId,
+      clientId: record.clientId,
+      clientName: record.clientName,
+      scopes: record.scope.split(' ').filter(Boolean),
+      expiresInSeconds: 600,
+    };
+  }
+
+  /**
+   * POST /oauth/consent/:requestId — user approves or denies the pending consent.
+   * Must be called with a valid user session (cookie JWT validated by Kong).
+   * Returns the redirect URL for the browser to follow.
+   */
+  async submitConsent(
+    requestId: string,
+    userId: string,
+    approve: boolean,
+  ): Promise<{ redirectUrl: string }> {
+    const record = await this.consentStore.consumeConsent(requestId);
+    if (!record) {
+      throw new NotFoundException({
+        error: 'consent_request_not_found',
+        error_description:
+          'Consent request not found or expired. Please restart the authorization flow.',
+      });
+    }
+
+    // User must be the one who initiated the authorize request
+    if (record.userId !== userId) {
+      throw new ForbiddenException({ error: 'user_mismatch' });
+    }
+
+    if (!approve) {
+      const denyUrl = new URL(record.redirectUri);
+      denyUrl.searchParams.set('error', 'access_denied');
+      denyUrl.searchParams.set(
+        'error_description',
+        'The user denied the authorization request.',
+      );
+      if (record.state) denyUrl.searchParams.set('state', record.state);
+      return { redirectUrl: denyUrl.toString() };
+    }
+
+    // Issue the authorization code
+    const code = await this.codeStore.storeCode({
+      clientId: record.clientId,
+      userId: record.userId,
+      scope: record.scope,
+      codeChallenge: record.codeChallenge,
+      codeChallengeMethod: record.codeChallengeMethod,
+      redirectUri: record.redirectUri,
+    });
+
+    const redirectUrl = new URL(record.redirectUri);
+    redirectUrl.searchParams.set('code', code);
+    if (record.state) redirectUrl.searchParams.set('state', record.state);
+    return { redirectUrl: redirectUrl.toString() };
+  }
+
+  /** POST /oauth/clients/register — RFC 7591 dynamic client registration (public client) */
+  async registerClient(
+    body: RegisterClientBody,
+  ): Promise<RegisterClientResponse> {
+    const ALL_SCOPES =
+      'tickets:read orders:read orders:create orders:cancel payments:read payments:create venues:read seating:read seating:hold';
+    const requestedScopes = body.scope
+      ? body.scope.split(' ').filter(Boolean)
+      : ALL_SCOPES.split(' ');
+
+    // Validate redirect_uris: must be HTTPS or localhost
+    for (const uri of body.redirect_uris) {
+      try {
+        const parsed = new URL(uri);
+        const isLocalhost =
+          parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+        if (parsed.protocol !== 'https:' && !isLocalhost) {
+          throw new BadRequestException({
+            error: 'invalid_redirect_uri',
+            error_description: `redirect_uri must use HTTPS or be localhost: ${uri}`,
+          });
+        }
+      } catch (e) {
+        if (e instanceof BadRequestException) throw e;
+        throw new BadRequestException({
+          error: 'invalid_redirect_uri',
+          error_description: `Invalid URI: ${uri}`,
+        });
+      }
+    }
+
+    const client = await this.dynamicClientService.register({
+      clientName: body.client_name,
+      redirectUris: body.redirect_uris,
+      scope: requestedScopes.join(' '),
+      grantTypes: body.grant_types ?? ['authorization_code'],
+    });
+
+    return {
+      client_id: client.clientId,
+      client_name: client.clientName,
+      redirect_uris: client.redirectUris,
+      grant_types: client.grantTypes,
+      scope: client.allowedScopes.join(' '),
+      token_endpoint_auth_method: 'none',
+      pkce_required: true,
+    };
   }
 }

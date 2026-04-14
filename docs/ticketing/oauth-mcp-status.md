@@ -125,16 +125,40 @@ allowedScopes:      all scopes above
 
 ---
 
-## Phase 2 — Future Work (Not Yet Started)
+## Phase 2 — Browser Login Flow ✅ COMPLETE (2026-04-14)
 
-> Remarked 2026-04-14. Do not start until Phase 1 fixes are merged.
+Implemented on branch `feature/oauth-mcp-phase2`. PR #44.
 
-| Item | Description |
-| --- | --- |
-| Kong scope enforcement | `jwt-scope.lua` plugin — restrict OAuth tokens to declared scopes per-route at the gateway boundary |
-| Dynamic client registration | Allow third-party MCP servers to register clients via `POST /oauth/clients/register` (RFC 7591) |
-| Consent screen UI | Next.js page at `/oauth/authorize` showing granted scopes; replace auto-approve for non-first-party clients |
-| `/.claude/mcp.json` snippet | Document the Claude Code MCP config for users to wire up `@ticketing/mcp-server` locally |
+| Item | Status | Notes |
+| --- | --- | --- |
+| Smooth browser OAuth round-trip | ✅ Done | auth-service redirects to absolute Next.js URL with full `?next=` authorize URL; signin page forwards `?next` through hidden form field; `isSafeRedirect()` guard prevents open redirect |
+| Polished callback pages | ✅ Done | Dark-theme card with SVG icons for success/error |
+| Terminal UX | ✅ Done | Full authorize URL printed; copy-paste fallback instructions |
+
+## Phase 2 — Full OAuth Feature Set ✅ COMPLETE (2026-04-14)
+
+Implemented on branch `feature/oauth-mcp-phase2`.
+
+| Item | Status | Files |
+| --- | --- | --- |
+| Kong scope enforcement | ✅ Done | `plugins/jwt-scope.lua`, `build.sh` (SCOPE_CHECK_LUA handler), `kong.base.yml` (orders + payments routes split for per-scope pre-function) |
+| Dynamic client registration | ✅ Done | `oauth/dynamic-client.service.ts`, `POST /oauth/clients/register` (RFC 7591), Kong `oauth-public` route |
+| Consent screen UI | ✅ Done | `oauth-consent-store.service.ts`, `GET`/`POST /oauth/consent/:requestId`, Next.js `/oauth/consent` page with scope labels + destructive warning |
+| `.claude/mcp.json` snippet | ✅ Done | `.claude/mcp.json` (project-level Claude Code config), `docs/ticketing/mcp-setup.md` |
+
+### How consent works for third-party clients
+
+```text
+GET /oauth/authorize (dynamic client_id, user authenticated)
+  → auth-service stores PendingConsent in Redis (TTL 10 min) → request_id
+  → 302 to Next.js /oauth/consent?request_id=<id>
+  → Next.js fetches GET /oauth/consent/<id> (public) → renders scope card
+  → user clicks Allow → POST /oauth/consent/<id> (JWT cookie validated by Kong, X-User-Id injected)
+  → auth-service issues code → returns redirectUrl
+  → Next.js client-side redirects browser to callback
+```
+
+First-party clients (`ticketing-mcp`) are auto-approved without the consent step.
 
 ---
 

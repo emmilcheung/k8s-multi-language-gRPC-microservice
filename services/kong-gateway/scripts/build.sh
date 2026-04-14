@@ -88,6 +88,8 @@ lua_path           = sys.argv[4]
 output_path        = sys.argv[5]
 rsa_public_key     = sys.argv[6]
 
+scope_lua_path     = lua_path.replace('jwt-sub.lua', 'jwt-scope.lua')
+
 # ── Load values files ──────────────────────────────────────────────────────────
 def load_values(path):
     """Parse a simple KEY: value YAML file into a dict (scalar values only)."""
@@ -136,6 +138,25 @@ with open(base_template_path) as f:
 
 # ── Substitute {{JWT_SUB_LUA}} (multi-line, placeholder may have leading spaces) ──
 content = re.sub(r'[ \t]*\{\{JWT_SUB_LUA\}\}', lua_block, content)
+
+# ── Substitute {{SCOPE_CHECK_LUA:<scope>}} placeholders ───────────────────────
+# Each occurrence encodes the required scope in the placeholder, e.g.:
+#   {{SCOPE_CHECK_LUA:orders:read}}
+# build.sh reads jwt-scope.lua, replaces SCOPE_PLACEHOLDER with the captured
+# scope string, indents 18 spaces, and substitutes inline.
+def make_scope_lua(scope_lua_content, scope, indent):
+    replaced = scope_lua_content.replace('SCOPE_PLACEHOLDER', scope)
+    lines = replaced.rstrip('\n').splitlines()
+    return '\n'.join(indent + line for line in lines)
+
+with open(scope_lua_path) as f:
+    scope_lua_content = f.read()
+
+def replace_scope_check(m):
+    scope = m.group(1)
+    return make_scope_lua(scope_lua_content, scope, LUA_INDENT)
+
+content = re.sub(r'[ \t]*\{\{SCOPE_CHECK_LUA:([^}]+)\}\}', replace_scope_check, content)
 
 # ── Substitute {{RSA_PUBLIC_KEY}} ─────────────────────────────────────────────
 content = re.sub(r'[ \t]*\{\{RSA_PUBLIC_KEY\}\}', rsa_block, content)

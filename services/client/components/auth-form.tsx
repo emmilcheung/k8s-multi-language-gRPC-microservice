@@ -13,11 +13,13 @@ import type { AuthState } from "@/app/actions/auth";
 interface AuthFormProps {
   mode: "signup" | "signin";
   action: (_prev: AuthState, formData: FormData) => Promise<AuthState>;
+  /** After successful signin, redirect to this URL (passed as a hidden field). */
+  next?: string;
 }
 
 const initialState: AuthState = {};
 
-export function AuthForm({ mode, action }: AuthFormProps) {
+export function AuthForm({ mode, action, next }: AuthFormProps) {
   const [state, formAction, pending] = useActionState(action, initialState);
 
   const isSignup = mode === "signup";
@@ -56,6 +58,8 @@ export function AuthForm({ mode, action }: AuthFormProps) {
         )}
 
         <form action={formAction} className="flex flex-col gap-4">
+          {/* Hidden field carries the post-login redirect URL for OAuth flows */}
+          {next && <input type="hidden" name="next" value={next} />}
           {/* Email */}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="email" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
