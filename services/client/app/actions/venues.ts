@@ -163,9 +163,12 @@ export async function createVenueSection(
 export async function deleteVenueSection(
   venueId: string,
   sectionId: string,
-  _prev: VenueState,
-  _formData: FormData
+  prev: VenueState,
+  formData: FormData
 ): Promise<VenueState> {
+  void prev;
+  void formData;
+
   const res = await fetch(`${base()}/api/venues/${venueId}/sections/${sectionId}`, {
     method: "DELETE",
     headers: await authHeaders(),
@@ -404,9 +407,12 @@ export async function saveLayout(
 export async function deactivatePlan(
   planId: string,
   venueId: string,
-  _prev: PlanState,
-  _formData: FormData
+  prev: PlanState,
+  formData: FormData
 ): Promise<PlanState> {
+  void prev;
+  void formData;
+
   if (!planId) return { error: "planId is required." };
 
   const res = await fetch(`${base()}/api/seating-plans/${planId}/deactivate`, {
@@ -435,9 +441,12 @@ export async function deactivatePlan(
 export async function activatePlan(
   planId: string,
   venueId: string,
-  _prev: PlanState,
-  _formData: FormData
+  prev: PlanState,
+  formData: FormData
 ): Promise<PlanState> {
+  void prev;
+  void formData;
+
   if (!planId) return { error: "planId is required." };
 
   const res = await fetch(`${base()}/api/seating-plans/${planId}/activate`, {
@@ -461,9 +470,11 @@ export async function activatePlan(
  */
 export async function updateVenue(
   venueId: string,
-  _prev: VenueState,
+  prev: VenueState,
   formData: FormData
 ): Promise<VenueState> {
+  void prev;
+
   const name = (formData.get("name") as string)?.trim();
   const capacityRaw = formData.get("capacity") as string;
   const capacity = parseInt(capacityRaw, 10);

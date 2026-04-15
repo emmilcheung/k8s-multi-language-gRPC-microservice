@@ -190,7 +190,7 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
       setPaymentError("Failed to initialize Stripe. Please try again.");
       setStripeReady(false);
     }
-  }, [cardElementNode, publishableKey, stripeScriptReady]);
+  }, [cardElementNode, publishableKey, stripeScriptReady, validPublishableKey]);
 
   useEffect(() => {
     return () => {
