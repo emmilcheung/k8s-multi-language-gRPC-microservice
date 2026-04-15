@@ -56,6 +56,7 @@ jobs:
       payment:    ${{ steps.filter.outputs.payment }}
       proto:      ${{ steps.filter.outputs.proto }}
       ticket:     ${{ steps.filter.outputs.ticket }}
+      user:       ${{ steps.filter.outputs.user }}
       venue:      ${{ steps.filter.outputs.venue }}
       skip-ci:    ${{ steps.set-skip-ci.outputs.skip-ci }}
     steps:
@@ -92,6 +93,9 @@ jobs:
             ticket:
               - 'services/ticket-service/**'
               - 'proto/**'
+              - '.github/workflows/ci.yml'
+            user:
+              - 'services/user-service/**'
               - '.github/workflows/ci.yml'
             venue:
               - 'services/venue-service/**'
@@ -485,6 +489,81 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
+  # ── user-service (TypeScript / NestJS / pnpm / Vitest) ────────────────────
+  user:
+    name: user-service
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.user == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: services/user-service
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/user-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: services/user-service/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --silent
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Integration tests (Testcontainers — PostgreSQL)
+        run: pnpm test:integration
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "false"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/user-service
+          file: services/user-service/Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/user-service.tar
+
+      - name: Load image for scanning
+        run: docker load --input /tmp/user-service.tar
+        working-directory: .
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-results.sarif
+
   # ── proto (buf lint + breaking change detection) ────────────────────────────
   proto:
     name: proto
@@ -706,7 +785,7 @@ jobs:
     name: Playwright E2E (full stack)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    needs: [changes, auth, client, expiration, kong, order, payment, proto, ticket, venue]
+    needs: [changes, auth, client, expiration, kong, order, payment, proto, ticket, user, venue]
     # Only run when:
     #   - The event is a pull_request (not a push to main)
     #   - Not a docs-only change (skip-ci == false)
@@ -765,7 +844,7 @@ jobs:
           done
 
       - name: Start Kong and all application services
-        run: docker compose up -d kong auth-service ticket-service venue-service order-service payment-service expiration-service
+        run: docker compose up -d kong auth-service ticket-service venue-service order-service payment-service expiration-service user-service
 
       - name: Wait for services to pass health checks
         run: |
@@ -777,7 +856,7 @@ jobs:
           timeout 360 bash -c "
             while true; do
               all_healthy=true
-              for service in auth-service ticket-service venue-service order-service payment-service expiration-service; do
+              for service in auth-service ticket-service venue-service order-service payment-service expiration-service user-service; do
                 status=\$(docker inspect \$(docker compose ps -q \$service 2>/dev/null) --format='{{.State.Health.Status}}' 2>/dev/null || echo 'not-started')
                 if [ \"\$status\" != 'healthy' ]; then
                   all_healthy=false
@@ -1077,7 +1156,7 @@ jobs:
     name: CI
     runs-on: ubuntu-24.04
     if: always()
-    needs: [changes, auth, client, expiration, kong, order, payment, proto, ticket, venue, e2e]
+    needs: [changes, auth, client, expiration, kong, order, payment, proto, ticket, user, venue, e2e]
     steps:
       - name: Check all jobs passed (or skip if only markdown changed)
         run: |
