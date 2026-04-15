@@ -7,6 +7,7 @@ HOST_AUTH: auth-service:3000
 HOST_TICKETS: ticket-service:3001
 HOST_ORDERS: order-service:8082
 HOST_PAYMENTS: payment-service:3002
+HOST_USERS: user-service:3004
 HOST_CLIENT: client:4000
 HOST_VENUE: venue-service:3003
 JWT_COOKIE_NAME: token
