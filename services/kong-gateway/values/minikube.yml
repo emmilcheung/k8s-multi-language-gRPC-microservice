@@ -8,12 +8,13 @@ HOST_AUTH: ticketing-auth-service.ticketing.svc.cluster.local:3000
 HOST_TICKETS: ticketing-ticket-service.ticketing.svc.cluster.local:3001
 HOST_ORDERS: ticketing-order-service.ticketing.svc.cluster.local:8082
 HOST_PAYMENTS: ticketing-payment-service.ticketing.svc.cluster.local:3002
+HOST_USERS: ticketing-user-service.ticketing.svc.cluster.local:3004
 HOST_CLIENT: ticketing-client.ticketing.svc.cluster.local:4000
 HOST_VENUE: ticketing-venue-service.ticketing.svc.cluster.local:3003
 
 RATE_LIMIT_ANONYMOUS_PER_MINUTE: 300
 RATE_LIMIT_POLICY: local
 RATE_LIMIT_AUTHENTICATED_PER_MINUTE: 300
-RATE_LIMIT_AUTH_ENDPOINTS_PER_MINUTE: 30
+RATE_LIMIT_AUTH_ENDPOINTS_PER_MINUTE: 300
 RATE_LIMIT_REDIS_HOST: ticketing-redis-master.ticketing.svc.cluster.local
 RATE_LIMIT_REDIS_PORT: 6379

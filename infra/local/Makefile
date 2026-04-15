@@ -133,7 +133,7 @@ build-ticket:
 
 # All other services use their own directory as the build context
 build-services:
-	@for svc in auth-service payment-service expiration-service client; do \
+	@for svc in auth-service payment-service expiration-service user-service client; do \
 		echo "  Building $$svc..."; \
 		docker build \
 			--file $(REPO_ROOT)/services/$$svc/Dockerfile \
@@ -241,11 +241,16 @@ secrets: _check-secrets _namespace
 		_apply payment-service-secrets \
 			--from-literal=DATABASE_URL="postgresql://payments_user:payments-local-secret@ticketing-postgres-payments:5432/payments_db" \
 			--from-literal=STRIPE_SECRET_KEY="$$STRIPE_SECRET_KEY" \
+			--from-literal=STRIPE_WEBHOOK_SECRET="whsec_test_placeholder" \
 			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092"; \
 		\
 		_apply expiration-service-secrets \
 			--from-literal=REDIS_ADDR="ticketing-redis-master:6379" \
 			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092"; \
+		\
+		_apply user-service-secrets \
+			--from-literal=DATABASE_URL="postgresql://users_user:users-local-secret@ticketing-postgres-users:5432/users_db" \
+			--from-literal=DB_POOL_MAX="20"; \
 	'
 	@echo "All secrets created."
 
@@ -277,6 +282,7 @@ helm-upgrade: _namespace
 		--set "order-service.secretRef=order-service-secrets" \
 		--set "payment-service.secretRef=payment-service-secrets" \
 		--set "expiration-service.secretRef=expiration-service-secrets" \
+		--set "user-service.secretRef=user-service-secrets" \
 		--timeout 10m \
 		--wait
 	@echo "Helm release '$(HELM_RELEASE)' is up."

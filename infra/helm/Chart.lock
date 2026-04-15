@@ -20,9 +20,15 @@ dependencies:
 - name: venue-service
   repository: file://charts/venue-service
   version: 0.1.0
+- name: user-service
+  repository: file://charts/user-service
+  version: 0.1.0
 - name: observability
   repository: file://charts/observability
   version: 0.1.0
+- name: postgresql
+  repository: oci://registry-1.docker.io/bitnamicharts
+  version: 16.7.5
 - name: postgresql
   repository: oci://registry-1.docker.io/bitnamicharts
   version: 16.7.5
@@ -50,5 +56,5 @@ dependencies:
 - name: kong
   repository: https://charts.konghq.com
   version: 2.48.0
-digest: sha256:d4d9f65b67b7500bb0df1c092833d9ab7f0d7cd57a5a9f16afda2375e130c032
-generated: "2026-04-08T00:55:19.83792+08:00"
+digest: sha256:a120d830c14751e7bfa6f8c89496dc3629d1d31341c02615c62e4cd754b6b973
+generated: "2026-04-15T16:37:46.523792+08:00"

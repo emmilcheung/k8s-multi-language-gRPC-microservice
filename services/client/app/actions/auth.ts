@@ -114,7 +114,7 @@ export async function signup(
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      return { error: body?.error?.message ?? "Signup failed." };
+      return { error: body?.error?.message ?? body?.message ?? "Signup failed." };
     }
 
     // Forward auth cookies from auth-service to browser (access + refresh).
@@ -156,7 +156,7 @@ export async function signin(
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      return { error: body?.error?.message ?? "Signin failed." };
+      return { error: body?.error?.message ?? body?.message ?? "Signin failed." };
     }
 
     // Forward auth cookies from auth-service to browser (access + refresh).

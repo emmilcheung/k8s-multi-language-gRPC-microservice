@@ -3,6 +3,7 @@
 // Shows saved payment methods (default pre-selected) with a fallback to entering a new card.
 
 import { useEffect, useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Lock, AlertCircle, CreditCard, Loader2, X, Clock, ChevronDown, Plus } from "lucide-react";
 import { cancelOrder } from "@/app/actions/orders";
 import type { OrderState } from "@/app/actions/orders";
@@ -100,6 +101,7 @@ export function OrderPaymentForm({
   const cardElementInstanceRef = useRef<CardElement | null>(null);
   const stripeMountedRef = useRef(false);
 
+  const router = useRouter();
   const isTimeRunningOut = secondsRemaining !== null && secondsRemaining < 60;
   const isPending = isProcessing || isCancelling;
   const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?.trim();
@@ -291,7 +293,7 @@ export function OrderPaymentForm({
         return;
       }
 
-      window.location.href = `/orders/${orderId}`;
+      router.refresh();
     } catch (err) {
       setPaymentError(err instanceof Error ? err.message : "An unexpected error occurred.");
       setIsProcessing(false);

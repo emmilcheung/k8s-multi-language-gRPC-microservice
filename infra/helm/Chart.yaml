@@ -32,6 +32,9 @@ dependencies:
   - name: venue-service
     version: "0.1.0"
     repository: "file://charts/venue-service"
+  - name: user-service
+    version: "0.1.0"
+    repository: "file://charts/user-service"
   - name: observability
     version: "0.1.0"
     repository: "file://charts/observability"
@@ -52,6 +55,10 @@ dependencies:
     repository: "oci://registry-1.docker.io/bitnamicharts"
   - name: postgresql
     alias: postgres-venue
+    version: "16.7.5"
+    repository: "oci://registry-1.docker.io/bitnamicharts"
+  - name: postgresql
+    alias: postgres-users
     version: "16.7.5"
     repository: "oci://registry-1.docker.io/bitnamicharts"
   - name: mongodb

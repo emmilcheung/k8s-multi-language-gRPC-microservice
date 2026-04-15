@@ -269,7 +269,8 @@ test.describe("settings", () => {
     await signup(page, email);
 
     await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: /^settings$/i })).toBeVisible();
+    // RSC streams after page load — wait for real content to replace the loading skeleton
+    await expect(page.getByRole("heading", { name: /^settings$/i })).toBeVisible({ timeout: 15000 });
 
     await page
       .getByLabel(/I consent to saving this payment method for future charges/i)
@@ -313,7 +314,8 @@ test.describe("settings", () => {
     await signup(page, email);
 
     await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: /^settings$/i })).toBeVisible();
+    // RSC streams after page load — wait for real content to replace the loading skeleton
+    await expect(page.getByRole("heading", { name: /^settings$/i })).toBeVisible({ timeout: 15000 });
 
     await page
       .getByLabel(/I consent to saving this payment method for future charges/i)
@@ -355,7 +357,8 @@ test.describe("settings", () => {
     await signup(page, email);
 
     await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: /^settings$/i })).toBeVisible();
+    // RSC streams after page load — wait for real content to replace the loading skeleton
+    await expect(page.getByRole("heading", { name: /^settings$/i })).toBeVisible({ timeout: 15000 });
 
     const currentBadge = page.getByText(/^current$/i).first();
     await expect(currentBadge).toBeVisible({ timeout: 15_000 });
@@ -529,7 +532,7 @@ test.describe("orders", () => {
     await signup(page, buyerEmail);
 
     await page.goto(ticketUrl);
-    await expect(page.getByRole("button", { name: /purchase ticket/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /purchase ticket/i })).toBeVisible({ timeout: 15000 });
     await page.getByRole("button", { name: /purchase ticket/i }).click();
     await page.waitForURL(/\/orders\/.+/);
 
@@ -649,9 +652,10 @@ test.describe("orders", () => {
     await page.getByRole("button", { name: /cancel order/i }).click();
     await page.waitForURL("/orders", { timeout: 15000 });
 
-    await expect(page.getByRole("heading", { name: /my orders/i })).toBeVisible();
+    // RSC streams after URL change — wait for real content to replace the loading skeleton
+    await expect(page.getByRole("heading", { name: /my orders/i })).toBeVisible({ timeout: 15000 });
     // The cancelled status badge text should appear somewhere on the page
-    await expect(page.getByText(/cancelled/i).first()).toBeVisible();
+    await expect(page.getByText(/cancelled/i).first()).toBeVisible({ timeout: 10000 });
   });
 
   test("my orders list shows the created order", async ({ page }) => {
@@ -659,8 +663,9 @@ test.describe("orders", () => {
 
     await page.goto("/orders");
 
-    await expect(page.getByRole("heading", { name: /my orders/i })).toBeVisible();
-    await expect(page.getByText(ticketTitle)).toBeVisible();
+    // RSC streams after navigation — wait for real content to replace the loading skeleton
+    await expect(page.getByRole("heading", { name: /my orders/i })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(ticketTitle)).toBeVisible({ timeout: 10000 });
   });
 
   test("ticket shows 'Already Reserved' after order is created", async ({ page }) => {
