@@ -52,6 +52,25 @@ The first time you run any MCP tool, the server will open your browser to authen
 
 After authentication, your token is stored locally at `~/.config/ticketing-mcp/tokens.json` with restrictive permissions (0o600).
 
+## Testing
+
+- `pnpm test` — run the MCP server package test suite.
+- Ensure the local ticketing stack is available at `http://localhost:8000` before starting the server.
+- Start the MCP server and then invoke the agent using `.claude/mcp.json`.
+- Example agent prompt: `search_events and return the first available event name`.
+
+## MCP Structure
+
+The MCP server is structured to keep authentication, API client logic, and agent-facing tools separate.
+
+- `src/index.ts` — MCP server startup, tool registration, and stdio integration.
+- `src/auth/` — OAuth2 PKCE flow, browser login, refresh token handling, and secure local token storage.
+- `src/client/api-client.ts` — Bearer token injection, request retry / refresh logic, and gateway calls to Kong.
+- `src/tools/` — Tool adapters for domains such as events, seats, orders, and payments.
+- `.claude/mcp.json` — Agent-side configuration used by Claude Code or any MCP-compatible client to launch the server.
+
+This package is the MCP server host. The client is the agent configuration in `.claude/mcp.json`; there is no separate compiled client binary in this repository. The `.claude/mcp.json` file tells a compatible agent how to launch the server and use the exposed tool set.
+
 ## Architecture
 
 ### Token Management (`src/auth/token-store.ts`)
