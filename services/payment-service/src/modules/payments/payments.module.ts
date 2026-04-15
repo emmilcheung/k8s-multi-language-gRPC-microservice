@@ -7,6 +7,8 @@ import { PaymentsService } from './payments.service';
 import { PaymentsRepository } from './payments.repository';
 import { OutboxRelayService } from './outbox-relay.service';
 import { OrderServiceClient } from './order-service.client';
+import { PAYMENT_VAULT_PROVIDER } from './payment-vault.provider';
+import { StripePaymentVaultProvider } from './stripe-payment-vault.provider';
 import { STRIPE_CLIENT } from './stripe.constants';
 
 @Module({
@@ -17,6 +19,11 @@ import { STRIPE_CLIENT } from './stripe.constants';
     PaymentsRepository,
     OutboxRelayService,
     OrderServiceClient,
+    StripePaymentVaultProvider,
+    {
+      provide: PAYMENT_VAULT_PROVIDER,
+      useExisting: StripePaymentVaultProvider,
+    },
     {
       provide: STRIPE_CLIENT,
       inject: [ConfigService],

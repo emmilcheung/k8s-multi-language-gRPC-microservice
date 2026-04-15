@@ -4,24 +4,40 @@ import {
   InternalServerErrorException,
   Inject,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import Stripe from 'stripe';
 import { and, eq } from 'drizzle-orm';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
+import { RegisterSavedPaymentMethodDto } from './payments.dto';
+import { PAYMENT_VAULT_PROVIDER, type PaymentVaultProvider } from './payment-vault.provider';
 import { PaymentsRepository } from './payments.repository';
 import { OrderServiceClient } from './order-service.client';
 import { STRIPE_CLIENT } from './stripe.constants';
-import { type Payment, PAYMENT_STATUS, outbox, payments } from '../../database/schema';
+import {
+  type Payment,
+  type SavedPaymentMethod,
+  PAYMENT_STATUS,
+  outbox,
+  payments,
+} from '../../database/schema';
 import { DRIZZLE_DB, type DrizzleDB } from '../../database/database.module';
 import { captureTraceHeaders } from '../../kafka/trace-context';
+
+interface RegisterSavedPaymentMethodContext {
+  source: string;
+  userAgent?: string;
+  ipAddress?: string;
+}
 
 export interface ChargePaymentDto {
   orderId: string;
   userId: string;
   /** Stripe token or paymentMethodId from the client. */
-  token: string;
+  token?: string;
+  savedPaymentMethodId?: string;
 }
 
 const PAYABLE_ORDER_STATUSES = new Set(['created', 'awaiting_payment']);
@@ -44,6 +60,8 @@ export class PaymentsService {
     private readonly paymentsRepo: PaymentsRepository,
     private readonly orderServiceClient: OrderServiceClient,
     @Inject(STRIPE_CLIENT) private readonly stripe: Stripe,
+    @Inject(PAYMENT_VAULT_PROVIDER)
+    private readonly paymentVaultProvider: PaymentVaultProvider,
     private readonly config: ConfigService,
     @Inject(DRIZZLE_DB) private readonly db: DrizzleDB,
   ) {}
@@ -94,6 +112,56 @@ export class PaymentsService {
     return token === MOCK_DECLINED_TOKEN;
   }
 
+  private normalizeConsentSource(source: string): string {
+    const trimmed = source.trim();
+    return trimmed.length > 0 ? trimmed.slice(0, 64) : 'unknown';
+  }
+
+  private hashIpAddress(ipAddress?: string): string | null {
+    if (!ipAddress) {
+      return null;
+    }
+
+    const trimmed = ipAddress.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    return createHash('sha256').update(trimmed).digest('hex');
+  }
+
+  private isDefaultConflictError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const candidate = error as { code?: string; constraint?: string };
+    return (
+      candidate.code === '23505' &&
+      candidate.constraint === 'uniq_saved_payment_methods_single_default'
+    );
+  }
+
+  private async setDefaultWithConflictHandling(
+    userId: string,
+    id: string,
+  ): Promise<SavedPaymentMethod | null> {
+    try {
+      return await this.paymentsRepo.setDefaultSavedPaymentMethod(userId, id);
+    } catch (error) {
+      if (this.isDefaultConflictError(error)) {
+        throw new ConflictException({
+          error: {
+            code: 'DEFAULT_PAYMENT_METHOD_CONFLICT',
+            message: 'Another default payment method update was processed concurrently. Retry.',
+          },
+        });
+      }
+
+      throw error;
+    }
+  }
+
   private buildMockStripeIntentId(
     orderId: string,
     outcome: 'succeeded' | 'failed' = 'succeeded',
@@ -123,6 +191,39 @@ export class PaymentsService {
     return this.completeMockPayment(order.orderId, order.userId, order.amount, order.currency);
   }
 
+  private async resolveChargeToken(dto: ChargePaymentDto): Promise<string> {
+    if (dto.token) {
+      return dto.token;
+    }
+
+    if (!dto.savedPaymentMethodId) {
+      throw new BadRequestException({
+        error: {
+          code: 'MISSING_PAYMENT_SOURCE',
+          message: 'Either token or savedPaymentMethodId is required',
+        },
+      });
+    }
+
+    const savedPaymentMethod = await this.paymentsRepo.findSavedPaymentMethodById(
+      dto.savedPaymentMethodId,
+    );
+    if (
+      !savedPaymentMethod ||
+      savedPaymentMethod.userId !== dto.userId ||
+      savedPaymentMethod.deletedAt
+    ) {
+      throw new NotFoundException({
+        error: {
+          code: 'PAYMENT_METHOD_NOT_FOUND',
+          message: 'Saved payment method not found',
+        },
+      });
+    }
+
+    return savedPaymentMethod.providerPaymentMethodId;
+  }
+
   /**
    * Create a new payment for an order.
    * Idempotent: if a payment for the given orderId already exists, returns it.
@@ -149,6 +250,7 @@ export class PaymentsService {
       }
 
       if (existing.status === PAYMENT_STATUS.PENDING) {
+        const token = await this.resolveChargeToken(dto);
         this.auditInfo('payment.charge.resumed', {
           orderId: dto.orderId,
           paymentId: existing.id,
@@ -158,7 +260,7 @@ export class PaymentsService {
           { orderId: dto.orderId, paymentId: existing.id },
           'Pending payment already exists — attempting to continue charge',
         );
-        return this.confirmPendingPayment(existing, dto.token);
+        return this.confirmPendingPayment(existing, token);
       }
 
       this.auditInfo('payment.charge.returned_existing', {
@@ -190,9 +292,11 @@ export class PaymentsService {
       });
     }
 
+    const token = await this.resolveChargeToken(dto);
+
     if (this.isMockMode) {
       // Mock path: deterministically complete or fail based on the supplied test token.
-      return this.resolveMockChargeOutcome(order, dto.token);
+      return this.resolveMockChargeOutcome(order, token);
     }
 
     // Real Stripe path: create PENDING first, then attempt charge
@@ -241,7 +345,7 @@ export class PaymentsService {
         {
           amount: order.amount,
           currency: order.currency,
-          payment_method: dto.token,
+          payment_method: token,
           confirm: true,
           automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
           metadata: {
@@ -271,6 +375,177 @@ export class PaymentsService {
         error: { code: 'PAYMENT_FAILED', message: 'Payment processing failed' },
       });
     }
+  }
+
+  async registerSavedPaymentMethod(
+    userId: string,
+    dto: RegisterSavedPaymentMethodDto,
+    context: RegisterSavedPaymentMethodContext,
+  ): Promise<SavedPaymentMethod> {
+    if (!dto.consentAccepted) {
+      throw new BadRequestException({
+        error: {
+          code: 'CONSENT_REQUIRED',
+          message: 'Explicit card-on-file consent is required',
+        },
+      });
+    }
+
+    const consentVersion = dto.consentVersion.trim();
+    if (!consentVersion) {
+      throw new BadRequestException({
+        error: {
+          code: 'CONSENT_REQUIRED',
+          message: 'Consent version is required',
+        },
+      });
+    }
+
+    this.auditInfo('payment.method.register.attempted', {
+      userId,
+      providerPaymentMethodId: dto.providerPaymentMethodId,
+      consentVersion,
+      consentSource: this.normalizeConsentSource(context.source),
+    });
+
+    const existingByProvider = await this.paymentsRepo.findSavedPaymentMethodByProviderId(
+      dto.providerPaymentMethodId,
+    );
+    if (existingByProvider && existingByProvider.deletedAt) {
+      throw new ConflictException({
+        error: {
+          code: 'PAYMENT_METHOD_EXISTS',
+          message: 'Saved payment method already exists',
+        },
+      });
+    }
+
+    if (existingByProvider && existingByProvider.userId !== userId) {
+      throw new ConflictException({
+        error: {
+          code: 'PAYMENT_METHOD_EXISTS',
+          message: 'Saved payment method already exists',
+        },
+      });
+    }
+
+    if (existingByProvider) {
+      if (dto.setAsDefault) {
+        const updated = await this.setDefaultWithConflictHandling(userId, existingByProvider.id);
+        if (updated) {
+          return updated;
+        }
+      }
+      return existingByProvider;
+    }
+
+    let paymentCustomer = await this.paymentsRepo.findPaymentCustomerByUserId(userId);
+    if (!paymentCustomer) {
+      const customer = await this.paymentVaultProvider.ensureCustomer(userId);
+      paymentCustomer = await this.paymentsRepo.createPaymentCustomer({
+        userId,
+        provider: customer.provider,
+        providerCustomerId: customer.providerCustomerId,
+      });
+    }
+
+    const attached = await this.paymentVaultProvider.attachPaymentMethod({
+      providerCustomerId: paymentCustomer.providerCustomerId,
+      providerPaymentMethodId: dto.providerPaymentMethodId,
+    });
+
+    const savedPaymentMethod = await this.paymentsRepo.createSavedPaymentMethod({
+      userId,
+      paymentCustomerId: paymentCustomer.id,
+      provider: paymentCustomer.provider,
+      providerPaymentMethodId: attached.providerPaymentMethodId,
+      brand: attached.brand,
+      last4: attached.last4,
+      expMonth: attached.expMonth,
+      expYear: attached.expYear,
+      fingerprint: attached.fingerprint ?? null,
+      isDefault: false,
+      consentGivenAt: new Date(),
+      consentVersion,
+      consentSource: this.normalizeConsentSource(context.source),
+      consentIpHash: this.hashIpAddress(context.ipAddress),
+      consentUserAgent: context.userAgent?.slice(0, 512) ?? null,
+    });
+
+    if (dto.setAsDefault) {
+      const updated = await this.setDefaultWithConflictHandling(userId, savedPaymentMethod.id);
+      if (updated) {
+        return updated;
+      }
+    }
+
+    this.auditInfo('payment.method.register.completed', {
+      userId,
+      savedPaymentMethodId: savedPaymentMethod.id,
+    });
+
+    return savedPaymentMethod;
+  }
+
+  async listSavedPaymentMethods(userId: string): Promise<SavedPaymentMethod[]> {
+    return this.paymentsRepo.listSavedPaymentMethodsByUserId(userId);
+  }
+
+  async setDefaultSavedPaymentMethod(userId: string, id: string): Promise<SavedPaymentMethod> {
+    const savedPaymentMethod = await this.paymentsRepo.findSavedPaymentMethodById(id);
+    if (
+      !savedPaymentMethod ||
+      savedPaymentMethod.userId !== userId ||
+      savedPaymentMethod.deletedAt
+    ) {
+      throw new NotFoundException({
+        error: {
+          code: 'PAYMENT_METHOD_NOT_FOUND',
+          message: 'Saved payment method not found',
+        },
+      });
+    }
+
+    const updated = await this.setDefaultWithConflictHandling(userId, id);
+    if (!updated) {
+      throw new NotFoundException({
+        error: {
+          code: 'PAYMENT_METHOD_NOT_FOUND',
+          message: 'Saved payment method not found',
+        },
+      });
+    }
+
+    this.auditInfo('payment.method.default.updated', {
+      userId,
+      savedPaymentMethodId: id,
+    });
+
+    return updated;
+  }
+
+  async deleteSavedPaymentMethod(userId: string, id: string): Promise<void> {
+    const savedPaymentMethod = await this.paymentsRepo.findSavedPaymentMethodById(id);
+    if (
+      !savedPaymentMethod ||
+      savedPaymentMethod.userId !== userId ||
+      savedPaymentMethod.deletedAt
+    ) {
+      throw new NotFoundException({
+        error: {
+          code: 'PAYMENT_METHOD_NOT_FOUND',
+          message: 'Saved payment method not found',
+        },
+      });
+    }
+
+    await this.paymentVaultProvider.detachPaymentMethod(savedPaymentMethod.providerPaymentMethodId);
+    await this.paymentsRepo.softDeleteSavedPaymentMethod(userId, id);
+
+    this.auditInfo('payment.method.deleted', {
+      userId,
+      savedPaymentMethodId: id,
+    });
   }
 
   async findById(id: string): Promise<Payment> {
