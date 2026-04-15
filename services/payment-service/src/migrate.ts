@@ -9,11 +9,9 @@
  * Usage (from Dockerfile CMD):
  *   node dist/migrate && node dist/main
  */
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { Pool } from 'pg';
-import path from 'path';
 import pino from 'pino';
+import path from 'path';
+import { runSqlMigrations } from './common/database/sql-migration-runner';
 
 // Standalone structured logger for the migration script (O-09).
 // Uses the same JSON format as the main app without requiring NestJS bootstrap.
@@ -26,20 +24,16 @@ async function runMigrations(): Promise<void> {
     process.exit(1);
   }
 
-  const pool = new Pool({ connectionString: databaseUrl });
-
   try {
-    const db = drizzle(pool);
-    log.info('[migrate] Applying pending migrations…');
-    await migrate(db, {
+    await runSqlMigrations({
+      advisoryLockId: 41001,
+      databaseUrl,
+      log,
       migrationsFolder: path.join(__dirname, '..', 'migrations'),
     });
-    log.info('[migrate] Migrations applied successfully');
   } catch (err) {
     log.error({ err }, '[migrate] Migration failed');
     process.exit(1);
-  } finally {
-    await pool.end();
   }
 }
 

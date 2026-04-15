@@ -38,9 +38,12 @@ export async function createOrder(
 
 export async function cancelOrder(
   orderId: string,
-  _prev: OrderState,
-  _formData: FormData
+  prev: OrderState,
+  formData: FormData
 ): Promise<OrderState> {
+  void prev;
+  void formData;
+
   const res = await fetch(`${base()}/api/orders/${orderId}`, {
     method: "DELETE",
     headers: await authHeaders(),
@@ -57,9 +60,12 @@ export async function cancelOrder(
 
 export async function submitPayment(
   orderId: string,
-  _prev: OrderState,
-  _formData: FormData
+  prev: OrderState,
+  formData: FormData
 ): Promise<OrderState> {
+  void prev;
+  void formData;
+
   const token = process.env.STRIPE_TEST_TOKEN ?? "pm_card_visa";
 
   const res = await fetch(`${base()}/api/payments`, {

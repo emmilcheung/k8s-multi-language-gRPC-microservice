@@ -15,7 +15,11 @@ vi.mock("next/link", () => ({
 describe("AuthForm", () => {
   it("submits signup form values via action", async () => {
     const user = userEvent.setup();
-    const signupAction = vi.fn(async (_prev: AuthState, _fd: FormData): Promise<AuthState> => ({}));
+    const signupAction = vi.fn(async (prev: AuthState, formData: FormData): Promise<AuthState> => {
+      void prev;
+      void formData;
+      return {};
+    });
 
     render(<AuthForm mode="signup" action={signupAction} />);
 
@@ -31,7 +35,11 @@ describe("AuthForm", () => {
 
   it("renders signin mode and submits credentials", async () => {
     const user = userEvent.setup();
-    const signinAction = vi.fn(async (_prev: AuthState, _fd: FormData): Promise<AuthState> => ({}));
+    const signinAction = vi.fn(async (prev: AuthState, formData: FormData): Promise<AuthState> => {
+      void prev;
+      void formData;
+      return {};
+    });
 
     render(<AuthForm mode="signin" action={signinAction} />);
 

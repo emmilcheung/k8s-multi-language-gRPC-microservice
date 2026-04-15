@@ -66,6 +66,7 @@ const orderAmountsById: Record<string, number> = {
   '6e65651c-0424-475c-b491-82bc26e7818a': 2000,
   'aa7b17d0-398c-4fcb-abe6-9be62cee1769': 1500,
   'c238b3f5-5ce7-430f-a4d2-ad8e3a946a4e': 3000,
+  'f72fe9be-0e9e-47a5-bd3e-47d4f09de0e1': 4200,
 };
 
 const mockOrderServiceClient = {
@@ -104,8 +105,18 @@ beforeAll(async () => {
     path.join(__dirname, '../migrations/002_add_outbox.sql'),
     'utf-8',
   );
+  const migration4Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/004_add_saved_payment_methods.sql'),
+    'utf-8',
+  );
+  const migration5Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/005_harden_saved_payment_methods.sql'),
+    'utf-8',
+  );
   await pool.query(migration1Sql);
   await pool.query(migration2Sql);
+  await pool.query(migration4Sql);
+  await pool.query(migration5Sql);
 
   // Bootstrap NestJS without pino pretty and with mocked Stripe + Kafka consumer
   const moduleRef = await Test.createTestingModule({
@@ -165,6 +176,8 @@ afterAll(async () => {
 async function cleanPayments() {
   await pool.query('DELETE FROM outbox');
   await pool.query('DELETE FROM payments');
+  await pool.query('DELETE FROM saved_payment_methods');
+  await pool.query('DELETE FROM payment_customers');
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -322,5 +335,168 @@ describe('GET /healthz/ready', () => {
     const res = await request.get('/healthz/ready');
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ok');
+  });
+});
+
+describe('Saved payment methods lifecycle endpoints', () => {
+  const userId = 'user-methods-1';
+
+  beforeAll(cleanPayments);
+
+  it('POST /api/payments/methods/register should create a method and GET /methods should return it', async () => {
+    const register = await request
+      .post('/api/payments/methods/register')
+      .set('X-User-Id', userId)
+      .send({
+        providerPaymentMethodId: 'pm_mock_card_4242',
+        setAsDefault: true,
+        consentAccepted: true,
+        consentVersion: 'settings-card-save-v1',
+      });
+
+    expect(register.status).toBe(201);
+    expect(register.body.paymentMethod.id).toBeDefined();
+    expect(register.body.paymentMethod.providerPaymentMethodId).toBeUndefined();
+    expect(register.body.paymentMethod.paymentCustomerId).toBeUndefined();
+    expect(register.body.paymentMethod.fingerprint).toBeUndefined();
+    expect(register.body.paymentMethod.isDefault).toBe(true);
+
+    const list = await request.get('/api/payments/methods').set('X-User-Id', userId);
+    expect(list.status).toBe(200);
+    expect(Array.isArray(list.body.paymentMethods)).toBe(true);
+    expect(list.body.paymentMethods).toHaveLength(1);
+    expect(list.body.paymentMethods[0]?.providerPaymentMethodId).toBeUndefined();
+  });
+
+  it('PATCH /api/payments/methods/:id/default should enforce a single default', async () => {
+    const first = await request
+      .post('/api/payments/methods/register')
+      .set('X-User-Id', userId)
+      .send({
+        providerPaymentMethodId: 'pm_mock_card_1111',
+        setAsDefault: true,
+        consentAccepted: true,
+        consentVersion: 'settings-card-save-v1',
+      });
+
+    const second = await request
+      .post('/api/payments/methods/register')
+      .set('X-User-Id', userId)
+      .send({
+        providerPaymentMethodId: 'pm_mock_card_2222',
+        setAsDefault: false,
+        consentAccepted: true,
+        consentVersion: 'settings-card-save-v1',
+      });
+
+    const secondId = second.body.paymentMethod.id as string;
+    const patch = await request
+      .patch(`/api/payments/methods/${secondId}/default`)
+      .set('X-User-Id', userId)
+      .send({});
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(patch.status).toBe(200);
+    expect(patch.body.paymentMethod.id).toBe(secondId);
+    expect(patch.body.paymentMethod.last4).toBe('2222');
+    expect(patch.body.paymentMethod.expMonth).toBe(12);
+    expect(patch.body.paymentMethod.expYear).toBe(2099);
+    expect(patch.body.paymentMethod.isDefault).toBe(true);
+
+    const rows = await pool.query<{ id: string; is_default: boolean }>(
+      'SELECT id, is_default FROM saved_payment_methods WHERE user_id = $1 AND deleted_at IS NULL',
+      [userId],
+    );
+    const defaultRows = rows.rows.filter((row) => row.is_default);
+    expect(defaultRows).toHaveLength(1);
+    expect(defaultRows[0]?.id).toBe(secondId);
+  });
+
+  it('DELETE /api/payments/methods/:id should soft delete and hide from list', async () => {
+    const register = await request
+      .post('/api/payments/methods/register')
+      .set('X-User-Id', userId)
+      .send({
+        providerPaymentMethodId: 'pm_mock_card_3333',
+        setAsDefault: false,
+        consentAccepted: true,
+        consentVersion: 'settings-card-save-v1',
+      });
+
+    const methodId = register.body.paymentMethod.id as string;
+    const del = await request
+      .delete(`/api/payments/methods/${methodId}`)
+      .set('X-User-Id', userId)
+      .send({});
+
+    expect(del.status).toBe(204);
+
+    const list = await request.get('/api/payments/methods').set('X-User-Id', userId);
+    expect(list.status).toBe(200);
+    const paymentMethods: Array<{ id: string }> = Array.isArray(list.body.paymentMethods)
+      ? (list.body.paymentMethods as Array<{ id: string }>)
+      : [];
+    expect(paymentMethods.some((method) => method.id === methodId)).toBe(false);
+
+    const dbRow = await pool.query<{ deleted_at: string | null }>(
+      'SELECT deleted_at FROM saved_payment_methods WHERE id = $1',
+      [methodId],
+    );
+    expect(dbRow.rows).toHaveLength(1);
+    expect(dbRow.rows[0]?.deleted_at).not.toBeNull();
+  });
+
+  it('POST /api/payments should accept savedPaymentMethodId and charge successfully', async () => {
+    const chargeUserId = 'user-saved-charge-1';
+    const register = await request
+      .post('/api/payments/methods/register')
+      .set('X-User-Id', chargeUserId)
+      .send({
+        providerPaymentMethodId: 'pm_mock_card_9000',
+        setAsDefault: true,
+        consentAccepted: true,
+        consentVersion: 'settings-card-save-v1',
+      });
+
+    const savedPaymentMethodId = register.body.paymentMethod.id as string;
+
+    const charge = await request.post('/api/payments').set('X-User-Id', chargeUserId).send({
+      orderId: 'f72fe9be-0e9e-47a5-bd3e-47d4f09de0e1',
+      savedPaymentMethodId,
+    });
+
+    expect(charge.status).toBe(201);
+    expect(charge.body.payment.orderId).toBe('f72fe9be-0e9e-47a5-bd3e-47d4f09de0e1');
+    expect(charge.body.payment.amount).toBe(4200);
+    expect(charge.body.payment.status).toBe('completed');
+  });
+
+  it('methods endpoints should reject missing X-User-Id', async () => {
+    const register = await request.post('/api/payments/methods/register').send({
+      providerPaymentMethodId: 'pm_mock_card_5555',
+      setAsDefault: false,
+      consentAccepted: true,
+      consentVersion: 'settings-card-save-v1',
+    });
+    expect(register.status).toBe(400);
+    expect(register.body.error.code).toBe('MISSING_USER_ID');
+
+    const list = await request.get('/api/payments/methods');
+    expect(list.status).toBe(400);
+    expect(list.body.error.code).toBe('MISSING_USER_ID');
+  });
+
+  it('POST /api/payments/methods/register should reject missing consent', async () => {
+    const register = await request
+      .post('/api/payments/methods/register')
+      .set('X-User-Id', 'user-no-consent')
+      .send({
+        providerPaymentMethodId: 'pm_mock_card_6666',
+        setAsDefault: false,
+      });
+
+    expect(register.status).toBe(400);
+    expect(register.body.error.code).toBe('VALIDATION_FAILED');
   });
 });

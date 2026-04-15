@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
-import type { Order } from "@/lib/types";
+import type { Order, SavedPaymentMethod } from "@/lib/types";
 import { STATUS_LABEL, STATUS_BADGE } from "@/lib/order-status";
 import { calculateOrderTotal } from "@/lib/order-utils";
 import { Badge } from "@/components/ui/badge";
@@ -54,8 +54,20 @@ export default async function OrderDetailPage({ params }: Props) {
   }
 
   let order: Order;
+  let savedPaymentMethods: SavedPaymentMethod[] = [];
   try {
-    order = await serverApi<Order>(`/api/orders/${orderId}`);
+    const [orderResult, methodsResult] = await Promise.allSettled([
+      serverApi<Order>(`/api/orders/${orderId}`),
+      serverApi<{ paymentMethods: SavedPaymentMethod[] }>(`/api/payments/methods`),
+    ]);
+
+    if (orderResult.status === "rejected") {
+      notFound();
+    }
+    order = orderResult.value;
+    if (methodsResult.status === "fulfilled") {
+      savedPaymentMethods = methodsResult.value.paymentMethods ?? [];
+    }
   } catch {
     notFound();
   }
@@ -202,6 +214,7 @@ export default async function OrderDetailPage({ params }: Props) {
             orderId={order.id}
             amount={amount}
             expiresAt={order.expiresAt}
+            savedPaymentMethods={savedPaymentMethods}
           />
         )}
       </div>

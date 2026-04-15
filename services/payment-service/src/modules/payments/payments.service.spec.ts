@@ -1,20 +1,44 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ConflictException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PinoLogger } from 'nestjs-pino';
 import Stripe from 'stripe';
 import { PaymentsService } from './payments.service';
 import { PAYMENT_STATUS } from '../../database/schema';
-import type { Payment } from '../../database/schema';
+import type { Payment, PaymentCustomer, SavedPaymentMethod } from '../../database/schema';
 import type { OrderSnapshot } from './order-service.client';
 import { PaymentsRepository } from './payments.repository';
 import { OrderServiceClient } from './order-service.client';
 import { type DrizzleDB } from '../../database/database.module';
+import type { PaymentVaultProvider } from './payment-vault.provider';
 
-type RepoMock = Pick<PaymentsRepository, 'create' | 'findById' | 'findByOrderId' | 'updateStatus'>;
+type RepoMock = Pick<
+  PaymentsRepository,
+  | 'create'
+  | 'findById'
+  | 'findByOrderId'
+  | 'updateStatus'
+  | 'findPaymentCustomerByUserId'
+  | 'createPaymentCustomer'
+  | 'findSavedPaymentMethodById'
+  | 'findSavedPaymentMethodByProviderId'
+  | 'listSavedPaymentMethodsByUserId'
+  | 'createSavedPaymentMethod'
+  | 'setDefaultSavedPaymentMethod'
+  | 'softDeleteSavedPaymentMethod'
+>;
 type OrderServiceClientMock = Pick<OrderServiceClient, 'getOrderSnapshot'>;
 type LoggerMock = Pick<PinoLogger, 'info' | 'warn' | 'error' | 'debug'>;
 type ConfigMock = Pick<ConfigService, 'get' | 'getOrThrow'>;
+type PaymentVaultProviderMock = Pick<
+  PaymentVaultProvider,
+  'ensureCustomer' | 'attachPaymentMethod' | 'detachPaymentMethod'
+>;
 type StripeMock = {
   paymentIntents: {
     create: ReturnType<typeof vi.fn>;
@@ -65,6 +89,59 @@ function makeRepo() {
     findById: vi.fn(),
     findByOrderId: vi.fn(),
     updateStatus: vi.fn(),
+    findPaymentCustomerByUserId: vi.fn(),
+    createPaymentCustomer: vi.fn(),
+    findSavedPaymentMethodById: vi.fn(),
+    findSavedPaymentMethodByProviderId: vi.fn(),
+    listSavedPaymentMethodsByUserId: vi.fn(),
+    createSavedPaymentMethod: vi.fn(),
+    setDefaultSavedPaymentMethod: vi.fn(),
+    softDeleteSavedPaymentMethod: vi.fn(),
+  };
+}
+
+function makePaymentCustomer(overrides: Partial<PaymentCustomer> = {}): PaymentCustomer {
+  return {
+    id: 'c1111111-1111-4111-8111-111111111111',
+    userId: 'user-uuid-1',
+    provider: 'stripe',
+    providerCustomerId: 'cus_mock_1',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  };
+}
+
+function makeSavedPaymentMethod(overrides: Partial<SavedPaymentMethod> = {}): SavedPaymentMethod {
+  return {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    userId: 'user-uuid-1',
+    paymentCustomerId: 'c1111111-1111-4111-8111-111111111111',
+    provider: 'stripe',
+    providerPaymentMethodId: 'pm_saved_1',
+    brand: 'visa',
+    last4: '4242',
+    expMonth: 12,
+    expYear: 2099,
+    fingerprint: 'fp_saved_1',
+    isDefault: false,
+    consentGivenAt: new Date(),
+    consentVersion: 'settings-card-save-v1',
+    consentSource: 'settings-ui',
+    consentIpHash: 'hashed-ip',
+    consentUserAgent: 'vitest-agent',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    deletedAt: null,
+    ...overrides,
+  };
+}
+
+function makePaymentVaultProvider() {
+  return {
+    ensureCustomer: vi.fn(),
+    attachPaymentMethod: vi.fn(),
+    detachPaymentMethod: vi.fn(),
   };
 }
 
@@ -152,6 +229,7 @@ function createService(params: {
   repo: RepoMock;
   orderServiceClient: OrderServiceClientMock;
   stripe: StripeMock;
+  paymentVaultProvider: PaymentVaultProviderMock;
   config: ConfigMock;
   db: DbMock;
 }): PaymentsService {
@@ -160,6 +238,7 @@ function createService(params: {
     params.repo as unknown as PaymentsRepository,
     params.orderServiceClient as unknown as OrderServiceClient,
     params.stripe as unknown as Stripe,
+    params.paymentVaultProvider as unknown as PaymentVaultProvider,
     params.config as unknown as ConfigService,
     params.db as unknown as DrizzleDB,
   );
@@ -170,6 +249,7 @@ function createService(params: {
 describe('PaymentsService.charge', () => {
   let repo: ReturnType<typeof makeRepo>;
   let stripe: ReturnType<typeof makeStripe>;
+  let paymentVaultProvider: ReturnType<typeof makePaymentVaultProvider>;
   let logger: ReturnType<typeof makeLogger>;
   let config: ReturnType<typeof makeConfig>;
   let db: ReturnType<typeof makeDb>;
@@ -179,12 +259,21 @@ describe('PaymentsService.charge', () => {
   beforeEach(() => {
     repo = makeRepo();
     stripe = makeStripe();
+    paymentVaultProvider = makePaymentVaultProvider();
     logger = makeLogger();
     config = makeConfig();
     db = makeDb();
     orderServiceClient = makeOrderServiceClient();
 
-    service = createService({ logger, repo, orderServiceClient, stripe, config, db });
+    service = createService({
+      logger,
+      repo,
+      orderServiceClient,
+      stripe,
+      paymentVaultProvider,
+      config,
+      db,
+    });
   });
 
   it('should return existing payment when orderId already has a payment (idempotent)', async () => {
@@ -272,6 +361,7 @@ describe('PaymentsService.charge', () => {
       repo,
       orderServiceClient,
       stripe,
+      paymentVaultProvider,
       config: mockConfig,
       db: mockDb,
     });
@@ -314,6 +404,7 @@ describe('PaymentsService.charge', () => {
       repo,
       orderServiceClient,
       stripe,
+      paymentVaultProvider,
       config: mockConfig,
       db: mockDb,
     });
@@ -496,6 +587,202 @@ describe('PaymentsService.charge', () => {
       }),
     ).rejects.toThrow(ConflictException);
   });
+
+  it('should resolve provider payment method when charging with savedPaymentMethodId', async () => {
+    const pending = makePayment({
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+      amount: 2750,
+    });
+    const saved = makeSavedPaymentMethod({
+      id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      userId: '22222222-2222-4222-8222-222222222222',
+      providerPaymentMethodId: 'pm_saved_provider_1',
+      deletedAt: null,
+    });
+
+    repo.findByOrderId.mockResolvedValue(null);
+    repo.findSavedPaymentMethodById.mockResolvedValue(saved);
+    repo.create.mockResolvedValue(pending);
+    stripe.paymentIntents.create.mockResolvedValue({ id: 'pi_saved', status: 'succeeded' });
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(
+      makeOrderSnapshot({
+        orderId: '11111111-1111-4111-8111-111111111111',
+        userId: '22222222-2222-4222-8222-222222222222',
+        amount: 2750,
+      }),
+    );
+
+    const completed = makePayment({
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+      amount: 2750,
+      status: PAYMENT_STATUS.COMPLETED,
+      stripePaymentIntentId: 'pi_saved',
+    });
+    db._tx.update.mockReturnValue({
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      returning: vi.fn().mockResolvedValue([completed]),
+    });
+
+    await service.charge({
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+      savedPaymentMethodId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    });
+
+    expect(stripe.paymentIntents.create).toHaveBeenCalledWith(
+      expect.objectContaining({ payment_method: 'pm_saved_provider_1' }),
+      expect.any(Object),
+    );
+  });
+});
+
+describe('PaymentsService saved payment methods', () => {
+  let repo: ReturnType<typeof makeRepo>;
+  let orderServiceClient: ReturnType<typeof makeOrderServiceClient>;
+  let stripe: ReturnType<typeof makeStripe>;
+  let paymentVaultProvider: ReturnType<typeof makePaymentVaultProvider>;
+  let service: PaymentsService;
+
+  beforeEach(() => {
+    repo = makeRepo();
+    orderServiceClient = makeOrderServiceClient();
+    stripe = makeStripe();
+    paymentVaultProvider = makePaymentVaultProvider();
+    service = createService({
+      logger: makeLogger(),
+      repo,
+      orderServiceClient,
+      stripe,
+      paymentVaultProvider,
+      config: makeConfig('sk_test_mock'),
+      db: makeDb(),
+    });
+  });
+
+  it('should register a saved payment method successfully in mock mode', async () => {
+    const paymentCustomer = makePaymentCustomer({
+      userId: 'user-uuid-1',
+      providerCustomerId: 'cus_mock_user',
+    });
+    const saved = makeSavedPaymentMethod({
+      id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      userId: 'user-uuid-1',
+      paymentCustomerId: paymentCustomer.id,
+      providerPaymentMethodId: 'pm_saved_new',
+    });
+    const savedDefault = { ...saved, isDefault: true };
+
+    repo.findSavedPaymentMethodByProviderId.mockResolvedValue(null);
+    repo.findPaymentCustomerByUserId.mockResolvedValue(null);
+    paymentVaultProvider.ensureCustomer.mockResolvedValue({
+      provider: 'stripe',
+      providerCustomerId: 'cus_mock_user',
+    });
+    repo.createPaymentCustomer.mockResolvedValue(paymentCustomer);
+    paymentVaultProvider.attachPaymentMethod.mockResolvedValue({
+      providerPaymentMethodId: 'pm_saved_new',
+      brand: 'visa',
+      last4: '4242',
+      expMonth: 12,
+      expYear: 2099,
+      fingerprint: 'fp_mock_4242',
+    });
+    repo.createSavedPaymentMethod.mockResolvedValue(saved);
+    repo.setDefaultSavedPaymentMethod.mockResolvedValue(savedDefault);
+
+    const result = await service.registerSavedPaymentMethod(
+      'user-uuid-1',
+      {
+        providerPaymentMethodId: 'pm_saved_new',
+        setAsDefault: true,
+        consentAccepted: true,
+        consentVersion: 'settings-card-save-v1',
+      },
+      {
+        source: 'settings-ui',
+        ipAddress: '10.0.0.10',
+        userAgent: 'Mozilla/5.0',
+      },
+    );
+
+    expect(paymentVaultProvider.ensureCustomer).toHaveBeenCalledWith('user-uuid-1');
+    expect(paymentVaultProvider.attachPaymentMethod).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerCustomerId: 'cus_mock_user',
+        providerPaymentMethodId: 'pm_saved_new',
+      }),
+    );
+    expect(repo.setDefaultSavedPaymentMethod).toHaveBeenCalledWith(
+      'user-uuid-1',
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    );
+    expect(result.isDefault).toBe(true);
+  });
+
+  it('should reject registration without explicit consent', async () => {
+    await expect(
+      service.registerSavedPaymentMethod(
+        'user-uuid-1',
+        {
+          providerPaymentMethodId: 'pm_saved_new',
+          setAsDefault: false,
+          consentAccepted: false,
+          consentVersion: 'settings-card-save-v1',
+        },
+        {
+          source: 'settings-ui',
+          ipAddress: '10.0.0.10',
+          userAgent: 'Mozilla/5.0',
+        },
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('should set default saved payment method and keep a single default selection', async () => {
+    const method = makeSavedPaymentMethod({
+      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      userId: 'user-uuid-1',
+      isDefault: false,
+    });
+
+    repo.findSavedPaymentMethodById.mockResolvedValue(method);
+    repo.setDefaultSavedPaymentMethod.mockResolvedValue({ ...method, isDefault: true });
+
+    const result = await service.setDefaultSavedPaymentMethod(
+      'user-uuid-1',
+      'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    );
+
+    expect(repo.setDefaultSavedPaymentMethod).toHaveBeenCalledWith(
+      'user-uuid-1',
+      'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    );
+    expect(result.isDefault).toBe(true);
+  });
+
+  it('should soft-delete saved payment method after provider detach', async () => {
+    const method = makeSavedPaymentMethod({
+      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      userId: 'user-uuid-1',
+      providerPaymentMethodId: 'pm_saved_delete',
+      deletedAt: null,
+    });
+
+    repo.findSavedPaymentMethodById.mockResolvedValue(method);
+    paymentVaultProvider.detachPaymentMethod.mockResolvedValue(undefined);
+    repo.softDeleteSavedPaymentMethod.mockResolvedValue({ ...method, deletedAt: new Date() });
+
+    await service.deleteSavedPaymentMethod('user-uuid-1', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee');
+
+    expect(paymentVaultProvider.detachPaymentMethod).toHaveBeenCalledWith('pm_saved_delete');
+    expect(repo.softDeleteSavedPaymentMethod).toHaveBeenCalledWith(
+      'user-uuid-1',
+      'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    );
+  });
 });
 
 describe('PaymentsService.findById', () => {
@@ -511,6 +798,7 @@ describe('PaymentsService.findById', () => {
       repo,
       orderServiceClient,
       stripe: makeStripe(),
+      paymentVaultProvider: makePaymentVaultProvider(),
       config: makeConfig(),
       db: makeDb(),
     });
@@ -534,12 +822,14 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
   let repo: ReturnType<typeof makeRepo>;
   let orderServiceClient: ReturnType<typeof makeOrderServiceClient>;
   let stripe: ReturnType<typeof makeStripe>;
+  let paymentVaultProvider: ReturnType<typeof makePaymentVaultProvider>;
   let logger: ReturnType<typeof makeLogger>;
 
   beforeEach(() => {
     repo = makeRepo();
     orderServiceClient = makeOrderServiceClient();
     stripe = makeStripe();
+    paymentVaultProvider = makePaymentVaultProvider();
     logger = makeLogger();
   });
 
@@ -550,6 +840,7 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
       repo,
       orderServiceClient,
       stripe,
+      paymentVaultProvider,
       config: makeConfig('sk_test_live'),
       db: realDb,
     });
@@ -591,6 +882,7 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
       repo,
       orderServiceClient,
       stripe,
+      paymentVaultProvider,
       config: makeConfig('test_mock'),
       db: mockDb,
     });
@@ -624,6 +916,7 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
       repo,
       orderServiceClient,
       stripe,
+      paymentVaultProvider,
       config: makeConfig('sk_test_mock'),
       db: mockDb,
     });
@@ -643,6 +936,7 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
       repo,
       orderServiceClient,
       stripe,
+      paymentVaultProvider,
       config: makeConfig('test_mock'),
       db: mockDb,
     });
@@ -662,6 +956,7 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
       repo,
       orderServiceClient,
       stripe,
+      paymentVaultProvider,
       config: makeConfig('test_mock'),
       db: mockDb,
     });
@@ -677,6 +972,7 @@ describe('PaymentsService Stripe webhook idempotency', () => {
   let repo: ReturnType<typeof makeRepo>;
   let orderServiceClient: ReturnType<typeof makeOrderServiceClient>;
   let stripe: ReturnType<typeof makeStripe>;
+  let paymentVaultProvider: ReturnType<typeof makePaymentVaultProvider>;
   let db: ReturnType<typeof makeDb>;
   let logger: ReturnType<typeof makeLogger>;
   let service: PaymentsService;
@@ -685,9 +981,18 @@ describe('PaymentsService Stripe webhook idempotency', () => {
     repo = makeRepo();
     orderServiceClient = makeOrderServiceClient();
     stripe = makeStripe();
+    paymentVaultProvider = makePaymentVaultProvider();
     db = makeDb();
     logger = makeLogger();
-    service = createService({ logger, repo, orderServiceClient, stripe, config: makeConfig(), db });
+    service = createService({
+      logger,
+      repo,
+      orderServiceClient,
+      stripe,
+      paymentVaultProvider,
+      config: makeConfig(),
+      db,
+    });
   });
 
   it('should audit an applied succeeded webhook transition', async () => {

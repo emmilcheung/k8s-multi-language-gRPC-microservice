@@ -1,4 +1,15 @@
-import { pgTable, text, timestamp, uuid, integer, boolean, jsonb } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+  integer,
+  boolean,
+  jsonb,
+  index,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 /**
  * payments table — owned exclusively by payment-service.
@@ -33,6 +44,68 @@ export const PAYMENT_STATUS = {
 } as const;
 
 export type PaymentStatus = (typeof PAYMENT_STATUS)[keyof typeof PAYMENT_STATUS];
+
+/**
+ * payment_customers table — maps a platform user to a provider customer reference.
+ * Never stores PAN/CVV or raw card details.
+ */
+export const paymentCustomers = pgTable('payment_customers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: text('user_id').notNull().unique(),
+  provider: text('provider').notNull().default('stripe'),
+  providerCustomerId: text('provider_customer_id').notNull().unique(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type PaymentCustomer = typeof paymentCustomers.$inferSelect;
+export type NewPaymentCustomer = typeof paymentCustomers.$inferInsert;
+
+/**
+ * saved_payment_methods table — stores only provider references and masked card metadata.
+ */
+export const savedPaymentMethods = pgTable(
+  'saved_payment_methods',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    paymentCustomerId: uuid('payment_customer_id')
+      .notNull()
+      .references(() => paymentCustomers.id),
+    provider: text('provider').notNull().default('stripe'),
+    providerPaymentMethodId: text('provider_payment_method_id').notNull().unique(),
+    brand: text('brand').notNull().default('unknown'),
+    last4: text('last4').notNull().default('0000'),
+    expMonth: integer('exp_month').notNull().default(1),
+    expYear: integer('exp_year').notNull().default(1970),
+    fingerprint: text('fingerprint'),
+    isDefault: boolean('is_default').notNull().default(false),
+    consentGivenAt: timestamp('consent_given_at', { withTimezone: true }).notNull(),
+    consentVersion: text('consent_version').notNull(),
+    consentSource: text('consent_source').notNull(),
+    consentIpHash: text('consent_ip_hash'),
+    consentUserAgent: text('consent_user_agent'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => ({
+    userIdIdx: index('idx_saved_payment_methods_user_id').on(table.userId),
+    userDefaultIdx: index('idx_saved_payment_methods_user_default').on(
+      table.userId,
+      table.isDefault,
+    ),
+    paymentCustomerIdx: index('idx_saved_payment_methods_payment_customer_id').on(
+      table.paymentCustomerId,
+    ),
+    singleDefaultPerUserIdx: uniqueIndex('uniq_saved_payment_methods_single_default')
+      .on(table.userId)
+      .where(sql`${table.isDefault} = true and ${table.deletedAt} is null`),
+  }),
+);
+
+export type SavedPaymentMethod = typeof savedPaymentMethods.$inferSelect;
+export type NewSavedPaymentMethod = typeof savedPaymentMethods.$inferInsert;
 
 /**
  * outbox table — transactional outbox for reliable Kafka event publishing.

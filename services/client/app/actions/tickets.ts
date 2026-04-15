@@ -298,9 +298,12 @@ export async function attachSeatingPlan(
  */
 export async function detachSeatingPlan(
   ticketId: string,
-  _prev: TicketState,
-  _formData: FormData
+  prev: TicketState,
+  formData: FormData
 ): Promise<TicketState> {
+  void prev;
+  void formData;
+
   const res = await fetch(`${base()}/api/tickets/${ticketId}/seating-plan`, {
     method: "DELETE",
     headers: await authHeaders(),

@@ -1,11 +1,13 @@
 "use client";
 // components/order-payment-form.tsx — Stripe Payment Element Client Component.
-// Glass card with large amount display, lock icon security note, Stripe card input, and action buttons.
+// Shows saved payment methods (default pre-selected) with a fallback to entering a new card.
 
 import { useEffect, useState, useRef } from "react";
-import { Lock, AlertCircle, CreditCard, Loader2, X, Clock } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Lock, AlertCircle, CreditCard, Loader2, X, Clock, ChevronDown, Plus } from "lucide-react";
 import { cancelOrder } from "@/app/actions/orders";
 import type { OrderState } from "@/app/actions/orders";
+import type { SavedPaymentMethod } from "@/lib/types";
 
 interface CardElement {
   mount(container: HTMLElement | string): void;
@@ -39,6 +41,7 @@ interface OrderPaymentFormProps {
   orderId: string;
   amount: number;
   expiresAt: string;
+  savedPaymentMethods?: SavedPaymentMethod[];
 }
 
 const initialState: OrderState = {};
@@ -61,7 +64,31 @@ function formatTimeRemaining(seconds: number): string {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
-export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFormProps) {
+function cardBrandIcon(brand?: string): string {
+  switch (brand?.toLowerCase()) {
+    case "visa": return "VISA";
+    case "mastercard": return "MC";
+    case "amex": return "AMEX";
+    case "discover": return "DISC";
+    default: return brand?.toUpperCase().slice(0, 4) ?? "CARD";
+  }
+}
+
+export function OrderPaymentForm({
+  orderId,
+  amount,
+  expiresAt,
+  savedPaymentMethods = [],
+}: OrderPaymentFormProps) {
+  // Determine the initial selection: prefer the default method, else first saved, else null (new card)
+  const defaultMethod = savedPaymentMethods.find((m) => m.isDefault) ?? savedPaymentMethods[0] ?? null;
+  const hasSavedMethods = savedPaymentMethods.length > 0;
+
+  const [selectedMethodId, setSelectedMethodId] = useState<string | null>(
+    defaultMethod?.id ?? null
+  );
+  const [showNewCard, setShowNewCard] = useState(!hasSavedMethods);
+
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -74,19 +101,23 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
   const cardElementInstanceRef = useRef<CardElement | null>(null);
   const stripeMountedRef = useRef(false);
 
+  const router = useRouter();
   const isTimeRunningOut = secondsRemaining !== null && secondsRemaining < 60;
   const isPending = isProcessing || isCancelling;
   const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?.trim();
   const validPublishableKey = Boolean(publishableKey && publishableKey.startsWith("pk_"));
 
+  // Stripe is only needed when entering a new card
+  const needsStripe = showNewCard;
+
   // Load Stripe.js once and track when the constructor is ready.
   useEffect(() => {
+    if (!needsStripe) return;
+
     let disposed = false;
 
     const handleStripeReady = () => {
-      if (!disposed) {
-        setStripeScriptReady(true);
-      }
+      if (!disposed) setStripeScriptReady(true);
     };
 
     const handleStripeError = () => {
@@ -98,9 +129,7 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
     const stripeWindow = window as unknown as { Stripe?: StripeConstructor };
     if (stripeWindow.Stripe) {
       handleStripeReady();
-      return () => {
-        disposed = true;
-      };
+      return () => { disposed = true; };
     }
 
     const existingScript = document.querySelector<HTMLScriptElement>(
@@ -122,13 +151,12 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
       script.removeEventListener("load", handleStripeReady);
       script.removeEventListener("error", handleStripeError);
     };
-  }, []);
+  }, [needsStripe]);
 
   // Mount the card element only after both the Stripe constructor and the DOM node are ready.
   useEffect(() => {
-    if (stripeMountedRef.current || !stripeScriptReady || !cardElementNode) {
-      return;
-    }
+    if (!needsStripe) return;
+    if (stripeMountedRef.current || !stripeScriptReady || !cardElementNode) return;
 
     if (!validPublishableKey || !publishableKey) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -156,14 +184,10 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
           base: {
             fontSize: "14px",
             color: "#e5e7eb",
-            "::placeholder": {
-              color: "#6b7280",
-            },
+            "::placeholder": { color: "#6b7280" },
             backgroundColor: "transparent",
           },
-          invalid: {
-            color: "#ef4444",
-          },
+          invalid: { color: "#ef4444" },
         },
       });
 
@@ -190,7 +214,7 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
       setPaymentError("Failed to initialize Stripe. Please try again.");
       setStripeReady(false);
     }
-  }, [cardElementNode, publishableKey, stripeScriptReady]);
+  }, [cardElementNode, publishableKey, stripeScriptReady, validPublishableKey, needsStripe]);
 
   useEffect(() => {
     return () => {
@@ -212,67 +236,66 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
       setSecondsRemaining(Math.max(0, remaining));
     };
 
-    updateCountdown(); // Set initial value immediately
+    updateCountdown();
     const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
   }, [expiresAt]);
 
   const handlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!stripeInstanceRef.current || !cardElementInstanceRef.current) {
-      setPaymentError("Stripe is not ready. Please refresh the page.");
-      return;
-    }
-
     setIsProcessing(true);
     setPaymentError(null);
 
     try {
-      // Create a PaymentMethod from the card details
-      const result = await stripeInstanceRef.current.createPaymentMethod({
-        type: "card",
-        card: cardElementInstanceRef.current,
-      });
+      let body: Record<string, string>;
 
-      if (result.error) {
-        setPaymentError(result.error.message || "Card validation failed.");
-        setIsProcessing(false);
-        return;
+      if (!showNewCard && selectedMethodId) {
+        // Pay with a saved payment method
+        body = { orderId, savedPaymentMethodId: selectedMethodId };
+      } else {
+        // Pay with a new card via Stripe
+        if (!stripeInstanceRef.current || !cardElementInstanceRef.current) {
+          setPaymentError("Stripe is not ready. Please refresh the page.");
+          setIsProcessing(false);
+          return;
+        }
+
+        const result = await stripeInstanceRef.current.createPaymentMethod({
+          type: "card",
+          card: cardElementInstanceRef.current,
+        });
+
+        if (result.error) {
+          setPaymentError(result.error.message || "Card validation failed.");
+          setIsProcessing(false);
+          return;
+        }
+
+        if (!result.paymentMethod?.id) {
+          setPaymentError("Failed to process card. Please try again.");
+          setIsProcessing(false);
+          return;
+        }
+
+        body = { orderId, paymentMethodId: result.paymentMethod.id };
       }
 
-      if (!result.paymentMethod?.id) {
-        setPaymentError("Failed to process card. Please try again.");
-        setIsProcessing(false);
-        return;
-      }
-
-      const paymentMethodId = result.paymentMethod.id;
-
-      // Submit payment to backend via API route
       const res = await fetch("/api/submit-payment", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          orderId,
-          paymentMethodId,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setPaymentError(body?.error?.message ?? "Payment failed.");
+        const resBody = await res.json().catch(() => ({}));
+        setPaymentError(resBody?.error?.message ?? "Payment failed.");
         setIsProcessing(false);
         return;
       }
 
-      // Success - redirect to order page
-      window.location.href = `/orders/${orderId}`;
+      router.refresh();
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred.";
-      setPaymentError(errorMessage);
+      setPaymentError(err instanceof Error ? err.message : "An unexpected error occurred.");
       setIsProcessing(false);
     }
   };
@@ -285,11 +308,13 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
       const formData = new FormData();
       await cancelOrder(orderId, initialState, formData);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to cancel order.";
-      setPaymentError(errorMessage);
+      setPaymentError(err instanceof Error ? err.message : "Failed to cancel order.");
       setIsCancelling(false);
     }
   };
+
+  // Whether the Pay button should be enabled
+  const canSubmit = showNewCard ? stripeReady && isCardComplete : Boolean(selectedMethodId);
 
   return (
     <div className="glass rounded-2xl w-full p-8 flex flex-col gap-6">
@@ -299,7 +324,6 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
           <CreditCard className="w-4 h-4" />
           Complete Payment
         </div>
-        {/* Big amount */}
         <p className="text-4xl font-bold tracking-tight gradient-text">
           ${amount.toFixed(2)}
         </p>
@@ -342,42 +366,117 @@ export function OrderPaymentForm({ orderId, amount, expiresAt }: OrderPaymentFor
         </div>
       )}
 
-      {/* Card Element */}
-      <div className="flex flex-col gap-2">
-        <label htmlFor="card-element" className="text-sm font-medium text-foreground">
-          Card Details
-        </label>
-        <div className="relative">
-          <div
-            id="card-element"
-            ref={(node) => setCardElementNode(node)}
-            className="border border-white/10 rounded-lg px-4 py-3 bg-white/3 focus-within:bg-white/5 focus-within:border-primary/50 transition-colors min-h-12"
-          />
-          {!stripeReady && (
-            <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground bg-card/80 rounded-lg">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading payment form...
-            </div>
+      {/* ── Saved payment methods ── */}
+      {hasSavedMethods && !showNewCard && (
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium text-foreground">Payment Method</label>
+          <div className="flex flex-col gap-2">
+            {savedPaymentMethods.map((method) => (
+              <button
+                key={method.id}
+                type="button"
+                onClick={() => setSelectedMethodId(method.id)}
+                className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors ${
+                  selectedMethodId === method.id
+                    ? "border-primary/60 bg-primary/10 text-foreground"
+                    : "border-white/10 bg-white/3 text-muted-foreground hover:border-white/20 hover:bg-white/5"
+                }`}
+              >
+                {/* Brand badge */}
+                <span className="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide bg-white/10 text-foreground min-w-9">
+                  {cardBrandIcon(method.brand)}
+                </span>
+                <span className="flex-1 text-sm font-medium">
+                  {method.label ?? `•••• ${method.last4}`}
+                </span>
+                {method.isDefault && (
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-primary/80 bg-primary/10 rounded px-1.5 py-0.5">
+                    Default
+                  </span>
+                )}
+                <span className="text-xs text-muted-foreground">
+                  {method.expMonth}/{method.expYear}
+                </span>
+                {/* Selected indicator */}
+                <span
+                  className={`w-4 h-4 rounded-full border-2 shrink-0 transition-colors ${
+                    selectedMethodId === method.id
+                      ? "border-primary bg-primary"
+                      : "border-white/20 bg-transparent"
+                  }`}
+                />
+              </button>
+            ))}
+          </div>
+
+          {/* Use a new card instead */}
+          <button
+            type="button"
+            onClick={() => {
+              setShowNewCard(true);
+              setSelectedMethodId(null);
+            }}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mt-1 self-start"
+          >
+            <Plus className="w-3 h-3" />
+            Use a new card instead
+          </button>
+        </div>
+      )}
+
+      {/* ── New card entry (Stripe element) ── */}
+      {showNewCard && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <label htmlFor="card-element" className="text-sm font-medium text-foreground">
+              Card Details
+            </label>
+            {hasSavedMethods && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNewCard(false);
+                  setSelectedMethodId(defaultMethod?.id ?? savedPaymentMethods[0]?.id ?? null);
+                }}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ChevronDown className="w-3 h-3" />
+                Use saved card
+              </button>
+            )}
+          </div>
+          <div className="relative">
+            <div
+              id="card-element"
+              ref={(node) => setCardElementNode(node)}
+              className="border border-white/10 rounded-lg px-4 py-3 bg-white/3 focus-within:bg-white/5 focus-within:border-primary/50 transition-colors min-h-12"
+            />
+            {!stripeReady && (
+              <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground bg-card/80 rounded-lg">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Loading payment form...
+              </div>
+            )}
+          </div>
+          {stripeReady && !isCardComplete && !paymentError && (
+            <p className="text-sm text-muted-foreground mt-2">
+              Please complete your card details, including CVC, before paying.
+            </p>
           )}
         </div>
-        {stripeReady && !isCardComplete && !paymentError && (
-          <p className="text-sm text-muted-foreground mt-2">
-            Please complete your card details, including CVC, before paying.
-          </p>
-        )}
-      </div>
+      )}
 
       {/* Security note */}
       <div className="flex items-center gap-2 text-xs text-muted-foreground bg-white/3 rounded-xl px-3 py-2.5 border border-white/6">
         <Lock className="w-3.5 h-3.5 text-primary/60 shrink-0" />
-        Your payment is processed securely. We never store card details.
+        Your payment is processed securely. We never store raw card details.
       </div>
 
       {/* Actions */}
       <div className="flex flex-col gap-2">
         <button
           onClick={handlePayment}
-          disabled={isPending || !stripeReady || !isCardComplete}
+          disabled={isPending || !canSubmit}
           className="w-full gap-2 bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-primary-foreground rounded-lg px-4 py-2.5 font-medium flex items-center justify-center transition-colors"
         >
           {isProcessing ? (

@@ -7,7 +7,11 @@ import type { TicketState } from "@/app/actions/tickets";
 describe("TicketForm", () => {
   it("renders defaults and submits edited values", async () => {
     const user = userEvent.setup();
-    const action = vi.fn(async (_prev: TicketState, _fd: FormData): Promise<TicketState> => ({}));
+    const action = vi.fn(async (prev: TicketState, formData: FormData): Promise<TicketState> => {
+      void prev;
+      void formData;
+      return {};
+    });
 
     render(
       <TicketForm

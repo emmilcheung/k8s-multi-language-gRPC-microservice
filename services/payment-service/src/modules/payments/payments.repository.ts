@@ -1,11 +1,35 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { DRIZZLE_DB, type DrizzleDB } from '../../database/database.module';
-import { payments, type Payment, type NewPayment, type PaymentStatus } from '../../database/schema';
+import {
+  paymentCustomers,
+  payments,
+  savedPaymentMethods,
+  type NewPayment,
+  type NewPaymentCustomer,
+  type NewSavedPaymentMethod,
+  type Payment,
+  type PaymentCustomer,
+  type PaymentStatus,
+  type SavedPaymentMethod,
+} from '../../database/schema';
 
 @Injectable()
 export class PaymentsRepository {
   constructor(@Inject(DRIZZLE_DB) private readonly db: DrizzleDB) {}
+
+  async findPaymentCustomerByUserId(userId: string): Promise<PaymentCustomer | null> {
+    const [row] = await this.db
+      .select()
+      .from(paymentCustomers)
+      .where(eq(paymentCustomers.userId, userId));
+    return row ?? null;
+  }
+
+  async createPaymentCustomer(data: NewPaymentCustomer): Promise<PaymentCustomer> {
+    const [row] = await this.db.insert(paymentCustomers).values(data).returning();
+    return row;
+  }
 
   async create(data: NewPayment): Promise<Payment> {
     const [row] = await this.db.insert(payments).values(data).returning();
@@ -19,6 +43,88 @@ export class PaymentsRepository {
 
   async findByOrderId(orderId: string): Promise<Payment | null> {
     const [row] = await this.db.select().from(payments).where(eq(payments.orderId, orderId));
+    return row ?? null;
+  }
+
+  async findSavedPaymentMethodById(id: string): Promise<SavedPaymentMethod | null> {
+    const [row] = await this.db
+      .select()
+      .from(savedPaymentMethods)
+      .where(eq(savedPaymentMethods.id, id));
+    return row ?? null;
+  }
+
+  async findSavedPaymentMethodByProviderId(
+    providerPaymentMethodId: string,
+  ): Promise<SavedPaymentMethod | null> {
+    const [row] = await this.db
+      .select()
+      .from(savedPaymentMethods)
+      .where(eq(savedPaymentMethods.providerPaymentMethodId, providerPaymentMethodId));
+    return row ?? null;
+  }
+
+  async listSavedPaymentMethodsByUserId(userId: string): Promise<SavedPaymentMethod[]> {
+    return this.db
+      .select()
+      .from(savedPaymentMethods)
+      .where(and(eq(savedPaymentMethods.userId, userId), isNull(savedPaymentMethods.deletedAt)))
+      .orderBy(desc(savedPaymentMethods.createdAt));
+  }
+
+  async createSavedPaymentMethod(data: NewSavedPaymentMethod): Promise<SavedPaymentMethod> {
+    const [row] = await this.db.insert(savedPaymentMethods).values(data).returning();
+    return row;
+  }
+
+  async setDefaultSavedPaymentMethod(
+    userId: string,
+    id: string,
+  ): Promise<SavedPaymentMethod | null> {
+    const now = new Date();
+
+    return this.db.transaction(async (tx) => {
+      await tx
+        .update(savedPaymentMethods)
+        .set({ isDefault: false, updatedAt: now })
+        .where(and(eq(savedPaymentMethods.userId, userId), isNull(savedPaymentMethods.deletedAt)));
+
+      const [row] = await tx
+        .update(savedPaymentMethods)
+        .set({ isDefault: true, updatedAt: now })
+        .where(
+          and(
+            eq(savedPaymentMethods.userId, userId),
+            eq(savedPaymentMethods.id, id),
+            isNull(savedPaymentMethods.deletedAt),
+          ),
+        )
+        .returning();
+
+      return row ?? null;
+    });
+  }
+
+  async softDeleteSavedPaymentMethod(
+    userId: string,
+    id: string,
+  ): Promise<SavedPaymentMethod | null> {
+    const [row] = await this.db
+      .update(savedPaymentMethods)
+      .set({
+        isDefault: false,
+        deletedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(savedPaymentMethods.userId, userId),
+          eq(savedPaymentMethods.id, id),
+          isNull(savedPaymentMethods.deletedAt),
+        ),
+      )
+      .returning();
+
     return row ?? null;
   }
 

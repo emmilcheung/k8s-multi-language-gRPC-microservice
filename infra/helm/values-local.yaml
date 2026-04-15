@@ -123,6 +123,7 @@ payment-service:
     repository: payment-service
     tag: latest
   env:
+    ORDER_SERVICE_URL: "http://ticketing-order-service:8082"
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
     OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     OTEL_SERVICE_NAME: payment-service
@@ -172,6 +173,25 @@ venue-service:
     limits:
       cpu: 300m
       memory: 128Mi
+  autoscaling:
+    enabled: false
+
+user-service:
+  replicaCount: 1
+  image:
+    repository: user-service
+    tag: latest
+  env:
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    OTEL_SERVICE_NAME: user-service
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
   autoscaling:
     enabled: false
 
@@ -291,6 +311,24 @@ postgres-venue:
     username: "venue_user"
     password: "venue-local-secret"
     database: "venue_db"
+  primary:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  metrics:
+    enabled: false
+
+postgres-users:
+  auth:
+    existingSecret: ""
+    postgresPassword: "users-local-secret"
+    username: "users_user"
+    password: "users-local-secret"
+    database: "users_db"
   primary:
     resources:
       requests:

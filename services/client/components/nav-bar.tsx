@@ -6,7 +6,15 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { Button } from "@/components/ui/button";
 import { signout } from "@/app/actions/auth";
 import { cn } from "@/lib/utils";
-import { Tag, Building2, LayoutDashboard, LogOut, LogIn, UserPlus } from "lucide-react";
+import {
+  Tag,
+  Building2,
+  LayoutDashboard,
+  LogOut,
+  LogIn,
+  UserPlus,
+  Settings,
+} from "lucide-react";
 
 interface NavBarProps {
   isLoggedIn: boolean;
@@ -68,6 +76,16 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
               >
                 <LayoutDashboard className="size-3.5" />
                 Orders
+              </Link>
+              <Link
+                href="/settings"
+                className={cn(
+                  buttonVariants({ variant: "ghost", size: "sm" }),
+                  "gap-1.5 text-muted-foreground hover:text-foreground text-xs font-medium"
+                )}
+              >
+                <Settings className="size-3.5" />
+                Settings
               </Link>
               <form action={signout} className="ml-1">
                 <Button

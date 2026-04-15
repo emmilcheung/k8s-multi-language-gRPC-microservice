@@ -1,0 +1,39 @@
+{{- if .Values.networkPolicy.enabled }}
+# NetworkPolicy for user-service
+# Ingress: Kong (HTTP:3004)
+# Egress:  PostgreSQL (5432), DNS (53)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "user-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "user-service.selectorLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "user-service.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow HTTP from Kong proxy pods
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kong
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.port }}
+  egress:
+    # DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # PostgreSQL (users DB)
+    - ports:
+        - protocol: TCP
+          port: 5432
+{{- end }}

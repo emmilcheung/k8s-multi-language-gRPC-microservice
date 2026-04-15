@@ -5,6 +5,53 @@ export interface User {
   email: string;
 }
 
+export interface Profile {
+  id?: string;
+  email?: string;
+  displayName?: string;
+  locale?: string;
+  timezone?: string;
+  fullName?: string;
+  phone?: string;
+}
+
+export interface Preferences {
+  marketingOptIn?: boolean;
+  orderUpdates?: boolean;
+  productUpdates?: boolean;
+  locale?: string;
+  currency?: string;
+  marketingEmails?: boolean;
+}
+
+export interface BillingAddress {
+  line1?: string;
+  line2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+}
+
+export interface SessionInfo {
+  sessionId: string;
+  createdAt: string;
+  lastRotatedAt: string;
+  userAgent?: string | null;
+  ipAddress?: string | null;
+  current: boolean;
+}
+
+export interface SavedPaymentMethod {
+  id: string;
+  brand?: string;
+  label?: string;
+  last4?: string;
+  expMonth?: number;
+  expYear?: number;
+  isDefault?: boolean;
+}
+
 export interface Ticket {
   id: string;
   title: string;

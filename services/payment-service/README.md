@@ -1,4 +1,4 @@
-# payment-service
+# Payment Service
 
 Processes payments for confirmed orders using Stripe PaymentIntents. Observes `orders.order.created` events from Kafka and exposes a REST API for the client to trigger charges.
 
@@ -7,10 +7,10 @@ Processes payments for confirmed orders using Stripe PaymentIntents. Observes `o
 - Charge a payment method via Stripe (idempotent — one payment per order)
 - In real mode, initiate payments only from `POST /api/payments`
 - In mock mode, auto-complete `orders.order.created` events for local and integration flows
-- Publish `payments.payment.captured` or `payments.payment.failed` events (future)
+- Publish `payments.payment.captured` or `payments.payment.failed` events (planned)
 - Own the `payments` PostgreSQL database — no other service accesses it
 
-## Tech Stack
+## Tech stack
 
 | Concern | Choice |
 |---|---|
@@ -27,7 +27,7 @@ Processes payments for confirmed orders using Stripe PaymentIntents. Observes `o
 
 `3001`
 
-## API Endpoints
+## API endpoints
 
 All external endpoints are exposed through the Kong API Gateway.
 
@@ -111,7 +111,7 @@ Readiness probe — returns `200` when PostgreSQL and Kafka are reachable, `503`
 
 Prometheus metrics endpoint (RED method: request rate, error rate, duration).
 
-## Environment Variables
+## Environment variables
 
 | Variable | Required | Description |
 |---|---|---|
@@ -122,12 +122,12 @@ Prometheus metrics endpoint (RED method: request rate, error rate, duration).
 | `ORDER_SERVICE_URL` | Yes | Base URL for order-service used to verify order ownership and amount |
 | `ORDER_SERVICE_TIMEOUT_MS` | No | Order lookup timeout in milliseconds (default: `5000`) |
 | `STRIPE_SECRET_KEY` | Yes | Stripe secret key. Set to `test_mock` to skip real Stripe calls in tests. In mock mode, sending token `pm_mock_declined` forces a deterministic failed payment for E2E and QA scenarios. |
-| `STRIPE_WEBHOOK_SECRET` | Conditionally | Required in production for webhook signature verification. |
+| `STRIPE_WEBHOOK_SECRET` | Conditionally required | Required in production for webhook signature verification. |
 | `KAFKA_BROKERS` | Yes | Comma-separated Kafka broker addresses (e.g. `localhost:9092`) |
 
 Copy `.env.example` to `.env` and fill in values. Never commit `.env`.
 
-## Database Schema
+## Database schema
 
 Single table: `payments`
 
@@ -164,7 +164,7 @@ Failed messages (after 3 exponential-back-off retries) are routed to `orders.ord
 | `payments.payment.captured` | Successful charge |
 | `payments.payment.failed` | Stripe charge failure |
 
-## Running Locally
+## Running locally
 
 ```bash
 # 1. Start dependencies (Postgres, Kafka)
@@ -176,12 +176,14 @@ pnpm install
 # 3. Copy env file and fill in values
 cp .env.example .env
 
-# 4. Apply migrations
-psql "$DATABASE_URL" -f migrations/001_init_payments.sql
+# 4. Apply migrations for host-run development
+pnpm migrate
 
 # 5. Start in watch mode
 pnpm start:dev
 ```
+
+When running under Docker Compose or the container image, migrations are applied automatically by `node dist/migrate` before the NestJS process starts. Readiness stays red if the required tables are missing.
 
 ## Testing
 
@@ -196,5 +198,5 @@ pnpm test:cov
 pnpm test:integration
 ```
 
-Unit tests: 14 passing  
-Integration tests: 11 passing
+- Unit tests: 14 passing
+- Integration tests: 11 passing

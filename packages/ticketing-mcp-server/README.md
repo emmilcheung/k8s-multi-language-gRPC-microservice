@@ -7,115 +7,158 @@ An MCP (Model Context Protocol) server for the ticketing platform that runs loca
 - OAuth2 Authorization Code with PKCE for secure authentication
 - Local token storage in `~/.config/ticketing-mcp/tokens.json` (mode 0o600)
 - Automatic token refresh with fallback to re-authentication
-- MCP tools for:
-  - Event search and details (`search_events`, `get_event`)
-  - Seat availability (`view_seat_availability`)
-  - Order management (`list_my_orders`, `get_order`, `create_order`, `create_seated_order`, `cancel_order`)
-  - Payments (`get_payment`, `pay_for_order`)
+- Agent-friendly MCP tools exposed over stdio
+- Tool groups:
+  - `search_events`, `get_event`
+  - `view_seat_availability`
+  - `list_my_orders`, `get_order`, `create_order`, `create_seated_order`, `cancel_order`
+  - `get_payment`, `pay_for_order`
 
 ## Installation
 
 ```bash
+cd packages/ticketing-mcp-server
 pnpm install
 pnpm build
 ```
 
-Or with npm:
-
-```bash
-npm install
-npm run build
-```
-
 ## Usage
 
-### Environment Variables
+### Environment
 
 - `TICKETING_API_URL` — Base URL for the ticketing API (default: `http://localhost:8000`)
 
-### Running the Server
+### Run locally
 
 ```bash
+cd packages/ticketing-mcp-server
 export TICKETING_API_URL=http://localhost:8000
 pnpm dev
 ```
 
-Or run the compiled version:
+### Run the compiled server
 
 ```bash
+cd packages/ticketing-mcp-server
 node dist/index.js
 ```
 
-### Authentication
+### Agent integration
 
-The first time you run any MCP tool, the server will open your browser to authenticate via OAuth2. The callback URL is `http://127.0.0.1:19836/callback`.
+Use the repository-level `.claude/mcp.json` configuration to launch the MCP server from Claude Code or any MCP-compatible agent.
 
-After authentication, your token is stored locally at `~/.config/ticketing-mcp/tokens.json` with restrictive permissions (0o600).
+## Authentication
+
+The first time a tool is invoked, the server opens your browser for OAuth2 login and listens for the callback at:
+
+- `http://127.0.0.1:19836/callback`
+
+Authenticated tokens are stored locally at `~/.config/ticketing-mcp/tokens.json` with mode `0o600`.
+
+## Demo Screenshots
+
+The package includes example screenshots showing setup and purchase flows with Claude Code.
+
+- `example/setup.png` — configure the MCP server and connect the agent
+- `example/oauth.png` — OAuth authorization flow in the browser
+- `example/list_ticket.png` — search/list tickets from the agent
+- `example/purchase_with_default.png` — purchase a ticket using default values
+- `example/purchase_result_1.png` — successful order confirmation
+- `example/purchase_result_2.png` — payment/order details result
+
+![Setup](example/setup.png)
+
+![OAuth login](example/oauth.png)
+
+![List tickets](example/list_ticket.png)
+
+![Purchase ticket](example/purchase_with_default.png)
+
+![Purchase result 1](example/purchase_result_1.png)
+
+![Purchase result 2](example/purchase_result_2.png)
+
+## Testing
+
+```bash
+cd packages/ticketing-mcp-server
+pnpm test
+```
+
+Note: the ticketing API should be available at `http://localhost:8000` when running tests or using the MCP tools.
+
+## Package layout
+
+- `src/index.ts` — MCP server startup, tool registration, and stdio transport
+- `src/auth/` — OAuth2 PKCE flow, login, refresh handling, and secure token storage
+- `src/client/api-client.ts` — HTTP client with Bearer token injection, refresh logic, and retry handling
+- `src/tools/` — tool adapters for the ticketing domains
+- `.claude/mcp.json` — agent-side configuration for Claude Code and MCP-compatible clients
 
 ## Architecture
 
-### Token Management (`src/auth/token-store.ts`)
+### Token management (`src/auth/token-store.ts`)
 
-- `readTokens()` — Load tokens from disk
-- `writeTokens(tokens)` — Save tokens with mode 0o600
-- `isExpired(tokens)` — Check if token needs refresh (30s skew)
-- `clearTokens()` — Wipe tokens
+- `readTokens()` — load tokens from disk
+- `writeTokens(tokens)` — save tokens with 0o600 permissions
+- `isExpired(tokens)` — check expiry with a 30-second skew
+- `clearTokens()` — remove token state
 
-### OAuth Flow (`src/auth/oauth-flow.ts`)
+### OAuth flow (`src/auth/oauth-flow.ts`)
 
-- `login(apiBaseUrl)` — PKCE Authorization Code flow
-  - Generates code verifier & challenge
-  - Opens browser at `/oauth/authorize`
-  - Listens for callback on localhost:19836
-  - Exchanges code for tokens
-- `refreshTokens(apiBaseUrl, refreshToken)` — Refresh expired tokens
+- `login(apiBaseUrl)` — perform PKCE Authorization Code flow
+  - generate code verifier and challenge
+  - open browser at `/oauth/authorize`
+  - receive callback on localhost:19836
+  - exchange code for access and refresh tokens
+- `refreshTokens(apiBaseUrl, refreshToken)` — refresh an expired session
 
-### API Client (`src/client/api-client.ts`)
+### API client (`src/client/api-client.ts`)
 
-- Handles Bearer token injection in all requests
-- Automatic token refresh on 401 or expiry
-- Graceful fallback to re-authentication on refresh failure
-- Methods: `get<T>(path)`, `post<T>(path, body)`, `delete<T>(path)`
+- injects `Authorization: Bearer <token>` on requests
+- refreshes tokens automatically on 401 or expiry
+- falls back to re-authentication when refresh fails
+- exposes `get<T>`, `post<T>`, and `delete<T>` helpers
 
-### MCP Tools
+### MCP tools
 
-Organized by domain:
-
-- **events** (`src/tools/events.ts`) — `search_events`, `get_event`
-- **seats** (`src/tools/seats.ts`) — `view_seat_availability`
-- **orders** (`src/tools/orders.ts`) — `list_my_orders`, `get_order`, `create_order`, `create_seated_order`, `cancel_order`
-- **payments** (`src/tools/payments.ts`) — `get_payment`, `pay_for_order`
+- **Events** — `search_events`, `get_event`
+- **Seats** — `view_seat_availability`
+- **Orders** — `list_my_orders`, `get_order`, `create_order`, `create_seated_order`, `cancel_order`
+- **Payments** — `get_payment`, `pay_for_order`
 
 ## Development
 
-### Type-checking
+### Type checking
 
 ```bash
+cd packages/ticketing-mcp-server
 pnpm tsc --noEmit
 ```
 
-### Building
+### Build
 
 ```bash
+cd packages/ticketing-mcp-server
 pnpm build
 ```
 
-Output goes to `dist/`.
+Output is written to `dist/`.
 
-## API Endpoints (via Kong Gateway)
+## API endpoints
 
-All calls go through `TICKETING_API_URL` with `Authorization: Bearer <token>` header.
+All calls go through `TICKETING_API_URL` with `Authorization: Bearer <token>`.
 
-- `GET /api/tickets` — List events
-- `GET /api/tickets/:id` — Get event
-- `GET /api/seating-plans/:id/availability` — Seat availability
-- `GET /api/orders` — List user orders
-- `GET /api/orders/:id` — Get order
-- `POST /api/orders` — Create GA order
-- `POST /api/orders/seated` — Create seated order
-- `DELETE /api/orders/:id` — Cancel order
-- `GET /api/payments/:id` — Get payment
-- `POST /api/payments` — Process payment
+- `GET /api/tickets`
+- `GET /api/tickets/:id`
+- `GET /api/seating-plans/:id/availability`
+- `GET /api/orders`
+- `GET /api/orders/:id`
+- `POST /api/orders`
+- `POST /api/orders/seated`
+- `DELETE /api/orders/:id`
+- `GET /api/payments/:id`
+- `POST /api/payments`
 
 ## License
 

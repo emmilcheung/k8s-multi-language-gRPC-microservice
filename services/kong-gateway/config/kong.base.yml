@@ -15,6 +15,7 @@
 #   *    /api/tickets/*                    → ticket-service (JWT required)
 #   *    /api/orders/*                     → order-service  (JWT required)
 #   *    /api/payments/*                   → payment-service (JWT required)
+#   *    /api/user-settings/*              → user-service   (JWT required)
 #   /*                                     → client         (catch-all, no JWT)
 #
 # Auth strategy:
@@ -157,6 +158,43 @@ services:
         paths:
           - /api/users/currentuser
         methods: [GET]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      # Protected: session management — validates JWT and injects X-User-Id.
+      - name: auth-sessions-list
+        paths:
+          - ~/api/users/sessions$
+        methods: [GET]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      - name: auth-sessions-revoke
+        paths:
+          - ~/api/users/sessions/[^/]+$
+        methods: [DELETE]
         strip_path: false
         plugins:
           - name: jwt
@@ -375,6 +413,100 @@ services:
                 - |
                   {{JWT_SUB_LUA}}
 
+      # Saved payment methods routes must be matched before payments-resource
+      # so /api/payments/methods is not captured as a payment ID.
+      - name: payments-methods-read
+        paths:
+          - ~/api/payments/methods$
+        methods: [GET]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: pre-function
+            config:
+              access:
+                - |
+                  {{SCOPE_CHECK_LUA:payments:read}}
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      - name: payments-methods-register
+        paths:
+          - ~/api/payments/methods/register$
+        methods: [POST]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: pre-function
+            config:
+              access:
+                - |
+                  {{SCOPE_CHECK_LUA:payments:create}}
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      - name: payments-methods-default
+        paths:
+          - ~/api/payments/methods/[^/]+/default$
+        methods: [PATCH]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: pre-function
+            config:
+              access:
+                - |
+                  {{SCOPE_CHECK_LUA:payments:create}}
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      - name: payments-methods-delete
+        paths:
+          - ~/api/payments/methods/[^/]+$
+        methods: [DELETE]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: pre-function
+            config:
+              access:
+                - |
+                  {{SCOPE_CHECK_LUA:payments:create}}
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
       - name: payments-resource
         paths:
           - ~/api/payments/[^/]+$
@@ -392,6 +524,33 @@ services:
               access:
                 - |
                   {{SCOPE_CHECK_LUA:payments:read}}
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+  # ── user-service ─────────────────────────────────────────────────────────────
+  - name: user-service
+    url: http://{{HOST_USERS}}
+    connect_timeout: {{CONNECT_TIMEOUT_MS}}
+    read_timeout: {{READ_TIMEOUT_MS}}
+    write_timeout: {{WRITE_TIMEOUT_MS}}
+    routes:
+      - name: user-settings
+        paths:
+          - ~/api/user-settings/profile$
+          - ~/api/user-settings/preferences$
+          - ~/api/user-settings/billing-address$
+        methods: [GET, PUT]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
           - name: post-function
             config:
               access:

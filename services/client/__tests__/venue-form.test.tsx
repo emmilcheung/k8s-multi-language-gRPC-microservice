@@ -6,7 +6,11 @@ import type { VenueState } from "@/app/actions/venues";
 
 describe("VenueForm", () => {
   it("renders all required fields", () => {
-    const action = vi.fn(async (_prev: VenueState, _fd: FormData): Promise<VenueState> => ({}));
+    const action = vi.fn(async (prev: VenueState, formData: FormData): Promise<VenueState> => {
+      void prev;
+      void formData;
+      return {};
+    });
     render(<VenueForm action={action} />);
 
     expect(screen.getByLabelText(/venue name/i)).toBeInTheDocument();
@@ -17,7 +21,11 @@ describe("VenueForm", () => {
 
   it("submits with user-entered values", async () => {
     const user = userEvent.setup();
-    const action = vi.fn(async (_prev: VenueState, _fd: FormData): Promise<VenueState> => ({}));
+    const action = vi.fn(async (prev: VenueState, formData: FormData): Promise<VenueState> => {
+      void prev;
+      void formData;
+      return {};
+    });
     render(<VenueForm action={action} />);
 
     await user.type(screen.getByLabelText(/venue name/i), "Madison Square Garden");
@@ -35,9 +43,13 @@ describe("VenueForm", () => {
   });
 
   it("shows an error alert when state contains an error", () => {
-    const action = vi.fn(async (_prev: VenueState, _fd: FormData): Promise<VenueState> => ({
-      error: "Venue name is required.",
-    }));
+    const action = vi.fn(async (prev: VenueState, formData: FormData): Promise<VenueState> => {
+      void prev;
+      void formData;
+      return {
+        error: "Venue name is required.",
+      };
+    });
     render(<VenueForm action={action} />);
     // No error initially
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

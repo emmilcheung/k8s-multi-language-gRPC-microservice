@@ -9,6 +9,8 @@ charts/expiration-service-*.tgz
 charts/order-service-*.tgz
 charts/payment-service-*.tgz
 charts/ticket-service-*.tgz
+charts/user-service-*.tgz
+charts/venue-service-*.tgz
 
 # Packaged root-level charts
 *.tgz

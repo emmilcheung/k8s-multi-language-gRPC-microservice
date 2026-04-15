@@ -131,6 +131,7 @@ for SERVICE_ENTRY in \
   "payment-service:${REPO_ROOT}/services/payment-service" \
   "expiration-service:${REPO_ROOT}/services/expiration-service" \
   "venue-service:${REPO_ROOT}/services/venue-service" \
+  "user-service:${REPO_ROOT}/services/user-service" \
   "client:${REPO_ROOT}/services/client" \
 ; do
   SERVICE="${SERVICE_ENTRY%%:*}"
@@ -171,6 +172,7 @@ PG_AUTH_HOST="ticketing-postgres-auth"
 PG_ORDERS_HOST="ticketing-postgres-orders"
 PG_PAYMENTS_HOST="ticketing-postgres-payments"
 PG_VENUE_HOST="ticketing-postgres-venue"
+PG_USERS_HOST="ticketing-postgres-users"
 MONGO_HOST="ticketing-mongodb"
 REDIS_HOST="ticketing-redis-master"
 KAFKA_HOST="ticketing-cp-kafka.ticketing.svc.cluster.local"   # in-cluster cp-kafka broker
@@ -180,6 +182,7 @@ PG_AUTH_PASS="auth-local-secret"
 PG_ORDERS_PASS="orders-local-secret"
 PG_PAYMENTS_PASS="payments-local-secret"
 PG_VENUE_PASS="venue-local-secret"
+PG_USERS_PASS="users-local-secret"
 
 # Helper: create or replace a secret (delete + recreate for idempotency)
 apply_secret() {
@@ -220,6 +223,7 @@ apply_secret order-service-secrets \
 apply_secret payment-service-secrets \
   --from-literal=DATABASE_URL="postgresql://payments_user:${PG_PAYMENTS_PASS}@${PG_PAYMENTS_HOST}:5432/payments_db" \
   --from-literal=STRIPE_SECRET_KEY="${STRIPE_SECRET_KEY}" \
+  --from-literal=STRIPE_WEBHOOK_SECRET="whsec_test_placeholder" \
   --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092"
 
 # expiration-service-secrets
@@ -233,6 +237,11 @@ apply_secret venue-service-secrets \
   --from-literal=REDIS_URL="redis://${REDIS_HOST}:6379" \
   --from-literal=TICKET_SERVICE_URL="ticketing-ticket-service.ticketing.svc.cluster.local:50051" \
   --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092"
+
+# user-service-secrets
+apply_secret user-service-secrets \
+  --from-literal=DATABASE_URL="postgresql://users_user:${PG_USERS_PASS}@${PG_USERS_HOST}:5432/users_db" \
+  --from-literal=DB_POOL_MAX="20"
 
 info "All secrets created."
 
@@ -264,6 +273,7 @@ helm upgrade --install ticketing "${HELM_CHART}" \
   --set "payment-service.secretRef=payment-service-secrets" \
   --set "expiration-service.secretRef=expiration-service-secrets" \
   --set "venue-service.secretRef=venue-service-secrets" \
+  --set "user-service.secretRef=user-service-secrets" \
   --timeout 10m \
   --wait
 

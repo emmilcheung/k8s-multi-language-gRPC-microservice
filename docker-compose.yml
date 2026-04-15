@@ -88,6 +88,27 @@ services:
     networks:
       - microservices-net
 
+  # ── PostgreSQL: user-service ────────────────────────────────────────────────
+  postgres-users:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: users_db
+      POSTGRES_USER: users_user
+      POSTGRES_PASSWORD: users_pass
+    ports:
+      - "5436:5432"
+    volumes:
+      - postgres_users_data:/var/lib/postgresql/data
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U users_user -d users_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - microservices-net
+
   # ── MongoDB: ticket-service ─────────────────────────────────────────────────
   mongodb:
     image: mongo:7
@@ -397,7 +418,33 @@ services:
       - "3002:3002"
     mem_limit: 512m
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3002/healthz/live"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3002/healthz/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - microservices-net
+
+  # ── user-service: Node.js / NestJS ─────────────────────────────────────────
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3004
+      DATABASE_URL: postgresql://users_user:users_pass@postgres-users:5432/users_db
+      DB_POOL_MAX: 20
+    depends_on:
+      postgres-users:
+        condition: service_healthy
+    ports:
+      - "3004:3004"
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3004/healthz/ready"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -477,6 +524,7 @@ volumes:
   postgres_orders_data:
   postgres_payments_data:
   postgres_venue_data:
+  postgres_users_data:
   mongodb_data:
   redis_data:
   kafka_data:

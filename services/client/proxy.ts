@@ -75,7 +75,7 @@ function persistRefreshedCookies(response: NextResponse, setCookieHeader: string
   }
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const response = NextResponse.next();
   const traceparent = request.headers.get("traceparent") ?? request.headers.get("x-b3-traceid");
 

@@ -279,18 +279,69 @@ The most important ones:
 
 ## 7. Operations
 
+### Agent-driven MCP Operations
+
+This workspace includes a local ticketing MCP server in `packages/ticketing-mcp-server` plus an agent-side client config in `.claude/mcp.json`.
+
+This MCP setup allows Claude Code and other MCP-compatible agents to call ticketing workflows directly over stdio, using OAuth2 Authorization Code + PKCE for secure authentication and forwarding requests through Kong at `http://localhost:8000`.
+
+See `packages/ticketing-mcp-server/README.md` for package structure, install steps, demo screenshots, and local test guidance.
+
+The server runs locally, authenticates with OAuth2 Authorization Code + PKCE, and exposes ticketing tools to MCP-compatible agents such as Claude Code over stdio. Requests are forwarded through Kong at `http://localhost:8000` using the authenticated user's tokens.
+
+Key points:
+- MCP server package: `packages/ticketing-mcp-server`
+- Agent-side config: `.claude/mcp.json`
+- Claude Code discovers the config automatically when the workspace is opened.
+- Auth tokens are stored securely in `~/.config/ticketing-mcp/tokens.json`.
+- Tools include event search, seat availability, order creation/cancellation, payment processing, and session revocation.
+
+Install and run the MCP server locally:
+```bash
+cd packages/ticketing-mcp-server
+pnpm install
+pnpm build
+export TICKETING_API_URL=http://localhost:8000
+pnpm dev
+```
+
+Test the MCP workflow:
+```bash
+# terminal 1
+cd packages/ticketing-mcp-server
+pnpm install
+pnpm build
+export TICKETING_API_URL=http://localhost:8000
+pnpm dev
+
+# terminal 2
+cd services/auth-service
+pnpm test
+pnpm test:integration
+```
+
+Agent prompt guidance:
+- Use exact working directories and explicit commands.
+- Be specific: `run unit tests`, `build the MCP server`, `invoke search_events`, `create_order`.
+- Example: `change directory into packages/ticketing-mcp-server and start the MCP server`
+- Example: `change directory into services/auth-service and run pnpm test and pnpm test:integration`
+- Example: `once the MCP server is running, use the agent to call search_events and list_my_orders`
+
+The MCP tools map directly to ticketing functionality such as `search_events`, `get_event`, `view_seat_availability`, `list_my_orders`, `get_order`, `create_order`, `create_seated_order`, `cancel_order`, `get_payment`, and `pay_for_order`.
+
 ### 7.1 Local Development (Docker Compose)
 
 The fastest way to run everything — no Kubernetes required.
 
 ```bash
 # Start all services and infrastructure
-docker compose up --build
+docker compose up --build --detach
 
-# Run E2E tests (in a separate terminal, after compose is up)
-cd services/client
-pnpm dev --port 4000 &    # Next.js dev server (needed for E2E)
-pnpm exec playwright test
+# Tail logs for all services
+docker compose logs -f
+
+# Stop the stack
+docker compose down
 ```
 
 **Service ports:**
@@ -301,6 +352,7 @@ pnpm exec playwright test
 | ticket-service | 3001 |
 | payment-service | 3002 |
 | venue-service | 3003 |
+| user-service | 3004 |
 | order-service | 8082 |
 | Kong (API gateway) | **8000** |
 | Kafka (host access for E2E) | 9093 |
@@ -309,19 +361,80 @@ pnpm exec playwright test
 | PostgreSQL (orders) | 5433 |
 | PostgreSQL (payments) | 5434 |
 | PostgreSQL (venue) | 5435 |
+| PostgreSQL (users) | 5436 |
 | Redis | 6379 |
 | Schema Registry | 8081 |
-| Prometheus | 9090 |
-| Jaeger | 16686 |
-| Grafana | 3004 |
-| OTel Collector (gRPC) | 4317 |
-| OTel Collector (HTTP) | 4318 |
+| Prometheus (separate observability compose) | 9090 |
+| Jaeger (separate observability compose) | 16686 |
+| Grafana (separate observability compose) | 3004 |
+| OTel Collector (gRPC, separate observability compose) | 4317 |
+| OTel Collector (HTTP, separate observability compose) | 4318 |
 
 All traffic from the browser goes through Kong on port **8000**.
 
+To run E2E locally:
+
+```bash
+cd services/client
+pnpm dev --port 4000
+```
+
+In a second terminal:
+
+```bash
+pnpm exec playwright test
+```
+
+If you want to execute a command inside a running service container:
+
+```bash
+docker compose exec auth-service pnpm test
+```
+
+#### Fresh environment verification
+
+Use this flow to verify the settings release on a clean machine or clean volumes. No manual SQL should be required.
+
+```bash
+# 1. Clean volumes and start the stack
+docker compose down -v
+docker compose up --build --detach
+
+# 2. Confirm the settings dependencies are ready
+curl -fsS http://localhost:3002/healthz/ready
+curl -fsS http://localhost:3004/healthz/ready
+
+# 3. Run only the settings E2E subset
+cd services/client
+pnpm exec playwright test tests/e2e/ticketing.spec.ts --grep settings
+```
+
+Service-level verification commands for the current settings hardening gate:
+
+```bash
+cd services/payment-service
+pnpm test
+pnpm lint
+pnpm exec tsc --noEmit
+pnpm build
+pnpm test:integration -- test/payments.integration.spec.ts
+
+cd ../user-service
+pnpm test
+pnpm test:integration
+pnpm lint
+pnpm exec tsc --noEmit
+pnpm build
+
+cd ../client
+pnpm lint
+pnpm exec tsc --noEmit
+pnpm build
+```
+
 #### Local observability
 
-Docker Compose now includes a local observability stack for traces and metrics:
+The local observability stack for traces and metrics runs from `observability/local/docker-compose.observability.yml`:
 
 - OpenTelemetry Collector receives OTLP traces from the services.
 - Jaeger stores and visualizes trace spans.
@@ -460,7 +573,7 @@ CI will enforce this with `buf breaking` on every PR (once pipelines are written
 ```bash
 cd services/auth-service
 pnpm test           # unit tests (no external deps)
-pnpm test:int       # integration tests (Testcontainers spins up PostgreSQL)
+pnpm test:integration  # integration tests (Testcontainers spins up PostgreSQL)
 ```
 
 #### ticket-service (Go / testify + testcontainers-go)
@@ -484,18 +597,27 @@ mvn verify -P integration-test        # integration tests (requires Docker)
 ```bash
 cd services/payment-service
 pnpm test
-pnpm test:int
+pnpm test:integration
 ```
 
 #### E2E (Playwright — runs against Docker Compose or minikube)
 
 ```bash
 # Against Docker Compose:
-docker compose up --build -d
-cd services/client && pnpm dev --port 4000 &
-pnpm exec playwright test
+docker compose up --build --detach
+cd services/client
+pnpm dev --port 4000
+```
 
-# Against minikube (requires 'make -C infra/local tunnel' running):
+In a second terminal:
+
+```bash
+pnpm exec playwright test
+```
+
+#### Against minikube (requires 'make -C infra/local tunnel' running):
+
+```bash
 cd services/client
 pnpm exec playwright test
 ```
