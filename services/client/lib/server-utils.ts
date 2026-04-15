@@ -35,6 +35,9 @@ interface RequestWithCookies {
   cookies: {
     get(name: string): { value: string } | undefined;
   };
+  headers?: {
+    get(name: string): string | null;
+  };
 }
 
 interface SessionCookies {
@@ -192,6 +195,30 @@ export async function authHeaders(request?: RequestWithCookies): Promise<Headers
   return {
     "Content-Type": "application/json",
     ...traceHeaders(),
-    ...(token ? { Cookie: `token=${token}` } : {}),
+    ...(token ? { Cookie: `${ACCESS_TOKEN_COOKIE}=${token}` } : {}),
+  };
+}
+
+/**
+ * Returns fetch headers for auth session APIs that require both access and
+ * refresh cookies to compute current-session state and clear cookies on revoke.
+ */
+export async function authSessionHeaders(request?: RequestWithCookies): Promise<HeadersInit> {
+  const token = await getValidAccessToken(request);
+
+  // Prefer cookie values from the mutable server cookie store after refresh.
+  const currentCookies = await readSessionCookies();
+  const requestCookies = request ? await readSessionCookies(request) : currentCookies;
+  const refreshToken = currentCookies.refreshToken ?? requestCookies.refreshToken;
+
+  const cookieHeader = buildCookieHeader({
+    token,
+    refreshToken,
+  });
+
+  return {
+    "Content-Type": "application/json",
+    ...traceHeaders(),
+    ...(cookieHeader ? { Cookie: cookieHeader } : {}),
   };
 }
