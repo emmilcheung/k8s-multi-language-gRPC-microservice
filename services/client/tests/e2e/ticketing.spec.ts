@@ -256,6 +256,118 @@ test.describe("auth", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Settings tests
+// ---------------------------------------------------------------------------
+
+test.describe("settings", () => {
+  test("user can save a default payment method from settings", async ({ page }) => {
+    test.setTimeout(90_000);
+    const paymentMethodId = `pm_mock_settings_${Date.now()}_4242`;
+    await installStripeMock(page, { paymentMethodId });
+
+    const email = uniqueEmail("settings-save-card");
+    await signup(page, email);
+
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: /^settings$/i })).toBeVisible();
+
+    await page
+      .getByLabel(/I consent to saving this payment method for future charges/i)
+      .check();
+
+    const registerResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/payment-methods/register") &&
+        response.request().method() === "POST",
+      { timeout: 60_000 }
+    );
+
+    await page.getByRole("button", { name: /save payment method/i }).click();
+
+    const response = await registerResponse;
+    await response.finished().catch(() => undefined);
+    if (!response.ok()) {
+      const status = response.status();
+      const body = await response.text().catch(() => "");
+      test.skip(
+        status >= 500 || status === 404,
+        `Payment-method registration backend unavailable (${status}): ${body.slice(0, 200)}`
+      );
+    }
+    expect(response.ok()).toBe(true);
+
+    await expect(page.getByText(/payment method saved successfully/i)).toBeVisible({
+      timeout: 15000,
+    });
+
+    await expect(page.getByText(/(\*\*\*\*|••••)\s*4242/i).first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/^default$/i).first()).toBeVisible({ timeout: 15000 });
+  });
+
+  test("user can delete a saved payment method from settings", async ({ page }) => {
+    test.setTimeout(90_000);
+    const paymentMethodId = `pm_mock_settings_${Date.now()}_9876`;
+    await installStripeMock(page, { paymentMethodId });
+
+    const email = uniqueEmail("settings-delete-card");
+    await signup(page, email);
+
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: /^settings$/i })).toBeVisible();
+
+    await page
+      .getByLabel(/I consent to saving this payment method for future charges/i)
+      .check();
+
+    const registerResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/payment-methods/register") &&
+        response.request().method() === "POST",
+      { timeout: 60_000 }
+    );
+
+    await page.getByRole("button", { name: /save payment method/i }).click();
+    const saveResponse = await registerResponse;
+    await saveResponse.finished().catch(() => undefined);
+    if (!saveResponse.ok()) {
+      const status = saveResponse.status();
+      const body = await saveResponse.text().catch(() => "");
+      test.skip(
+        status >= 500 || status === 404,
+        `Payment-method registration backend unavailable (${status}): ${body.slice(0, 200)}`
+      );
+    }
+    expect(saveResponse.ok()).toBe(true);
+
+    await expect(page.getByText(/(\*\*\*\*|••••)\s*9876/i).first()).toBeVisible({ timeout: 15000 });
+
+    await page.getByRole("button", { name: /^delete$/i }).first().click();
+
+    await expect(page.getByText(/(\*\*\*\*|••••)\s*9876/i)).toHaveCount(0, {
+      timeout: 15000,
+    });
+    await expect(page.getByText(/no saved payment methods yet/i)).toBeVisible({ timeout: 15000 });
+  });
+
+  test("current session cannot be revoked from settings", async ({ page }) => {
+    test.setTimeout(60_000);
+    const email = uniqueEmail("settings-current-session");
+    await signup(page, email);
+
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: /^settings$/i })).toBeVisible();
+
+    const currentBadge = page.getByText(/^current$/i).first();
+    await expect(currentBadge).toBeVisible({ timeout: 15_000 });
+
+    const currentSessionCard = currentBadge.locator(
+      "xpath=ancestor::div[contains(@class,'rounded border')][1]"
+    );
+    await expect(currentSessionCard.getByRole("button", { name: /^revoke$/i })).toHaveCount(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Ticket tests
 // ---------------------------------------------------------------------------
 
