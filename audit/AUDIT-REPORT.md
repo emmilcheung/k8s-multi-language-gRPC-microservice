@@ -8,6 +8,52 @@
 
 ---
 
+## 0. 2026-04-15 Re-Audit Addendum
+
+### Scope
+
+This re-audit covers the latest vendor fixes for the settings release hardening work:
+
+- `payment-service` saved payment methods and startup migration path
+- `user-service` introduction and schema bootstrap path
+- Kong routing for settings, sessions, and saved payment methods
+- client settings actions, UI, and end-to-end coverage
+- fresh Docker Compose bootstrap behavior with empty volumes
+
+### Verdict
+
+The previously confirmed release blocker is resolved.
+
+On the latest version, a clean local environment now boots without manual SQL, both `payment-service` and `user-service` become ready only after required schema is present, and the client settings/payment flows pass against the rebuilt stack. No new P0 or P1 findings were confirmed in the audited scope during this re-audit.
+
+### Verification Completed
+
+- `services/payment-service`: unit tests, lint, `tsc --noEmit`, production build, and focused integration tests passed
+- `services/user-service`: unit tests, integration tests, lint, `tsc --noEmit`, and production build passed
+- `services/client`: build passed, targeted settings unit tests passed, lint produced warnings only
+- Clean stack proof passed with `docker compose down -v && docker compose up --build --detach`
+- Readiness checks passed for `payment-service` and `user-service`
+- Playwright settings subset passed on the clean stack (3/3)
+- Real client payment flow coverage also passed on the current stack:
+  - mocked Stripe checkout success path passed
+  - mocked Stripe checkout decline path passed
+
+### Grade
+
+| Area | Grade | Notes |
+|---|---|---|
+| Original blocker resolution | **A** | Fresh environment bootstrap no longer requires manual SQL |
+| Audited scope release readiness | **A** | Critical runtime, readiness, and E2E gates passed |
+| Overall hygiene of touched area | **A-** | Non-blocking warnings and documentation lint issues remain |
+
+### Residual Non-Blocking Items
+
+- `services/client` still emits existing lint warnings in untouched files
+- Next.js emits an existing middleware-to-proxy deprecation warning during client build/dev
+- Markdown lint issues remain in `services/payment-service/README.md`
+
+---
+
 ## Table of Contents
 
 1. [Executive Summary](#1-executive-summary)

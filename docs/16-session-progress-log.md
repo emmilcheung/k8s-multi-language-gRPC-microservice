@@ -4,6 +4,49 @@
 
 ---
 
+## Session: 2026-04-15 — Settings release hardening + clean bootstrap gate ✅ COMPLETE
+
+**Branch:** `main`
+
+### What was done
+
+1. **User-service startup path hardened**
+- Added a runtime SQL migration runner for `services/user-service` that applies `migrations/*.sql` in sorted order and records filename checksums in `schema_migrations`.
+- Kept fail-loud startup behavior so checksum drift or SQL failures stop the container before Nest starts.
+- Preserved schema-aware readiness and startup verification for `user_profiles`, `user_preferences`, and `billing_addresses`.
+
+2. **Payment-service startup path hardened**
+- Replaced the metadata-dependent runtime migrator with the same explicit SQL migration runner strategy in `services/payment-service`.
+- Ensured clean boot now creates the saved-payment schema required by readiness: `payment_customers` and `saved_payment_methods`.
+- Kept `/healthz/ready` as the compose health target so missing schema fails fast.
+
+3. **Production-parity validation retained and extended**
+- `pnpm migrate` in both TypeScript services now uses the same code path as container startup instead of a separate `drizzle-kit migrate` path.
+- Client settings action unit coverage remained in place for session-auth routing.
+- Existing settings Playwright coverage was rerun against the rebuilt stack.
+
+4. **Clean environment proof completed**
+- Rebuilt the full stack from empty volumes with `docker compose down -v && docker compose up --build --detach`.
+- Verified both `payment-service` and `user-service` passed readiness from the fresh bootstrap.
+- Ran the settings-focused Playwright flow successfully against the clean stack.
+
+### Verification
+
+- `pnpm lint && pnpm build` in `services/payment-service` ✅
+- `pnpm lint && pnpm build` in `services/user-service` ✅
+- `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:1/<db> pnpm migrate` in both services reached the new migration entrypoint and failed only on the expected connection refusal ✅
+- `docker compose down -v && docker compose up --build --detach` from repo root ✅
+- `curl -fsS http://localhost:3002/healthz/ready` ✅
+- `curl -fsS http://localhost:3004/healthz/ready` ✅
+- `pnpm exec playwright test tests/e2e/ticketing.spec.ts --grep settings` in `services/client` ✅ (3/3 passed)
+
+### Outcome
+
+- The settings release-hardening path now proves the audit requirement that a fresh local bootstrap does not require manual SQL.
+- The clean-stack verification for saved payment methods and session/settings flows is passing end to end.
+
+---
+
 ## Session: 2026-04-09 — Linkerd gRPC transport hardening + ticket outbox relay tests ✅ COMPLETE
 
 **Branch:** `copilot/worktree-2026-04-08T16-22-48`
