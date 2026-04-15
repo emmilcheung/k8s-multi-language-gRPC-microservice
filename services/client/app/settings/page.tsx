@@ -28,9 +28,20 @@ function formatTimestamp(value?: string | null): string {
 
 export default async function SettingsPage() {
   const cookieStore = await cookies();
-  if (!cookieStore.get("token")?.value) {
+  const token = cookieStore.get("token")?.value;
+  if (!token) {
     redirect("/auth/signin");
   }
+
+  let currentUserEmail: string | null = null;
+  try {
+    const payloadB64 = token.split(".")[1];
+    if (payloadB64) {
+      const json = Buffer.from(payloadB64, "base64url").toString("utf-8");
+      const payload = JSON.parse(json) as { email?: string };
+      currentUserEmail = payload.email ?? null;
+    }
+  } catch { /* non-fatal */ }
 
   const { profile, preferences, billingAddress, sessions, paymentMethods, orders } =
     await getSettingsData();
@@ -51,6 +62,9 @@ export default async function SettingsPage() {
           </span>
         </div>
         <h1 className="font-display font-extrabold text-2xl tracking-tight">Settings</h1>
+        {currentUserEmail && (
+          <p className="text-sm text-muted-foreground font-medium">{currentUserEmail}</p>
+        )}
         <p className="text-sm text-muted-foreground">
           Manage your profile, sessions, payments, and billing details.
         </p>

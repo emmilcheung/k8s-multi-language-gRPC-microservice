@@ -136,8 +136,9 @@ export class OAuthService {
       });
     }
 
-    // 5. First-party clients are auto-approved; third-party require explicit consent.
-    if (client.isFirstParty === false) {
+    // 5. Only clients explicitly marked isFirstParty:true are auto-approved.
+    // All others (including undefined) require explicit user consent.
+    if (client.isFirstParty !== true) {
       // Dynamic (third-party) client — store pending consent and redirect to consent UI
       const requestId = await this.consentStore.storePendingConsent({
         clientId: client.clientId,

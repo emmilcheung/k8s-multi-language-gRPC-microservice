@@ -5,7 +5,10 @@ import { traceResponseHeaders } from "@/lib/tracing";
 
 interface SubmitPaymentRequest {
   orderId: string;
-  paymentMethodId: string;
+  /** Stripe PM token — used when paying with a new card */
+  paymentMethodId?: string;
+  /** Stored saved payment method ID — used when paying with a saved card */
+  savedPaymentMethodId?: string;
 }
 
 async function readJsonBody(response: Response): Promise<unknown> {
@@ -28,24 +31,26 @@ async function readJsonBody(response: Response): Promise<unknown> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body = (await request.json()) as SubmitPaymentRequest;
-    const { orderId, paymentMethodId } = body;
+    const { orderId, paymentMethodId, savedPaymentMethodId } = body;
 
-    // Validate input
-    if (!orderId || !paymentMethodId) {
+    // Validate input — must have orderId and exactly one payment identifier
+    if (!orderId || (!paymentMethodId && !savedPaymentMethodId)) {
       return NextResponse.json(
         { error: { code: "INVALID_INPUT", message: "Missing required fields." } },
         { status: 400, headers: traceResponseHeaders() }
       );
     }
 
-    // Call the backend payment service with the real paymentMethodId
+    // Build payment-service payload — use saved method ID or Stripe token
+    const paymentPayload = savedPaymentMethodId
+      ? { orderId, savedPaymentMethodId }
+      : { orderId, token: paymentMethodId };
+
+    // Call the backend payment service
     const res = await fetch(`${base()}/api/payments`, {
       method: "POST",
       headers: await authHeaders(request),
-      body: JSON.stringify({
-        orderId,
-        token: paymentMethodId, // Backend expects 'token' field with paymentMethodId
-      }),
+      body: JSON.stringify(paymentPayload),
     });
 
     if (!res.ok) {
