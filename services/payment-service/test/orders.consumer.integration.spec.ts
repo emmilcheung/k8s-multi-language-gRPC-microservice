@@ -83,8 +83,18 @@ beforeAll(async () => {
     path.join(__dirname, '../migrations/002_add_outbox.sql'),
     'utf-8',
   );
+  const migration4Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/004_add_saved_payment_methods.sql'),
+    'utf-8',
+  );
+  const migration5Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/005_harden_saved_payment_methods.sql'),
+    'utf-8',
+  );
   await pool.query(migration1Sql);
   await pool.query(migration2Sql);
+  await pool.query(migration4Sql);
+  await pool.query(migration5Sql);
 
   const kafka = new Kafka({
     clientId: 'payments-consumer-it-admin',
@@ -151,6 +161,8 @@ afterAll(async () => {
 beforeEach(async () => {
   await pool.query('DELETE FROM outbox');
   await pool.query('DELETE FROM payments');
+  await pool.query('DELETE FROM saved_payment_methods');
+  await pool.query('DELETE FROM payment_customers');
 });
 
 function buildOrderCreatedEvent(
