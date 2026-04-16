@@ -1,6 +1,6 @@
 {{- if .Values.networkPolicy.enabled }}
 # NetworkPolicy for order-service (I-01)
-# Ingress: Kong (HTTP:8082)
+# Ingress: Kong (HTTP:8082), payment-service (HTTP:8082 via F-07)
 # Egress:  ticket-service (gRPC:50051), Kafka (9092), PostgreSQL (5432), DNS (53)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -22,6 +22,14 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: kong
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.port }}
+    # Allow HTTP from payment-service pods (F-07)
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: payment-service
       ports:
         - protocol: TCP
           port: {{ .Values.service.port }}
