@@ -82,12 +82,25 @@ services:
               fault_tolerant: true
               hide_client_headers: false
 
-      # OAuth: consent query — public GET so Next.js server can fetch pending consent details.
+      # OAuth: consent query — JWT required (cookie); auth-service verifies the
+      # consenting user via X-User-Id and X-User-Id-Sig.
       - name: oauth-consent-query
         paths:
           - ~/oauth/consent/[^/]+$
         methods: [GET]
         strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
 
       # OAuth: consent approval — JWT required (cookie); user confirms or denies.
       # X-User-Id is injected so auth-service can verify the consenting user matches.
@@ -231,7 +244,7 @@ services:
         methods: [GET]
         strip_path: false
 
-      # Protected: create / update / delete ticket — JWT required
+      # Protected: create / update / delete ticket — JWT + organizer role required
       - name: tickets-write
         paths:
           - ~/api/tickets$
@@ -251,6 +264,8 @@ services:
               access:
                 - |
                   {{JWT_SUB_LUA}}
+                - |
+                  {{ROLE_CHECK_LUA:organizer}}
 
   # ── order-service ─────────────────────────────────────────────────────────────
   - name: order-service
@@ -584,8 +599,8 @@ services:
               max_age: 3600
               credentials: false
 
-      # Protected: create / update / activate seating plans and sections — JWT required
-      - name: venue-seating-plans-write
+      # Protected: organizer-only seating plan management — JWT + organizer role required
+      - name: venue-seating-plans-write-organizer
         paths:
           - ~/api/seating-plans$
           - ~/api/seating-plans/[^/]+$
@@ -593,11 +608,8 @@ services:
           - ~/api/seating-plans/[^/]+/price-tiers$
           - ~/api/seating-plans/[^/]+/attach-ticket$
           - ~/api/seating-plans/[^/]+/activate$
+          - ~/api/seating-plans/[^/]+/deactivate$
           - ~/api/seating-plans/[^/]+/layout$
-          - ~/api/seating-plans/[^/]+/seats/hold$
-          - ~/api/seating-plans/[^/]+/seats/release$
-          - ~/api/seating-plans/[^/]+/holds$
-          - ~/api/seating-plans/[^/]+/holds/[^/]+$
         methods: [POST, PUT, PATCH, DELETE]
         strip_path: false
         plugins:
@@ -612,8 +624,30 @@ services:
               access:
                 - |
                   {{JWT_SUB_LUA}}
+                - |
+                  {{ROLE_CHECK_LUA:organizer}}
 
-      # Protected: list seating plans by venue — JWT required (organizer-scoped)
+      # Protected: buyer seat hold/release — JWT required only
+      - name: venue-seats-buyer
+        paths:
+          - ~/api/seating-plans/[^/]+/seats/hold$
+          - ~/api/seating-plans/[^/]+/seats/release$
+        methods: [POST]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      # Protected: list seating plans by venue — JWT + organizer role required
       - name: venue-seating-plans-list
         paths:
           - ~/api/seating-plans$
@@ -631,6 +665,8 @@ services:
               access:
                 - |
                   {{JWT_SUB_LUA}}
+                - |
+                  {{ROLE_CHECK_LUA:organizer}}
 
       # Protected: catch-all for nested plan write paths not listed explicitly above
       - name: venue-seating-plans-nested-write

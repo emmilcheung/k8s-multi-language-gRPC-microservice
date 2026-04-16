@@ -6,6 +6,8 @@
 #   values/_defaults.yml        — default values for all environments
 #   values/<env>.yml            — per-environment overrides
 #   plugins/jwt-sub.lua         — inlined into every protected route
+#   plugins/jwt-scope.lua       — inlined for scope-protected routes
+#   plugins/role-check.lua      — inlined for role-protected routes
 #   KONG_RSA_PUBLIC_KEY (env)   — RSA public key; never stored in values files
 #
 # Usage:
@@ -56,6 +58,10 @@ if [[ -z "${KONG_RSA_PUBLIC_KEY:-}" ]]; then
   exit 1
 fi
 
+# SIGNING_KEY also comes from the environment. An empty value keeps
+# X-User-Id-Sig generation disabled for environments that have not opted in yet.
+KONG_SIGNING_KEY="${KONG_SIGNING_KEY:-}"
+
 echo "[build.sh] Environment : ${ENV}"
 echo "[build.sh] Output file : ${OUTPUT_FILE}"
 
@@ -67,9 +73,12 @@ trap 'rm -f "${TMPFILE}"' EXIT
 # Python handles:
 #   1. Loading _defaults.yml and <env>.yml (last-write-wins key merge)
 #   2. Inlining jwt-sub.lua into every {{JWT_SUB_LUA}} placeholder
-#   3. Inlining KONG_RSA_PUBLIC_KEY into the {{RSA_PUBLIC_KEY}} placeholder
-#   4. Substituting all remaining scalar {{PLACEHOLDER}} tokens
-#   5. Validating no placeholders remain unresolved
+#   3. Inlining jwt-scope.lua into {{SCOPE_CHECK_LUA:<scope>}} placeholders
+#   4. Inlining role-check.lua into {{ROLE_CHECK_LUA:<role>}} placeholders
+#   5. Inlining KONG_RSA_PUBLIC_KEY into the {{RSA_PUBLIC_KEY}} placeholder
+#   6. Replacing SIGNING_KEY_PLACEHOLDER inside jwt-sub.lua
+#   7. Substituting all remaining scalar {{PLACEHOLDER}} tokens
+#   8. Validating no placeholders remain unresolved
 python3 - \
   "${BASE_TEMPLATE}" \
   "${DEFAULTS_FILE}" \
@@ -77,6 +86,7 @@ python3 - \
   "${LUA_FILE}" \
   "${TMPFILE}" \
   "${KONG_RSA_PUBLIC_KEY}" \
+  "${KONG_SIGNING_KEY}" \
   <<'PYEOF'
 import sys
 import re
@@ -87,8 +97,10 @@ env_values_path    = sys.argv[3]
 lua_path           = sys.argv[4]
 output_path        = sys.argv[5]
 rsa_public_key     = sys.argv[6]
+signing_key        = sys.argv[7]
 
 scope_lua_path     = lua_path.replace('jwt-sub.lua', 'jwt-scope.lua')
+role_lua_path      = lua_path.replace('jwt-sub.lua', 'role-check.lua')
 
 # ── Load values files ──────────────────────────────────────────────────────────
 def load_values(path):
@@ -116,7 +128,9 @@ values.update(load_values(env_values_path))  # env overrides defaults
 LUA_INDENT = ' ' * 18
 
 with open(lua_path) as f:
-    lua_lines = f.read().rstrip('\n').splitlines()
+    jwt_sub_content = f.read().replace('SIGNING_KEY_PLACEHOLDER', signing_key)
+
+lua_lines = jwt_sub_content.rstrip('\n').splitlines()
 
 lua_block = '\n'.join(LUA_INDENT + line for line in lua_lines)
 
@@ -158,12 +172,29 @@ def replace_scope_check(m):
 
 content = re.sub(r'[ \t]*\{\{SCOPE_CHECK_LUA:([^}]+)\}\}', replace_scope_check, content)
 
+# ── Substitute {{ROLE_CHECK_LUA:<role>}} placeholders ────────────────────────
+# Similar to SCOPE_CHECK_LUA, each occurrence encodes the required role:
+#   {{ROLE_CHECK_LUA:organizer}}
+def make_role_lua(role_lua_content, role, indent):
+    replaced = role_lua_content.replace('ROLE_PLACEHOLDER', role)
+    lines = replaced.rstrip('\n').splitlines()
+    return '\n'.join(indent + line for line in lines)
+
+with open(role_lua_path) as f:
+    role_lua_content = f.read()
+
+def replace_role_check(m):
+    role = m.group(1)
+    return make_role_lua(role_lua_content, role, LUA_INDENT)
+
+content = re.sub(r'[ \t]*\{\{ROLE_CHECK_LUA:([^}]+)\}\}', replace_role_check, content)
+
 # ── Substitute {{RSA_PUBLIC_KEY}} ─────────────────────────────────────────────
 content = re.sub(r'[ \t]*\{\{RSA_PUBLIC_KEY\}\}', rsa_block, content)
 
 # ── Substitute scalar {{PLACEHOLDER}} tokens ──────────────────────────────────
 for key, val in values.items():
-    content = content.replace('{{' + key + '}}', val)
+  content = content.replace('{{' + key + '}}', val)
 
 # ── Validate: no unresolved placeholders remain ───────────────────────────────
 # Strip YAML comment lines before scanning so that example placeholders in

@@ -1,8 +1,14 @@
 -- jwt-scope.lua
 -- Enforces OAuth scope on Bearer JWT tokens at the Kong gateway boundary.
 --
--- Only applies to OAuth Bearer tokens (those carrying a `scope` claim).
--- Cookie-based browser tokens have no `scope` claim and pass through untouched.
+-- SCOPE ENFORCEMENT BEHAVIOR:
+--   ✓ Bearer/API-token JWTs: Scope claim is validated against the required scope.
+--     If scope is missing or insufficient, request is rejected with 403 Forbidden.
+--
+--   ✗ Cookie-based session tokens: These carry no `scope` claim and bypass this
+--     check by design. This is an accepted temporary limitation (see F-14).
+--     Downstream services must apply additional authorization logic if needed.
+--     Future versions may implement scope parity for session tokens (not in roadmap).
 --
 -- Why no require "cjson":
 --   Kong's pre-function Lua sandbox blocks all require() calls (same as
@@ -35,7 +41,8 @@ if not b64_payload then
   return
 end
 
--- Re-pad base64url to standard base64 (JWT strips trailing '=').
+-- Normalize base64url to standard base64 before decoding.
+b64_payload = b64_payload:gsub("-", "+"):gsub("_", "/")
 local pad = (4 - #b64_payload % 4) % 4
 b64_payload = b64_payload .. string.rep("=", pad)
 
@@ -47,8 +54,9 @@ end
 -- Extract the `scope` claim value (space-separated string).
 local scope = payload_json:match('"scope"%s*:%s*"([^"]+)"')
 if not scope then
-  -- No scope claim → browser cookie token redeemed via Bearer (edge case),
-  -- or a non-OAuth token. Allow through; downstream services handle authz.
+  -- No scope claim → this is a session/cookie token, not an OAuth bearer token.
+  -- By design, session tokens bypass scope checks (F-14 limitation).
+  -- Authorization decisions for these requests defer to downstream services.
   return
 end
 
