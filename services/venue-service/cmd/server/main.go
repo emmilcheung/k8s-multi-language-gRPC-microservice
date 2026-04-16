@@ -19,6 +19,7 @@ import (
 	"github.com/acme/venue-service/internal/migrations"
 	"github.com/acme/venue-service/internal/reconciler"
 	pgrepo "github.com/acme/venue-service/internal/repository/postgres"
+	"github.com/acme/venue-service/internal/security"
 	"github.com/acme/venue-service/internal/service"
 	"github.com/acme/venue-service/internal/sse"
 	"github.com/acme/venue-service/internal/tracing"
@@ -194,6 +195,9 @@ func main() {
 	defer grpcCancel()
 	grpcAddr := fmt.Sprintf(":%d", cfg.GrpcPort)
 
+	// Signature validator — validates X-User-Id-Sig headers signed by Kong.
+	sigValidator := security.NewUserIDSignatureValidator(cfg.UserIDSigningKey)
+
 	// Echo HTTP server.
 	e := echo.New()
 	e.HideBanner = true
@@ -217,19 +221,19 @@ func main() {
 	// API routes.
 	api := e.Group("/api")
 
-	venueHandler := handler.NewVenueHandler(venueRepo, log)
+	venueHandler := handler.NewVenueHandler(venueRepo, sigValidator, log)
 	venueHandler.RegisterRoutes(api.Group("/venues"))
 
-	venueSectionHandler := handler.NewVenueSectionHandler(venueRepo, venueSectionRepo, log)
+	venueSectionHandler := handler.NewVenueSectionHandler(venueRepo, venueSectionRepo, sigValidator, log)
 	venueSectionHandler.RegisterRoutes(api.Group("/venues/:venueId"))
 
-	planHandler := handler.NewPlanHandler(planRepo, sectionRepo, log)
+	planHandler := handler.NewPlanHandler(planRepo, sectionRepo, sigValidator, log)
 	planHandler.RegisterRoutes(api.Group("/seating-plans"))
 
-	sectionHandler := handler.NewSectionHandler(planRepo, sectionRepo, priceTierRepo, log)
+	sectionHandler := handler.NewSectionHandler(planRepo, sectionRepo, priceTierRepo, sigValidator, log)
 	sectionHandler.RegisterRoutes(api.Group("/seating-plans/:planId"))
 
-	seatHoldHandler := handler.NewSeatHoldHandler(holdMgr, log)
+	seatHoldHandler := handler.NewSeatHoldHandler(holdMgr, sigValidator, log)
 	seatHoldHandler.RegisterRoutes(api.Group("/seating-plans/:planId"))
 
 	sseHandler := handler.NewSSEHandler(sseBroadcaster, log)

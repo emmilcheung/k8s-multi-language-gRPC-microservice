@@ -39,6 +39,7 @@ func TestAttachSeatingPlan_ShouldReturn200AndSetSeatingPlanId(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/tickets/"+ticketID+"/seating-plan", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "owner-user")
+	req.Header.Set("X-User-Roles", "organizer")
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
@@ -91,6 +92,7 @@ func TestAttachSeatingPlan_ThenDetach_ShouldClearSeatingPlanId(t *testing.T) {
 	// Detach.
 	delReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/tickets/"+ticketID+"/seating-plan", nil)
 	delReq.Header.Set("X-User-Id", "owner-user")
+	delReq.Header.Set("X-User-Roles", "organizer")
 	delResp, err := http.DefaultClient.Do(delReq)
 	require.NoError(t, err)
 	defer delResp.Body.Close() //nolint:errcheck
@@ -141,6 +143,7 @@ func TestDetachSeatingPlan_ShouldReturn403WhenNotOwner(t *testing.T) {
 
 	delReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/tickets/"+ticketID+"/seating-plan", nil)
 	delReq.Header.Set("X-User-Id", "attacker-user")
+	delReq.Header.Set("X-User-Roles", "organizer")
 	delResp, err := http.DefaultClient.Do(delReq)
 	require.NoError(t, err)
 	defer delResp.Body.Close() //nolint:errcheck
@@ -159,6 +162,7 @@ func TestAttachSeatingPlan_ShouldReturn400WhenPlanIdInvalid(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/tickets/"+ticketID+"/seating-plan", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "owner-user")
+	req.Header.Set("X-User-Roles", "organizer")
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close() //nolint:errcheck
@@ -236,6 +240,7 @@ func createTicket(t *testing.T, baseURL, title, price, userID string) (int, stri
 	req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/tickets", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", userID)
+	req.Header.Set("X-User-Roles", "organizer")
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close() //nolint:errcheck
@@ -255,6 +260,7 @@ func attachSeatingPlan(t *testing.T, baseURL, ticketID, planID, userID string, w
 	req, _ := http.NewRequest(http.MethodPut, baseURL+"/api/tickets/"+ticketID+"/seating-plan", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", userID)
+	req.Header.Set("X-User-Roles", "organizer")
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close() //nolint:errcheck

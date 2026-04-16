@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/acme/venue-service/internal/repository"
+	"github.com/acme/venue-service/internal/security"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
@@ -15,6 +16,7 @@ type SectionHandler struct {
 	planRepo      repository.PlanRepository
 	sectionRepo   repository.SectionRepository
 	priceTierRepo PriceTierRepository
+	validator     *security.UserIDSignatureValidator
 	log           *zap.Logger
 }
 
@@ -29,12 +31,14 @@ func NewSectionHandler(
 	planRepo repository.PlanRepository,
 	sectionRepo repository.SectionRepository,
 	priceTierRepo PriceTierRepository,
+	validator *security.UserIDSignatureValidator,
 	log *zap.Logger,
 ) *SectionHandler {
 	return &SectionHandler{
 		planRepo:      planRepo,
 		sectionRepo:   sectionRepo,
 		priceTierRepo: priceTierRepo,
+		validator:     validator,
 		log:           log,
 	}
 }
@@ -68,6 +72,11 @@ func (h *SectionHandler) CreateSection(c echo.Context) error {
 	organizerID := c.Request().Header.Get("X-User-Id")
 	if organizerID == "" {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
 	planID := c.Param("planId")
@@ -156,6 +165,11 @@ func (h *SectionHandler) CreatePriceTier(c echo.Context) error {
 	organizerID := c.Request().Header.Get("X-User-Id")
 	if organizerID == "" {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
 	planID := c.Param("planId")

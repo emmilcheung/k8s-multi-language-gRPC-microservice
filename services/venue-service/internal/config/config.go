@@ -11,15 +11,16 @@ import (
 // Config holds all configuration for venue-service.
 // All fields are validated at startup — the service refuses to start if anything is missing.
 type Config struct {
-	Env              string
-	Port             int
-	GrpcPort         int
-	LogLevel         string
-	DatabaseURL      string
-	KafkaBrokers     []string
-	RedisURL         string
-	TicketServiceURL string
-	HoldTTLSec       int
+	Env                   string
+	Port                  int
+	GrpcPort              int
+	LogLevel              string
+	DatabaseURL           string
+	KafkaBrokers          []string
+	RedisURL              string
+	TicketServiceURL      string
+	HoldTTLSec            int
+	UserIDSigningKey      string
 }
 
 // Load reads configuration from environment variables and validates all required fields.
@@ -66,20 +67,23 @@ func Load() (*Config, error) {
 		errs = append(errs, fmt.Sprintf("HOLD_TTL_SEC must be a positive integer, got %q", holdTTLSecStr))
 	}
 
+	userIDSigningKey := getEnv("X_USER_ID_SIGNING_KEY", "")
+
 	if len(errs) > 0 {
 		return nil, errors.New(strings.Join(errs, "; "))
 	}
 
 	return &Config{
-		Env:              env,
-		Port:             port,
-		GrpcPort:         grpcPort,
-		LogLevel:         logLevel,
-		DatabaseURL:      databaseURL,
-		KafkaBrokers:     kafkaBrokers,
-		RedisURL:         redisURL,
-		TicketServiceURL: ticketServiceURL,
-		HoldTTLSec:       holdTTLSec,
+		Env:                   env,
+		Port:                  port,
+		GrpcPort:              grpcPort,
+		LogLevel:              logLevel,
+		DatabaseURL:           databaseURL,
+		KafkaBrokers:          kafkaBrokers,
+		RedisURL:              redisURL,
+		TicketServiceURL:      ticketServiceURL,
+		HoldTTLSec:            holdTTLSec,
+		UserIDSigningKey:      userIDSigningKey,
 	}, nil
 }
 

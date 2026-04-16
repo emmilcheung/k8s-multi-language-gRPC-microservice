@@ -19,6 +19,7 @@ import (
 	"github.com/acme/ticket-service/internal/outbox"
 	"github.com/acme/ticket-service/internal/reconciler"
 	"github.com/acme/ticket-service/internal/repository"
+	"github.com/acme/ticket-service/internal/security"
 	"github.com/acme/ticket-service/internal/service"
 	"github.com/acme/ticket-service/internal/tracing"
 	"github.com/acme/ticket-service/pkg/logger"
@@ -169,7 +170,9 @@ func main() {
 	e.GET("/healthz/ready", healthHandler.Ready)
 
 	// Ticket routes
-	ticketHandler := handler.NewTicketHandler(svc, log)
+	signingKey := os.Getenv("X_USER_ID_SIGNING_KEY")
+	signatureValidator := security.NewUserIDSignatureValidator(signingKey)
+	ticketHandler := handler.NewTicketHandler(svc, log, signatureValidator)
 	v1 := e.Group("/api/tickets")
 	v1.POST("", ticketHandler.Create)
 	v1.GET("", ticketHandler.List)

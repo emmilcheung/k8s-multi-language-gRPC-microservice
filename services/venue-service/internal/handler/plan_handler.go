@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/acme/venue-service/internal/repository"
+	"github.com/acme/venue-service/internal/security"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
@@ -15,12 +16,13 @@ import (
 type PlanHandler struct {
 	planRepo    repository.PlanRepository
 	sectionRepo repository.SectionRepository
+	validator   *security.UserIDSignatureValidator
 	log         *zap.Logger
 }
 
 // NewPlanHandler creates a new PlanHandler.
-func NewPlanHandler(planRepo repository.PlanRepository, sectionRepo repository.SectionRepository, log *zap.Logger) *PlanHandler {
-	return &PlanHandler{planRepo: planRepo, sectionRepo: sectionRepo, log: log}
+func NewPlanHandler(planRepo repository.PlanRepository, sectionRepo repository.SectionRepository, validator *security.UserIDSignatureValidator, log *zap.Logger) *PlanHandler {
+	return &PlanHandler{planRepo: planRepo, sectionRepo: sectionRepo, validator: validator, log: log}
 }
 
 // RegisterRoutes attaches seating plan routes to the given Echo group.
@@ -71,6 +73,11 @@ func (h *PlanHandler) List(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
 	}
 
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
+	}
+
 	venueID := c.QueryParam("venueId")
 	if venueID == "" {
 		return c.JSON(http.StatusUnprocessableEntity, errorResponse("venueId query parameter is required"))
@@ -95,6 +102,11 @@ func (h *PlanHandler) Create(c echo.Context) error {
 	organizerID := c.Request().Header.Get("X-User-Id")
 	if organizerID == "" {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
 	var req createPlanRequest
@@ -171,6 +183,11 @@ func (h *PlanHandler) Update(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
 	}
 
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
+	}
+
 	id := c.Param("id")
 
 	var req updatePlanRequest
@@ -206,6 +223,11 @@ func (h *PlanHandler) AttachTicket(c echo.Context) error {
 	organizerID := c.Request().Header.Get("X-User-Id")
 	if organizerID == "" {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
 	id := c.Param("id")
@@ -265,6 +287,11 @@ func (h *PlanHandler) Activate(c echo.Context) error {
 	organizerID := c.Request().Header.Get("X-User-Id")
 	if organizerID == "" {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
 	id := c.Param("id")
@@ -358,6 +385,11 @@ func (h *PlanHandler) Deactivate(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
 	}
 
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
+	}
+
 	id := c.Param("id")
 
 	if err := h.planRepo.Deactivate(c.Request().Context(), id, organizerID); err != nil {
@@ -393,6 +425,11 @@ func (h *PlanHandler) SaveLayout(c echo.Context) error {
 	organizerID := c.Request().Header.Get("X-User-Id")
 	if organizerID == "" {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
 	id := c.Param("id")
