@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { test, expect, type Page } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
@@ -6,6 +7,7 @@ import { test, expect, type Page } from "@playwright/test";
 // ---------------------------------------------------------------------------
 
 const PASSWORD = "Password123!";
+const AUTH_POSTGRES_CONTAINER = "microservices-postgres-auth-1";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -13,6 +15,10 @@ const PASSWORD = "Password123!";
 
 function uniqueEmail(prefix: string) {
   return `${prefix}-${Date.now()}-${randomUUID().slice(0, 8)}@test.com`;
+}
+
+function createPkceChallenge(verifier: string) {
+  return createHash("sha256").update(verifier).digest("base64url");
 }
 
 async function signup(page: Page, email: string) {
@@ -33,13 +39,58 @@ async function signup(page: Page, email: string) {
   }
 }
 
-// async function signin(page: Page, email: string) {
-//   await page.goto("/auth/signin");
-//   await page.getByLabel("Email").fill(email);
-//   await page.getByLabel("Password").fill(PASSWORD);
-//   await page.getByRole("button", { name: /sign in/i }).click();
-//   await page.waitForURL("/");
-// }
+async function signin(page: Page, email: string) {
+  await page.goto("/auth/signin");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.waitForURL("/");
+}
+
+function sqlLiteral(value: string) {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function grantOrganizerRole(email: string) {
+  const sql = [
+    "WITH promoted AS (",
+    "  UPDATE users",
+    `  SET roles = '["organizer"]'::json`,
+    `  WHERE email = ${sqlLiteral(email)}`,
+    "  RETURNING 1",
+    ")",
+    "SELECT COUNT(*) FROM promoted;",
+  ].join(" ");
+  const result = execFileSync(
+    "docker",
+    [
+      "exec",
+      "-i",
+      AUTH_POSTGRES_CONTAINER,
+      "psql",
+      "-U",
+      "auth_user",
+      "-d",
+      "auth_db",
+      "-t",
+      "-A",
+      "-c",
+      sql,
+    ],
+    { encoding: "utf8" }
+  ).trim();
+
+  if (result !== "1") {
+    throw new Error(`Failed to promote ${email} to organizer. Updated rows: ${result || "0"}`);
+  }
+}
+
+async function signupAsOrganizer(page: Page, email: string) {
+  await signup(page, email);
+  grantOrganizerRole(email);
+  await signout(page);
+  await signin(page, email);
+}
 
 async function signout(page: Page) {
   await page.getByRole("button", { name: /sign out/i }).click();
@@ -253,6 +304,57 @@ test.describe("auth", () => {
     await page.waitForURL(/\/auth\/signin/);
     expect(page.url()).toContain("/auth/signin");
   });
+
+  test("authenticated user can approve a dynamic OAuth consent request", async ({ page }) => {
+    const email = uniqueEmail("oauth-consent");
+    await signup(page, email);
+
+    const redirectUri = "http://localhost:4000/oauth/callback-test";
+    const clientName = `Playwright Consent ${Date.now()}`;
+    const registerResponse = await page.request.post(
+      "http://localhost:8000/oauth/clients/register",
+      {
+        data: {
+          client_name: clientName,
+          redirect_uris: [redirectUri],
+          scope: "orders:create",
+        },
+      }
+    );
+    expect(registerResponse.ok()).toBe(true);
+
+    const registeredClient = (await registerResponse.json()) as {
+      client_id: string;
+      client_name: string;
+    };
+
+    const codeVerifier = `${randomUUID()}${randomUUID()}`;
+    const state = `oauth-state-${Date.now()}`;
+    const authorizeParams = new URLSearchParams({
+      response_type: "code",
+      client_id: registeredClient.client_id,
+      redirect_uri: redirectUri,
+      scope: "orders:create",
+      state,
+      code_challenge: createPkceChallenge(codeVerifier),
+      code_challenge_method: "S256",
+    });
+
+    await page.goto(`http://localhost:8000/oauth/authorize?${authorizeParams.toString()}`);
+    await page.waitForURL(/\/oauth\/consent\?request_id=/);
+
+    await expect(page.getByRole("heading", { name: /allow access\?/i })).toBeVisible();
+    await expect(page.getByText(clientName).first()).toBeVisible();
+    await expect(page.getByText(/requested permissions/i)).toBeVisible();
+
+    await page.getByRole("button", { name: /allow access/i }).click();
+    await page.waitForURL(/\/oauth\/callback-test\?/);
+
+    const redirectUrl = new URL(page.url());
+    expect(redirectUrl.pathname).toBe("/oauth/callback-test");
+    expect(redirectUrl.searchParams.get("state")).toBe(state);
+    expect(redirectUrl.searchParams.get("code")).toBeTruthy();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -377,7 +479,7 @@ test.describe("settings", () => {
 test.describe("tickets", () => {
   test("seller can create a ticket and it appears on the homepage", async ({ page }) => {
     const email = uniqueEmail("seller-create");
-    await signup(page, email);
+    await signupAsOrganizer(page, email);
 
     const title = `E2E Concert ${Date.now()}`;
     await createTicket(page, title, "75.00");
@@ -409,7 +511,7 @@ test.describe("tickets", () => {
 
   test("seller sees edit form on own ticket, not purchase button", async ({ page }) => {
     const email = uniqueEmail("seller-owner");
-    await signup(page, email);
+    await signupAsOrganizer(page, email);
 
     await createTicket(page, `Owner Test ${Date.now()}`, "10.00");
 
@@ -422,7 +524,7 @@ test.describe("tickets", () => {
 
   test("seller sees 'Your listing' text on own ticket", async ({ page }) => {
     const email = uniqueEmail("seller-listing");
-    await signup(page, email);
+    await signupAsOrganizer(page, email);
 
     await createTicket(page, `Listing Text ${Date.now()}`, "20.00");
 
@@ -434,7 +536,7 @@ test.describe("tickets", () => {
 
   test("seller can update a ticket", async ({ page }) => {
     const email = uniqueEmail("seller-update");
-    await signup(page, email);
+    await signupAsOrganizer(page, email);
 
     const original = `Original ${Date.now()}`;
     await createTicket(page, original, "10.00");
@@ -457,7 +559,7 @@ test.describe("tickets", () => {
 
   test("create ticket requires a title", async ({ page }) => {
     const email = uniqueEmail("ticket-no-title");
-    await signup(page, email);
+    await signupAsOrganizer(page, email);
 
     await page.goto("/tickets/new");
 
@@ -485,7 +587,7 @@ test.describe("tickets", () => {
 
   test("create ticket requires a positive price", async ({ page }) => {
     const email = uniqueEmail("ticket-bad-price");
-    await signup(page, email);
+    await signupAsOrganizer(page, email);
 
     await page.goto("/tickets/new");
 
@@ -525,7 +627,7 @@ test.describe("orders", () => {
     const buyerEmail = uniqueEmail("buyer-ord");
     const ticketTitle = `Order E2E ${Date.now()}`;
 
-    await signup(page, sellerEmail);
+    await signupAsOrganizer(page, sellerEmail);
     const ticketUrl = await createTicket(page, ticketTitle, "55.00");
 
     await signout(page);
@@ -703,7 +805,7 @@ test.describe("orders", () => {
 
   test("seller cannot purchase own ticket — sees edit form instead", async ({ page }) => {
     const email = uniqueEmail("seller-no-buy");
-    await signup(page, email);
+    await signupAsOrganizer(page, email);
 
     await createTicket(page, `No-Buy ${Date.now()}`, "25.00");
 
@@ -718,7 +820,7 @@ test.describe("orders", () => {
   test("unauthenticated visitor sees sign-in link instead of purchase button", async ({ page }) => {
     // Create a ticket as a seller, then sign out
     const email = uniqueEmail("seller-unauth");
-    await signup(page, email);
+    await signupAsOrganizer(page, email);
     const ticketUrl = await createTicket(page, `Unauth Test ${Date.now()}`, "15.00");
     await signout(page);
 
@@ -737,7 +839,7 @@ test.describe("orders", () => {
 test.describe("seating plan", () => {
   test("organizer sees seating plan panel on own ticket", async ({ page }) => {
     const email = uniqueEmail("org-seatplan");
-    await signup(page, email);
+    await signupAsOrganizer(page, email);
 
     await createTicket(page, `Seating Plan Test ${Date.now()}`, "50.00");
 
@@ -752,7 +854,7 @@ test.describe("seating plan", () => {
 
   test("organizer can create a plan and attach it to a ticket", async ({ page }) => {
     const email = uniqueEmail("org-attach");
-    await signup(page, email);
+    await signupAsOrganizer(page, email);
 
     // 1. Create a venue
     await page.goto("/venues/new");
@@ -806,7 +908,7 @@ test.describe("seating plan", () => {
   test("GA ticket with default quota does not show quantity stepper", async ({ page }) => {
     const sellerEmail = uniqueEmail("seller-ga-qty");
     const buyerEmail = uniqueEmail("buyer-ga-qty");
-    await signup(page, sellerEmail);
+    await signupAsOrganizer(page, sellerEmail);
 
     const ticketUrl = await createTicket(page, `GA No Stepper ${Date.now()}`, "20.00");
 
