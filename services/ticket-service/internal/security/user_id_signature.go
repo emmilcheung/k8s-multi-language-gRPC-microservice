@@ -52,11 +52,7 @@ func (v *UserIDSignatureValidator) IsValidSignature(userID, signature string) bo
 	}
 
 	expectedPrevious := v.computeSignature(userID, currentMinute-1)
-	if expectedPrevious == signature {
-		return true
-	}
-
-	return false
+	return expectedPrevious == signature
 }
 
 func (v *UserIDSignatureValidator) computeSignature(userID string, minute int64) string {
