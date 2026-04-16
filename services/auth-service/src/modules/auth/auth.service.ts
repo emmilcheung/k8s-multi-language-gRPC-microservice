@@ -31,6 +31,8 @@ export interface JwtPayload {
   scope?: string;
   /** Present only on OAuth2 access tokens — identifies the issuing client. */
   client_id?: string;
+  /** User's assigned roles (additive claim for future authorization). */
+  roles?: string[];
 }
 
 export interface CurrentUser {
@@ -56,6 +58,7 @@ const jwtPayloadSchema = z.object({
   exp: z.number().int().optional(),
   scope: z.string().optional(),
   client_id: z.string().optional(),
+  roles: z.array(z.string()).optional(),
 });
 
 @Injectable()
@@ -117,7 +120,11 @@ export class AuthService {
       'Auth audit event',
     );
 
-    const accessToken = this.issueToken({ sub: user.id, email: user.email });
+    const accessToken = this.issueToken({
+      sub: user.id,
+      email: user.email,
+      roles: user.roles,
+    });
     const refreshToken = await this.refreshTokenService.issue(
       user.id,
       sessionMetadata,
@@ -198,7 +205,11 @@ export class AuthService {
       },
       'Auth audit event',
     );
-    const accessToken = this.issueToken({ sub: user.id, email: user.email });
+    const accessToken = this.issueToken({
+      sub: user.id,
+      email: user.email,
+      roles: user.roles,
+    });
     const refreshToken = await this.refreshTokenService.issue(
       user.id,
       sessionMetadata,
@@ -208,7 +219,7 @@ export class AuthService {
 
   /**
    * Issue a new access token for a userId (used during refresh token rotation).
-   * Looks up the user by ID to include the email claim.
+   * Looks up the user by ID to include the email claim and roles.
    */
   async issueAccessTokenForUser(userId: string): Promise<string> {
     const user = await this.usersRepo.findById(userId);
@@ -217,7 +228,11 @@ export class AuthService {
         error: { code: 'USER_NOT_FOUND', message: 'User not found' },
       });
     }
-    return this.issueToken({ sub: user.id, email: user.email });
+    return this.issueToken({
+      sub: user.id,
+      email: user.email,
+      roles: user.roles,
+    });
   }
 
   /**

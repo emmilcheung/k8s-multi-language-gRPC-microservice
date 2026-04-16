@@ -23,6 +23,7 @@ import {
   RefreshTokenService,
   type SessionMetadata,
 } from './refresh-token.service';
+import { UserIdSignatureValidator } from '../../common/security/user-id-signature.validator';
 
 const DEFAULT_ACCESS_TOKEN_COOKIE = 'token';
 const DEFAULT_REFRESH_TOKEN_COOKIE = 'refreshToken';
@@ -37,6 +38,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly refreshTokenService: RefreshTokenService,
     private readonly config: ConfigService,
+    private readonly signatureValidator: UserIdSignatureValidator,
   ) {}
 
   // POST /api/users/signup
@@ -224,10 +226,12 @@ export class AuthController {
   // Kong injects X-User-Id after JWT verification. As a defense-in-depth
   // measure (S-03), we also verify the JWT from the cookie ourselves so that
   // direct pod access (bypassing Kong) is rejected for unauthenticated callers.
+  // Additionally, X-User-Id-Sig must be valid; missing or invalid signatures result in 401.
   @Get('api/users/currentuser')
   @HttpCode(HttpStatus.OK)
   async currentUser(@Req() req: Request) {
     const kongUserId = req.headers['x-user-id'] as string | undefined;
+    const userIdSig = req.headers['x-user-id-sig'] as string | undefined;
     const token = req.cookies[this.accessTokenCookieName()] as
       | string
       | undefined;
@@ -255,6 +259,11 @@ export class AuthController {
     }
 
     // No cookie but Kong set X-User-Id (e.g. API client using Bearer header).
+    // Validate the signature before trusting the header.
+    if (!this.signatureValidator.isValidSignature(kongUserId, userIdSig)) {
+      throw new UnauthorizedException('invalid X-User-Id-Sig signature');
+    }
+
     // Trust Kong's validation; return a minimal identity without email.
     return { currentUser: { id: kongUserId } };
   }
@@ -368,6 +377,7 @@ export class AuthController {
     req: Request,
   ): Promise<{ id: string }> {
     const kongUserId = req.headers['x-user-id'] as string | undefined;
+    const userIdSig = req.headers['x-user-id-sig'] as string | undefined;
     const token = req.cookies[this.accessTokenCookieName()] as
       | string
       | undefined;
@@ -398,6 +408,16 @@ export class AuthController {
           },
         });
       }
+    }
+
+    // No cookie but Kong set X-User-Id. Validate the signature before trusting it.
+    if (!this.signatureValidator.isValidSignature(kongUserId, userIdSig)) {
+      throw new UnauthorizedException({
+        error: {
+          code: 'UNAUTHENTICATED',
+          message: 'invalid X-User-Id-Sig signature',
+        },
+      });
     }
 
     return { id: kongUserId! };

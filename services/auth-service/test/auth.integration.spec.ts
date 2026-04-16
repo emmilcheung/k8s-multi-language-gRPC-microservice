@@ -99,11 +99,17 @@ beforeAll(async () => {
 
   // 4. Apply migration using raw SQL
   pool = new Pool({ connectionString: databaseUrl });
-  const migrationSql = fs.readFileSync(
+  const migration1Sql = fs.readFileSync(
     path.join(__dirname, '../migrations/001_init_users.sql'),
     'utf-8',
   );
-  await pool.query(migrationSql);
+  await pool.query(migration1Sql);
+
+  const migration2Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/002_add_roles.sql'),
+    'utf-8',
+  );
+  await pool.query(migration2Sql);
 
   // 5. Bootstrap NestJS app (without pino/metrics to keep tests simple)
   const moduleRef = await Test.createTestingModule({

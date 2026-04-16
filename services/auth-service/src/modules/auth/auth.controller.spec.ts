@@ -7,6 +7,7 @@ import type { AuthService } from './auth.service';
 import type { RefreshTokenService } from './refresh-token.service';
 import type { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
+import { UserIdSignatureValidator } from '../../common/security/user-id-signature.validator';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -83,6 +84,12 @@ function makeLogger(): PinoLogger {
   } as unknown as PinoLogger;
 }
 
+function makeSignatureValidator(): UserIdSignatureValidator {
+  const validator = new UserIdSignatureValidator('');
+  vi.spyOn(validator, 'isValidSignature').mockReturnValue(true);
+  return validator;
+}
+
 /** Create a minimal Express-like response mock. */
 function makeRes() {
   const res = {
@@ -120,11 +127,13 @@ function makeController(
     overrides.refreshTokenService,
   );
   const configService = overrides.configService ?? makeConfigService();
+  const signatureValidator = makeSignatureValidator();
   const controller = new AuthController(
     logger,
     authService,
     refreshTokenService,
     configService,
+    signatureValidator,
   );
   return {
     controller,
@@ -132,6 +141,7 @@ function makeController(
     refreshTokenService,
     configService,
     logger,
+    signatureValidator,
   };
 }
 

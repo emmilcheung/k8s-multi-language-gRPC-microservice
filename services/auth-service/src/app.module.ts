@@ -10,6 +10,7 @@ import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { DatabaseModule } from './database/database.module';
 import { RedisModule } from './modules/redis/redis.module';
+import { SecurityModule } from './common/security/security.module';
 
 const envSchema = z.object({
   NODE_ENV: z
@@ -50,6 +51,7 @@ const envSchema = z.object({
   // OAuth2 redirect helpers — used by OAuthService to build cross-service URLs.
   KONG_BASE_URL: z.string().url().default('http://localhost:8000'),
   OAUTH_CLIENT_BASE_URL: z.string().url().default('http://localhost:4000'),
+  X_USER_ID_SIGNING_KEY: z.string().optional().default(''),
 });
 
 /** Inject the active OTel traceId and spanId into every pino log line (O-02). */
@@ -108,6 +110,7 @@ function otelMixin(): Record<string, string> {
 
     // ── Feature modules ──────────────────────────────────────────────────────
     DatabaseModule,
+    SecurityModule,
     RedisModule,
     UsersModule,
     AuthModule,

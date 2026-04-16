@@ -9,6 +9,7 @@ import { UsersModule } from '../users/users.module';
 import { RefreshTokenService } from './refresh-token.service';
 import { SigninAbuseProtectionService } from './signin-abuse-protection.service';
 import { RedisModule } from '../redis/redis.module';
+import { SecurityModule } from '../../common/security/security.module';
 import { parseRsaPrivateKey } from './rsa-key.util';
 
 @Module({
@@ -18,6 +19,7 @@ import { parseRsaPrivateKey } from './rsa-key.util';
     // AppModule. NestJS deduplicates module instances, so only one Redis client
     // is created regardless of how many modules import RedisModule.
     RedisModule,
+    SecurityModule,
     UsersModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
