@@ -17,6 +17,11 @@ type Config struct {
 	LogLevel              string
 	DatabaseURL           string
 	KafkaBrokers          []string
+	KafkaSecurityProtocol string
+	KafkaSASLMechanism    string
+	KafkaSASLUsername     string
+	KafkaSASLPassword     string
+	KafkaSSLCALocation    string
 	RedisURL              string
 	TicketServiceURL      string
 	HoldTTLSec            int
@@ -53,6 +58,27 @@ func Load() (*Config, error) {
 		errs = append(errs, "KAFKA_BROKERS is required")
 	}
 	kafkaBrokers := splitAndTrim(kafkaBrokersStr)
+	kafkaSecurityProtocol := strings.ToUpper(strings.TrimSpace(getEnv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")))
+	switch kafkaSecurityProtocol {
+	case "PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL":
+	default:
+		errs = append(errs, fmt.Sprintf("KAFKA_SECURITY_PROTOCOL must be one of PLAINTEXT, SSL, SASL_PLAINTEXT, SASL_SSL, got %q", kafkaSecurityProtocol))
+	}
+	kafkaSASLMechanism := strings.ToUpper(strings.TrimSpace(getEnv("KAFKA_SASL_MECHANISM", "")))
+	kafkaSASLUsername := strings.TrimSpace(getEnv("KAFKA_SASL_USERNAME", ""))
+	kafkaSASLPassword := strings.TrimSpace(getEnv("KAFKA_SASL_PASSWORD", ""))
+	kafkaSSLCALocation := strings.TrimSpace(getEnv("KAFKA_SSL_CA_LOCATION", ""))
+	if strings.HasPrefix(kafkaSecurityProtocol, "SASL") {
+		if kafkaSASLMechanism == "" {
+			errs = append(errs, "KAFKA_SASL_MECHANISM is required when KAFKA_SECURITY_PROTOCOL uses SASL")
+		}
+		if kafkaSASLUsername == "" {
+			errs = append(errs, "KAFKA_SASL_USERNAME is required when KAFKA_SECURITY_PROTOCOL uses SASL")
+		}
+		if kafkaSASLPassword == "" {
+			errs = append(errs, "KAFKA_SASL_PASSWORD is required when KAFKA_SECURITY_PROTOCOL uses SASL")
+		}
+	}
 
 	redisURL := getEnv("REDIS_URL", "")
 
@@ -80,6 +106,11 @@ func Load() (*Config, error) {
 		LogLevel:              logLevel,
 		DatabaseURL:           databaseURL,
 		KafkaBrokers:          kafkaBrokers,
+		KafkaSecurityProtocol: kafkaSecurityProtocol,
+		KafkaSASLMechanism:    kafkaSASLMechanism,
+		KafkaSASLUsername:     kafkaSASLUsername,
+		KafkaSASLPassword:     kafkaSASLPassword,
+		KafkaSSLCALocation:    kafkaSSLCALocation,
 		RedisURL:              redisURL,
 		TicketServiceURL:      ticketServiceURL,
 		HoldTTLSec:            holdTTLSec,

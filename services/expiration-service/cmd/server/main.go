@@ -45,8 +45,16 @@ func main() {
 	shutdownTracing := tracing.Init(context.Background(), "expiration-service", log)
 	defer shutdownTracing(context.Background())
 
+	kafkaSecurity := appkafka.SecurityConfig{
+		SecurityProtocol: cfg.KafkaSecurityProtocol,
+		SASLMechanism:    cfg.KafkaSASLMechanism,
+		SASLUsername:     cfg.KafkaSASLUsername,
+		SASLPassword:     cfg.KafkaSASLPassword,
+		SSLCALocation:    cfg.KafkaSSLCALocation,
+	}
+
 	// Kafka producer — publishes expiration.order.expiration_complete events.
-	producer, err := appkafka.NewProducer(cfg.KafkaBrokers, log)
+	producer, err := appkafka.NewProducer(cfg.KafkaBrokers, log, kafkaSecurity)
 	if err != nil {
 		log.Fatal("failed to create kafka producer", zap.Error(err))
 	}
@@ -62,7 +70,7 @@ func main() {
 
 	// Kafka consumer — subscribes to orders.order.created and schedules expiration tasks.
 	// The producer is passed so the consumer can route failed messages to the DLQ.
-	consumer, err := appkafka.NewConsumer(cfg.KafkaBrokers, "expiration-service", producer, log)
+	consumer, err := appkafka.NewConsumer(cfg.KafkaBrokers, "expiration-service", producer, log, kafkaSecurity)
 	if err != nil {
 		log.Fatal("failed to create kafka consumer", zap.Error(err))
 	}
@@ -72,7 +80,7 @@ func main() {
 	redisChecker := health.NewRedisChecker(cfg.RedisAddr)
 	defer redisChecker.Close() //nolint:errcheck
 
-	kafkaChecker := health.NewKafkaChecker(cfg.KafkaBrokers)
+	kafkaChecker := health.NewKafkaChecker(cfg.KafkaBrokers, kafkaSecurity)
 
 	// Echo HTTP server — /healthz/live, /healthz/ready, /metrics.
 	httpServer := server.New(redisChecker, kafkaChecker, log)

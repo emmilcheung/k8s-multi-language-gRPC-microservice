@@ -22,6 +22,12 @@ const envSchema = z
     STRIPE_SECRET_KEY: z.string(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),
     KAFKA_BROKERS: z.string(),
+    KAFKA_SECURITY_PROTOCOL: z
+      .enum(['PLAINTEXT', 'SSL', 'SASL_PLAINTEXT', 'SASL_SSL'])
+      .default('PLAINTEXT'),
+    KAFKA_SASL_MECHANISM: z.enum(['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']).optional(),
+    KAFKA_SASL_USERNAME: z.string().optional(),
+    KAFKA_SASL_PASSWORD: z.string().optional(),
     X_USER_ID_SIGNING_KEY: z.string().optional().default(''),
   })
   .superRefine((config, ctx) => {
@@ -30,6 +36,21 @@ const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['STRIPE_WEBHOOK_SECRET'],
         message: 'STRIPE_WEBHOOK_SECRET is required in production',
+      });
+    }
+
+    if (
+      (config.KAFKA_SECURITY_PROTOCOL === 'SASL_PLAINTEXT' ||
+        config.KAFKA_SECURITY_PROTOCOL === 'SASL_SSL') &&
+      (!config.KAFKA_SASL_MECHANISM ||
+        !config.KAFKA_SASL_USERNAME ||
+        !config.KAFKA_SASL_PASSWORD)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['KAFKA_SECURITY_PROTOCOL'],
+        message:
+          'KAFKA_SASL_MECHANISM, KAFKA_SASL_USERNAME, and KAFKA_SASL_PASSWORD are required for SASL Kafka',
       });
     }
   });

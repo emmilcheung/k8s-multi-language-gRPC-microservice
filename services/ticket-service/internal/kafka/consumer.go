@@ -105,8 +105,8 @@ type OrderConsumer struct {
 // NewOrderConsumer creates a Kafka consumer that listens to order events.
 // groupID should be "ticket-service" (per the AGENTS.md convention).
 // producer is used to publish failed messages to the DLQ after retries are exhausted.
-func NewOrderConsumer(brokers []string, groupID string, reserver TicketReserver, producer *Producer, log *zap.Logger) (*OrderConsumer, error) {
-	c, err := kafka.NewConsumer(&kafka.ConfigMap{
+func NewOrderConsumer(brokers []string, groupID string, reserver TicketReserver, producer *Producer, log *zap.Logger, security ...SecurityConfig) (*OrderConsumer, error) {
+	configMap := &kafka.ConfigMap{
 		"bootstrap.servers":       joinBrokers(brokers),
 		"group.id":                groupID,
 		"auto.offset.reset":       "earliest",
@@ -115,7 +115,12 @@ func NewOrderConsumer(brokers []string, groupID string, reserver TicketReserver,
 		"heartbeat.interval.ms":   3000,
 		"max.poll.interval.ms":    300000,
 		"socket.keepalive.enable": true,
-	})
+	}
+	if err := firstSecurityConfig(security).Apply(configMap); err != nil {
+		return nil, fmt.Errorf("configure kafka consumer security: %w", err)
+	}
+
+	c, err := kafka.NewConsumer(configMap)
 	if err != nil {
 		return nil, fmt.Errorf("create kafka consumer: %w", err)
 	}

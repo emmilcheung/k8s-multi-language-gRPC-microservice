@@ -100,17 +100,24 @@ func main() {
 	}
 
 	// Kafka producer
-	producer, err := kafka.NewProducer(cfg.KafkaBrokers, log)
+	kafkaSecurity := kafka.SecurityConfig{
+		SecurityProtocol: cfg.KafkaSecurityProtocol,
+		SASLMechanism:    cfg.KafkaSASLMechanism,
+		SASLUsername:     cfg.KafkaSASLUsername,
+		SASLPassword:     cfg.KafkaSASLPassword,
+		SSLCALocation:    cfg.KafkaSSLCALocation,
+	}
+	producer, err := kafka.NewProducer(cfg.KafkaBrokers, log, kafkaSecurity)
 	if err != nil {
 		log.Fatal("failed to create Kafka producer", zap.Error(err))
 	}
 	defer producer.Close()
-	kafkaChecker = health.NewKafkaChecker(cfg.KafkaBrokers)
+	kafkaChecker = health.NewKafkaChecker(cfg.KafkaBrokers, kafkaSecurity)
 	outboxRelay := outbox.NewRelay(mongoRepo, producer, log)
 
 	// Kafka consumer — listens to order events and keeps ticket reservation state in sync.
 	// The producer is passed so the consumer can route failed messages to the DLQ.
-	orderConsumer, err := kafka.NewOrderConsumer(cfg.KafkaBrokers, "ticket-service", ticketRepo, producer, log)
+	orderConsumer, err := kafka.NewOrderConsumer(cfg.KafkaBrokers, "ticket-service", ticketRepo, producer, log, kafkaSecurity)
 	if err != nil {
 		log.Fatal("failed to create Kafka order consumer", zap.Error(err))
 	}

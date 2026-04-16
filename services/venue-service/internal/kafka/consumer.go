@@ -55,12 +55,17 @@ type Producer struct {
 }
 
 // NewProducer creates a new Kafka producer configured for exactly-once delivery.
-func NewProducer(brokers []string, log *zap.Logger) (*Producer, error) {
-	p, err := kafka.NewProducer(&kafka.ConfigMap{
+func NewProducer(brokers []string, log *zap.Logger, security ...SecurityConfig) (*Producer, error) {
+	configMap := &kafka.ConfigMap{
 		"bootstrap.servers":  strings.Join(brokers, ","),
 		"acks":               "all",
 		"enable.idempotence": true,
-	})
+	}
+	if err := firstSecurityConfig(security).Apply(configMap); err != nil {
+		return nil, fmt.Errorf("configure kafka producer security: %w", err)
+	}
+
+	p, err := kafka.NewProducer(configMap)
 	if err != nil {
 		return nil, fmt.Errorf("kafka new producer: %w", err)
 	}
@@ -135,13 +140,18 @@ type OrderConsumer struct {
 
 // NewOrderConsumer creates a Kafka consumer subscribed to order lifecycle topics.
 // producer is used for DLQ routing; pass nil to disable DLQ (not recommended in production).
-func NewOrderConsumer(brokers []string, groupID string, handler OrderEventHandler, producer *Producer, log *zap.Logger) (*OrderConsumer, error) {
-	c, err := kafka.NewConsumer(&kafka.ConfigMap{
+func NewOrderConsumer(brokers []string, groupID string, handler OrderEventHandler, producer *Producer, log *zap.Logger, security ...SecurityConfig) (*OrderConsumer, error) {
+	configMap := &kafka.ConfigMap{
 		"bootstrap.servers":  strings.Join(brokers, ","),
 		"group.id":           groupID,
 		"auto.offset.reset":  "earliest",
 		"enable.auto.commit": false,
-	})
+	}
+	if err := firstSecurityConfig(security).Apply(configMap); err != nil {
+		return nil, fmt.Errorf("configure kafka consumer security: %w", err)
+	}
+
+	c, err := kafka.NewConsumer(configMap)
 	if err != nil {
 		return nil, fmt.Errorf("kafka new consumer: %w", err)
 	}

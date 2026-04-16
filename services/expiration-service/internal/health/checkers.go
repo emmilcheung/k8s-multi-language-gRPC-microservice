@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	appkafka "github.com/acme/expiration-service/internal/kafka"
 	confluent "github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	redis "github.com/redis/go-redis/v9"
 )
@@ -46,11 +47,12 @@ func (r *RedisChecker) Close() error {
 
 // KafkaChecker verifies Kafka connectivity by fetching cluster metadata.
 type KafkaChecker struct {
-	brokers string
+	brokers  string
+	security appkafka.SecurityConfig
 }
 
 // NewKafkaChecker creates a KafkaChecker for the given broker list.
-func NewKafkaChecker(brokers []string) *KafkaChecker {
+func NewKafkaChecker(brokers []string, security ...appkafka.SecurityConfig) *KafkaChecker {
 	result := ""
 	for i, b := range brokers {
 		if i > 0 {
@@ -58,19 +60,31 @@ func NewKafkaChecker(brokers []string) *KafkaChecker {
 		}
 		result += b
 	}
-	return &KafkaChecker{brokers: result}
+	checker := &KafkaChecker{
+		brokers:  result,
+		security: appkafka.SecurityConfig{SecurityProtocol: "PLAINTEXT"},
+	}
+	if len(security) > 0 {
+		checker.security = security[0]
+	}
+	return checker
 }
 
 // Ping creates a temporary admin client and fetches cluster metadata.
 // Returns an error if the broker cannot be reached within 1 second.
 func (k *KafkaChecker) Ping(ctx context.Context) error {
 	// Create a short-lived admin client for metadata fetch
-	admin, err := confluent.NewAdminClient(&confluent.ConfigMap{
+	configMap := &confluent.ConfigMap{
 		"bootstrap.servers":           k.brokers,
 		"socket.timeout.ms":           1000,
 		"request.timeout.ms":          1000,
 		"metadata.request.timeout.ms": 1000,
-	})
+	}
+	if err := k.security.Apply(configMap); err != nil {
+		return fmt.Errorf("configure kafka admin client security: %w", err)
+	}
+
+	admin, err := confluent.NewAdminClient(configMap)
 	if err != nil {
 		return fmt.Errorf("kafka admin client: %w", err)
 	}

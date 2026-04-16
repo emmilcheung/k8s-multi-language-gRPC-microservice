@@ -11,11 +11,16 @@ import (
 // Config holds all configuration for expiration-service.
 // All fields are validated at startup — the service refuses to start if anything is missing.
 type Config struct {
-	Env          string
-	Port         int
-	LogLevel     string
-	RedisAddr    string
-	KafkaBrokers []string
+	Env                   string
+	Port                  int
+	LogLevel              string
+	RedisAddr             string
+	KafkaBrokers          []string
+	KafkaSecurityProtocol string
+	KafkaSASLMechanism    string
+	KafkaSASLUsername     string
+	KafkaSASLPassword     string
+	KafkaSSLCALocation    string
 }
 
 // Load reads configuration from environment variables and validates all required fields.
@@ -42,17 +47,43 @@ func Load() (*Config, error) {
 		errs = append(errs, "KAFKA_BROKERS is required")
 	}
 	kafkaBrokers := splitAndTrim(kafkaBrokersStr)
+	kafkaSecurityProtocol := strings.ToUpper(strings.TrimSpace(getEnv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")))
+	switch kafkaSecurityProtocol {
+	case "PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL":
+	default:
+		errs = append(errs, fmt.Sprintf("KAFKA_SECURITY_PROTOCOL must be one of PLAINTEXT, SSL, SASL_PLAINTEXT, SASL_SSL, got %q", kafkaSecurityProtocol))
+	}
+	kafkaSASLMechanism := strings.ToUpper(strings.TrimSpace(getEnv("KAFKA_SASL_MECHANISM", "")))
+	kafkaSASLUsername := strings.TrimSpace(getEnv("KAFKA_SASL_USERNAME", ""))
+	kafkaSASLPassword := strings.TrimSpace(getEnv("KAFKA_SASL_PASSWORD", ""))
+	kafkaSSLCALocation := strings.TrimSpace(getEnv("KAFKA_SSL_CA_LOCATION", ""))
+	if strings.HasPrefix(kafkaSecurityProtocol, "SASL") {
+		if kafkaSASLMechanism == "" {
+			errs = append(errs, "KAFKA_SASL_MECHANISM is required when KAFKA_SECURITY_PROTOCOL uses SASL")
+		}
+		if kafkaSASLUsername == "" {
+			errs = append(errs, "KAFKA_SASL_USERNAME is required when KAFKA_SECURITY_PROTOCOL uses SASL")
+		}
+		if kafkaSASLPassword == "" {
+			errs = append(errs, "KAFKA_SASL_PASSWORD is required when KAFKA_SECURITY_PROTOCOL uses SASL")
+		}
+	}
 
 	if len(errs) > 0 {
 		return nil, errors.New(strings.Join(errs, "; "))
 	}
 
 	return &Config{
-		Env:          env,
-		Port:         port,
-		LogLevel:     logLevel,
-		RedisAddr:    redisAddr,
-		KafkaBrokers: kafkaBrokers,
+		Env:                   env,
+		Port:                  port,
+		LogLevel:              logLevel,
+		RedisAddr:             redisAddr,
+		KafkaBrokers:          kafkaBrokers,
+		KafkaSecurityProtocol: kafkaSecurityProtocol,
+		KafkaSASLMechanism:    kafkaSASLMechanism,
+		KafkaSASLUsername:     kafkaSASLUsername,
+		KafkaSASLPassword:     kafkaSASLPassword,
+		KafkaSSLCALocation:    kafkaSSLCALocation,
 	}, nil
 }
 

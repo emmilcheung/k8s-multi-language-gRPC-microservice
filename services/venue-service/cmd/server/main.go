@@ -83,7 +83,14 @@ func main() {
 
 	// Health checkers.
 	dbChecker := health.NewDBChecker(pool)
-	kafkaChecker := health.NewKafkaChecker(cfg.KafkaBrokers)
+	kafkaSecurity := kafka.SecurityConfig{
+		SecurityProtocol: cfg.KafkaSecurityProtocol,
+		SASLMechanism:    cfg.KafkaSASLMechanism,
+		SASLUsername:     cfg.KafkaSASLUsername,
+		SASLPassword:     cfg.KafkaSASLPassword,
+		SSLCALocation:    cfg.KafkaSSLCALocation,
+	}
+	kafkaChecker := health.NewKafkaChecker(cfg.KafkaBrokers, kafkaSecurity)
 
 	var redisChecker *health.RedisChecker
 	var redisClient *redis.Client
@@ -112,7 +119,7 @@ func main() {
 	}
 
 	// Kafka producer.
-	producer, err := kafka.NewProducer(cfg.KafkaBrokers, log)
+	producer, err := kafka.NewProducer(cfg.KafkaBrokers, log, kafkaSecurity)
 	if err != nil {
 		log.Fatal("failed to create Kafka producer", zap.Error(err))
 	}
@@ -164,7 +171,7 @@ func main() {
 	}
 
 	// Kafka consumer — listens to order lifecycle events.
-	orderConsumer, err := kafka.NewOrderConsumer(cfg.KafkaBrokers, "venue-service", svc, producer, log)
+	orderConsumer, err := kafka.NewOrderConsumer(cfg.KafkaBrokers, "venue-service", svc, producer, log, kafkaSecurity)
 	if err != nil {
 		log.Fatal("failed to create Kafka order consumer", zap.Error(err))
 	}

@@ -281,6 +281,9 @@ redis:
     enabled: true
 
 # ── kafka (Bitnami Kafka — KRaft mode) ────────────────────────────────────────
+# Non-production default only. Staging and production must disable this chart
+# via values-staging.yaml / values-prod.yaml and use externally managed Kafka
+# with per-service SASL credentials in Secrets.
 kafka:
   kraft:
     enabled: true

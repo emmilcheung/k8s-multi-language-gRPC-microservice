@@ -1,6 +1,6 @@
-# ── Staging overrides (Issue 46 Phase 3) ─────────────────────────────────────
-# Staging validates full NetworkPolicy coverage and external secure Kafka before
-# production rollout. Supply KAFKA_* SASL secrets per service.
+# ── Production overrides (Issue 46 Phase 3) ─────────────────────────────────
+# Production must use external managed Kafka with per-service SASL credentials.
+# Do not deploy the in-cluster PLAINTEXT broker in this environment.
 
 auth-service:
   networkPolicy:
