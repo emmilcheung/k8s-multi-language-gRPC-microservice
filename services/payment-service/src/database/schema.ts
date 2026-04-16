@@ -89,19 +89,14 @@ export const savedPaymentMethods = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
-  (table) => ({
-    userIdIdx: index('idx_saved_payment_methods_user_id').on(table.userId),
-    userDefaultIdx: index('idx_saved_payment_methods_user_default').on(
-      table.userId,
-      table.isDefault,
-    ),
-    paymentCustomerIdx: index('idx_saved_payment_methods_payment_customer_id').on(
-      table.paymentCustomerId,
-    ),
-    singleDefaultPerUserIdx: uniqueIndex('uniq_saved_payment_methods_single_default')
+  (table) => [
+    index('idx_saved_payment_methods_user_id').on(table.userId),
+    index('idx_saved_payment_methods_user_default').on(table.userId, table.isDefault),
+    index('idx_saved_payment_methods_payment_customer_id').on(table.paymentCustomerId),
+    uniqueIndex('uniq_saved_payment_methods_single_default')
       .on(table.userId)
       .where(sql`${table.isDefault} = true and ${table.deletedAt} is null`),
-  }),
+  ],
 );
 
 export type SavedPaymentMethod = typeof savedPaymentMethods.$inferSelect;

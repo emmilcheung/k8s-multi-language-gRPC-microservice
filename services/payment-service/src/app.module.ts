@@ -5,6 +5,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { z } from 'zod';
 import { trace } from '@opentelemetry/api';
 import { DatabaseModule } from './database/database.module';
+import { SecurityModule } from './common/security/security.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
@@ -21,6 +22,7 @@ const envSchema = z
     STRIPE_SECRET_KEY: z.string(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),
     KAFKA_BROKERS: z.string(),
+    X_USER_ID_SIGNING_KEY: z.string().optional().default(''),
   })
   .superRefine((config, ctx) => {
     if (config.NODE_ENV === 'production' && !config.STRIPE_WEBHOOK_SECRET) {
@@ -85,6 +87,7 @@ function otelMixin(): Record<string, string> {
 
     // ── Feature modules ──────────────────────────────────────────────────────
     DatabaseModule,
+    SecurityModule,
     ScheduleModule.forRoot(),
     PaymentsModule,
     HealthModule,

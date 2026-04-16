@@ -10,9 +10,10 @@ import { OrderServiceClient } from './order-service.client';
 import { PAYMENT_VAULT_PROVIDER } from './payment-vault.provider';
 import { StripePaymentVaultProvider } from './stripe-payment-vault.provider';
 import { STRIPE_CLIENT } from './stripe.constants';
+import { SecurityModule } from '../../common/security/security.module';
 
 @Module({
-  imports: [PinoLoggerModule],
+  imports: [PinoLoggerModule, SecurityModule],
   controllers: [PaymentsController],
   providers: [
     PaymentsService,

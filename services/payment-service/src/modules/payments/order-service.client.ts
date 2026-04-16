@@ -44,7 +44,11 @@ export class OrderServiceClient {
     private readonly config: ConfigService,
   ) {}
 
-  async getOrderSnapshot(orderId: string, userId: string): Promise<OrderSnapshot> {
+  async getOrderSnapshot(
+    orderId: string,
+    userId: string,
+    userIdSig?: string,
+  ): Promise<OrderSnapshot> {
     const baseUrl = this.config.getOrThrow<string>('ORDER_SERVICE_URL').replace(/\/$/, '');
     const timeoutMs = this.config.get<number>(
       'ORDER_SERVICE_TIMEOUT_MS',
@@ -53,8 +57,16 @@ export class OrderServiceClient {
 
     let response: Response;
     try {
+      const headers: Record<string, string> = { 'X-User-Id': userId };
+
+      // Forward X-User-Id-Sig to the upstream service for verification.
+      // This signature is set by Kong and validates the user ID.
+      if (userIdSig) {
+        headers['X-User-Id-Sig'] = userIdSig;
+      }
+
       response = await fetch(`${baseUrl}/api/orders/${orderId}`, {
-        headers: { 'X-User-Id': userId },
+        headers,
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {

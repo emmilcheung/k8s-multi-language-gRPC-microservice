@@ -2,6 +2,7 @@ package com.ticketing.orders.controller;
 
 import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
+import com.ticketing.orders.security.UserIdSignatureValidator;
 import com.ticketing.orders.service.OrderService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -22,8 +23,8 @@ import java.util.UUID;
  * REST controller for order lifecycle.
  *
  * Auth: Kong validates the JWT and injects X-User-Id into the request header.
- * This controller reads that header and passes the userId to the service layer.
- * It never re-validates the token (AGENTS.md §5.1).
+ * Kong also computes and injects X-User-Id-Sig (HMAC-SHA256 with minute-level replay limit).
+ * This controller validates the signature before using the user ID.
  *
  * Routes:
  *   POST   /api/orders            — create GA order
@@ -37,17 +38,22 @@ import java.util.UUID;
 public class OrderController {
 
     private static final String USER_ID_HEADER = "X-User-Id";
+    private static final String USER_ID_SIG_HEADER = "X-User-Id-Sig";
 
     private final OrderService orderService;
+    private final UserIdSignatureValidator signatureValidator;
 
-    public OrderController(OrderService orderService) {
+    public OrderController(OrderService orderService, UserIdSignatureValidator signatureValidator) {
         this.orderService = orderService;
+        this.signatureValidator = signatureValidator;
     }
 
     @PostMapping
     public ResponseEntity<OrderResponse> createOrder(
             @RequestHeader(USER_ID_HEADER) UUID userId,
+            @RequestHeader(value = USER_ID_SIG_HEADER, required = false) String signature,
             @Valid @RequestBody CreateOrderRequest request) {
+        validateUserIdSignature(userId.toString(), signature);
         OrderResponse response = orderService.createOrder(userId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
@@ -59,28 +65,42 @@ public class OrderController {
     @PostMapping("/seated")
     public ResponseEntity<OrderResponse> createSeatedOrder(
             @RequestHeader(USER_ID_HEADER) UUID userId,
+            @RequestHeader(value = USER_ID_SIG_HEADER, required = false) String signature,
             @Valid @RequestBody CreateOrderRequest request) {
+        validateUserIdSignature(userId.toString(), signature);
         OrderResponse response = orderService.createSeatedOrder(userId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @GetMapping
     public ResponseEntity<List<OrderResponse>> listOrders(
-            @RequestHeader(USER_ID_HEADER) UUID userId) {
+            @RequestHeader(USER_ID_HEADER) UUID userId,
+            @RequestHeader(value = USER_ID_SIG_HEADER, required = false) String signature) {
+        validateUserIdSignature(userId.toString(), signature);
         return ResponseEntity.ok(orderService.listOrders(userId));
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<OrderResponse> getOrder(
             @RequestHeader(USER_ID_HEADER) UUID userId,
+            @RequestHeader(value = USER_ID_SIG_HEADER, required = false) String signature,
             @PathVariable UUID id) {
+        validateUserIdSignature(userId.toString(), signature);
         return ResponseEntity.ok(orderService.getOrder(id, userId));
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<OrderResponse> cancelOrder(
             @RequestHeader(USER_ID_HEADER) UUID userId,
+            @RequestHeader(value = USER_ID_SIG_HEADER, required = false) String signature,
             @PathVariable UUID id) {
+        validateUserIdSignature(userId.toString(), signature);
         return ResponseEntity.ok(orderService.cancelOrder(id, userId));
+    }
+
+    private void validateUserIdSignature(String userId, String signature) {
+        if (!signatureValidator.isValidSignature(userId, signature)) {
+            throw new IllegalArgumentException("Invalid X-User-Id-Sig signature");
+        }
     }
 }
