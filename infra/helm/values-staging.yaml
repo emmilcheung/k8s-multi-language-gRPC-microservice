@@ -1,0 +1,8 @@
+# ── Staging overrides (F-07 remediation) ──────────────────────────────────────
+# Minimal environment-specific configuration for staging deployment.
+# Enables NetworkPolicy for order-service to validate the F-07 ingress rule fix.
+# All other settings inherit from values.yaml defaults.
+
+order-service:
+  networkPolicy:
+    enabled: true

@@ -13,7 +13,7 @@ env:
   PORT: "3000"
 
 # Name of a Kubernetes Secret containing:
-#   DATABASE_URL, JWT_SECRET, RSA_PRIVATE_KEY, KAFKA_BROKERS, REDIS_URL
+#   DATABASE_URL, JWT_SECRET, RSA_PRIVATE_KEY, KAFKA_BROKERS, REDIS_URL, X_USER_ID_SIGNING_KEY
 secretRef: auth-service-secrets
 
 resources:

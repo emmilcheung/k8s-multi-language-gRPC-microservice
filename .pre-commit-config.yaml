@@ -1,0 +1,23 @@
+# Pre-commit hooks: local validation before commit
+#
+# Install with:
+#   pip install pre-commit
+#   pre-commit install
+#
+# Run manually against staged changes:
+#   pre-commit run --all-files
+#
+# Hooks run in the order specified below.
+
+repos:
+  # Detect secrets (PEM keys, private credentials, etc.)
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args:
+          - --baseline
+          - .secrets.baseline
+          - --allow-multiple-secret-files
+        # Fail stage: commit is blocked if secrets are detected
+        stages: [commit]

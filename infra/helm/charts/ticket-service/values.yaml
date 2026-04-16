@@ -16,7 +16,7 @@ env:
   LOG_LEVEL: info
   MONGO_DB: tickets
 
-secretRef: ticket-service-secrets  # contains MONGO_URI, KAFKA_BROKERS
+secretRef: ticket-service-secrets  # contains MONGO_URI, KAFKA_BROKERS, X_USER_ID_SIGNING_KEY
 
 resources:
   requests:

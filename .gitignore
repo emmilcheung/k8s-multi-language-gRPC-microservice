@@ -39,6 +39,9 @@ coverage.out
 infra/local/secrets/*.env
 infra/local/secrets.env
 
+# RSA key files (local JWT signing keys — never commit)
+infra/local/rsa_local*.pem
+
 # Terraform
 .terraform/
 *.tfstate

@@ -15,7 +15,7 @@ env:
   GRPC_PORT: "50052"
   LOG_LEVEL: info
 
-secretRef: venue-service-secrets  # contains DATABASE_URL, REDIS_URL, KAFKA_BROKERS
+secretRef: venue-service-secrets  # contains DATABASE_URL, REDIS_URL, KAFKA_BROKERS, X_USER_ID_SIGNING_KEY
 
 resources:
   requests:

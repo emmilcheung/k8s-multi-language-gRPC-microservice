@@ -610,6 +610,7 @@ jobs:
           # KONG_RSA_PUBLIC_KEY must be set in repo secrets.
           # The job is skipped on forks where the secret is unavailable.
           KONG_RSA_PUBLIC_KEY: ${{ secrets.KONG_RSA_PUBLIC_KEY }}
+          KONG_SIGNING_KEY: ${{ secrets.X_USER_ID_SIGNING_KEY }}
 
       - name: Validate kong.yml (kong config parse via Docker)
         run: bash scripts/validate.sh kong.yml
@@ -810,11 +811,13 @@ jobs:
             printf 'RSA_PRIVATE_KEY="%b"\n' "$RSA_PRIVATE_KEY"
             printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY"
             printf 'KONG_RSA_PUBLIC_KEY="%b"\n' "$KONG_RSA_PUBLIC_KEY"
+            printf 'X_USER_ID_SIGNING_KEY=%s\n' "$X_USER_ID_SIGNING_KEY"
           } > .env
         env:
           RSA_PRIVATE_KEY: ${{ secrets.RSA_PRIVATE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           KONG_RSA_PUBLIC_KEY: ${{ secrets.KONG_RSA_PUBLIC_KEY }}
+          X_USER_ID_SIGNING_KEY: ${{ secrets.X_USER_ID_SIGNING_KEY }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

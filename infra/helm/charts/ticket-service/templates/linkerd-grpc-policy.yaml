@@ -26,5 +26,5 @@ spec:
   client:
     meshTLS:
       identities:
-        - {{ printf "*.%s.serviceaccount.identity.linkerd.%s" .Release.Namespace .Values.global.serviceMesh.linkerd.identityDomain | quote }}
+        - {{ printf "order-service.%s.serviceaccount.identity.linkerd.%s" .Release.Namespace .Values.global.serviceMesh.linkerd.identityDomain | quote }}
 {{- end }}
