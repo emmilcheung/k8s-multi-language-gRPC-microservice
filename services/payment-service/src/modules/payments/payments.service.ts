@@ -38,6 +38,8 @@ export interface ChargePaymentDto {
   /** Stripe token or paymentMethodId from the client. */
   token?: string;
   savedPaymentMethodId?: string;
+  /** X-User-Id-Sig from Kong (validates the user ID). */
+  userIdSig?: string;
 }
 
 const PAYABLE_ORDER_STATUSES = new Set(['created', 'awaiting_payment']);
@@ -276,7 +278,11 @@ export class PaymentsService {
       return existing;
     }
 
-    const order = await this.orderServiceClient.getOrderSnapshot(dto.orderId, dto.userId);
+    const order = await this.orderServiceClient.getOrderSnapshot(
+      dto.orderId,
+      dto.userId,
+      dto.userIdSig,
+    );
     if (!PAYABLE_ORDER_STATUSES.has(order.status)) {
       this.auditWarn('payment.charge.rejected', {
         orderId: order.orderId,

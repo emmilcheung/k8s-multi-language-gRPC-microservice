@@ -71,8 +71,8 @@ type Producer struct {
 }
 
 // NewProducer creates a Kafka producer with idempotence and acks=all.
-func NewProducer(brokers []string, log *zap.Logger) (*Producer, error) {
-	p, err := kafka.NewProducer(&kafka.ConfigMap{
+func NewProducer(brokers []string, log *zap.Logger, security ...SecurityConfig) (*Producer, error) {
+	configMap := &kafka.ConfigMap{
 		"bootstrap.servers":  joinBrokers(brokers),
 		"acks":               "all",
 		"enable.idempotence": true,
@@ -82,7 +82,12 @@ func NewProducer(brokers []string, log *zap.Logger) (*Producer, error) {
 		// outage (e.g. Kafka disabled in local dev) causes a fast delivery
 		// failure rather than a gateway timeout visible to the caller.
 		"message.timeout.ms": 3000,
-	})
+	}
+	if err := firstSecurityConfig(security).Apply(configMap); err != nil {
+		return nil, fmt.Errorf("configure kafka producer security: %w", err)
+	}
+
+	p, err := kafka.NewProducer(configMap)
 	if err != nil {
 		return nil, fmt.Errorf("create kafka producer: %w", err)
 	}

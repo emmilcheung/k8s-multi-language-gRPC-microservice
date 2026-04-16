@@ -128,6 +128,7 @@ export function SettingsAddPaymentMethodForm() {
       stripeInstanceRef.current = stripe;
       const elements = stripe.elements();
       const cardElement = elements.create("card", {
+        hidePostalCode: true,
         style: {
           base: {
             fontSize: "14px",

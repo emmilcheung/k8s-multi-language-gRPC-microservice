@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	appkafka "github.com/acme/venue-service/internal/kafka"
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -52,20 +53,33 @@ func (r *RedisChecker) Close() error {
 
 // KafkaChecker verifies Kafka connectivity via metadata fetch.
 type KafkaChecker struct {
-	brokers string
+	brokers  string
+	security appkafka.SecurityConfig
 }
 
-func NewKafkaChecker(brokers []string) *KafkaChecker {
-	return &KafkaChecker{brokers: strings.Join(brokers, ",")}
+func NewKafkaChecker(brokers []string, security ...appkafka.SecurityConfig) *KafkaChecker {
+	checker := &KafkaChecker{
+		brokers:  strings.Join(brokers, ","),
+		security: appkafka.SecurityConfig{SecurityProtocol: "PLAINTEXT"},
+	}
+	if len(security) > 0 {
+		checker.security = security[0]
+	}
+	return checker
 }
 
 func (k *KafkaChecker) Ping(_ context.Context) error {
-	admin, err := kafka.NewAdminClient(&kafka.ConfigMap{
+	configMap := &kafka.ConfigMap{
 		"bootstrap.servers":           k.brokers,
 		"socket.timeout.ms":           1000,
 		"request.timeout.ms":          1000,
 		"metadata.request.timeout.ms": 1000,
-	})
+	}
+	if err := k.security.Apply(configMap); err != nil {
+		return fmt.Errorf("configure kafka admin client security: %w", err)
+	}
+
+	admin, err := kafka.NewAdminClient(configMap)
 	if err != nil {
 		return fmt.Errorf("kafka admin client: %w", err)
 	}

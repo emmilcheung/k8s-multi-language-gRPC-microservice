@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/acme/venue-service/internal/repository"
+	"github.com/acme/venue-service/internal/security"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
@@ -13,6 +14,7 @@ import (
 type VenueSectionHandler struct {
 	venueRepo     repository.VenueRepository
 	vsSectionRepo repository.VenueSectionRepository
+	validator     *security.UserIDSignatureValidator
 	log           *zap.Logger
 }
 
@@ -20,11 +22,13 @@ type VenueSectionHandler struct {
 func NewVenueSectionHandler(
 	venueRepo repository.VenueRepository,
 	vsSectionRepo repository.VenueSectionRepository,
+	validator *security.UserIDSignatureValidator,
 	log *zap.Logger,
 ) *VenueSectionHandler {
 	return &VenueSectionHandler{
 		venueRepo:     venueRepo,
 		vsSectionRepo: vsSectionRepo,
+		validator:     validator,
 		log:           log,
 	}
 }
@@ -64,6 +68,11 @@ func (h *VenueSectionHandler) Create(c echo.Context) error {
 	organizerID := c.Request().Header.Get("X-User-Id")
 	if organizerID == "" {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
 	venueID := c.Param("venueId")
@@ -120,6 +129,11 @@ func (h *VenueSectionHandler) Delete(c echo.Context) error {
 	organizerID := c.Request().Header.Get("X-User-Id")
 	if organizerID == "" {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
 	venueID := c.Param("venueId")

@@ -24,10 +24,14 @@ import {
 } from './payments.dto';
 import { type SavedPaymentMethod } from '../../database/schema';
 import type { Request } from 'express';
+import { UserIdSignatureValidator } from '../../common/security/user-id-signature.validator';
 
 @Controller('api/payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly signatureValidator: UserIdSignatureValidator,
+  ) {}
 
   private toSavedPaymentMethodResponse(
     paymentMethod: SavedPaymentMethod,
@@ -89,21 +93,36 @@ export class PaymentsController {
     return userId;
   }
 
+  private validateUserIdSignature(userId: string | undefined, signature: string | undefined): void {
+    if (!this.signatureValidator.isValidSignature(userId, signature)) {
+      throw new UnauthorizedException({
+        error: { code: 'INVALID_SIGNATURE', message: 'Invalid X-User-Id-Sig signature' },
+      });
+    }
+  }
+
   /**
    * POST /api/payments
    * Charge a payment for an order.
    * Requires X-User-Id header injected by Kong after JWT validation.
+   * Forwards X-User-Id-Sig to upstream services for verification.
    */
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async charge(@Headers('x-user-id') userId: string | undefined, @Body() dto: ChargeDto) {
+  async charge(
+    @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-id-sig') userIdSig: string | undefined,
+    @Body() dto: ChargeDto,
+  ) {
     const ownerUserId = this.requireUserId(userId);
+    this.validateUserIdSignature(userId, userIdSig);
 
     const payment = await this.paymentsService.charge({
       orderId: dto.orderId,
       userId: ownerUserId,
       token: dto.token,
       savedPaymentMethodId: dto.savedPaymentMethodId,
+      userIdSig,
     });
 
     return { payment };
@@ -113,10 +132,12 @@ export class PaymentsController {
   @HttpCode(HttpStatus.CREATED)
   async registerSavedPaymentMethod(
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-id-sig') userIdSig: string | undefined,
     @Body() dto: RegisterSavedPaymentMethodDto,
     @Req() req: Request,
   ) {
     const ownerUserId = this.requireUserId(userId);
+    this.validateUserIdSignature(userId, userIdSig);
     const paymentMethod = await this.paymentsService.registerSavedPaymentMethod(ownerUserId, dto, {
       source: this.extractConsentSource(req),
       userAgent: this.extractUserAgent(req),
@@ -126,8 +147,12 @@ export class PaymentsController {
   }
 
   @Get('methods')
-  async listSavedPaymentMethods(@Headers('x-user-id') userId: string | undefined) {
+  async listSavedPaymentMethods(
+    @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-id-sig') userIdSig: string | undefined,
+  ) {
     const ownerUserId = this.requireUserId(userId);
+    this.validateUserIdSignature(userId, userIdSig);
     const paymentMethods = await this.paymentsService.listSavedPaymentMethods(ownerUserId);
     return {
       paymentMethods: paymentMethods.map((paymentMethod) =>
@@ -139,9 +164,11 @@ export class PaymentsController {
   @Patch('methods/:id/default')
   async setDefaultSavedPaymentMethod(
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-id-sig') userIdSig: string | undefined,
     @Param() params: SetDefaultSavedPaymentMethodDto,
   ) {
     const ownerUserId = this.requireUserId(userId);
+    this.validateUserIdSignature(userId, userIdSig);
     const paymentMethod = await this.paymentsService.setDefaultSavedPaymentMethod(
       ownerUserId,
       params.id,
@@ -153,9 +180,11 @@ export class PaymentsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteSavedPaymentMethod(
     @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-id-sig') userIdSig: string | undefined,
     @Param() params: SetDefaultSavedPaymentMethodDto,
   ): Promise<void> {
     const ownerUserId = this.requireUserId(userId);
+    this.validateUserIdSignature(userId, userIdSig);
     await this.paymentsService.deleteSavedPaymentMethod(ownerUserId, params.id);
   }
 
@@ -191,12 +220,18 @@ export class PaymentsController {
    * Requires X-User-Id header; returns 403 if the requesting user does not own the payment.
    */
   @Get(':id')
-  async findOne(@Param('id') id: string, @Headers('x-user-id') userId: string | undefined) {
+  async findOne(
+    @Param('id') id: string,
+    @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-user-id-sig') userIdSig: string | undefined,
+  ) {
     if (!userId) {
       throw new UnauthorizedException({
         error: { code: 'UNAUTHENTICATED', message: 'Authentication required' },
       });
     }
+
+    this.validateUserIdSignature(userId, userIdSig);
 
     const payment = await this.paymentsService.findById(id);
 

@@ -84,6 +84,12 @@
         <artifactId>lz4-java</artifactId>
         <version>1.10.1</version>
       </dependency>
+      <!-- CVE-2026-35554: kafka-clients DoS vulnerability -->
+      <dependency>
+        <groupId>org.apache.kafka</groupId>
+        <artifactId>kafka-clients</artifactId>
+        <version>4.1.2</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 
@@ -219,6 +225,14 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-kafka-test</artifactId>
       <scope>test</scope>
+    </dependency>
+    <!-- CVE-2026-35554: kafka-clients test artifact override for fixed version -->
+    <dependency>
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-clients</artifactId>
+      <version>4.1.2</version>
+      <scope>test</scope>
+      <classifier>test</classifier>
     </dependency>
     <dependency>
       <groupId>org.testcontainers</groupId>

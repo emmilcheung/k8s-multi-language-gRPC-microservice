@@ -5,6 +5,7 @@ import { Kafka, Consumer, EachMessagePayload, KafkaMessage, Producer } from 'kaf
 import * as net from 'net';
 import { PaymentsService } from '../modules/payments/payments.service';
 import { withKafkaConsumerSpan, withKafkaProducerSpan } from './trace-context';
+import { buildKafkaClientOptions, getKafkaHostAndPort } from './kafka.config';
 
 /** Shape of the CloudEvents envelope we expect from order-service. */
 interface OrderCreatedEvent {
@@ -53,14 +54,7 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const brokers = this.config.getOrThrow<string>('KAFKA_BROKERS').split(',');
-    const kafka = new Kafka({
-      clientId: 'payment-service',
-      brokers,
-      connectionTimeout: 3000,
-      requestTimeout: 5000,
-      retry: { retries: 3, initialRetryTime: 1000 },
-    });
+    const kafka = new Kafka(buildKafkaClientOptions(this.config, 'payment-service'));
 
     this.consumer = kafka.consumer({ groupId: 'payment-service' });
     this.producer = kafka.producer();
@@ -127,9 +121,7 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
    * time and throws an uncatchable error after retry exhaustion.
    */
   private isBrokerReachable(): Promise<boolean> {
-    const brokers = this.config.getOrThrow<string>('KAFKA_BROKERS').split(',');
-    const [host, portStr] = brokers[0].split(':');
-    const port = parseInt(portStr ?? '9092', 10);
+    const { host, port } = getKafkaHostAndPort(this.config);
     return new Promise((resolve) => {
       const socket = new net.Socket();
       const done = (result: boolean) => {

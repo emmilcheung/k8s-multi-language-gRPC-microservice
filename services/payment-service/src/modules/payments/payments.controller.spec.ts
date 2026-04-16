@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
+import { UserIdSignatureValidator } from '../../common/security/user-id-signature.validator';
 import { PAYMENT_STATUS } from '../../database/schema';
 import type { Payment, SavedPaymentMethod } from '../../database/schema';
 
@@ -88,12 +89,15 @@ describe('PaymentsController.charge', () => {
 
   beforeEach(() => {
     service = makeService();
-    controller = new PaymentsController(service as unknown as PaymentsService);
+    const validator = {
+      isValidSignature: vi.fn().mockReturnValue(true),
+    } as unknown as UserIdSignatureValidator;
+    controller = new PaymentsController(service as unknown as PaymentsService, validator);
   });
 
   it('should throw BadRequestException when X-User-Id header is missing', async () => {
     await expect(
-      controller.charge(undefined, { orderId: 'order-1', token: 'pm_x' }),
+      controller.charge(undefined, undefined, { orderId: 'order-1', token: 'pm_x' }),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -101,7 +105,7 @@ describe('PaymentsController.charge', () => {
     const payment = makePayment();
     service.charge.mockResolvedValue(payment);
 
-    const result = await controller.charge('user-1', {
+    const result = await controller.charge('user-1', 'valid-sig', {
       orderId: 'order-1',
       token: 'pm_x',
     });
@@ -116,7 +120,7 @@ describe('PaymentsController.charge', () => {
     service.charge.mockRejectedValue(new InternalServerErrorException('fail'));
 
     await expect(
-      controller.charge('user-1', { orderId: 'order-1', token: 'pm_bad' }),
+      controller.charge('user-1', 'valid-sig', { orderId: 'order-1', token: 'pm_bad' }),
     ).rejects.toThrow(InternalServerErrorException);
   });
 });
@@ -127,19 +131,22 @@ describe('PaymentsController.findOne', () => {
 
   beforeEach(() => {
     service = makeService();
-    controller = new PaymentsController(service as unknown as PaymentsService);
+    const validator = {
+      isValidSignature: vi.fn().mockReturnValue(true),
+    } as unknown as UserIdSignatureValidator;
+    controller = new PaymentsController(service as unknown as PaymentsService, validator);
   });
 
   it('should return payment when authenticated owner requests it', async () => {
     const payment = makePayment({ userId: 'user-uuid-1' });
     service.findById.mockResolvedValue(payment);
 
-    const result = await controller.findOne('pay-uuid-1', 'user-uuid-1');
+    const result = await controller.findOne('pay-uuid-1', 'user-uuid-1', 'valid-sig');
     expect(result).toEqual({ payment });
   });
 
   it('should throw UnauthorizedException when X-User-Id header is missing', async () => {
-    await expect(controller.findOne('pay-uuid-1', undefined)).rejects.toThrow(
+    await expect(controller.findOne('pay-uuid-1', undefined, undefined)).rejects.toThrow(
       UnauthorizedException,
     );
     expect(service.findById).not.toHaveBeenCalled();
@@ -148,14 +155,16 @@ describe('PaymentsController.findOne', () => {
   it('should throw NotFoundException when payment does not exist', async () => {
     service.findById.mockResolvedValue(null);
 
-    await expect(controller.findOne('bad-id', 'user-uuid-1')).rejects.toThrow(NotFoundException);
+    await expect(controller.findOne('bad-id', 'user-uuid-1', 'valid-sig')).rejects.toThrow(
+      NotFoundException,
+    );
   });
 
   it('should throw ForbiddenException when user does not own the payment', async () => {
     const payment = makePayment({ userId: 'owner-uuid' });
     service.findById.mockResolvedValue(payment);
 
-    await expect(controller.findOne('pay-uuid-1', 'attacker-uuid')).rejects.toThrow(
+    await expect(controller.findOne('pay-uuid-1', 'attacker-uuid', 'valid-sig')).rejects.toThrow(
       ForbiddenException,
     );
   });
@@ -167,7 +176,10 @@ describe('PaymentsController saved payment methods', () => {
 
   beforeEach(() => {
     service = makeService();
-    controller = new PaymentsController(service as unknown as PaymentsService);
+    const validator = {
+      isValidSignature: vi.fn().mockReturnValue(true),
+    } as unknown as UserIdSignatureValidator;
+    controller = new PaymentsController(service as unknown as PaymentsService, validator);
   });
 
   it('should register a saved payment method when user id is present', async () => {
@@ -185,6 +197,7 @@ describe('PaymentsController saved payment methods', () => {
 
     const result = await controller.registerSavedPaymentMethod(
       'user-1',
+      'valid-sig',
       {
         providerPaymentMethodId: 'pm_mock_card_4242',
         setAsDefault: true,
@@ -225,6 +238,7 @@ describe('PaymentsController saved payment methods', () => {
     await expect(
       controller.registerSavedPaymentMethod(
         undefined,
+        undefined,
         {
           providerPaymentMethodId: 'pm_mock_card_1111',
           consentAccepted: true,
@@ -240,7 +254,7 @@ describe('PaymentsController saved payment methods', () => {
       makeSavedMethod({ id: 'method-1', isDefault: false, last4: '1111' }),
     ]);
 
-    const result = await controller.listSavedPaymentMethods('user-1');
+    const result = await controller.listSavedPaymentMethods('user-1', 'valid-sig');
     expect(service.listSavedPaymentMethods).toHaveBeenCalledWith('user-1');
     expect(result).toEqual({
       paymentMethods: [
@@ -262,7 +276,7 @@ describe('PaymentsController saved payment methods', () => {
       makeSavedMethod({ id: 'method-2', isDefault: true, last4: '2222' }),
     );
 
-    const result = await controller.setDefaultSavedPaymentMethod('user-1', {
+    const result = await controller.setDefaultSavedPaymentMethod('user-1', 'valid-sig', {
       id: 'method-2',
     });
 
@@ -284,7 +298,7 @@ describe('PaymentsController saved payment methods', () => {
     service.deleteSavedPaymentMethod.mockResolvedValue(undefined);
 
     await expect(
-      controller.deleteSavedPaymentMethod('user-1', { id: 'method-3' }),
+      controller.deleteSavedPaymentMethod('user-1', 'valid-sig', { id: 'method-3' }),
     ).resolves.toBeUndefined();
 
     expect(service.deleteSavedPaymentMethod).toHaveBeenCalledWith('user-1', 'method-3');

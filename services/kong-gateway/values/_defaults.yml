@@ -6,7 +6,7 @@
 #
 # RSA_PUBLIC_KEY is NOT defined here — it must always come from the environment
 # variable KONG_RSA_PUBLIC_KEY passed to build.sh at render time.
-
+# SIGNING_KEY is also injected via environment (KONG_SIGNING_KEY) at render time.
 # ── Service upstream hostnames (host:port) ─────────────────────────────────────
 HOST_AUTH: auth-service:3000
 HOST_TICKETS: ticket-service:3001

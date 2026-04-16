@@ -5,19 +5,21 @@ import (
 	"net/http"
 
 	"github.com/acme/venue-service/internal/repository"
+	"github.com/acme/venue-service/internal/security"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
 
 // VenueHandler handles venue CRUD endpoints.
 type VenueHandler struct {
-	repo repository.VenueRepository
-	log  *zap.Logger
+	repo      repository.VenueRepository
+	validator *security.UserIDSignatureValidator
+	log       *zap.Logger
 }
 
 // NewVenueHandler creates a new VenueHandler.
-func NewVenueHandler(repo repository.VenueRepository, log *zap.Logger) *VenueHandler {
-	return &VenueHandler{repo: repo, log: log}
+func NewVenueHandler(repo repository.VenueRepository, validator *security.UserIDSignatureValidator, log *zap.Logger) *VenueHandler {
+	return &VenueHandler{repo: repo, validator: validator, log: log}
 }
 
 // RegisterRoutes attaches venue routes to the given Echo group.
@@ -46,10 +48,16 @@ type updateVenueRequest struct {
 
 // Create handles POST /api/venues.
 // The organizer identity is derived from the Kong-injected X-User-Id header.
+// X-User-Id-Sig must be valid; missing or invalid signatures result in 401.
 func (h *VenueHandler) Create(c echo.Context) error {
 	organizerID := c.Request().Header.Get("X-User-Id")
 	if organizerID == "" {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
 	var req createVenueRequest
@@ -105,10 +113,16 @@ func (h *VenueHandler) Get(c echo.Context) error {
 
 // List handles GET /api/venues.
 // Returns all venues for the requesting organizer (X-User-Id).
+// X-User-Id-Sig must be valid; missing or invalid signatures result in 401.
 func (h *VenueHandler) List(c echo.Context) error {
 	organizerID := c.Request().Header.Get("X-User-Id")
 	if organizerID == "" {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
 	venues, err := h.repo.ListByOrganizer(c.Request().Context(), organizerID)
@@ -127,10 +141,16 @@ func (h *VenueHandler) List(c echo.Context) error {
 
 // Update handles PUT /api/venues/:id.
 // Only the owning organizer may update the venue (enforced by repo WHERE clause).
+// X-User-Id-Sig must be valid; missing or invalid signatures result in 401.
 func (h *VenueHandler) Update(c echo.Context) error {
 	organizerID := c.Request().Header.Get("X-User-Id")
 	if organizerID == "" {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(organizerID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
 	id := c.Param("id")

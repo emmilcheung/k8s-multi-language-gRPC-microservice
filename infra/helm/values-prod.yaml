@@ -1,0 +1,41 @@
+# ── Production overrides (Issue 46 Phase 3) ─────────────────────────────────
+# Production must use external managed Kafka with per-service SASL credentials.
+# Do not deploy the in-cluster PLAINTEXT broker in this environment.
+
+auth-service:
+  networkPolicy:
+    enabled: true
+
+ticket-service:
+  networkPolicy:
+    enabled: true
+
+order-service:
+  networkPolicy:
+    enabled: true
+
+payment-service:
+  networkPolicy:
+    enabled: true
+
+expiration-service:
+  networkPolicy:
+    enabled: true
+
+client:
+  networkPolicy:
+    enabled: true
+
+venue-service:
+  networkPolicy:
+    enabled: true
+
+user-service:
+  networkPolicy:
+    enabled: true
+
+kafka:
+  enabled: false
+
+cp-kafka:
+  enabled: false

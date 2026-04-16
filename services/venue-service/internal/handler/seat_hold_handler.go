@@ -7,6 +7,7 @@ import (
 
 	"github.com/acme/venue-service/internal/hold"
 	"github.com/acme/venue-service/internal/repository"
+	"github.com/acme/venue-service/internal/security"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
@@ -20,13 +21,14 @@ type HoldManager interface {
 
 // SeatHoldHandler handles seat hold, release, and availability endpoints.
 type SeatHoldHandler struct {
-	holdMgr HoldManager
-	log     *zap.Logger
+	holdMgr   HoldManager
+	validator *security.UserIDSignatureValidator
+	log       *zap.Logger
 }
 
 // NewSeatHoldHandler creates a new SeatHoldHandler.
-func NewSeatHoldHandler(holdMgr HoldManager, log *zap.Logger) *SeatHoldHandler {
-	return &SeatHoldHandler{holdMgr: holdMgr, log: log}
+func NewSeatHoldHandler(holdMgr HoldManager, validator *security.UserIDSignatureValidator, log *zap.Logger) *SeatHoldHandler {
+	return &SeatHoldHandler{holdMgr: holdMgr, validator: validator, log: log}
 }
 
 // RegisterRoutes attaches hold/release/availability routes to the given plan group.
@@ -56,10 +58,16 @@ type releaseRequest struct {
 //
 // The userId is derived from the Kong-injected X-User-Id header.
 // Any client-supplied userId in the body is rejected per design decision D-08.
+// X-User-Id-Sig must be valid; missing or invalid signatures result in 401.
 func (h *SeatHoldHandler) HoldSeats(c echo.Context) error {
 	userID := c.Request().Header.Get("X-User-Id")
 	if userID == "" {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(userID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
 	planID := c.Param("planId")
@@ -91,6 +99,11 @@ func (h *SeatHoldHandler) ReleaseHold(c echo.Context) error {
 	userID := c.Request().Header.Get("X-User-Id")
 	if userID == "" {
 		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.validator.IsValidSignature(userID, signature) {
+		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
 	planID := c.Param("planId")

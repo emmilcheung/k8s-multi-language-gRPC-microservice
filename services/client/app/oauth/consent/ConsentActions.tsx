@@ -6,11 +6,9 @@ import { Loader2, CheckCircle, XCircle } from "lucide-react";
 
 interface ConsentActionsProps {
   requestId: string;
-  apiBase: string;
-  authCookie: string | undefined;
 }
 
-export function ConsentActions({ requestId, apiBase, authCookie }: ConsentActionsProps) {
+export function ConsentActions({ requestId }: ConsentActionsProps) {
   const [pending, setPending] = useState<"approve" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,13 +17,11 @@ export function ConsentActions({ requestId, apiBase, authCookie }: ConsentAction
     setError(null);
 
     try {
-      const res = await fetch(`${apiBase}/oauth/consent/${requestId}`, {
+      const res = await fetch(`/api/oauth/consent/${requestId}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(authCookie ? { Cookie: authCookie } : {}),
         },
-        credentials: "include",
         body: JSON.stringify({ approve }),
       });
 

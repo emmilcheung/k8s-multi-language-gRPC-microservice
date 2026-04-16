@@ -91,6 +91,7 @@ export function OrderPaymentForm({
 
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [pollingNotice, setPollingNotice] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [stripeReady, setStripeReady] = useState(false);
   const [stripeScriptReady, setStripeScriptReady] = useState(false);
@@ -180,6 +181,7 @@ export function OrderPaymentForm({
 
       const elements = stripe.elements();
       const cardElement = elements.create("card", {
+        hidePostalCode: true,
         style: {
           base: {
             fontSize: "14px",
@@ -241,10 +243,49 @@ export function OrderPaymentForm({
     return () => clearInterval(interval);
   }, [expiresAt]);
 
+  // Poll order status up to a reasonable timeout to confirm payment completion.
+  // If order reaches "complete" or "cancelled", we consider confirmation successful.
+  // If timeout is hit, we stop polling and show a clear message to the user.
+  const pollOrderStatus = async (maxWaitMs: number = 30000): Promise<boolean> => {
+    const pollIntervalMs = 1000;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitMs) {
+      try {
+        const res = await fetch(`/api/orders/${orderId}/status`);
+        if (!res.ok) {
+          // If fetch fails, continue polling (backend may be busy)
+          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+          continue;
+        }
+
+        const { order } = await res.json() as { order?: { status: string } };
+        if (!order) {
+          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+          continue;
+        }
+
+        // If order reached a terminal state, confirm success
+        if (order.status === "complete" || order.status === "cancelled") {
+          return true;
+        }
+
+        // Still processing, wait and retry
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      } catch {
+        // Network error, continue polling
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      }
+    }
+
+    return false; // Timeout reached
+  };
+
   const handlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsProcessing(true);
     setPaymentError(null);
+    setPollingNotice(null);
 
     try {
       let body: Record<string, string>;
@@ -293,7 +334,21 @@ export function OrderPaymentForm({
         return;
       }
 
-      router.refresh();
+      // Payment was accepted by the backend. Now poll order status
+      // to confirm order completion before refreshing the page.
+      const confirmed = await pollOrderStatus();
+
+      if (confirmed) {
+        // Order reached terminal state, refresh page to show updated state
+        router.refresh();
+      } else {
+        // Polling timed out, but payment was submitted successfully.
+        // Show a clear informational notice and let user know the page can be refreshed shortly.
+        setPollingNotice(
+          "Payment submitted successfully! The order is being processed. Please refresh the page in a moment to see the updated status."
+        );
+        setIsProcessing(false);
+      }
     } catch (err) {
       setPaymentError(err instanceof Error ? err.message : "An unexpected error occurred.");
       setIsProcessing(false);
@@ -366,6 +421,17 @@ export function OrderPaymentForm({
         </div>
       )}
 
+      {/* Polling notice (informational, not an error) */}
+      {pollingNotice && (
+        <div
+          role="status"
+          className="flex items-start gap-2.5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 dark:text-amber-200 dark:bg-amber-950/30 dark:border-amber-900/50"
+        >
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>{pollingNotice}</span>
+        </div>
+      )}
+
       {/* ── Saved payment methods ── */}
       {hasSavedMethods && !showNewCard && (
         <div className="flex flex-col gap-2">
@@ -415,6 +481,7 @@ export function OrderPaymentForm({
             onClick={() => {
               setShowNewCard(true);
               setSelectedMethodId(null);
+              setPollingNotice(null);
             }}
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mt-1 self-start"
           >
@@ -437,6 +504,7 @@ export function OrderPaymentForm({
                 onClick={() => {
                   setShowNewCard(false);
                   setSelectedMethodId(defaultMethod?.id ?? savedPaymentMethods[0]?.id ?? null);
+                  setPollingNotice(null);
                 }}
                 className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
               >

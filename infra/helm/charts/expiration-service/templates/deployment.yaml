@@ -23,6 +23,11 @@ spec:
         {{- include "expiration-service.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "expiration-service.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        runAsNonRoot: true
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 30 }}
       {{- if .Values.podAntiAffinity.enabled }}
       affinity:
@@ -44,14 +49,27 @@ spec:
             matchLabels:
               {{- include "expiration-service.selectorLabels" . | nindent 14 }}
       {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
       containers:
         - name: {{ .Chart.Name }}
           image: {{ include "expiration-service.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy | default .Values.global.imagePullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
               protocol: TCP
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           env:
             {{- range $key, $value := .Values.env }}
             - name: {{ $key }}

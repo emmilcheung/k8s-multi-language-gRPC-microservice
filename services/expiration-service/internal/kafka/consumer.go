@@ -29,10 +29,10 @@ type Consumer struct {
 
 // NewConsumer creates a Kafka consumer subscribed to TopicOrderCreated.
 // producer is used to route failed messages to the DLQ after retries are exhausted.
-func NewConsumer(brokers []string, groupID string, producer *Producer, log *zap.Logger) (*Consumer, error) {
+func NewConsumer(brokers []string, groupID string, producer *Producer, log *zap.Logger, security ...SecurityConfig) (*Consumer, error) {
 	brokersStr := joinBrokers(brokers)
 
-	c, err := confluent.NewConsumer(&confluent.ConfigMap{
+	configMap := &confluent.ConfigMap{
 		"bootstrap.servers":       brokersStr,
 		"group.id":                groupID,
 		"auto.offset.reset":       "earliest",
@@ -41,7 +41,12 @@ func NewConsumer(brokers []string, groupID string, producer *Producer, log *zap.
 		"max.poll.interval.ms":    300000,
 		"fetch.wait.max.ms":       500,
 		"socket.keepalive.enable": true,
-	})
+	}
+	if err := firstSecurityConfig(security).Apply(configMap); err != nil {
+		return nil, fmt.Errorf("configure kafka consumer security: %w", err)
+	}
+
+	c, err := confluent.NewConsumer(configMap)
 	if err != nil {
 		return nil, fmt.Errorf("create kafka consumer: %w", err)
 	}

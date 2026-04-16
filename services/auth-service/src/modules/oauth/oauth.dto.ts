@@ -109,7 +109,7 @@ export class RegisterClientBody {
 
   @IsArray()
   @ArrayNotEmpty()
-  @IsUrl({}, { each: true })
+  @IsUrl({ require_tld: false }, { each: true })
   redirect_uris!: string[];
 
   @IsString()

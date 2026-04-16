@@ -19,6 +19,7 @@ func TestLoad_ValidConfig(t *testing.T) {
 	assert.Equal(t, 3001, cfg.Port)
 	assert.Equal(t, "mongodb://localhost:27017", cfg.MongoURI)
 	assert.Equal(t, []string{"localhost:9092"}, cfg.KafkaBrokers)
+	assert.Equal(t, "PLAINTEXT", cfg.KafkaSecurityProtocol)
 	assert.Equal(t, "", cfg.RedisURL)
 }
 
@@ -81,4 +82,34 @@ func TestLoad_RedisURLOptional(t *testing.T) {
 	cfg, err := Load()
 	require.NoError(t, err)
 	assert.Equal(t, "redis://localhost:6379", cfg.RedisURL)
+}
+
+func TestLoad_KafkaSASLRequiresCredentials(t *testing.T) {
+	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	t.Setenv("KAFKA_SECURITY_PROTOCOL", "SASL_SSL")
+	t.Setenv("KAFKA_SASL_MECHANISM", "SCRAM-SHA-256")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "KAFKA_SASL_USERNAME")
+	assert.Contains(t, err.Error(), "KAFKA_SASL_PASSWORD")
+}
+
+func TestLoad_KafkaSASLConfig(t *testing.T) {
+	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	t.Setenv("KAFKA_SECURITY_PROTOCOL", "SASL_SSL")
+	t.Setenv("KAFKA_SASL_MECHANISM", "SCRAM-SHA-256")
+	t.Setenv("KAFKA_SASL_USERNAME", "ticket-service")
+	t.Setenv("KAFKA_SASL_PASSWORD", "secret")
+	t.Setenv("KAFKA_SSL_CA_LOCATION", "/etc/ssl/certs/ca.pem")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "SASL_SSL", cfg.KafkaSecurityProtocol)
+	assert.Equal(t, "SCRAM-SHA-256", cfg.KafkaSASLMechanism)
+	assert.Equal(t, "ticket-service", cfg.KafkaSASLUsername)
+	assert.Equal(t, "secret", cfg.KafkaSASLPassword)
+	assert.Equal(t, "/etc/ssl/certs/ca.pem", cfg.KafkaSSLCALocation)
 }

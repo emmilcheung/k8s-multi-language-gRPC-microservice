@@ -8,6 +8,13 @@
       "when": 1700000000000,
       "tag": "001_init_users",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1700000001000,
+      "tag": "002_add_roles",
+      "breakpoints": true
     }
   ]
 }

@@ -54,6 +54,7 @@ func TestLoad_ShouldSucceed_WhenAllRequiredEnvVarsSet(t *testing.T) {
 	assert.Equal(t, 50052, cfg.GrpcPort)
 	assert.Equal(t, "debug", cfg.LogLevel)
 	assert.Equal(t, []string{"localhost:9092", "localhost:9093"}, cfg.KafkaBrokers)
+	assert.Equal(t, "PLAINTEXT", cfg.KafkaSecurityProtocol)
 	assert.Equal(t, "redis://localhost:6379", cfg.RedisURL)
 }
 
@@ -74,4 +75,36 @@ func TestLoad_ShouldUseDefaults_WhenOptionalEnvVarsAbsent(t *testing.T) {
 	assert.Equal(t, 50052, cfg.GrpcPort)
 	assert.Equal(t, "info", cfg.LogLevel)
 	assert.Equal(t, "", cfg.RedisURL)
+}
+
+func TestLoad_ShouldReturnError_WhenKafkaSASLCredentialsMissing(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/venue_db")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	t.Setenv("TICKET_SERVICE_URL", "localhost:50051")
+	t.Setenv("KAFKA_SECURITY_PROTOCOL", "SASL_SSL")
+	t.Setenv("KAFKA_SASL_MECHANISM", "SCRAM-SHA-256")
+
+	_, err := config.Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "KAFKA_SASL_USERNAME")
+	assert.Contains(t, err.Error(), "KAFKA_SASL_PASSWORD")
+}
+
+func TestLoad_ShouldLoadKafkaSASLConfig(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/venue_db")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	t.Setenv("TICKET_SERVICE_URL", "localhost:50051")
+	t.Setenv("KAFKA_SECURITY_PROTOCOL", "SASL_SSL")
+	t.Setenv("KAFKA_SASL_MECHANISM", "SCRAM-SHA-256")
+	t.Setenv("KAFKA_SASL_USERNAME", "venue-service")
+	t.Setenv("KAFKA_SASL_PASSWORD", "secret")
+	t.Setenv("KAFKA_SSL_CA_LOCATION", "/etc/ssl/certs/ca.pem")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, "SASL_SSL", cfg.KafkaSecurityProtocol)
+	assert.Equal(t, "SCRAM-SHA-256", cfg.KafkaSASLMechanism)
+	assert.Equal(t, "venue-service", cfg.KafkaSASLUsername)
+	assert.Equal(t, "secret", cfg.KafkaSASLPassword)
+	assert.Equal(t, "/etc/ssl/certs/ca.pem", cfg.KafkaSSLCALocation)
 }

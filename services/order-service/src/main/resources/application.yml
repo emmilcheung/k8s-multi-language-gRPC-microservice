@@ -30,6 +30,11 @@ spring:
 
   kafka:
     bootstrap-servers: ${KAFKA_BROKERS}
+    properties:
+      security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+      sasl.mechanism: ${KAFKA_SASL_MECHANISM:}
+      sasl.jaas.config: "org.apache.kafka.common.security.scram.ScramLoginModule required username='${KAFKA_SASL_USERNAME:}' password='${KAFKA_SASL_PASSWORD:}';"
+      ssl.endpoint.identification.algorithm: ${KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM:https}
     admin:
       fail-fast: false        # do not crash context if broker is unreachable at startup
       auto-create: false      # do not attempt to create topics (KafkaAdmin blocks on broker connect)

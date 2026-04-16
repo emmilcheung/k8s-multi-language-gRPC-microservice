@@ -79,9 +79,10 @@ _read_secret() {
 RSA_PRIVATE_KEY="$(_read_secret RSA_PRIVATE_KEY)"
 STRIPE_SECRET_KEY="$(_read_secret STRIPE_SECRET_KEY)"
 KONG_RSA_PUBLIC_KEY="$(_read_secret KONG_RSA_PUBLIC_KEY)"
+X_USER_ID_SIGNING_KEY="$(_read_secret X_USER_ID_SIGNING_KEY)"
 
 # Validate required secrets are present and non-empty
-for var in RSA_PRIVATE_KEY STRIPE_SECRET_KEY KONG_RSA_PUBLIC_KEY; do
+for var in RSA_PRIVATE_KEY STRIPE_SECRET_KEY KONG_RSA_PUBLIC_KEY X_USER_ID_SIGNING_KEY; do
   val="${!var}"
   if [[ -z "${val}" || "${val}" == "REPLACE_ME"* ]]; then
     error "${var} is not set in infra/local/secrets.env. Please fill in the real value."
@@ -201,13 +202,15 @@ apply_secret auth-service-secrets \
   --from-literal=JWT_EXPIRY="15m" \
   --from-literal=COOKIE_DOMAIN="localhost" \
   --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092" \
-  --from-literal=REDIS_URL="redis://${REDIS_HOST}:6379"
+  --from-literal=REDIS_URL="redis://${REDIS_HOST}:6379" \
+  --from-literal=X_USER_ID_SIGNING_KEY="${X_USER_ID_SIGNING_KEY}"
 
 # ticket-service-secrets
 apply_secret ticket-service-secrets \
   --from-literal=MONGO_URI="mongodb://mongo_user:mongo-local-secret@${MONGO_HOST}:27017/tickets?authSource=admin" \
   --from-literal=MONGO_DB="tickets" \
-  --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092"
+  --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092" \
+  --from-literal=X_USER_ID_SIGNING_KEY="${X_USER_ID_SIGNING_KEY}"
 
 # order-service-secrets
 apply_secret order-service-secrets \
@@ -217,14 +220,16 @@ apply_secret order-service-secrets \
   --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092" \
   --from-literal=TICKET_SERVICE_GRPC_HOST="ticketing-ticket-service.ticketing.svc.cluster.local" \
   --from-literal=TICKET_SERVICE_GRPC_PORT="50051" \
-  --from-literal=ORDER_EXPIRATION_MINUTES="15"
+  --from-literal=ORDER_EXPIRATION_MINUTES="15" \
+  --from-literal=X_USER_ID_SIGNING_KEY="${X_USER_ID_SIGNING_KEY}"
 
 # payment-service-secrets
 apply_secret payment-service-secrets \
   --from-literal=DATABASE_URL="postgresql://payments_user:${PG_PAYMENTS_PASS}@${PG_PAYMENTS_HOST}:5432/payments_db" \
   --from-literal=STRIPE_SECRET_KEY="${STRIPE_SECRET_KEY}" \
   --from-literal=STRIPE_WEBHOOK_SECRET="whsec_test_placeholder" \
-  --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092"
+  --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092" \
+  --from-literal=X_USER_ID_SIGNING_KEY="${X_USER_ID_SIGNING_KEY}"
 
 # expiration-service-secrets
 apply_secret expiration-service-secrets \
@@ -236,7 +241,8 @@ apply_secret venue-service-secrets \
   --from-literal=DATABASE_URL="postgres://venue_user:${PG_VENUE_PASS}@${PG_VENUE_HOST}:5432/venue_db?sslmode=disable" \
   --from-literal=REDIS_URL="redis://${REDIS_HOST}:6379" \
   --from-literal=TICKET_SERVICE_URL="ticketing-ticket-service.ticketing.svc.cluster.local:50051" \
-  --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092"
+  --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092" \
+  --from-literal=X_USER_ID_SIGNING_KEY="${X_USER_ID_SIGNING_KEY}"
 
 # user-service-secrets
 apply_secret user-service-secrets \
@@ -251,6 +257,7 @@ info "All secrets created."
 step "5.5/8  Rendering Kong config for minikube..."
 RENDERED_KONG_YML="${REPO_ROOT}/services/kong-gateway/kong.yml"
 KONG_RSA_PUBLIC_KEY="${KONG_RSA_PUBLIC_KEY}" \
+KONG_SIGNING_KEY="${X_USER_ID_SIGNING_KEY}" \
   bash "${GATEWAY_DIR}/scripts/build.sh" minikube "${RENDERED_KONG_YML}"
 info "Kong config rendered: ${RENDERED_KONG_YML}"
 

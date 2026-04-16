@@ -9,6 +9,7 @@ import * as net from 'net';
 import { DRIZZLE_DB, type DrizzleDB } from '../../database/database.module';
 import { outbox } from '../../database/schema';
 import { withKafkaProducerSpan } from '../../kafka/trace-context';
+import { buildKafkaClientOptions, getKafkaHostAndPort } from '../../kafka/kafka.config';
 
 const RELAY_BATCH_SIZE = 50;
 
@@ -45,13 +46,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const brokers = this.config.getOrThrow<string>('KAFKA_BROKERS').split(',');
-    const kafka = new Kafka({
-      clientId: 'payment-service-outbox-relay',
-      brokers,
-      connectionTimeout: 3000,
-      requestTimeout: 5000,
-    });
+    const kafka = new Kafka(buildKafkaClientOptions(this.config, 'payment-service-outbox-relay'));
 
     this.producer = kafka.producer({
       // acks: -1 (all) is the KafkaJS default for producers; ensure idempotency
@@ -161,9 +156,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   }
 
   private isBrokerReachable(): Promise<boolean> {
-    const brokers = this.config.getOrThrow<string>('KAFKA_BROKERS').split(',');
-    const [host, portStr] = brokers[0].split(':');
-    const port = parseInt(portStr ?? '9092', 10);
+    const { host, port } = getKafkaHostAndPort(this.config);
     return new Promise((resolve) => {
       const socket = new net.Socket();
       const done = (result: boolean) => {

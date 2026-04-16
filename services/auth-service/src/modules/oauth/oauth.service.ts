@@ -434,8 +434,11 @@ export class OAuthService {
     );
   }
 
-  /** GET /oauth/consent/:requestId — return pending consent details for the UI */
-  async getConsentRequest(requestId: string): Promise<ConsentSummary> {
+  /** GET /oauth/consent/:requestId — return pending consent details for the UI, verifying the user owns it */
+  async getConsentRequest(
+    requestId: string,
+    userId: string,
+  ): Promise<ConsentSummary> {
     const record = await this.consentStore.getConsent(requestId);
     if (!record) {
       throw new NotFoundException({
@@ -444,6 +447,15 @@ export class OAuthService {
           'Consent request not found or expired. Please restart the authorization flow.',
       });
     }
+
+    // User must be the one who initiated the authorize request
+    if (record.userId !== userId) {
+      throw new ForbiddenException({
+        error: 'user_mismatch',
+        error_description: 'You do not own this consent request.',
+      });
+    }
+
     return {
       requestId: record.requestId,
       clientId: record.clientId,

@@ -1,8 +1,22 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { OrderPaymentForm } from "@/components/order-payment-form";
 
+// Module-level mock for router.refresh so we can assert it from tests
+const routerRefreshMock = vi.fn();
+
+// Mock next/navigation
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    refresh: routerRefreshMock,
+  }),
+}));
+
 describe("OrderPaymentForm", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   afterEach(() => {
     delete (window as Window & { Stripe?: unknown }).Stripe;
     vi.restoreAllMocks();
@@ -146,6 +160,226 @@ describe("OrderPaymentForm", () => {
       } else {
         process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = originalPublishableKey;
       }
+    }
+  });
+
+  it("displays payment error when submit-payment returns error", async () => {
+    const originalPublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_mock";
+
+    let changeHandler: ((event: { error?: { message?: string }; complete: boolean }) => void) | null = null;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { message: "Payment declined" } }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+      )
+    );
+
+    Object.defineProperty(window, "Stripe", {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => ({
+        elements: () => ({
+          create: () => ({
+            mount(container: HTMLElement | string) {
+              const target =
+                typeof container === "string"
+                  ? document.querySelector(container)
+                  : container;
+              if (target instanceof HTMLElement) {
+                target.setAttribute("data-stripe-mock", "mounted");
+              }
+            },
+            unmount() {},
+            on(_event: string, handler: (event: { error?: { message?: string }; complete: boolean }) => void) {
+              changeHandler = handler;
+            },
+            off() {},
+          }),
+        }),
+        createPaymentMethod: vi.fn().mockResolvedValue({
+          paymentMethod: { id: "pm_test_123" },
+        }),
+      })),
+    });
+
+    const { act } = await import("@testing-library/react");
+
+    render(
+      <OrderPaymentForm
+        orderId="ord-1"
+        amount={25.5}
+        expiresAt="2099-12-31T23:59:59.000Z"
+      />
+    );
+
+    try {
+      // Wait for Stripe to mount
+      await waitFor(() => {
+        expect(screen.queryByText(/loading payment form/i)).not.toBeInTheDocument();
+      });
+
+      // Simulate card completion
+      await act(async () => {
+        changeHandler?.({ complete: true });
+      });
+
+      // Click Pay Now button
+      const payButton = screen.getByRole("button", { name: /pay now/i });
+
+      await act(async () => {
+        payButton.click();
+      });
+
+      // Verify error is displayed
+      await waitFor(() => {
+        expect(screen.getByText("Payment declined")).toBeInTheDocument();
+      });
+
+      // Button should not be in processing state anymore
+      expect(screen.getByRole("button", { name: /pay now/i })).toBeEnabled();
+    } finally {
+      if (originalPublishableKey === undefined) {
+        delete process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+      } else {
+        process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = originalPublishableKey;
+      }
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("polls order status after successful payment submission and calls router.refresh", async () => {
+    const originalPublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_mock";
+
+    let changeHandler: ((event: { error?: { message?: string }; complete: boolean }) => void) | null = null;
+    let statusPollCount = 0;
+
+    const fetchSpy = vi.fn((url: string) => {
+      // First call: submit-payment
+      if (url === "/api/submit-payment") {
+        return Promise.resolve(
+          new Response(JSON.stringify({}), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
+      }
+
+      // Subsequent calls: status endpoint
+      if (url === "/api/orders/ord-1/status") {
+        statusPollCount++;
+        // Return "processing" on first poll, then "complete" on second
+        const orderStatus = statusPollCount === 1 ? "processing" : "complete";
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              order: { status: orderStatus },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          )
+        );
+      }
+
+      return Promise.resolve(
+        new Response("Not Found", { status: 404 })
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchSpy);
+
+    Object.defineProperty(window, "Stripe", {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => ({
+        elements: () => ({
+          create: () => ({
+            mount(container: HTMLElement | string) {
+              const target =
+                typeof container === "string"
+                  ? document.querySelector(container)
+                  : container;
+              if (target instanceof HTMLElement) {
+                target.setAttribute("data-stripe-mock", "mounted");
+              }
+            },
+            unmount() {},
+            on(_event: string, handler: (event: { error?: { message?: string }; complete: boolean }) => void) {
+              changeHandler = handler;
+            },
+            off() {},
+          }),
+        }),
+        createPaymentMethod: vi.fn().mockResolvedValue({
+          paymentMethod: { id: "pm_test_123" },
+        }),
+      })),
+    });
+
+    const { act } = await import("@testing-library/react");
+
+    render(
+      <OrderPaymentForm
+        orderId="ord-1"
+        amount={25.5}
+        expiresAt="2099-12-31T23:59:59.000Z"
+      />
+    );
+
+    try {
+      // Wait for Stripe to mount
+      await waitFor(() => {
+        expect(screen.queryByText(/loading payment form/i)).not.toBeInTheDocument();
+      });
+
+      // Simulate card completion
+      await act(async () => {
+        changeHandler?.({ complete: true });
+      });
+
+      // Click Pay Now button
+      const payButton = screen.getByRole("button", { name: /pay now/i });
+
+      await act(async () => {
+        payButton.click();
+      });
+
+      // Wait for the submit-payment call
+      await waitFor(() => {
+        const submitPaymentCalls = fetchSpy.mock.calls.filter(
+          (call) => call[0] === "/api/submit-payment"
+        );
+        expect(submitPaymentCalls.length).toBeGreaterThan(0);
+      });
+
+      // Wait for polling to complete (verify we polled at least twice)
+      await waitFor(() => {
+        expect(statusPollCount).toBeGreaterThanOrEqual(2);
+      }, { timeout: 5000 });
+
+      // Verify router.refresh was called when order status became complete
+      expect(routerRefreshMock).toHaveBeenCalled();
+
+      // Verify no error is displayed
+      expect(screen.queryByText(/Payment declined/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Payment failed/)).not.toBeInTheDocument();
+    } finally {
+      if (originalPublishableKey === undefined) {
+        delete process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+      } else {
+        process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = originalPublishableKey;
+      }
+      vi.restoreAllMocks();
     }
   });
 });

@@ -1,0 +1,41 @@
+# ── Staging overrides (Issue 46 Phase 3) ─────────────────────────────────────
+# Staging validates full NetworkPolicy coverage and external secure Kafka before
+# production rollout. Supply KAFKA_* SASL secrets per service.
+
+auth-service:
+  networkPolicy:
+    enabled: true
+
+ticket-service:
+  networkPolicy:
+    enabled: true
+
+order-service:
+  networkPolicy:
+    enabled: true
+
+payment-service:
+  networkPolicy:
+    enabled: true
+
+expiration-service:
+  networkPolicy:
+    enabled: true
+
+client:
+  networkPolicy:
+    enabled: true
+
+venue-service:
+  networkPolicy:
+    enabled: true
+
+user-service:
+  networkPolicy:
+    enabled: true
+
+kafka:
+  enabled: false
+
+cp-kafka:
+  enabled: false

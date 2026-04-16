@@ -12,6 +12,7 @@ import (
 	"github.com/acme/venue-service/internal/handler"
 	"github.com/acme/venue-service/internal/hold"
 	"github.com/acme/venue-service/internal/repository"
+	"github.com/acme/venue-service/internal/security"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -188,6 +189,10 @@ func jsonBody(t *testing.T, v interface{}) *bytes.Buffer {
 	return bytes.NewBuffer(b)
 }
 
+func newSignatureValidator() *security.UserIDSignatureValidator {
+	return security.NewUserIDSignatureValidator("")
+}
+
 // ── VenueHandler tests ────────────────────────────────────────────────────────
 
 func TestVenueHandler_Create_ShouldReturn201_WhenValidRequest(t *testing.T) {
@@ -197,7 +202,7 @@ func TestVenueHandler_Create_ShouldReturn201_WhenValidRequest(t *testing.T) {
 			return nil
 		},
 	}
-	h := handler.NewVenueHandler(repo, zap.NewNop())
+	h := handler.NewVenueHandler(repo, newSignatureValidator(), zap.NewNop())
 
 	e := newEcho()
 	body := jsonBody(t, map[string]interface{}{
@@ -221,7 +226,7 @@ func TestVenueHandler_Create_ShouldReturn201_WhenValidRequest(t *testing.T) {
 }
 
 func TestVenueHandler_Create_ShouldReturn401_WhenNoUserID(t *testing.T) {
-	h := handler.NewVenueHandler(&stubVenueRepo{}, zap.NewNop())
+	h := handler.NewVenueHandler(&stubVenueRepo{}, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/venues", jsonBody(t, map[string]interface{}{
@@ -236,7 +241,7 @@ func TestVenueHandler_Create_ShouldReturn401_WhenNoUserID(t *testing.T) {
 }
 
 func TestVenueHandler_Create_ShouldReturn422_WhenNameMissing(t *testing.T) {
-	h := handler.NewVenueHandler(&stubVenueRepo{}, zap.NewNop())
+	h := handler.NewVenueHandler(&stubVenueRepo{}, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/venues", jsonBody(t, map[string]interface{}{
@@ -257,7 +262,7 @@ func TestVenueHandler_Get_ShouldReturn404_WhenNotFound(t *testing.T) {
 			return nil, repository.ErrVenueNotFound
 		},
 	}
-	h := handler.NewVenueHandler(repo, zap.NewNop())
+	h := handler.NewVenueHandler(repo, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/venues/missing", nil)
@@ -301,7 +306,7 @@ func TestPlanHandler_Get_ShouldReturn200_WithSections(t *testing.T) {
 		},
 	}
 
-	h := handler.NewPlanHandler(planStub, sectionStub, zap.NewNop())
+	h := handler.NewPlanHandler(planStub, sectionStub, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/seating-plans/plan-1", nil)
@@ -350,7 +355,7 @@ func TestPlanHandler_Activate_ShouldReturn200_WhenNotAttached(t *testing.T) {
 		},
 	}
 
-	h := handler.NewPlanHandler(planStub, sectionStub, zap.NewNop())
+	h := handler.NewPlanHandler(planStub, sectionStub, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/activate",
@@ -382,7 +387,7 @@ func TestPlanHandler_Activate_ShouldReturn422_WhenNoSections(t *testing.T) {
 		},
 	}
 
-	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, zap.NewNop())
+	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/activate",
@@ -414,7 +419,7 @@ func TestPlanHandler_Activate_ShouldReturn409_WhenAlreadyActive(t *testing.T) {
 		},
 	}
 
-	h := handler.NewPlanHandler(planStub, &sectionRepoWithCapacity{&nopSectionRepo{}}, zap.NewNop())
+	h := handler.NewPlanHandler(planStub, &sectionRepoWithCapacity{&nopSectionRepo{}}, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/activate",
@@ -445,7 +450,7 @@ func TestPlanHandler_AttachTicket_ShouldReturn409_WhenVersionConflict(t *testing
 		},
 	}
 
-	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, zap.NewNop())
+	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/attach-ticket",
@@ -473,7 +478,7 @@ func TestPlanHandler_AttachTicket_ShouldReturn403_WhenNotOwner(t *testing.T) {
 		},
 	}
 
-	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, zap.NewNop())
+	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/attach-ticket",
@@ -490,7 +495,7 @@ func TestPlanHandler_AttachTicket_ShouldReturn403_WhenNotOwner(t *testing.T) {
 }
 
 func TestPlanHandler_Create_ShouldReturn422_WhenVenueIDMissing(t *testing.T) {
-	h := handler.NewPlanHandler(&stubPlanRepo{}, &nopSectionRepo{}, zap.NewNop())
+	h := handler.NewPlanHandler(&stubPlanRepo{}, &nopSectionRepo{}, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans",
@@ -529,7 +534,7 @@ func TestSeatHoldHandler_HoldSeats_ShouldReturn200_WhenValid(t *testing.T) {
 			return &hold.HoldResult{Held: seatIDs, ExpiresAt: expiresAt}, nil
 		},
 	}
-	h := handler.NewSeatHoldHandler(mgr, zap.NewNop())
+	h := handler.NewSeatHoldHandler(mgr, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/seats/hold",
@@ -554,7 +559,7 @@ func TestSeatHoldHandler_HoldSeats_ShouldReturn200_WhenValid(t *testing.T) {
 }
 
 func TestSeatHoldHandler_HoldSeats_ShouldReturn401_WhenNoUserID(t *testing.T) {
-	h := handler.NewSeatHoldHandler(&stubHoldManager{}, zap.NewNop())
+	h := handler.NewSeatHoldHandler(&stubHoldManager{}, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/seats/hold",
@@ -570,7 +575,7 @@ func TestSeatHoldHandler_HoldSeats_ShouldReturn401_WhenNoUserID(t *testing.T) {
 }
 
 func TestSeatHoldHandler_HoldSeats_ShouldReturn422_WhenNoSeatIDs(t *testing.T) {
-	h := handler.NewSeatHoldHandler(&stubHoldManager{}, zap.NewNop())
+	h := handler.NewSeatHoldHandler(&stubHoldManager{}, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/seats/hold",
@@ -592,7 +597,7 @@ func TestSeatHoldHandler_HoldSeats_ShouldReturn409_WhenSeatNotAvailable(t *testi
 			return nil, repository.ErrSeatNotAvailable
 		},
 	}
-	h := handler.NewSeatHoldHandler(mgr, zap.NewNop())
+	h := handler.NewSeatHoldHandler(mgr, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/seats/hold",
@@ -614,7 +619,7 @@ func TestSeatHoldHandler_HoldSeats_ShouldReturn409_WhenPlanNotActive(t *testing.
 			return nil, hold.ErrPlanNotActive
 		},
 	}
-	h := handler.NewSeatHoldHandler(mgr, zap.NewNop())
+	h := handler.NewSeatHoldHandler(mgr, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/seats/hold",
@@ -636,7 +641,7 @@ func TestSeatHoldHandler_ReleaseHold_ShouldReturn204_WhenValid(t *testing.T) {
 			return nil
 		},
 	}
-	h := handler.NewSeatHoldHandler(mgr, zap.NewNop())
+	h := handler.NewSeatHoldHandler(mgr, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/seats/release",
@@ -662,7 +667,7 @@ func TestSeatHoldHandler_GetAvailability_ShouldReturn200_WhenValid(t *testing.T)
 			}, nil
 		},
 	}
-	h := handler.NewSeatHoldHandler(mgr, zap.NewNop())
+	h := handler.NewSeatHoldHandler(mgr, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/seating-plans/plan-1/availability", nil)
@@ -686,7 +691,7 @@ func TestSeatHoldHandler_GetAvailability_ShouldReturn404_WhenPlanNotFound(t *tes
 			return nil, repository.ErrPlanNotFound
 		},
 	}
-	h := handler.NewSeatHoldHandler(mgr, zap.NewNop())
+	h := handler.NewSeatHoldHandler(mgr, newSignatureValidator(), zap.NewNop())
 	e := newEcho()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/seating-plans/missing/availability", nil)

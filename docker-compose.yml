@@ -221,6 +221,7 @@ services:
       # ── build.sh render env ───────────────────────────────────────────────
       KONG_ENV: local
       KONG_RSA_PUBLIC_KEY: "${KONG_RSA_PUBLIC_KEY}"
+      KONG_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
       # ── Kong runtime config ───────────────────────────────────────────────
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
@@ -277,6 +278,7 @@ services:
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
+      X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: auth-service
     depends_on:
@@ -316,6 +318,7 @@ services:
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: info
       VENUE_SERVICE_ADDR: venue-service:50052
+      X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       mongodb:
@@ -364,6 +367,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_LOGS_EXPORTER: none
       OTEL_SERVICE_NAME: order-service
+      X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
     depends_on:
       postgres-orders:
         condition: service_healthy
@@ -405,6 +409,7 @@ services:
       ORDER_SERVICE_URL: http://order-service:8082
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: payment-service
+      X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
     depends_on:
       postgres-payments:
         condition: service_healthy
@@ -469,6 +474,7 @@ services:
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: info
       TICKET_SERVICE_URL: ticket-service:50051
+      X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       postgres-venue:

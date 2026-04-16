@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/acme/ticket-service/internal/repository"
+	"github.com/acme/ticket-service/internal/security"
 	"github.com/acme/ticket-service/internal/service"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
@@ -23,13 +24,18 @@ var decimalPriceRE = regexp.MustCompile(`^\d{1,15}(\.\d{1,4})?$`)
 
 // TicketHandler handles HTTP requests for ticket operations.
 type TicketHandler struct {
-	svc *service.TicketService
-	log *zap.Logger
+	svc                    *service.TicketService
+	log                    *zap.Logger
+	signatureValidator     *security.UserIDSignatureValidator
 }
 
 // NewTicketHandler creates a new TicketHandler.
-func NewTicketHandler(svc *service.TicketService, log *zap.Logger) *TicketHandler {
-	return &TicketHandler{svc: svc, log: log}
+func NewTicketHandler(svc *service.TicketService, log *zap.Logger, sigValidator *security.UserIDSignatureValidator) *TicketHandler {
+	return &TicketHandler{
+		svc:                svc,
+		log:                log,
+		signatureValidator: sigValidator,
+	}
 }
 
 // createTicketRequest is the request body for POST /api/tickets.
@@ -152,6 +158,17 @@ func (h *TicketHandler) Create(c echo.Context) error {
 		return errorResponse(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
 	}
 
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.signatureValidator.IsValidSignature(userID, signature) {
+		return errorResponse(c, http.StatusUnauthorized, "INVALID_SIGNATURE", "Invalid user ID signature", nil)
+	}
+
+	rolesHeader := c.Request().Header.Get("X-User-Roles")
+	roles := security.ParseUserRoles(rolesHeader)
+	if !security.HasRole(roles, "organizer") {
+		return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Only organizers can create tickets", nil)
+	}
+
 	var req createTicketRequest
 	if err := c.Bind(&req); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil)
@@ -267,6 +284,17 @@ func (h *TicketHandler) Update(c echo.Context) error {
 		return errorResponse(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
 	}
 
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.signatureValidator.IsValidSignature(userID, signature) {
+		return errorResponse(c, http.StatusUnauthorized, "INVALID_SIGNATURE", "Invalid user ID signature", nil)
+	}
+
+	rolesHeader := c.Request().Header.Get("X-User-Roles")
+	roles := security.ParseUserRoles(rolesHeader)
+	if !security.HasRole(roles, "organizer") {
+		return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Only organizers can update tickets", nil)
+	}
+
 	id := c.Param("id")
 	if !uuidRE.MatchString(id) {
 		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "id must be a valid UUID", nil)
@@ -345,6 +373,17 @@ func (h *TicketHandler) AttachSeatingPlan(c echo.Context) error {
 		return errorResponse(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
 	}
 
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.signatureValidator.IsValidSignature(userID, signature) {
+		return errorResponse(c, http.StatusUnauthorized, "INVALID_SIGNATURE", "Invalid user ID signature", nil)
+	}
+
+	rolesHeader := c.Request().Header.Get("X-User-Roles")
+	roles := security.ParseUserRoles(rolesHeader)
+	if !security.HasRole(roles, "organizer") {
+		return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Only organizers can attach seating plans", nil)
+	}
+
 	id := c.Param("id")
 	if !uuidRE.MatchString(id) {
 		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "id must be a valid UUID", nil)
@@ -391,6 +430,17 @@ func (h *TicketHandler) DetachSeatingPlan(c echo.Context) error {
 	userID := c.Request().Header.Get("X-User-Id")
 	if userID == "" {
 		return errorResponse(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+	}
+
+	signature := c.Request().Header.Get("X-User-Id-Sig")
+	if !h.signatureValidator.IsValidSignature(userID, signature) {
+		return errorResponse(c, http.StatusUnauthorized, "INVALID_SIGNATURE", "Invalid user ID signature", nil)
+	}
+
+	rolesHeader := c.Request().Header.Get("X-User-Roles")
+	roles := security.ParseUserRoles(rolesHeader)
+	if !security.HasRole(roles, "organizer") {
+		return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Only organizers can detach seating plans", nil)
 	}
 
 	id := c.Param("id")

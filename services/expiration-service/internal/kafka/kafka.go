@@ -54,17 +54,22 @@ type Producer struct {
 }
 
 // NewProducer creates a Kafka producer with idempotence and acks=all.
-func NewProducer(brokers []string, log *zap.Logger) (*Producer, error) {
+func NewProducer(brokers []string, log *zap.Logger, security ...SecurityConfig) (*Producer, error) {
 	brokersStr := joinBrokers(brokers)
 
-	p, err := confluent.NewProducer(&confluent.ConfigMap{
+	configMap := &confluent.ConfigMap{
 		"bootstrap.servers":  brokersStr,
 		"acks":               "all",
 		"enable.idempotence": true,
 		"retries":            3,
 		"retry.backoff.ms":   200,
 		"message.timeout.ms": 10000,
-	})
+	}
+	if err := firstSecurityConfig(security).Apply(configMap); err != nil {
+		return nil, fmt.Errorf("configure kafka producer security: %w", err)
+	}
+
+	p, err := confluent.NewProducer(configMap)
 	if err != nil {
 		return nil, fmt.Errorf("create kafka producer: %w", err)
 	}

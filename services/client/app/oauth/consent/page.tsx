@@ -7,7 +7,6 @@ import { ConsentActions } from "./ConsentActions";
 import { base } from "@/lib/server-utils";
 import {
   ACCESS_TOKEN_COOKIE,
-  ACCESS_COOKIE_PATH,
 } from "@/lib/session-cookies";
 
 export const metadata = { title: "Authorize Access — Marquee" };
@@ -43,11 +42,23 @@ export default async function ConsentPage({
 
   if (!request_id) notFound();
 
-  // Fetch consent details from auth-service (public endpoint — no JWT needed for the query)
+  // Read the auth cookie early — required for Kong JWT check on GET
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
+
+  // Check if user is signed in — if not, they somehow landed here without auth
+  if (!accessToken) {
+    notFound();
+  }
+
+  // Fetch consent details from auth-service (JWT protected — cookie is required)
   let consent: ConsentDetails;
   try {
     const res = await fetch(`${base()}/oauth/consent/${request_id}`, {
       cache: "no-store",
+      headers: accessToken
+        ? { Cookie: `${ACCESS_TOKEN_COOKIE}=${accessToken}` }
+        : {},
     });
     if (res.status === 404) notFound();
     if (!res.ok) throw new Error(`${res.status}`);
@@ -55,21 +66,6 @@ export default async function ConsentPage({
   } catch {
     notFound();
   }
-
-  // Read the auth cookie so ConsentActions can forward it in the POST (needed for Kong JWT check)
-  const cookieStore = await cookies();
-  const accessToken = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
-  const authCookie = accessToken
-    ? `${ACCESS_TOKEN_COOKIE}=${accessToken}; Path=${ACCESS_COOKIE_PATH}`
-    : undefined;
-
-  // Check if user is signed in — if not, they somehow landed here without auth
-  if (!accessToken) {
-    notFound();
-  }
-
-  const apiBase =
-    process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
   const hasDestructive = consent.scopes.some((s) =>
     ["orders:create", "orders:cancel", "payments:create", "seating:hold"].includes(s),
@@ -159,8 +155,6 @@ export default async function ConsentPage({
           <div className="px-6 py-5">
             <ConsentActions
               requestId={consent.requestId}
-              apiBase={apiBase}
-              authCookie={authCookie}
             />
           </div>
         </div>

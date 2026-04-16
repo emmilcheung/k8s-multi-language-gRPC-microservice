@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
   ForbiddenException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { OAuthService } from './oauth.service';
@@ -26,10 +27,14 @@ import type {
   ConsentDetails,
   ConsentResult,
 } from './oauth.dto';
+import { UserIdSignatureValidator } from '../../common/security/user-id-signature.validator';
 
 @Controller()
 export class OAuthController {
-  constructor(private readonly oauthService: OAuthService) {}
+  constructor(
+    private readonly oauthService: OAuthService,
+    private readonly signatureValidator: UserIdSignatureValidator,
+  ) {}
 
   // GET /oauth/authorize
   @Get('oauth/authorize')
@@ -58,11 +63,17 @@ export class OAuthController {
   }
 
   // GET /oauth/clients — X-User-Id injected by Kong after JWT validation
+  // X-User-Id-Sig must be valid
   @Get('oauth/clients')
   async listClients(@Req() req: Request) {
     const userId =
       (req.headers['x-user-id'] as string | undefined) ?? undefined;
+    const userIdSig =
+      (req.headers['x-user-id-sig'] as string | undefined) ?? undefined;
     if (!userId) throw new ForbiddenException();
+    if (!this.signatureValidator.isValidSignature(userId, userIdSig)) {
+      throw new UnauthorizedException('invalid X-User-Id-Sig signature');
+    }
     return this.oauthService.listClients(userId);
   }
 
@@ -75,7 +86,12 @@ export class OAuthController {
   ): Promise<void> {
     const userId =
       (req.headers['x-user-id'] as string | undefined) ?? undefined;
+    const userIdSig =
+      (req.headers['x-user-id-sig'] as string | undefined) ?? undefined;
     if (!userId) throw new ForbiddenException();
+    if (!this.signatureValidator.isValidSignature(userId, userIdSig)) {
+      throw new UnauthorizedException('invalid X-User-Id-Sig signature');
+    }
     await this.oauthService.revokeClient(userId, clientId);
   }
 
@@ -88,15 +104,26 @@ export class OAuthController {
     return this.oauthService.registerClient(body);
   }
 
-  // GET /oauth/consent/:requestId — public; fetched by Next.js consent page to show client info
+  // GET /oauth/consent/:requestId — JWT protected (X-User-Id injected by Kong)
+  // X-User-Id-Sig must be valid
   @Get('oauth/consent/:requestId')
   async getConsent(
     @Param('requestId') requestId: string,
+    @Req() req: Request,
   ): Promise<ConsentDetails> {
-    return this.oauthService.getConsentRequest(requestId);
+    const userId =
+      (req.headers['x-user-id'] as string | undefined) ?? undefined;
+    const userIdSig =
+      (req.headers['x-user-id-sig'] as string | undefined) ?? undefined;
+    if (!userId) throw new ForbiddenException();
+    if (!this.signatureValidator.isValidSignature(userId, userIdSig)) {
+      throw new UnauthorizedException('invalid X-User-Id-Sig signature');
+    }
+    return this.oauthService.getConsentRequest(requestId, userId);
   }
 
   // POST /oauth/consent/:requestId — JWT protected (X-User-Id injected by Kong)
+  // X-User-Id-Sig must be valid
   @Post('oauth/consent/:requestId')
   @HttpCode(HttpStatus.OK)
   async submitConsent(
@@ -106,7 +133,12 @@ export class OAuthController {
   ): Promise<ConsentResult> {
     const userId =
       (req.headers['x-user-id'] as string | undefined) ?? undefined;
+    const userIdSig =
+      (req.headers['x-user-id-sig'] as string | undefined) ?? undefined;
     if (!userId) throw new ForbiddenException();
+    if (!this.signatureValidator.isValidSignature(userId, userIdSig)) {
+      throw new UnauthorizedException('invalid X-User-Id-Sig signature');
+    }
     return this.oauthService.submitConsent(requestId, userId, body.approve);
   }
 }
