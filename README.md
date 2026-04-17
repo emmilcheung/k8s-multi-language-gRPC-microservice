@@ -1,6 +1,6 @@
 # E-Ticketing platform
 
-> **Project inspiration:** This project rebuilds the concept and domain from the Udemy course
+> **Project inspiration:** This project re-designs the concept and domain from the Udemy course
 > [Microservices with Node JS and React](https://www.udemy.com/course/microservices-with-node-js-and-react/),
 > but with a completely redesigned architecture, polyglot stack, and distributed infrastructure.
 
