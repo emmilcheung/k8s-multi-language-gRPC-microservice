@@ -1,0 +1,107 @@
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#FF9900','primaryBorderColor':'#232F3E','primaryTextColor':'#232F3E','lineColor':'#232F3E','secondaryColor':'#EAF2FB','tertiaryColor':'#F7F8FA','fontFamily':'Helvetica, Arial, sans-serif'}}}%%
+flowchart TB
+    %% ===== C4-Container style diagram =====
+    %% Notation: rectangle = Container (deployable unit), cylinder = Data store,
+    %% stadium = External system, hexagon = Person. Protocol annotations on edges.
+
+    %% ---------- People / External ----------
+    user(["fa:fa-user Customer<br/>browser + mobile"]):::person
+    stripe{{"Stripe<br/>external PSP"}}:::ext
+    email{{"SES / SendGrid<br/>transactional email"}}:::ext
+
+    %% ---------- Edge ----------
+    subgraph edge[" Edge Tier "]
+        direction TB
+        alb["ALB + AWS WAF<br/><i>HTTPS · TLS via ACM</i>"]:::edge
+        kong["kong-gateway<br/><i>Kong OSS</i><br/>JWT · rate-limit · CORS · CSRF"]:::svc
+    end
+
+    %% ---------- Frontend ----------
+    subgraph fe[" Frontend "]
+        direction TB
+        client[["client<br/><i>Next.js 15 (App Router) · TS</i><br/>SSR + Server Actions"]]:::svc
+    end
+
+    %% ---------- Identity domain ----------
+    subgraph identity[" Identity "]
+        direction TB
+        auth[["auth-service<br/><i>NestJS 10 · Node 24</i><br/>signup · login · JWT"]]:::svc
+        user_svc[["user-service<br/><i>NestJS 10 · Node 24</i><br/>profile · prefs · billing"]]:::svc
+        auth_db[(auth_db<br/>RDS PostgreSQL)]:::db
+        user_db[(user_db<br/>RDS PostgreSQL)]:::db
+        auth --- auth_db
+        user_svc --- user_db
+    end
+
+    %% ---------- Catalog domain ----------
+    subgraph catalog[" Catalog "]
+        direction TB
+        ticket[["ticket-service<br/><i>Go 1.23 · Echo v4</i><br/>quota · reserve · finalize"]]:::svc
+        venue[["venue-service<br/><i>Go 1.23 · Echo v4</i><br/>seating plan · seat holds"]]:::svc
+        ticket_db[(ticket_db<br/>DocumentDB)]:::db
+        venue_db[(venue_db<br/>DocumentDB)]:::db
+        ticket --- ticket_db
+        venue --- venue_db
+    end
+
+    %% ---------- Transaction domain ----------
+    subgraph txn[" Transaction "]
+        direction TB
+        order[["order-service<br/><i>Java 21 · Spring Boot 4</i><br/>saga orchestrator · outbox"]]:::svc
+        payment[["payment-service<br/><i>NestJS 10 · Node 24</i><br/>Stripe intents · webhooks"]]:::svc
+        expiration[["expiration-service<br/><i>Go 1.23</i><br/>Redis ZSET timers"]]:::svc
+        order_db[(order_db<br/>RDS PostgreSQL<br/>+ outbox)]:::db
+        payment_db[(payment_db<br/>RDS PostgreSQL)]:::db
+        redis[(ElastiCache Redis<br/>timers · cache · idempotency)]:::db
+        order --- order_db
+        payment --- payment_db
+        expiration --- redis
+    end
+
+    %% ---------- Messaging ----------
+    subgraph bus[" Async Messaging "]
+        direction LR
+        kafka{{"Amazon MSK · Kafka<br/><i>CloudEvents v1.0 envelopes</i>"}}:::mq
+        sr[["Glue Schema Registry<br/><i>Avro/JSON Schema</i>"]]:::mq
+        kafka --- sr
+    end
+
+    %% ===== Synchronous edges (HTTP/gRPC) =====
+    user -- HTTPS --> alb
+    alb --> kong
+    kong -- SSR --> client
+    kong -- "REST /auth/*" --> auth
+    kong -- "REST /users/*" --> user_svc
+    kong -- "REST /tickets/*" --> ticket
+    kong -- "REST /venues/*" --> venue
+    kong -- "REST /orders/*" --> order
+    kong -- "REST /payments/*" --> payment
+    kong -- "Stripe webhook" --> payment
+
+    %% gRPC inside the mesh
+    order == "gRPC ReserveQuota / Finalize / Release" ==> ticket
+    order == "gRPC ReserveHeldSeats / AutoAssign" ==> venue
+    auth  -. "JWKS (pub key)" .-> kong
+    client -- "server-to-server API" --> kong
+
+    %% External
+    payment -- "HTTPS PaymentIntents" --> stripe
+    payment -- "email receipt" --> email
+
+    %% ===== Asynchronous edges (Kafka) =====
+    order -- "produces<br/>orders.order.{created,cancelled,completed}" --> kafka
+    kafka -- "consumes" --> ticket
+    kafka -- "consumes" --> venue
+    kafka -- "consumes" --> expiration
+    kafka -- "consumes" --> payment
+    expiration -- "produces<br/>expiration.order.expiration_complete" --> kafka
+    kafka -- "consumes" --> order
+    ticket -- "produces<br/>tickets.ticket.{created,updated}" --> kafka
+
+    %% ===== Styles =====
+    classDef svc fill:#FF9900,stroke:#232F3E,stroke-width:1.5px,color:#232F3E;
+    classDef db fill:#1A73E8,stroke:#232F3E,stroke-width:1.5px,color:#FFFFFF;
+    classDef mq fill:#7D3C98,stroke:#232F3E,stroke-width:1.5px,color:#FFFFFF;
+    classDef edge fill:#232F3E,stroke:#232F3E,stroke-width:1.5px,color:#FFFFFF;
+    classDef ext fill:#7AA116,stroke:#232F3E,stroke-width:1.5px,color:#FFFFFF;
+    classDef person fill:#FDF6E3,stroke:#232F3E,stroke-width:1.5px,color:#232F3E;

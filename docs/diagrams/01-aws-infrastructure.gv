@@ -1,0 +1,115 @@
+digraph aws_infra {
+	bgcolor="#FFFFFF" compound=true fontname=Helvetica label=<<b>Ticketing Platform &#8211; AWS Production Reference Architecture</b><br/><font point-size='10'>Multi-AZ EKS on VPC &#8226; MSK Kafka &#8226; RDS Multi-AZ &#8226; ElastiCache &#8226; Kong at edge &#8226; CloudWatch/X-Ray/CloudTrail observability</font>> labelloc=t newrank=true nodesep=0.30 rankdir=TB ranksep=0.55 ratio=compress size="14,22!" splines=polyline
+	node [margin="0.16,0.08"]
+	edge [color="#232F3E" fontcolor="#232F3E" fontname=Helvetica fontsize=9]
+	subgraph cluster_users {
+		color="#232F3E" fontname=Helvetica label=Internet style=dashed
+		user [label="End Users
+(browser, mobile)" color="#232F3E" fillcolor="#7AA116" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=ellipse style="filled,rounded"]
+		stripe [label="Stripe
+(external PSP)" color="#232F3E" fillcolor="#7AA116" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=ellipse style="filled,rounded"]
+	}
+	subgraph cluster_edge {
+		color="#232F3E" fillcolor="#FDF6E3" fontname=Helvetica label="AWS Global Edge" style="rounded,filled"
+		route53 [label=<<b>Route 53</b><br/><font point-size='9'>DNS, health-checked<br/>failover routing</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+		cloudfront [label=<<b>CloudFront</b><br/><font point-size='9'>Static assets CDN<br/>for Next.js build</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+		waf [label=<<b>AWS WAF</b><br/><font point-size='9'>OWASP Top-10<br/>rate limits, bot block</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+		acm [label=<<b>ACM</b><br/><font point-size='9'>TLS certs for<br/>ALB + CloudFront</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+	}
+	subgraph cluster_region {
+		color="#232F3E" fillcolor="#FFFFFF" fontname=Helvetica label="Region: ap-east-1" style="rounded,filled"
+		subgraph cluster_vpc {
+			color="#232F3E" fillcolor="#F7F8FA" fontname=Helvetica label="VPC  10.0.0.0/16  (3 AZs, NAT per AZ in prod)" style="rounded,filled"
+			subgraph cluster_public {
+				color="#232F3E" fillcolor="#EAF2FB" fontname=Helvetica label="Public Subnets (ELB/NAT)" style="rounded,filled"
+				alb [label=<<b>Application Load Balancer</b><br/><font point-size='9'>AWS LB Controller<br/>Ingress → Kong</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+				nat [label=<<b>NAT Gateway</b><br/><font point-size='9'>egress for private subnets</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+				igw [label=<<b>Internet Gateway</b><br/><font point-size='9'>ingress</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+			}
+			subgraph cluster_private {
+				color="#232F3E" fillcolor="#EAF2FB" fontname=Helvetica label="Private Subnets — EKS Worker Nodes (Karpenter + Managed Groups)" style="rounded,filled"
+				eks [label=<<b>Amazon EKS</b><br/><font point-size='9'>Kubernetes 1.30 control plane<br/>namespace: ticketing</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+				subgraph cluster_kong_ns {
+					color="#232F3E" fontname=Helvetica label="kong namespace" style="rounded,dashed"
+					kong [label=<<b>kong-gateway</b><br/><font point-size='9'>Edge gateway • JWT auth<br/>rate-limit • CORS • CSRF</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+				}
+				subgraph cluster_ns {
+					color="#232F3E" fontname=Helvetica label="ticketing namespace (9 services)" style="rounded,dashed"
+					client [label=<<b>client</b><br/><font point-size='9'>Next.js 15 (SSR) • TS</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+					auth [label=<<b>auth-service</b><br/><font point-size='9'>NestJS 10 • Node 24</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+					user [label=<<b>user-service</b><br/><font point-size='9'>NestJS 10 • Node 24</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+					ticket [label=<<b>ticket-service</b><br/><font point-size='9'>Go 1.23 • Echo v4 • gRPC</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+					venue [label=<<b>venue-service</b><br/><font point-size='9'>Go 1.23 • Echo v4 • gRPC</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+					order [label=<<b>order-service</b><br/><font point-size='9'>Java 21 • Spring Boot 4</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+					payment [label=<<b>payment-service</b><br/><font point-size='9'>NestJS 10 • Node 24</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+					expiration [label=<<b>expiration-service</b><br/><font point-size='9'>Go 1.23 • Redis timers</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+				}
+			}
+			subgraph cluster_data {
+				color="#232F3E" fillcolor="#EAF2FB" fontname=Helvetica label="Data Subnets (Multi-AZ, no public egress)" style="rounded,filled"
+				rds_auth [label=<<b>RDS PostgreSQL</b><br/><font point-size='9'>auth_db • Multi-AZ<br/>users, sessions</font>> color="#232F3E" fillcolor="#1A73E8" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+				rds_user [label=<<b>RDS PostgreSQL</b><br/><font point-size='9'>user_db • profiles,<br/>preferences, billing</font>> color="#232F3E" fillcolor="#1A73E8" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+				rds_order [label=<<b>RDS PostgreSQL</b><br/><font point-size='9'>order_db • orders,<br/>outbox (Spring)</font>> color="#232F3E" fillcolor="#1A73E8" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+				rds_payment [label=<<b>RDS PostgreSQL</b><br/><font point-size='9'>payment_db • charges,<br/>ledger, webhooks</font>> color="#232F3E" fillcolor="#1A73E8" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+				docdb [label=<<b>DocumentDB</b><br/><font point-size='9'>Mongo-compatible<br/>tickets, venues, seats</font>> color="#232F3E" fillcolor="#1A73E8" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+				elasticache [label=<<b>ElastiCache Redis</b><br/><font point-size='9'>cluster mode • Multi-AZ<br/>timers, cache, idempotency</font>> color="#232F3E" fillcolor="#1A73E8" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+				msk [label=<<b>Amazon MSK</b><br/><font point-size='9'>3-broker Kafka<br/>CloudEvents envelopes</font>> color="#232F3E" fillcolor="#7D3C98" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+				glue_sr [label=<<b>Glue Schema Registry</b><br/><font point-size='9'>Avro/JSON Schema<br/>for MSK topics</font>> color="#232F3E" fillcolor="#7D3C98" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+			}
+		}
+		subgraph cluster_ops {
+			color="#DD3522" fillcolor="#FDEEEE" fontname=Helvetica label="Security & Observability" style="rounded,filled"
+			iam [label=<<b>IAM + IRSA</b><br/><font point-size='9'>per-pod roles<br/>least privilege</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+			sm [label=<<b>Secrets Manager</b><br/><font point-size='9'>DB creds, JWT signing,<br/>Stripe API keys</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+			kms [label=<<b>KMS</b><br/><font point-size='9'>envelope encryption<br/>for RDS/S3/MSK</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+			ecr [label=<<b>ECR</b><br/><font point-size='9'>container registry<br/>image scanning</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+			cw [label=<<b>CloudWatch</b><br/><font point-size='9'>logs + RED metrics<br/>+ alarms</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+			xray [label=<<b>X-Ray</b><br/><font point-size='9'>distributed traces<br/>OTel collector</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+			ct [label=<<b>CloudTrail</b><br/><font point-size='9'>API audit log</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+			backup [label=<<b>AWS Backup + S3</b><br/><font point-size='9'>RDS/DocDB snapshots,<br/>long-term archive</font>> color="#232F3E" fillcolor="#232F3E" fontcolor="#FFFFFF" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+		}
+	}
+	user -> route53 [label=HTTPS]
+	route53 -> cloudfront [label=static]
+	route53 -> waf [label=api]
+	waf -> alb
+	cloudfront -> alb [label=origin style=dashed]
+	alb -> kong [label=Ingress]
+	acm -> alb [label=TLS arrowhead=none style=dotted]
+	kong -> client [label=SSR]
+	kong -> auth
+	kong -> user
+	kong -> ticket [label=REST]
+	kong -> venue [label=REST]
+	kong -> order
+	kong -> payment
+	order -> ticket [label="gRPC ReserveQuota" color="#7AA116"]
+	order -> venue [label="gRPC ReserveSeats" color="#7AA116"]
+	payment -> nat [style=dashed]
+	nat -> stripe [label="HTTPS out"]
+	stripe -> kong [label=webhook style=dashed]
+	auth -> rds_auth
+	user -> rds_user
+	order -> rds_order
+	payment -> rds_payment
+	ticket -> docdb
+	venue -> docdb
+	expiration -> elasticache [label=timers]
+	ticket -> elasticache [label=cache style=dashed]
+	order -> elasticache [label=idempotency style=dashed]
+	order -> msk [label=events color="#7D3C98"]
+	payment -> msk [label=events color="#7D3C98"]
+	ticket -> msk [label=events color="#7D3C98"]
+	venue -> msk [label=events color="#7D3C98"]
+	expiration -> msk [label=events color="#7D3C98"]
+	msk -> glue_sr [label=schemas style=dotted]
+	eks -> cw [label="structured logs + RED metrics" color="#888888" style=dotted]
+	eks -> xray [label="OTel traces" color="#888888" style=dotted]
+	sm -> eks [label="External Secrets" color="#DD3522" style=dotted]
+	iam -> eks [label=IRSA color="#DD3522" style=dotted]
+	ecr -> eks [label=images color="#888888" style=dotted]
+	rds_order -> backup [label=snapshots color="#888888" style=dotted]
+	docdb -> backup [color="#888888" style=dotted]
+	kms -> rds_order [label=encrypt color="#DD3522" style=dotted]
+	ct -> cw [color="#888888" style=dotted]
+}

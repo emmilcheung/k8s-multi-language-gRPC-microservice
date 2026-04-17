@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Data Model — per-service ownership</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: #F7F8FA;
+      color: #232F3E;
+    }
+    header {
+      max-width: 1400px;
+      margin: 0 auto 16px auto;
+    }
+    header h1 { margin: 0 0 4px 0; font-size: 20px; }
+    header p { margin: 0; color: #556070; font-size: 13px; }
+    .card {
+      background: #fff;
+      border: 1px solid #E5E7EB;
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 1400px;
+      margin: 0 auto;
+      overflow-x: auto;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .nav {
+      max-width: 1400px;
+      margin: 0 auto 12px auto;
+      font-size: 13px;
+    }
+    .nav a { color: #1A73E8; text-decoration: none; margin-right: 12px; }
+    .nav a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="index.html">← Index</a>
+    <a href="01-aws-infrastructure.svg">AWS Infra (SVG)</a>
+    <a href="02-data-model.html">Data Model</a>
+    <a href="03-c4-container.html">C4 Container</a>
+    <a href="04-data-flow-sequence.html">Data Flow</a>
+  </div>
+  <header>
+    <h1>Data Model — per-service ownership</h1>
+    <p>Rendered client-side via Mermaid 11. Source: <code>02-data-model.mermaid</code></p>
+  </header>
+  <div class="card">
+    <pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#FF9900','primaryBorderColor':'#232F3E','primaryTextColor':'#232F3E','lineColor':'#232F3E','secondaryColor':'#EAF2FB','tertiaryColor':'#F7F8FA'}}}%%
+erDiagram
+    %% ------------------------------------------------------------
+    %% Cross-service references use DOTTED style to make it clear
+    %% that they are LOGICAL references, not enforced foreign keys
+    %% (each service owns its own database — AGENTS.md §4 "Data Ownership").
+    %% ------------------------------------------------------------
+
+    %% auth_db  (RDS PostgreSQL — owned by auth-service)
+    USERS ||..o{ ORDERS : "user_id (logical)"
+    USERS ||..o{ PAYMENTS : "user_id (logical)"
+    USERS ||..o| USER_PROFILES : "1:1 (logical)"
+    USERS ||..o| USER_PREFERENCES : "1:1 (logical)"
+    USERS ||..o| BILLING_ADDRESSES : "1:1 (logical)"
+
+    %% order_db (RDS PostgreSQL — owned by order-service)
+    ORDERS ||--|{ ORDER_ITEMS : "contains"
+    ORDERS ||..|| PAYMENTS : "order_id (logical, 1:1)"
+    ORDERS ||--o{ ORDER_OUTBOX : "transactional outbox"
+    ORDERS ||..o{ TICKETS : "ticket_id (logical, via gRPC)"
+    ORDERS ||..o{ RESERVATIONS : "reservation_id (logical)"
+
+    %% ticket_db (DocumentDB — owned by ticket-service)
+    TICKETS ||--|{ RESERVATIONS : "has quota"
+    TICKETS }o..|| VENUES : "venue_id (logical, via gRPC)"
+
+    %% venue_db (DocumentDB — owned by venue-service)
+    VENUES ||--|{ SEATING_PLANS : "has"
+    SEATING_PLANS ||--|{ SECTIONS : "grouped by"
+    SECTIONS ||--|{ SEATS : "contains"
+    SEATING_PLANS ||--o{ SEAT_RESERVATIONS : "temporarily holds"
+
+    %% payment_db (RDS PostgreSQL — owned by payment-service)
+    PAYMENTS ||--o{ PAYMENT_RECORDS : "audit trail"
+    PAYMENTS ||--o{ PAYMENT_WEBHOOKS : "Stripe events"
+
+    %% redis (ElastiCache — owned by expiration-service + others for TTL)
+    RESERVATIONS ||..o{ EXPIRATION_TIMERS : "scheduled (Redis)"
+
+    %% =====================  ENTITIES  ============================
+
+    USERS {
+        uuid id PK "auth_db · auth-service"
+        text email UK
+        text password_hash
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    USER_PROFILES {
+        text user_id PK "user_db · user-service"
+        text display_name
+        text locale
+        text timezone
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    USER_PREFERENCES {
+        text user_id PK "user_db · user-service"
+        bool marketing_opt_in
+        bool order_updates
+        bool product_updates
+    }
+
+    BILLING_ADDRESSES {
+        text user_id PK "user_db · user-service"
+        text line1
+        text line2
+        text city
+        text postal_code
+        text country
+    }
+
+    ORDERS {
+        uuid id PK "order_db · order-service"
+        uuid user_id "logical FK → USERS"
+        uuid reservation_id UK "from ticket-service"
+        string status "PENDING|AWAITING_PAYMENT|CONFIRMED|CANCELLED|EXPIRED"
+        decimal total_amount
+        int version "optimistic lock"
+        timestamptz expires_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    ORDER_ITEMS {
+        uuid id PK
+        uuid order_id FK
+        string ticket_id "logical FK → TICKETS"
+        int quantity
+        decimal unit_price
+        string seat_ids "optional, CSV"
+    }
+
+    ORDER_OUTBOX {
+        uuid id PK
+        uuid aggregate_id
+        string event_type "orders.order.created|cancelled|completed"
+        jsonb payload
+        timestamptz created_at
+        timestamptz published_at "NULL until publisher drains"
+    }
+
+    TICKETS {
+        string id PK "ticket_db · ticket-service"
+        string title
+        text description
+        decimal price
+        int quota
+        int reserved
+        int sold
+        int max_per_user
+        string seating_plan_id "logical FK → SEATING_PLANS"
+        int version "optimistic lock"
+        timestamptz event_starts_at
+        timestamptz event_ends_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    RESERVATIONS {
+        string id PK "ticket_db"
+        string ticket_id FK
+        string user_id "logical FK → USERS"
+        int quantity
+        string status "HELD|FINALIZED|RELEASED|EXPIRED"
+        timestamptz expires_at
+        timestamptz created_at
+    }
+
+    VENUES {
+        string id PK "venue_db · venue-service"
+        string name
+        string address
+        string city
+        string country
+        int capacity
+        string location_coordinates
+    }
+
+    SEATING_PLANS {
+        string id PK
+        string venue_id FK
+        string ticket_id "logical FK → TICKETS"
+        string assignment_mode "manual|auto"
+        string status
+    }
+
+    SECTIONS {
+        string id PK
+        string plan_id FK
+        string name
+        decimal base_price
+    }
+
+    SEATS {
+        string id PK
+        string section_id FK
+        string label
+        string status "AVAILABLE|HELD|SOLD"
+    }
+
+    SEAT_RESERVATIONS {
+        string id PK "= reservation_id"
+        string plan_id FK
+        string user_id
+        string seat_ids "array"
+        timestamptz expires_at
+    }
+
+    PAYMENTS {
+        uuid id PK "payment_db · payment-service"
+        uuid order_id UK "logical FK → ORDERS"
+        uuid user_id "logical FK → USERS"
+        string method "CARD|APPLE_PAY|GOOGLE_PAY"
+        decimal amount
+        string currency "ISO 4217"
+        string status "PENDING|SUCCEEDED|FAILED|REFUNDED"
+        string stripe_payment_intent_id UK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    PAYMENT_RECORDS {
+        uuid id PK
+        uuid payment_id FK
+        string event_type "attempted|succeeded|failed|refunded"
+        jsonb payload
+        timestamptz recorded_at
+    }
+
+    PAYMENT_WEBHOOKS {
+        uuid id PK
+        string stripe_event_id UK "idempotency"
+        string event_type
+        jsonb body
+        timestamptz received_at
+        timestamptz processed_at
+    }
+
+    EXPIRATION_TIMERS {
+        string key PK "Redis ZSET — expiration-service"
+        string reservation_id
+        timestamptz fires_at
+    }
+
+    </pre>
+  </div>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: "base",
+      securityLevel: "loose",
+      er: { useMaxWidth: true },
+      sequence: { useMaxWidth: true, actorMargin: 60, messageAlign: "center" },
+      flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" }
+    });
+  </script>
+</body>
+</html>

@@ -66,29 +66,20 @@ Each architectural decision was chosen to mirror a real-world challenge:
 
 ## 2. Architecture
 
-```
-┌───────────────────────────────────────────────────────────────────────────┐
-│                    │                 AWS EKS  (ap-southeast-1)            │
-│                    │                                                      │
-HTTPS ──► ALB ──► Kong (JWT verify · rate-limit · correlation-ID)           │
-│                    │                       │                              │
-│        ┌───────────┼─────────────┬─────────┴────────┬──────────────┐      │
-│        │           │             │                  │              │      │
-│   auth-service   ticket-    order-service    payment-service    venue-    │
-│   (NestJS/TS)    service    (Java/SB4)       (NestJS/TS)        service   │
-│                  (Go/Echo)       │                  │          (Go/Echo)  │
-│                    │        gRPC │                  │              │      │
-│                    └────────────-┘                  │              │      │
-│                          │                          │              │      │
-│                   Apache Kafka (MSK / Strimzi) ─────┴──────────────┘      │
-│                          │                                                │
-│                 expiration-service (Go worker)                            │
-│                                                                           │
-│Datastores:  RDS PostgreSQL ×4      MongoDB             ElastiCache Redis  │
-│             (auth · orders ·       (ticket-service)    (expiration +      │
-│              payments · venue)                          Kong rate-limit)  │
-└───────────────────────────────────────────────────────────────────────────┘
-```
+### Architecture diagrams
+
+View the architecture diagrams directly in this README.
+
+![AWS infrastructure diagram](docs/diagrams/01-aws-infrastructure.svg)
+
+![Data model diagram](docs/diagrams/02-data-model.png)
+
+![C4 container diagram](docs/diagrams/03-c4-container.png)
+
+![Data flow sequence diagram](docs/diagrams/04-data-flow-sequence.png)
+
+> Open `docs/diagrams/index.html` for a browser-based diagram landing page.
+
 
 **Request flow:**
 

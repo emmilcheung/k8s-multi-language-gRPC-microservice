@@ -1,0 +1,93 @@
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#FF9900','primaryBorderColor':'#232F3E','primaryTextColor':'#232F3E','lineColor':'#232F3E','actorBkg':'#FF9900','actorBorder':'#232F3E','actorTextColor':'#232F3E','noteBkgColor':'#FDF6E3','noteTextColor':'#232F3E','noteBorderColor':'#232F3E','fontFamily':'Helvetica, Arial, sans-serif'}}}%%
+sequenceDiagram
+    autonumber
+    actor U as Customer
+    participant K as kong-gateway
+    participant OS as order-service (Java)
+    participant TS as ticket-service (Go)
+    participant VS as venue-service (Go)
+    participant MQ as MSK Kafka
+    participant PS as payment-service (NestJS)
+    participant ST as Stripe
+    participant ES as expiration-service (Go)
+    participant RD as Redis timers
+
+    %% ----------- PHASE 1: Reserve --------------------------------
+    rect rgb(250,243,219)
+    Note over U,OS: Phase 1 — Reserve quota and seats (synchronous, gRPC)
+    U->>K: POST /orders (ticket_id, qty, optional seat_ids)
+    K->>OS: JWT verified — forward
+    OS->>TS: gRPC ReserveQuota(ticket_id, reservation_id, qty, expires_at +15m)
+    TS-->>OS: success, remaining, price, max_per_user
+    alt specific seats requested
+      OS->>VS: gRPC ReserveHeldSeats(plan_id, seat_ids)
+      VS-->>OS: success, seats[]
+    else auto-assign
+      OS->>VS: gRPC AutoAssignAndReserve(plan_id, section, qty)
+      VS-->>OS: success, seats[]
+    end
+    OS->>OS: INSERT orders (status=PENDING, expires_at) AND INSERT order_outbox
+    Note right of OS: Single DB txn (Spring @Transactional) <br/> Transactional outbox pattern
+    OS-->>K: 201 Created (order_id, expires_at)
+    K-->>U: 201 Created
+    end
+
+    %% ----------- PHASE 2: Fan-out via Kafka ---------------------
+    rect rgb(234,242,251)
+    Note over OS,MQ: Phase 2 — Outbox drain to Kafka (CloudEvents envelope)
+    OS->>MQ: publish orders.order.created (key=order_id, partitioned by user_id)
+    par expiration timer scheduled
+      MQ-->>ES: consume orders.order.created
+      ES->>RD: ZADD timers fires_at reservation_id
+    and payment picks up
+      MQ-->>PS: consume orders.order.created
+      PS->>PS: INSERT payments (status=PENDING, idempotency=order_id)
+    end
+    end
+
+    %% ----------- PHASE 3: Payment --------------------------------
+    rect rgb(245,238,245)
+    Note over U,PS: Phase 3 — Client confirms payment
+    U->>K: POST /payments/confirm (order_id, payment_method)
+    K->>PS: JWT verified — forward
+    PS->>ST: create + confirm PaymentIntent (amount, currency)
+    ST-->>PS: status=succeeded (or requires_action)
+    PS->>PS: UPDATE payments SET status=SUCCEEDED AND INSERT payment_records
+    PS->>MQ: publish payments.payment.succeeded
+    ST-->>K: webhook payment_intent.succeeded (async, idempotent)
+    K->>PS: POST /payments/webhook
+    end
+
+    %% ----------- PHASE 4: Finalize ------------------------------
+    rect rgb(231,242,222)
+    Note over MQ,TS: Phase 4 — Finalize quota and complete order
+    MQ-->>OS: consume payments.payment.succeeded
+    OS->>TS: gRPC FinalizeReservation(reservation_id, order_id)
+    TS-->>OS: success
+    OS->>VS: gRPC FinalizeSeatReservation(reservation_id, order_id)
+    VS-->>OS: success
+    OS->>OS: UPDATE orders SET status=CONFIRMED AND outbox (orders.order.completed)
+    OS->>MQ: publish orders.order.completed
+    MQ-->>ES: consume orders.order.completed (cancel timer)
+    ES->>RD: ZREM timers reservation_id
+    end
+
+    %% ----------- PHASE 5: Expiry branch (compensation) ----------
+    rect rgb(253,238,238)
+    Note over ES,OS: Phase 5 — Expiry path (compensating saga)
+    ES->>RD: ZPOPMIN expired timers (every 1s)
+    ES->>MQ: publish expiration.order.expiration_complete
+    MQ-->>OS: consume expiration.order.expiration_complete
+    alt order still PENDING or AWAITING_PAYMENT
+      OS->>TS: gRPC ReleaseReservation(reservation_id, reason=EXPIRED)
+      OS->>VS: gRPC ReleaseSeatReservation(reservation_id, reason=EXPIRED)
+      OS->>OS: UPDATE orders SET status=EXPIRED
+      OS->>MQ: publish orders.order.cancelled
+      MQ-->>PS: consume orders.order.cancelled (void intent)
+      PS->>ST: cancel PaymentIntent (if not captured)
+    else already CONFIRMED
+      Note over OS: no-op (idempotent handler)
+    end
+    end
+
+    Note over MQ: Any consumer failure retries with exponential back-off (max 3), <br/> then routes to topic.dlq — audited, never silently dropped.

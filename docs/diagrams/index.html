@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ticketing Platform — Architecture Diagrams (v2)</title>
+  <style>
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      padding: 48px 24px;
+      background: #F7F8FA;
+      color: #232F3E;
+    }}
+    main {{ max-width: 960px; margin: 0 auto; }}
+    h1 {{ font-size: 28px; margin: 0 0 8px 0; }}
+    p.sub {{ color: #556070; margin: 0 0 28px 0; }}
+    .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }}
+    .tile {{
+      background: #fff;
+      border: 1px solid #E5E7EB;
+      border-radius: 12px;
+      padding: 20px 22px;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color .15s, transform .15s;
+      display: block;
+    }}
+    .tile:hover {{ border-color: #FF9900; transform: translateY(-2px); }}
+    .tile h2 {{ margin: 0 0 6px 0; font-size: 16px; color: #232F3E; }}
+    .tile p {{ margin: 0; color: #556070; font-size: 13px; }}
+    .badge {{
+      display: inline-block; font-size: 11px; padding: 2px 8px;
+      border-radius: 999px; margin-bottom: 8px; font-weight: 600;
+    }}
+    .b-aws {{ background: #FFE6BF; color: #8A4B00; }}
+    .b-mer {{ background: #D9E8FC; color: #0B3D91; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Ticketing Platform — Architecture Diagrams</h1>
+    <p class="sub">Four diagrams covering AWS infrastructure, per-service data ownership,
+      C4 container topology, and the end-to-end reservation + payment saga.</p>
+    <div class="grid">
+      <a class="tile" href="01-aws-infrastructure.svg">
+        <span class="badge b-aws">Graphviz · SVG/PNG</span>
+        <h2>1 · AWS Infrastructure</h2>
+        <p>Reference production architecture on EKS: VPC, MSK, RDS Multi-AZ,
+          ElastiCache, Kong, edge services, observability, IRSA.</p>
+      </a>
+      <a class="tile" href="02-data-model.html">
+        <span class="badge b-mer">Mermaid · ER</span>
+        <h2>2 · Data Model</h2>
+        <p>Per-service database ownership. Dotted lines mark
+          <i>logical</i> cross-service references (no enforced FKs).</p>
+      </a>
+      <a class="tile" href="03-c4-container.html">
+        <span class="badge b-mer">Mermaid · C4</span>
+        <h2>3 · C4 Container Diagram</h2>
+        <p>All 9 services grouped by domain (Identity · Catalog · Transaction),
+          showing REST, gRPC and Kafka protocols.</p>
+      </a>
+      <a class="tile" href="04-data-flow-sequence.html">
+        <span class="badge b-mer">Mermaid · Sequence</span>
+        <h2>4 · Data Flow / Saga</h2>
+        <p>Full reservation → payment → finalize / expire flow with
+          CloudEvents on MSK, transactional outbox, DLQ.</p>
+      </a>
+    </div>
+  </main>
+</body>
+</html>
