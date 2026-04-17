@@ -1,33 +1,21 @@
 # Agent Workflow & Post-Harness Validation
 
-This document captures the repository's agent workflow guidance, the final validation guard after an implementation loop, and the skills used to enforce those checks.
-
-## Purpose
-
-`AGENTS.md` is intentionally a high-level index and quick reference. The full workflow guidance belongs in a dedicated docs page so the agent-facing TOC remains concise and manageable.
-
-## Agent workflow reference
-
-The repository uses a manager/worker pattern with explicit workflow and verification gates. Key references:
-
-- `.claude/skills/orchestrate/SKILL.md` — manager/worker orchestration guidance for parallel and sequential tasks.
-- `.claude/skills/end-to-end-check/SKILL.md` — post-loop E2E workflow validation.
-- `.claude/skills/lint-check/SKILL.md` — post-loop lint and static verification validation.
-
 ## Post-harness validation loop
 
-After each main implementation loop with no unresolved blockers, run both post-harness validation skills before declaring the loop complete:
+After every implementation loop with no unresolved blockers, before declaring the loop complete, run:
 
-- `.claude/skills/end-to-end-check/SKILL.md`
-  - Validate new or changed workflows against client E2E coverage.
-  - Ensure root `docker-compose.yml` infrastructure is available.
-- `.claude/skills/lint-check/SKILL.md`
-  - Run service-specific lint and static verification commands aligned with CI.
+1. **[`lint-check`](../.claude/skills/lint-check/SKILL.md)** — service-specific lint and static verification, aligned with CI.
+2. **[`end-to-end-check`](../.claude/skills/end-to-end-check/SKILL.md)** — E2E coverage for new or changed workflows; verify `docker-compose.yml` infra is runnable.
 
-These two skills are the final validation gate for code quality and behavior after the main implementation cycle.
+These are the final gate. Do not declare "done" without both passing.
 
-## How to use this doc
+## Orchestration
 
-- Use `AGENTS.md` for the quick overview and table of contents.
-- Use `docs/17-agent-workflow.md` for workflow decisions, process reminders, and the post-harness validation contract.
-- Keep the `AGENTS.md` file compact; avoid moving full procedural detail back into it.
+Multi-workstream work uses a manager/worker pattern:
+
+- Invoke `/orchestrate` to enter manager mode — see [`../.claude/skills/orchestrate/SKILL.md`](../.claude/skills/orchestrate/SKILL.md).
+- Project-specific decomposition, dependency graph, decision log: [`SUBAGENT_ORCHESTRATION.md`](SUBAGENT_ORCHESTRATION.md).
+
+## Authoring principle
+
+Keep [`../AGENTS.md`](../AGENTS.md) as a TOC only. Keep [`../CLAUDE.md`](../CLAUDE.md) as the agent contract only. Full procedural detail belongs in `docs/` files like this one.

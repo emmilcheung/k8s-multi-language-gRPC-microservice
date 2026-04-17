@@ -26,6 +26,7 @@ This skill is used to validate code hygiene for changed services after an agent 
 2. Run service-specific verification commands:
    - `cd services/auth-service && pnpm lint && pnpm tsc --noEmit`
    - `cd services/payment-service && pnpm lint && pnpm tsc --noEmit`
+   - `cd services/user-service && pnpm lint && pnpm tsc --noEmit`
    - `cd services/client && pnpm lint && pnpm tsc --noEmit`
    - `cd services/ticket-service && go vet ./...`
    - `cd services/expiration-service && go vet ./...`
