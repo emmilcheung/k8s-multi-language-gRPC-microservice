@@ -7,6 +7,11 @@ REPO_ROOT="$(cd "$ROUTER_DIR/../.." && pwd)"
 
 ROVER_BIN="${ROVER_BIN:-rover}"
 
+if [[ ! -f "$ROUTER_DIR/supergraph-config.yaml" ]]; then
+  echo "Error: supergraph-config.yaml not found at $ROUTER_DIR/supergraph-config.yaml" >&2
+  exit 1
+fi
+
 echo "Composing supergraph from subgraph SDL files..."
 "$ROVER_BIN" supergraph compose \
   --config "$ROUTER_DIR/supergraph-config.yaml" \

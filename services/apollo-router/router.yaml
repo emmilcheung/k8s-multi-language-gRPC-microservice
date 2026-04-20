@@ -28,7 +28,7 @@ telemetry:
     tracing:
       otlp:
         enabled: true
-        endpoint: http://otel-collector:4317
+        endpoint: ${env.OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
 
 limits:
   max_depth: 15
