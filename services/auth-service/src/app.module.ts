@@ -8,6 +8,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { OAuthModule } from './modules/oauth/oauth.module';
 import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
+import { AuthGraphQLModule } from './graphql/graphql.module';
 import { DatabaseModule } from './database/database.module';
 import { RedisModule } from './modules/redis/redis.module';
 import { SecurityModule } from './common/security/security.module';
@@ -117,6 +118,7 @@ function otelMixin(): Record<string, string> {
     OAuthModule,
     HealthModule,
     MetricsModule,
+    AuthGraphQLModule,
   ],
 })
 export class AppModule {}
