@@ -1,0 +1,49 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@provides", "@tag"])
+
+type Ticket @key(fields: "id") {
+  id: ID!
+  title: String!
+  price: Int!
+  quota: Int!
+  available: Int!
+  maxPerUser: Int
+  ticketType: TicketType!
+  seatingPlan: SeatingPlan @provides(fields: "id")
+  createdAt: String!
+  updatedAt: String!
+}
+
+type SeatingPlan @key(fields: "id", resolvable: false) {
+  id: ID!
+}
+
+enum TicketType {
+  GENERAL_ADMISSION
+  SEATED
+}
+
+type Query {
+  tickets: [Ticket!]!
+  ticket(id: ID!): Ticket
+}
+
+type Mutation {
+  createTicket(input: CreateTicketInput!): Ticket!
+  updateTicket(id: ID!, input: UpdateTicketInput!): Ticket!
+}
+
+input CreateTicketInput {
+  title: String!
+  price: Int!
+  quota: Int!
+  maxPerUser: Int
+  ticketType: TicketType!
+}
+
+input UpdateTicketInput {
+  title: String
+  price: Int
+  quota: Int
+  maxPerUser: Int
+}
