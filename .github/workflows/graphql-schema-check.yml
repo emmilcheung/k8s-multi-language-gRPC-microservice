@@ -1,0 +1,28 @@
+name: GraphQL Schema Check
+
+on:
+  pull_request:
+    paths:
+      - "services/*/src/graphql/**"
+      - "services/*/internal/graphql/**"
+      - "services/*/src/main/resources/schema/**"
+      - "services/apollo-router/supergraph-config.yaml"
+
+jobs:
+  compose:
+    name: Compose supergraph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rover CLI
+        run: |
+          curl -sSL https://rover.apollo.dev/nix/latest | sh
+          echo "$HOME/.rover/bin" >> "$GITHUB_PATH"
+
+      - name: Compose supergraph
+        run: |
+          rover supergraph compose \
+            --config services/apollo-router/supergraph-config.yaml \
+            --output /tmp/supergraph.graphql
+          echo "Supergraph composed successfully"
