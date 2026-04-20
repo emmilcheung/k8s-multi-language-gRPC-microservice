@@ -9,9 +9,11 @@ import (
 	"syscall"
 	"time"
 
+	gqlhandler "github.com/99designs/gqlgen/graphql/handler"
 	"github.com/acme/ticket-service/internal/cache"
 	"github.com/acme/ticket-service/internal/config"
 	grpcserver "github.com/acme/ticket-service/internal/grpc"
+	gqlgraph "github.com/acme/ticket-service/internal/graphql"
 	"github.com/acme/ticket-service/internal/handler"
 	"github.com/acme/ticket-service/internal/health"
 	"github.com/acme/ticket-service/internal/kafka"
@@ -188,6 +190,11 @@ func main() {
 	// CP-13: seated ticket catalog — attach/detach a venue-service seating plan
 	v1.PUT("/:id/seating-plan", ticketHandler.AttachSeatingPlan)
 	v1.DELETE("/:id/seating-plan", ticketHandler.DetachSeatingPlan)
+
+	// GraphQL federation subgraph endpoint
+	gqlResolver := &gqlgraph.Resolver{TicketService: svc}
+	gqlSrv := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{Resolvers: gqlResolver}))
+	e.POST("/graphql", echo.WrapHandler(gqlSrv))
 
 	// R-06: Use errgroup to propagate server errors back to main instead of
 	// calling log.Fatal inside goroutines (which calls os.Exit, skipping all deferred cleanup).
