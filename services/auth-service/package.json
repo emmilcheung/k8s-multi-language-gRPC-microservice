@@ -31,9 +31,13 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
+    "@apollo/server": "^5.5.0",
+    "@apollo/subgraph": "^2.13.3",
+    "@nestjs/apollo": "^13.2.5",
     "@nestjs/common": "^11.1.18",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.1.18",
+    "@nestjs/graphql": "^13.2.5",
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/platform-express": "^11.1.18",
     "@opentelemetry/api": "^1.9.1",
@@ -48,6 +52,7 @@
     "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",
     "drizzle-orm": "^0.45.2",
+    "graphql": "^16.13.2",
     "ioredis": "^5.10.1",
     "ms": "^2.1.3",
     "nestjs-pino": "^4.6.1",
