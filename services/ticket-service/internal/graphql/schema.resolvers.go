@@ -19,6 +19,7 @@ import (
 func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketInput) (*Ticket, error) {
 	price := strconv.Itoa(input.Price)
 
+	// TicketType is not in service.CreateTicketInput — type is set via AttachSeatingPlan.
 	svcInput := service.CreateTicketInput{
 		Title: input.Title,
 		Price: price,
