@@ -10,6 +10,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { OrdersConsumer } from './kafka/orders.consumer';
+import { PaymentGraphQLModule } from './graphql/graphql.module';
 
 const envSchema = z
   .object({
@@ -42,9 +43,7 @@ const envSchema = z
     if (
       (config.KAFKA_SECURITY_PROTOCOL === 'SASL_PLAINTEXT' ||
         config.KAFKA_SECURITY_PROTOCOL === 'SASL_SSL') &&
-      (!config.KAFKA_SASL_MECHANISM ||
-        !config.KAFKA_SASL_USERNAME ||
-        !config.KAFKA_SASL_PASSWORD)
+      (!config.KAFKA_SASL_MECHANISM || !config.KAFKA_SASL_USERNAME || !config.KAFKA_SASL_PASSWORD)
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -113,6 +112,7 @@ function otelMixin(): Record<string, string> {
     PaymentsModule,
     HealthModule,
     MetricsModule,
+    PaymentGraphQLModule,
   ],
   // OrdersConsumer lives at app level so tests can exclude it without touching PaymentsModule
   providers: [OrdersConsumer],

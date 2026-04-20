@@ -1,0 +1,31 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@tag"])
+
+type Payment @key(fields: "id") {
+  id: ID!
+  orderId: ID!
+  amount: Int!
+  currency: String!
+  status: PaymentStatus!
+  createdAt: String!
+}
+
+enum PaymentStatus {
+  PENDING
+  CAPTURED
+  FAILED
+  REFUNDED
+}
+
+type Query {
+  payment(id: ID!): Payment
+}
+
+type Mutation {
+  createPayment(input: CreatePaymentInput!): Payment!
+}
+
+input CreatePaymentInput {
+  orderId: ID!
+  token: String!
+}
