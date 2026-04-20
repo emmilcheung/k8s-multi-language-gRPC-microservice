@@ -127,6 +127,14 @@ components:
         maxPerUser:
           type: integer
           description: Max tickets per buyer
+        ticketType:
+          type: string
+          description: Ticket type derived from seating plan attachment
+        orderId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Associated order ID if ticket is linked
         version:
           type: integer
         createdAt:
@@ -813,6 +821,59 @@ paths:
         "401":
           description: Not authenticated
 
+  /api/users/sessions:
+    get:
+      tags: [auth]
+      summary: List authenticated user's active sessions
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: List of active sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                    userId:
+                      type: string
+                      format: uuid
+                    createdAt:
+                      type: string
+                      format: date-time
+                    expiresAt:
+                      type: string
+                      format: date-time
+        "401":
+          description: Not authenticated
+
+  /api/users/sessions/{sessionId}:
+    parameters:
+      - name: sessionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    delete:
+      tags: [auth]
+      summary: Revoke a specific session
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Session revoked
+        "401":
+          description: Not authenticated
+        "404":
+          description: Session not found
+
   /api/auth/refresh:
     post:
       tags: [auth]
@@ -1129,6 +1190,34 @@ paths:
                 $ref: "#/components/schemas/VenueSection"
         "404":
           description: Venue not found
+
+  /api/venues/{venueId}/sections/{sectionId}:
+    parameters:
+      - name: venueId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: sectionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    delete:
+      tags: [venues]
+      summary: Delete a venue section template (owner only)
+      security:
+        - cookieAuth: []
+      responses:
+        "204":
+          description: Section template deleted
+        "403":
+          description: Not the venue owner
+        "404":
+          description: Venue or section not found
 
   # ════════════════════════════════════════════════════════
   # VENUE SERVICE — Seating Plans
@@ -1740,6 +1829,23 @@ paths:
   # ════════════════════════════════════════════════════════
 
   /api/payments:
+    get:
+      tags: [payments]
+      summary: List user's payments
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: List of payments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Payment"
+        "401":
+          description: Not authenticated
+
     post:
       tags: [payments]
       summary: Charge a payment for an order
@@ -1797,3 +1903,159 @@ paths:
           description: Not the payment owner
         "404":
           description: Not found
+
+  /api/payments/methods:
+    get:
+      tags: [payments]
+      summary: List saved payment methods for authenticated user
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: List of saved payment methods
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                    stripePaymentMethodId:
+                      type: string
+                      description: Stripe payment method ID
+                    brand:
+                      type: string
+                      example: "visa"
+                    last4:
+                      type: string
+                      example: "4242"
+                    isDefault:
+                      type: boolean
+                    createdAt:
+                      type: string
+                      format: date-time
+        "401":
+          description: Not authenticated
+
+    post:
+      tags: [payments]
+      summary: Register a new saved payment method
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  description: Stripe payment method token
+                isDefault:
+                  type: boolean
+                  default: false
+      responses:
+        "201":
+          description: Payment method saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  stripePaymentMethodId:
+                    type: string
+                  brand:
+                    type: string
+                  last4:
+                    type: string
+        "400":
+          description: Validation error
+        "401":
+          description: Not authenticated
+
+  /api/payments/methods/{methodId}:
+    parameters:
+      - name: methodId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    delete:
+      tags: [payments]
+      summary: Delete a saved payment method (owner only)
+      security:
+        - cookieAuth: []
+      responses:
+        "204":
+          description: Payment method deleted
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not the payment method owner
+        "404":
+          description: Method not found
+
+  /api/payments/methods/{methodId}/default:
+    parameters:
+      - name: methodId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    patch:
+      tags: [payments]
+      summary: Set as default payment method (owner only)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Set as default
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  isDefault:
+                    type: boolean
+                    example: true
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not the payment method owner
+        "404":
+          description: Method not found
+
+  /api/payments/webhook:
+    post:
+      tags: [payments]
+      summary: Stripe webhook endpoint (unauthenticated)
+      description: |
+        Receives webhook events from Stripe.
+        Must be declared before other payment routes to match first.
+        No authentication required — Stripe sends webhook signature in headers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Webhook processed
+        "400":
+          description: Invalid webhook signature or payload
