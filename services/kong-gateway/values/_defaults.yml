@@ -15,6 +15,7 @@ HOST_PAYMENTS: payment-service:3002
 HOST_USERS: user-service:3004
 HOST_CLIENT: client:4000
 HOST_VENUE: venue-service:3003
+HOST_APOLLO_ROUTER: apollo-router:4001
 
 # ── Timeouts (milliseconds) ────────────────────────────────────────────────────
 CONNECT_TIMEOUT_MS: 5000
@@ -23,6 +24,7 @@ WRITE_TIMEOUT_MS: 10000
 # Next.js SSR pages can be slow; give the client-service more headroom.
 CLIENT_READ_TIMEOUT_MS: 30000
 CLIENT_WRITE_TIMEOUT_MS: 30000
+GRAPHQL_READ_TIMEOUT_MS: 30000
 # SSE streams must stay open for minutes; needs a dedicated long timeout.
 SSE_READ_TIMEOUT_MS: 300000
 

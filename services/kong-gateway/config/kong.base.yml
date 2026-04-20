@@ -746,6 +746,43 @@ services:
                   -- every response from this route (K-SSE-01).
                   ngx.header["X-Accel-Buffering"] = "no"
 
+  # ── apollo-router (GraphQL Federation gateway) ───────────────────────────────
+  - name: apollo-router
+    url: http://{{HOST_APOLLO_ROUTER}}
+    connect_timeout: {{CONNECT_TIMEOUT_MS}}
+    read_timeout: {{GRAPHQL_READ_TIMEOUT_MS}}
+    write_timeout: {{CONNECT_TIMEOUT_MS}}
+    routes:
+      - name: graphql
+        paths:
+          - /graphql
+        methods: [POST, OPTIONS]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+          - name: cors
+            config:
+              origins: ["*"]
+              methods: [POST, OPTIONS]
+              headers: [Content-Type, Authorization]
+              exposed_headers: [X-Request-Id]
+              credentials: false
+              max_age: 3600
+          - name: rate-limiting
+            config:
+              minute: {{RATE_LIMIT_AUTHENTICATED_PER_MINUTE}}
+              policy: {{RATE_LIMIT_POLICY}}
+
   # ── client (Next.js SSR) — catch-all, must be last ────────────────────────────
   # Kong matches routes by longest-prefix first; all /api/* routes above always
   # win.  The client route has a higher read/write timeout to accommodate SSR.
