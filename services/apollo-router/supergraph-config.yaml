@@ -8,3 +8,11 @@ subgraphs:
     routing_url: http://user-service:3004/graphql
     schema:
       file: ../user-service/src/graphql/schema.graphql
+  tickets:
+    routing_url: http://ticket-service:3001/graphql
+    schema:
+      file: ../ticket-service/internal/graphql/schema.graphqls
+  payments:
+    routing_url: http://payment-service:3002/graphql
+    schema:
+      file: ../payment-service/src/graphql/schema.graphql

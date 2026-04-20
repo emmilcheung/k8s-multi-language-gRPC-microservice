@@ -1,5 +1,5 @@
 extend schema
-  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@provides", "@tag"])
+  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@tag"])
 
 type Ticket @key(fields: "id") {
   id: ID!
@@ -9,7 +9,7 @@ type Ticket @key(fields: "id") {
   available: Int!
   maxPerUser: Int
   ticketType: TicketType!
-  seatingPlan: SeatingPlan @provides(fields: "id")
+  seatingPlan: SeatingPlan
   createdAt: String!
   updatedAt: String!
 }
