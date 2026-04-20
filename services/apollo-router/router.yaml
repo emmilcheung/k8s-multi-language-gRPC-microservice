@@ -1,0 +1,35 @@
+supergraph:
+  path: /dist/config/supergraph.graphql
+
+headers:
+  all:
+    request:
+      - propagate:
+          named: x-user-id
+      - propagate:
+          named: x-user-roles
+      - propagate:
+          named: x-user-id-sig
+      - propagate:
+          named: traceparent
+      - propagate:
+          named: tracestate
+
+listen: 0.0.0.0:4001
+
+sandbox:
+  enabled: ${env.APOLLO_SANDBOX_ENABLED:-false}
+
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+  exporters:
+    tracing:
+      otlp:
+        enabled: true
+        endpoint: http://otel-collector:4317
+
+limits:
+  max_depth: 15
+  max_height: 200
