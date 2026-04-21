@@ -228,6 +228,16 @@ public class OrderService {
     // ── Read ──────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
+    public OrderResponse findById(UUID orderId) {
+        return orderRepository.findByIdWithTicket(orderId)
+                .map(order -> {
+                    List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
+                    return OrderResponse.from(order, seats);
+                })
+                .orElse(null);
+    }
+
+    @Transactional(readOnly = true)
     public OrderResponse getOrder(UUID orderId, UUID userId) {
         Order order = orderRepository.findByIdWithTicket(orderId)
                 .orElseThrow(() -> new NotFoundException("Order not found: " + orderId));
