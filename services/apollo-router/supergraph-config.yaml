@@ -16,3 +16,7 @@ subgraphs:
     routing_url: http://payment-service:3002/graphql
     schema:
       file: ../payment-service/src/graphql/schema.graphql
+  venues:
+    routing_url: http://venue-service:3003/graphql
+    schema:
+      file: ../venue-service/internal/graphql/schema.graphqls

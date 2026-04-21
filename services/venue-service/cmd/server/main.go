@@ -11,6 +11,7 @@ import (
 
 	"github.com/acme/venue-service/internal/config"
 	grpcserver "github.com/acme/venue-service/internal/grpc"
+	gqlgraph "github.com/acme/venue-service/internal/graphql"
 	"github.com/acme/venue-service/internal/handler"
 	"github.com/acme/venue-service/internal/health"
 	"github.com/acme/venue-service/internal/hold"
@@ -25,6 +26,7 @@ import (
 	"github.com/acme/venue-service/internal/tracing"
 	"github.com/acme/venue-service/pkg/logger"
 	"github.com/jackc/pgx/v5/pgxpool"
+	gqlhandler "github.com/99designs/gqlgen/graphql/handler"
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
@@ -245,6 +247,11 @@ func main() {
 
 	sseHandler := handler.NewSSEHandler(sseBroadcaster, log)
 	sseHandler.RegisterRoutes(api.Group("/seating-plans/:planId"))
+
+	// GraphQL federation subgraph.
+	gqlResolver := &gqlgraph.Resolver{PlanRepo: planRepo, SectionRepo: sectionRepo}
+	gqlSrv := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{Resolvers: gqlResolver}))
+	e.POST("/graphql", echo.WrapHandler(gqlSrv))
 
 	// R-06: Use errgroup to propagate server errors back to main instead of
 	// calling log.Fatal inside goroutines (which calls os.Exit, skipping all deferred cleanup).

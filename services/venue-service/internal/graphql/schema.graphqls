@@ -1,0 +1,44 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key"])
+
+type SeatingPlan @key(fields: "id") {
+  id: ID!
+  sections: [Section!]!
+  assignmentMode: AssignmentMode!
+  status: PlanStatus!
+}
+
+type Section {
+  id: ID!
+  name: String!
+  seats: [Seat!]!
+  availableSeats: Int!
+}
+
+type Seat {
+  id: ID!
+  label: String!
+  price: Int!
+  status: SeatStatus!
+}
+
+enum AssignmentMode {
+  MANUAL
+  AUTO
+}
+
+enum SeatStatus {
+  AVAILABLE
+  HELD
+  SOLD
+}
+
+enum PlanStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+type Query {
+  seatingPlan(id: ID!): SeatingPlan
+}
