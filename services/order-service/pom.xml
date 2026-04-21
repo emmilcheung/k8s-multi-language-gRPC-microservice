@@ -90,6 +90,12 @@
         <artifactId>kafka-clients</artifactId>
         <version>4.1.2</version>
       </dependency>
+      <!-- Pin graphql-java to SB4's managed version so federation-jvm does not downgrade it -->
+      <dependency>
+        <groupId>com.graphql-java</groupId>
+        <artifactId>graphql-java</artifactId>
+        <version>25.0</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 
@@ -196,6 +202,17 @@
       <groupId>org.redisson</groupId>
       <artifactId>redisson-spring-boot-starter</artifactId>
       <version>4.0.0</version>
+    </dependency>
+
+    <!-- ── GraphQL Federation subgraph ─────────────────────────────────────── -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-graphql</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.apollographql.federation</groupId>
+      <artifactId>federation-graphql-java-support</artifactId>
+      <version>5.4.0</version>
     </dependency>
 
     <!-- ── Resilience4j — circuit breaker on gRPC client (R-01) ─────────────── -->
