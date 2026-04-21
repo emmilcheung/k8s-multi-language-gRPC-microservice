@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
+import { createGraphQLClient } from "@/lib/graphql-client";
 import type { Order, SavedPaymentMethod } from "@/lib/types";
 import { STATUS_LABEL, STATUS_BADGE } from "@/lib/order-status";
 import { calculateOrderTotal } from "@/lib/order-utils";
@@ -29,6 +30,40 @@ interface Props {
 export async function generateMetadata({ params }: Props) {
   const { orderId } = await params;
   return { title: `Order ${orderId.slice(0, 8)} — Ticketing` };
+}
+
+const ORDER_DETAIL_QUERY = `
+  query OrderDetail($id: ID!) {
+    order(id: $id) {
+      id
+      userId
+      status
+      quantity
+      expiresAt
+      createdAt
+      ticket {
+        id
+        title
+        price
+      }
+    }
+  }
+`;
+
+async function getOrderViaGraphQL(orderId: string, cookie: string): Promise<Order | null> {
+  const client = createGraphQLClient(cookie);
+  const result = await client.query(ORDER_DETAIL_QUERY, { id: orderId }).toPromise();
+  const raw = result.data?.order;
+  if (!raw) return null;
+  return {
+    id: raw.id,
+    userId: raw.userId,
+    status: raw.status.toLowerCase().replace("complete", "complete") as Order["status"],
+    quantity: raw.quantity,
+    expiresAt: raw.expiresAt ?? "",
+    ticket: { id: raw.ticket.id, title: raw.ticket.title, price: raw.ticket.price },
+    version: 0,
+  };
 }
 
 // Steps for the stepper (linear happy path — cancelled shown differently)
@@ -56,15 +91,16 @@ export default async function OrderDetailPage({ params }: Props) {
   let order: Order;
   let savedPaymentMethods: SavedPaymentMethod[] = [];
   try {
-    const [orderResult, methodsResult] = await Promise.allSettled([
-      serverApi<Order>(`/api/orders/${orderId}`),
+    const cookieHeader = cookieStore.toString();
+    const [gqlOrder, methodsResult] = await Promise.allSettled([
+      getOrderViaGraphQL(orderId, cookieHeader),
       serverApi<{ paymentMethods: SavedPaymentMethod[] }>(`/api/payments/methods`),
     ]);
 
-    if (orderResult.status === "rejected") {
+    if (gqlOrder.status === "rejected" || gqlOrder.value === null) {
       notFound();
     }
-    order = orderResult.value;
+    order = gqlOrder.value!;
     if (methodsResult.status === "fulfilled") {
       savedPaymentMethods = methodsResult.value.paymentMethods ?? [];
     }
