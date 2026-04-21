@@ -20,3 +20,7 @@ subgraphs:
     routing_url: http://venue-service:3003/graphql
     schema:
       file: ../venue-service/internal/graphql/schema.graphqls
+  orders:
+    routing_url: http://order-service:8082/graphql
+    schema:
+      file: ../order-service/src/main/resources/schema/schema.graphqls
