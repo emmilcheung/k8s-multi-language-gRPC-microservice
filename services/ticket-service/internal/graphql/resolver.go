@@ -15,7 +15,8 @@ type Resolver struct {
 
 // mapTicketToGQL converts a repository.Ticket to the generated GQL Ticket model.
 func mapTicketToGQL(t *repository.Ticket) *Ticket {
-	price, _ := strconv.Atoi(t.Price)
+	priceF, _ := strconv.ParseFloat(t.Price, 64)
+	price := int(priceF)
 	available := t.Quota - t.Reserved - t.Sold
 	if available < 0 {
 		available = 0

@@ -1,9 +1,9 @@
 package com.ticketing.orders.graphql;
 
 import com.ticketing.orders.dto.OrderResponse;
-import com.ticketing.orders.entity.OrderStatus;
 import com.ticketing.orders.exception.ForbiddenException;
 import com.ticketing.orders.service.OrderService;
+import graphql.GraphQLContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -15,8 +15,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class OrderControllerTest {
@@ -24,11 +23,17 @@ class OrderControllerTest {
     @Mock
     private OrderService orderService;
 
-    private OrderController controller;
+    private OrderGraphqlController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new OrderController(orderService);
+        controller = new OrderGraphqlController(orderService);
+    }
+
+    private GraphQLContext ctxWithUserId(String userId) {
+        return GraphQLContext.newContext()
+                .of(UserIdInterceptor.USER_ID_KEY, userId)
+                .build();
     }
 
     @Test
@@ -37,7 +42,7 @@ class OrderControllerTest {
         OrderResponse order = new OrderResponse();
         when(orderService.listOrders(UUID.fromString(userId))).thenReturn(List.of(order));
 
-        List<OrderResponse> result = controller.orders(userId);
+        List<OrderResponse> result = controller.orders(ctxWithUserId(userId));
 
         assertThat(result).containsExactly(order);
         verify(orderService).listOrders(UUID.fromString(userId));
@@ -50,7 +55,7 @@ class OrderControllerTest {
         OrderResponse order = new OrderResponse();
         when(orderService.getOrder(UUID.fromString(orderId), UUID.fromString(userId))).thenReturn(order);
 
-        OrderResponse result = controller.order(orderId, userId);
+        OrderResponse result = controller.order(orderId, ctxWithUserId(userId));
 
         assertThat(result).isSameAs(order);
     }
@@ -62,7 +67,7 @@ class OrderControllerTest {
         when(orderService.getOrder(UUID.fromString(orderId), UUID.fromString(userId)))
                 .thenThrow(new ForbiddenException("You do not own this order"));
 
-        assertThatThrownBy(() -> controller.order(orderId, userId))
+        assertThatThrownBy(() -> controller.order(orderId, ctxWithUserId(userId)))
                 .isInstanceOf(ForbiddenException.class);
     }
 
@@ -73,7 +78,7 @@ class OrderControllerTest {
         when(orderService.listOrders(UUID.fromString(userId))).thenReturn(List.of(order));
 
         java.util.Map<String, Object> userRef = java.util.Map.of("id", userId);
-        List<OrderResponse> result = controller.userOrders(userRef, userId);
+        List<OrderResponse> result = controller.userOrders(userRef, ctxWithUserId(userId));
 
         assertThat(result).containsExactly(order);
     }
@@ -84,7 +89,7 @@ class OrderControllerTest {
         String requesterId = UUID.randomUUID().toString();
 
         java.util.Map<String, Object> userRef = java.util.Map.of("id", userId);
-        List<OrderResponse> result = controller.userOrders(userRef, requesterId);
+        List<OrderResponse> result = controller.userOrders(userRef, ctxWithUserId(requesterId));
 
         assertThat(result).isEmpty();
     }

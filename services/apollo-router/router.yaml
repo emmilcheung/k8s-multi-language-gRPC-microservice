@@ -1,5 +1,10 @@
 supergraph:
-  path: /dist/config/supergraph.graphql
+  listen: 0.0.0.0:4001
+  path: /graphql
+
+rhai:
+  scripts: /dist/scripts
+  main: jwt_cookie.rhai
 
 headers:
   all:
@@ -15,21 +20,3 @@ headers:
       - propagate:
           named: tracestate
 
-listen: 0.0.0.0:4001
-
-sandbox:
-  enabled: ${env.APOLLO_SANDBOX_ENABLED:-false}
-
-telemetry:
-  instrumentation:
-    spans:
-      mode: spec_compliant
-  exporters:
-    tracing:
-      otlp:
-        enabled: true
-        endpoint: ${env.OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
-
-limits:
-  max_depth: 15
-  max_height: 200
