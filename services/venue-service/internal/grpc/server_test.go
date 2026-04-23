@@ -142,6 +142,9 @@ func (n *nopPlanRepo) Create(ctx context.Context, p *repository.SeatingPlan) err
 func (n *nopPlanRepo) FindByID(ctx context.Context, id string) (*repository.SeatingPlan, error) {
 	return nil, repository.ErrPlanNotFound
 }
+func (n *nopPlanRepo) FindByIDs(_ context.Context, _ []string) ([]*repository.SeatingPlan, error) {
+	return nil, nil
+}
 func (n *nopPlanRepo) ListByVenue(ctx context.Context, venueID, organizerID string) ([]*repository.SeatingPlan, error) {
 	return nil, nil
 }

@@ -7,21 +7,11 @@ package graph
 
 import (
 	"context"
-	"errors"
-
-	"github.com/acme/venue-service/internal/repository"
 )
 
 // FindSeatingPlanByID is the resolver for the findSeatingPlanByID field.
 func (r *entityResolver) FindSeatingPlanByID(ctx context.Context, id string) (*SeatingPlan, error) {
-	plan, err := r.PlanRepo.FindByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, repository.ErrPlanNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return mapPlanToGQL(plan, nil), nil
+	return loadPlan(ctx, id)
 }
 
 // Entity returns EntityResolver implementation.

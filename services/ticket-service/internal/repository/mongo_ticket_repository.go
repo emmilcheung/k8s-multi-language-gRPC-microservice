@@ -243,6 +243,10 @@ type PaginationParams struct {
 type TicketRepository interface {
 	Create(ctx context.Context, t *Ticket) error
 	FindByID(ctx context.Context, id string) (*Ticket, error)
+	// FindByIDs fetches multiple tickets by primary key in a single round-trip.
+	// The returned slice is in the same order as the input ids; missing tickets
+	// are represented as nil at the corresponding index.
+	FindByIDs(ctx context.Context, ids []string) ([]*Ticket, error)
 	// FindAll returns a page of tickets ordered by createdAt descending (newest first).
 	// Pass a zero-value PaginationParams for the first page with defaults.
 	FindAll(ctx context.Context, p PaginationParams) ([]*Ticket, error)
@@ -566,6 +570,38 @@ func (r *MongoTicketRepository) FindByID(ctx context.Context, id string) (*Ticke
 		return nil, fmt.Errorf("find ticket by id: %w", err)
 	}
 	return &t, nil
+}
+
+// FindByIDs fetches multiple tickets in a single MongoDB $in query and returns
+// them in the same order as the input ids slice.  Missing tickets are nil at
+// the corresponding position.
+func (r *MongoTicketRepository) FindByIDs(ctx context.Context, ids []string) ([]*Ticket, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	cursor, err := r.collection.Find(ctx, bson.M{"_id": bson.M{"$in": ids}})
+	if err != nil {
+		return nil, fmt.Errorf("find tickets by ids: %w", err)
+	}
+	defer cursor.Close(ctx) //nolint:errcheck
+
+	byID := make(map[string]*Ticket, len(ids))
+	for cursor.Next(ctx) {
+		var t Ticket
+		if err := cursor.Decode(&t); err != nil {
+			return nil, fmt.Errorf("decode ticket: %w", err)
+		}
+		byID[t.ID] = &t
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("cursor error: %w", err)
+	}
+
+	out := make([]*Ticket, len(ids))
+	for i, id := range ids {
+		out[i] = byID[id] // nil if not found
+	}
+	return out, nil
 }
 
 // FindAll returns a page of tickets ordered by createdAt descending (newest first).

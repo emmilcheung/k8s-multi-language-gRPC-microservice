@@ -125,6 +125,22 @@ expiration-service:
       cpu: 200m
       memory: 128Mi
 
+# ── apollo-router (GraphQL Federation gateway) ────────────────────────────────
+apollo-router:
+  replicaCount: 2
+  image:
+    # Apollo Router is published to GHCR — not built from this repo's source.
+    # The repository field is the full image path; global.imageRegistry is NOT prepended.
+    repository: ghcr.io/apollographql/router
+    tag: "v2.1.1"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 # ── client (Next.js) ──────────────────────────────────────────────────────────
 client:
   replicaCount: 2
@@ -140,6 +156,12 @@ client:
     # the in-cluster ClusterIP DNS name — never via the public LoadBalancer.
     # This is the same Kong proxy; the difference is the network path taken.
     INTERNAL_API_URL: "http://ticketing-kong-proxy.ticketing.svc.cluster.local:8000"
+    # Server-side GraphQL: Next.js Server Components reach the router directly
+    # via the in-cluster ClusterIP DNS name (bypasses Kong for lower latency).
+    GRAPHQL_API_URL: "http://ticketing-apollo-router.ticketing.svc.cluster.local:4001/graphql"
+    # Browser-facing GraphQL: routed through Kong so the browser uses one origin.
+    # Override per-env via --set client.env.NEXT_PUBLIC_GRAPHQL_API_URL=<url>.
+    NEXT_PUBLIC_GRAPHQL_API_URL: "http://kong-proxy/graphql"
   resources:
     requests:
       cpu: 100m

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: apollo-router
+description: Apollo Router v2 — GraphQL Federation gateway federating 6 subgraphs
+type: application
+version: 0.1.0
+appVersion: "v2.1.1"

@@ -29,6 +29,9 @@ func (s *stubTicketRepo) Create(_ context.Context, _ *repository.Ticket) error {
 func (s *stubTicketRepo) FindByID(_ context.Context, _ string) (*repository.Ticket, error) {
 	panic("stubTicketRepo.FindByID not implemented")
 }
+func (s *stubTicketRepo) FindByIDs(_ context.Context, _ []string) ([]*repository.Ticket, error) {
+	panic("stubTicketRepo.FindByIDs not implemented")
+}
 func (s *stubTicketRepo) FindAll(_ context.Context, p repository.PaginationParams) ([]*repository.Ticket, error) {
 	// Simple pagination: find the offset by cursor (p.After) and return up to p.Limit tickets.
 	limit := p.Limit

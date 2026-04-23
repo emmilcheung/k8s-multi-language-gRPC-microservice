@@ -7,22 +7,11 @@ package graph
 
 import (
 	"context"
-	"errors"
-	"fmt"
-
-	"github.com/acme/ticket-service/internal/repository"
 )
 
 // FindTicketByID is the resolver for the findTicketByID field.
 func (r *entityResolver) FindTicketByID(ctx context.Context, id string) (*Ticket, error) {
-	t, err := r.TicketService.GetTicketByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, repository.ErrTicketNotFound) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("findTicketByID: %w", err)
-	}
-	return mapTicketToGQL(t), nil
+	return loadTicket(ctx, id)
 }
 
 // Entity returns EntityResolver implementation.

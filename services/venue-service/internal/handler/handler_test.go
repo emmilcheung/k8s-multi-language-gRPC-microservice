@@ -58,6 +58,9 @@ func (s *stubPlanRepo) Create(ctx context.Context, p *repository.SeatingPlan) er
 func (s *stubPlanRepo) FindByID(ctx context.Context, id string) (*repository.SeatingPlan, error) {
 	return s.findByIDFn(ctx, id)
 }
+func (s *stubPlanRepo) FindByIDs(_ context.Context, _ []string) ([]*repository.SeatingPlan, error) {
+	panic("stubPlanRepo.FindByIDs not implemented")
+}
 func (s *stubPlanRepo) ListByVenue(ctx context.Context, venueID, organizerID string) ([]*repository.SeatingPlan, error) {
 	if s.listByVenueFn != nil {
 		return s.listByVenueFn(ctx, venueID, organizerID)

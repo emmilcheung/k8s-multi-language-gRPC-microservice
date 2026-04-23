@@ -195,6 +195,18 @@ user-service:
   autoscaling:
     enabled: false
 
+apollo-router:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
 client:
   replicaCount: 1
   image:
@@ -203,6 +215,10 @@ client:
   env:
     NEXT_PUBLIC_API_URL: "http://localhost:8000"
     INTERNAL_API_URL: "http://ticketing-kong-proxy:8000"
+    # Server-side GraphQL: FQDN within minikube's ticketing namespace.
+    GRAPHQL_API_URL: "http://ticketing-apollo-router.ticketing.svc.cluster.local:4001/graphql"
+    # Browser-facing GraphQL: minikube tunnel exposes Kong on localhost:8000.
+    NEXT_PUBLIC_GRAPHQL_API_URL: "http://localhost:8000/graphql"
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
     OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     OTEL_SERVICE_NAME: client

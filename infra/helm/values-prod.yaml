@@ -2,6 +2,10 @@
 # Production must use external managed Kafka with per-service SASL credentials.
 # Do not deploy the in-cluster PLAINTEXT broker in this environment.
 
+apollo-router:
+  networkPolicy:
+    enabled: true
+
 auth-service:
   networkPolicy:
     enabled: true

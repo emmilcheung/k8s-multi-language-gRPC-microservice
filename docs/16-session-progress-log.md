@@ -9,6 +9,26 @@
 
 ---
 
+## Session: 2026-04-23 — docs(graphql-federation): document order-service Spring GraphQL deviation ✅ COMPLETE
+
+**Branch:** `feature/graphql-federation`
+
+### What was done
+
+Updated spec and plan docs to reflect the actual implementation of the order-service GraphQL subgraph.
+
+1. **`docs/superpowers/specs/2026-04-20-graphql-federation-design.md`** — replaced all Netflix DGS references in order-service context with Spring GraphQL; updated the architecture diagram label, subgraph assignments table, implementation pattern section (dependencies, file structure), DataLoader table, and rollout step 4; added a rationale note: order-service uses Spring GraphQL (`@Controller` + `@QueryMapping`/`@SchemaMapping`) instead of Netflix DGS — Spring-native, zero additional dependency, sufficient for federation via `@apollographql/federation-jvm`.
+
+2. **`docs/superpowers/plans/2026-04-20-graphql-federation.md`** — updated Tech Stack line (Netflix DGS → Spring GraphQL), added a one-line deviation note pointing to the spec, updated File Map table (DGS-named files → actual Spring GraphQL filenames), updated Task 16 title and pom.xml dependency block, updated Task 17 title, test class, and implementation code to reflect `@Controller`-based approach.
+
+3. No code changes were made.
+
+### Outcome
+
+Spec and plan now accurately reflect the implemented Spring GraphQL approach. Rationale is captured in the spec. No functional changes.
+
+---
+
 ## Session: 2026-04-15 — Settings release hardening + clean bootstrap gate ✅ COMPLETE
 
 **Branch:** `main`

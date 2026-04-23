@@ -9,6 +9,7 @@ import org.springframework.boot.graphql.autoconfigure.GraphQlSourceBuilderCustom
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -33,12 +34,28 @@ public class FederationConfig {
             Federation.transform(registry, wiring)
                 .fetchEntities(env -> {
                     List<Map<String, Object>> representations = env.getArgument(_Entity.argumentName);
+
+                    // Collect all Order IDs in one pass so we can batch-load them in
+                    // a single DB query instead of one findById() call per entity.
+                    List<UUID> orderIds = new ArrayList<>();
+                    for (Map<String, Object> ref : representations) {
+                        if ("Order".equals(ref.get("__typename"))) {
+                            orderIds.add(UUID.fromString((String) ref.get("id")));
+                        }
+                    }
+
+                    // Single round-trip for all Orders in this _entities call.
+                    Map<UUID, OrderResponse> orderMap = orderIds.isEmpty()
+                            ? Map.of()
+                            : orderService.findByIds(orderIds);
+
+                    // Fan results back in the original representation order.
                     return representations.stream()
                         .map(ref -> {
                             String typename = (String) ref.get("__typename");
                             String id = (String) ref.get("id");
                             if ("Order".equals(typename)) {
-                                return orderService.findById(UUID.fromString(id));
+                                return orderMap.get(UUID.fromString(id));
                             }
                             if ("User".equals(typename)) {
                                 return Map.of("id", id);

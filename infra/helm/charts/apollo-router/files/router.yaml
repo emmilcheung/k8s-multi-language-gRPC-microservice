@@ -1,0 +1,22 @@
+supergraph:
+  listen: 0.0.0.0:4001
+  path: /graphql
+
+rhai:
+  scripts: /dist/scripts
+  main: jwt_cookie.rhai
+
+headers:
+  all:
+    request:
+      - propagate:
+          named: x-user-id
+      - propagate:
+          named: x-user-roles
+      - propagate:
+          named: x-user-id-sig
+      - propagate:
+          named: traceparent
+      - propagate:
+          named: tracestate
+

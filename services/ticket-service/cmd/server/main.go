@@ -191,10 +191,18 @@ func main() {
 	v1.PUT("/:id/seating-plan", ticketHandler.AttachSeatingPlan)
 	v1.DELETE("/:id/seating-plan", ticketHandler.DetachSeatingPlan)
 
-	// GraphQL federation subgraph endpoint
+	// GraphQL federation subgraph endpoint.
+	// A per-request DataLoader middleware is wrapped around the handler so that
+	// every _entities batch call gets its own loader instance (prevents
+	// cross-request data leaks and keeps the per-request cache correct).
 	gqlResolver := &gqlgraph.Resolver{TicketService: svc}
 	gqlSrv := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{Resolvers: gqlResolver}))
-	e.POST("/graphql", echo.WrapHandler(gqlSrv))
+	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		loader := gqlgraph.NewTicketLoader(svc)
+		ctx := gqlgraph.WithTicketLoader(r.Context(), loader)
+		gqlSrv.ServeHTTP(w, r.WithContext(ctx))
+	})
+	e.POST("/graphql", echo.WrapHandler(gqlHandler))
 
 	// R-06: Use errgroup to propagate server errors back to main instead of
 	// calling log.Fatal inside goroutines (which calls os.Exit, skipping all deferred cleanup).
