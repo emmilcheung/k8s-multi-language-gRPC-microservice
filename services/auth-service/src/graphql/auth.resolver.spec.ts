@@ -38,7 +38,10 @@ describe('AuthResolver', () => {
       const user = { id: 'user-456', email: 'other@test.com' };
       mockUsersRepository.findById.mockResolvedValue(user);
 
-      const result = await resolver.resolveReference({ __typename: 'User', id: 'user-456' });
+      const result = await resolver.resolveReference({
+        __typename: 'User',
+        id: 'user-456',
+      });
 
       expect(result).toEqual({ id: 'user-456', email: 'other@test.com' });
     });

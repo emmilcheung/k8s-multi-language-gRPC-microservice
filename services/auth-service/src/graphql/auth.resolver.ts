@@ -1,15 +1,27 @@
-import { Resolver, Query, ResolveField, Parent, Context, ResolveReference } from '@nestjs/graphql';
+import {
+  Resolver,
+  Query,
+  ResolveField,
+  Parent,
+  Context,
+  ResolveReference,
+} from '@nestjs/graphql';
+import type { User } from '../modules/users/users.repository';
 import { UsersRepository } from '../modules/users/users.repository';
+
+type GqlContext = {
+  req: { headers: Record<string, string | string[] | undefined> };
+};
 
 @Resolver('User')
 export class AuthResolver {
   constructor(private readonly usersRepository: UsersRepository) {}
 
   @Query()
-  async currentUser(@Context() ctx: any) {
+  async currentUser(@Context() ctx: GqlContext) {
     const userId = ctx.req.headers['x-user-id'];
     if (!userId) return null;
-    return this.usersRepository.findById(userId);
+    return this.usersRepository.findById(userId as string);
   }
 
   @ResolveReference()
@@ -18,7 +30,7 @@ export class AuthResolver {
   }
 
   @ResolveField()
-  email(@Parent() user: any, @Context() ctx: any) {
+  email(@Parent() user: Partial<User>, @Context() ctx: GqlContext) {
     const requesterId = ctx.req.headers['x-user-id'];
     if (requesterId !== user.id) return null;
     return user.email;
