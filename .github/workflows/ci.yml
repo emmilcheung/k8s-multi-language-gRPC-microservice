@@ -903,6 +903,34 @@ jobs:
             echo "$service is healthy"
           done
 
+      - name: Cache Rover home
+        uses: actions/cache@v4
+        with:
+          path: ~/.rover
+          key: rover-${{ runner.os }}-v0.38.1-supergraph-v2.9.0
+
+      - name: Install Rover CLI
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_on: any
+          command: |
+            curl -sSL https://rover.apollo.dev/nix/latest | sh
+            echo "$HOME/.rover/bin" >> "$GITHUB_PATH"
+
+      - name: Compose Apollo Router supergraph
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_on: any
+          command: |
+            export PATH="$HOME/.rover/bin:$PATH"
+            bash services/apollo-router/scripts/compose.sh
+        env:
+          APOLLO_ELV2_LICENSE: accept
+
       - name: Start Apollo Router
         run: docker compose up -d apollo-router
 
