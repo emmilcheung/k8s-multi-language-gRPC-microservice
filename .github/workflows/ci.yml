@@ -699,7 +699,6 @@ jobs:
           retry_on: any
           command: |
             docker buildx build \
-              --context . \
               --file services/ticket-service/Dockerfile \
               --cache-from type=gha \
               --cache-to type=gha,mode=max \
