@@ -354,25 +354,47 @@ jobs:
   # ── graphql (Apollo Router supergraph composition) ──────────────────────────
   graphql:
     name: GraphQL schema check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changes
     if: needs.changes.outputs.graphql == 'true'
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache Rover home
+        uses: actions/cache@v4
+        with:
+          path: ~/.rover
+          key: rover-${{ runner.os }}-v0.38.1-supergraph-v2.9.0
+
       - name: Install Rover CLI
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_on: any
+          command: |
+            curl -sSL https://rover.apollo.dev/nix/latest | sh
+            echo "$HOME/.rover/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Rover CLI
         run: |
-          curl -sSL https://rover.apollo.dev/nix/latest | sh
-          echo "$HOME/.rover/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.rover/bin:$PATH"
+          rover --version
 
       - name: Compose supergraph
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_on: any
+          command: |
+            export PATH="$HOME/.rover/bin:$PATH"
+            rover supergraph compose \
+              --config services/apollo-router/supergraph-config.yaml \
+              --output /tmp/supergraph.graphql
+            echo "Supergraph composed successfully"
         env:
           APOLLO_ELV2_LICENSE: accept
-        run: |
-          rover supergraph compose \
-            --config services/apollo-router/supergraph-config.yaml \
-            --output /tmp/supergraph.graphql
-          echo "Supergraph composed successfully"
 
   # ── order-service (Java 21 / Spring Boot / Maven) ──────────────────────────
   # Build context is the REPO ROOT — Dockerfile reads ../../proto/ for protobuf codegen.
