@@ -58,7 +58,7 @@ async function getOrderViaGraphQL(orderId: string, cookie: string): Promise<Orde
   return {
     id: raw.id,
     userId: raw.userId,
-    status: raw.status.toLowerCase().replace("complete", "complete") as Order["status"],
+    status: raw.status.toLowerCase() as Order["status"],
     quantity: raw.quantity,
     expiresAt: raw.expiresAt ?? "",
     ticket: { id: raw.ticket.id, title: raw.ticket.title, price: raw.ticket.price },
@@ -92,15 +92,15 @@ export default async function OrderDetailPage({ params }: Props) {
   let savedPaymentMethods: SavedPaymentMethod[] = [];
   try {
     const cookieHeader = cookieStore.toString();
-    const [gqlOrder, methodsResult] = await Promise.allSettled([
+    const [orderResult, methodsResult] = await Promise.allSettled([
       getOrderViaGraphQL(orderId, cookieHeader),
       serverApi<{ paymentMethods: SavedPaymentMethod[] }>(`/api/payments/methods`),
     ]);
 
-    if (gqlOrder.status === "rejected" || gqlOrder.value === null) {
+    if (orderResult.status === "rejected" || orderResult.value === null) {
       notFound();
     }
-    order = gqlOrder.value!;
+    order = orderResult.value;
     if (methodsResult.status === "fulfilled") {
       savedPaymentMethods = methodsResult.value.paymentMethods ?? [];
     }

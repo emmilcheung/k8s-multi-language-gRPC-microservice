@@ -2,6 +2,10 @@
 # Staging validates full NetworkPolicy coverage and external secure Kafka before
 # production rollout. Supply KAFKA_* SASL secrets per service.
 
+apollo-router:
+  networkPolicy:
+    enabled: true
+
 auth-service:
   networkPolicy:
     enabled: true

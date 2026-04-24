@@ -14,10 +14,11 @@ type contextKey string
 
 const planLoaderKey contextKey = "planLoader"
 
-// planBatchFn is the DataLoader batch function.  It receives all plan IDs
-// queued during one event-loop tick and fetches them in a single
-// FindByIDs query, then fans results back in input order.
-func planBatchFn(repo repository.PlanRepository) dataloader.BatchFunc[string, *SeatingPlan] {
+// planBatchFn is the DataLoader batch function. It receives all plan IDs
+// queued during one event-loop tick, fetches the plans in a single FindByIDs
+// query, then hydrates the sections for each plan before fanning results back
+// in input order.
+func planBatchFn(repo repository.PlanRepository, sectionRepo repository.SectionRepository) dataloader.BatchFunc[string, *SeatingPlan] {
 	return func(ctx context.Context, keys []string) []*dataloader.Result[*SeatingPlan] {
 		plans, err := repo.FindByIDs(ctx, keys)
 		results := make([]*dataloader.Result[*SeatingPlan], len(keys))
@@ -31,7 +32,12 @@ func planBatchFn(repo repository.PlanRepository) dataloader.BatchFunc[string, *S
 			if p == nil {
 				results[i] = &dataloader.Result[*SeatingPlan]{Data: nil}
 			} else {
-				results[i] = &dataloader.Result[*SeatingPlan]{Data: mapPlanToGQL(p, nil)}
+				sections, err := loadSections(ctx, sectionRepo, p.ID)
+				if err != nil {
+					results[i] = &dataloader.Result[*SeatingPlan]{Error: fmt.Errorf("planloader sections: %w", err)}
+					continue
+				}
+				results[i] = &dataloader.Result[*SeatingPlan]{Data: mapPlanToGQL(p, sections)}
 			}
 		}
 		return results
@@ -39,8 +45,8 @@ func planBatchFn(repo repository.PlanRepository) dataloader.BatchFunc[string, *S
 }
 
 // NewPlanLoader constructs a per-request DataLoader backed by the given repo.
-func NewPlanLoader(repo repository.PlanRepository) *dataloader.Loader[string, *SeatingPlan] {
-	return dataloader.NewBatchedLoader(planBatchFn(repo))
+func NewPlanLoader(repo repository.PlanRepository, sectionRepo repository.SectionRepository) *dataloader.Loader[string, *SeatingPlan] {
+	return dataloader.NewBatchedLoader(planBatchFn(repo, sectionRepo))
 }
 
 // WithPlanLoader stores a loader instance in the context.

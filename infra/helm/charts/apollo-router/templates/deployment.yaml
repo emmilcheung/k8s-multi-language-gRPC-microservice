@@ -77,6 +77,11 @@ spec:
             - name: http
               containerPort: {{ .Values.service.port }}
               protocol: TCP
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.telemetry.otlpEndpoint | default "http://otel-collector:4317" | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: "apollo-router"
           volumeMounts:
             - name: config
               mountPath: /dist/config/router.yaml
@@ -85,10 +90,6 @@ spec:
             - name: config
               mountPath: /dist/config/supergraph.graphql
               subPath: supergraph.graphql
-              readOnly: true
-            - name: config
-              mountPath: /dist/scripts/jwt_cookie.rhai
-              subPath: jwt_cookie.rhai
               readOnly: true
             - name: tmp
               mountPath: /tmp

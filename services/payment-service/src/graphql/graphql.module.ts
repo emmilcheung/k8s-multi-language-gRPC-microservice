@@ -3,6 +3,8 @@ import { GraphQLModule } from '@nestjs/graphql';
 import { ApolloFederationDriver, ApolloFederationDriverConfig } from '@nestjs/apollo';
 import { PaymentResolver } from './payment.resolver';
 import { PaymentsModule } from '../modules/payments/payments.module';
+import { SecurityModule } from '../common/security/security.module';
+import { UserIdSigGuard } from './guards/user-id-sig.guard';
 
 @Module({
   imports: [
@@ -12,7 +14,8 @@ import { PaymentsModule } from '../modules/payments/payments.module';
       playground: false,
     }),
     PaymentsModule,
+    SecurityModule,
   ],
-  providers: [PaymentResolver],
+  providers: [PaymentResolver, UserIdSigGuard],
 })
 export class PaymentGraphQLModule {}

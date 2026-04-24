@@ -10,5 +10,3 @@ data:
     {{- .Files.Get "files/router.yaml" | nindent 4 }}
   supergraph.graphql: |
     {{- .Files.Get "files/supergraph.graphql" | nindent 4 }}
-  jwt_cookie.rhai: |
-    {{- .Files.Get "files/scripts/jwt_cookie.rhai" | nindent 4 }}

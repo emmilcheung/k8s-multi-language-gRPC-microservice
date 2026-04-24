@@ -6,6 +6,8 @@ import {
 } from '@nestjs/apollo';
 import { AuthResolver } from './auth.resolver';
 import { UsersModule } from '../modules/users/users.module';
+import { SecurityModule } from '../common/security/security.module';
+import { UserIdSigGuard } from './guards/user-id-sig.guard';
 
 @Module({
   imports: [
@@ -15,7 +17,8 @@ import { UsersModule } from '../modules/users/users.module';
       playground: false,
     }),
     UsersModule,
+    SecurityModule,
   ],
-  providers: [AuthResolver],
+  providers: [AuthResolver, UserIdSigGuard],
 })
 export class AuthGraphQLModule {}

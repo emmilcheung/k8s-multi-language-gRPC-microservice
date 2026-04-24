@@ -1,6 +1,7 @@
 import { Resolver, Query, ResolveReference, Args, Context } from '@nestjs/graphql';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, UseGuards } from '@nestjs/common';
 import { PaymentsService } from '../modules/payments/payments.service';
+import { UserIdSigGuard } from './guards/user-id-sig.guard';
 
 interface GqlContext {
   req: {
@@ -13,6 +14,7 @@ export class PaymentResolver {
   constructor(private readonly paymentsService: PaymentsService) {}
 
   @Query()
+  @UseGuards(UserIdSigGuard)
   async payment(@Args('id') id: string, @Context() ctx: GqlContext) {
     try {
       const payment = await this.paymentsService.findById(id);

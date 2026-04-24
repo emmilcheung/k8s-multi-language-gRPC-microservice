@@ -9,9 +9,10 @@ import (
 	"syscall"
 	"time"
 
+	gqlhandler "github.com/99designs/gqlgen/graphql/handler"
 	"github.com/acme/venue-service/internal/config"
-	grpcserver "github.com/acme/venue-service/internal/grpc"
 	gqlgraph "github.com/acme/venue-service/internal/graphql"
+	grpcserver "github.com/acme/venue-service/internal/grpc"
 	"github.com/acme/venue-service/internal/handler"
 	"github.com/acme/venue-service/internal/health"
 	"github.com/acme/venue-service/internal/hold"
@@ -26,7 +27,6 @@ import (
 	"github.com/acme/venue-service/internal/tracing"
 	"github.com/acme/venue-service/pkg/logger"
 	"github.com/jackc/pgx/v5/pgxpool"
-	gqlhandler "github.com/99designs/gqlgen/graphql/handler"
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
@@ -255,11 +255,11 @@ func main() {
 	gqlResolver := &gqlgraph.Resolver{PlanRepo: planRepo, SectionRepo: sectionRepo}
 	gqlSrv := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{Resolvers: gqlResolver}))
 	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		loader := gqlgraph.NewPlanLoader(planRepo)
+		loader := gqlgraph.NewPlanLoader(planRepo, sectionRepo)
 		ctx := gqlgraph.WithPlanLoader(r.Context(), loader)
 		gqlSrv.ServeHTTP(w, r.WithContext(ctx))
 	})
-	e.POST("/graphql", echo.WrapHandler(gqlHandler))
+	e.POST("/graphql", echo.WrapHandler(gqlgraph.WrapWithUserIDSignatureValidation(gqlHandler, sigValidator)))
 
 	// R-06: Use errgroup to propagate server errors back to main instead of
 	// calling log.Fatal inside goroutines (which calls os.Exit, skipping all deferred cleanup).

@@ -2,10 +2,6 @@ supergraph:
   listen: 0.0.0.0:4001
   path: /graphql
 
-rhai:
-  scripts: /dist/scripts
-  main: jwt_cookie.rhai
-
 headers:
   all:
     request:
@@ -20,3 +16,19 @@ headers:
       - propagate:
           named: tracestate
 
+telemetry:
+  exporters:
+    tracing:
+      otlp:
+        enabled: true
+        endpoint: "${env.OTEL_EXPORTER_OTLP_ENDPOINT}"
+        protocol: grpc
+    metrics:
+      otlp:
+        enabled: true
+        endpoint: "${env.OTEL_EXPORTER_OTLP_ENDPOINT}"
+        protocol: grpc
+        temporality: delta
+  instrumentation:
+    spans:
+      mode: spec_compliant

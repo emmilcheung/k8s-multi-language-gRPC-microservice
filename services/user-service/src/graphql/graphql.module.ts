@@ -7,6 +7,8 @@ import {
 import { UserResolver } from "./user.resolver";
 import { UserLoader } from "./users.loader";
 import { UserSettingsModule } from "../modules/user-settings/user-settings.module";
+import { SecurityModule } from "../common/security/security.module";
+import { UserIdSigGuard } from "./guards/user-id-sig.guard";
 
 @Module({
   imports: [
@@ -16,7 +18,8 @@ import { UserSettingsModule } from "../modules/user-settings/user-settings.modul
       playground: false,
     }),
     UserSettingsModule,
+    SecurityModule,
   ],
-  providers: [UserResolver, UserLoader],
+  providers: [UserResolver, UserLoader, UserIdSigGuard],
 })
 export class UserGraphQLModule {}
