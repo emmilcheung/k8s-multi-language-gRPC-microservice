@@ -1,4 +1,3 @@
-federation_version: =2.9.0
 subgraphs:
   auth:
     routing_url: http://auth-service:3000/graphql
