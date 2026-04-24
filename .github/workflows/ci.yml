@@ -889,10 +889,17 @@ jobs:
           echo "Waiting for apollo-router to be healthy..."
           timeout 120 bash -c '
             while true; do
-              status=$(docker inspect $(docker compose ps -q apollo-router 2>/dev/null) --format="{{.State.Health.Status}}" 2>/dev/null || echo "not-started")
+              container_id=$(docker compose ps -q apollo-router 2>/dev/null)
+              status=$(docker inspect "$container_id" --format="{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" 2>/dev/null || echo "not-started")
               if [ "$status" = "healthy" ]; then
                 echo "apollo-router is healthy"
                 break
+              fi
+              if [ "$status" = "unhealthy" ]; then
+                echo "apollo-router became unhealthy"
+                docker inspect "$container_id" --format="{{json .State.Health}}" || true
+                docker logs "$container_id" || true
+                exit 1
               fi
               echo "  apollo-router: $status"
               sleep 5
