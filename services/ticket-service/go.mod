@@ -3,6 +3,7 @@ module github.com/acme/ticket-service
 go 1.25.0
 
 require (
+	github.com/99designs/gqlgen v0.17.89
 	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/confluentinc/confluent-kafka-go/v2 v2.13.3
 	github.com/google/uuid v1.6.0
@@ -16,6 +17,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/mongodb v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.41.0
+	github.com/vektah/gqlparser/v2 v2.5.32
 	go.mongodb.org/mongo-driver/v2 v2.5.0
 	go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho v0.67.0
 	go.opentelemetry.io/otel v1.43.0
@@ -25,6 +27,15 @@ require (
 	go.uber.org/zap v1.27.1
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
+)
+
+require (
+	github.com/agnivade/levenshtein v1.2.1 // indirect
+	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
+	github.com/gorilla/websocket v1.5.0 // indirect
+	github.com/graph-gophers/dataloader/v7 v7.1.3 // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
+	github.com/sosodev/duration v1.4.0 // indirect
 )
 
 replace github.com/org/ticketing/libs/grpc-stubs/go => ../../libs/grpc-stubs/go

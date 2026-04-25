@@ -1,0 +1,13 @@
+apollo-router deployed successfully.
+
+  Release:   {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Image:     {{ include "apollo-router.image" . }}
+
+Endpoints (in-cluster):
+  GraphQL  http://{{ include "apollo-router.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}/graphql
+
+Health check:
+  GET /health
+
+Kong routes /graphql → this service via HOST_APOLLO_ROUTER in the Kong declarative config.

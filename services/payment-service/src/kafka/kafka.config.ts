@@ -11,7 +11,10 @@ function getKafkaSecurityProtocol(config: ConfigService): string {
 }
 
 function getKafkaSaslMechanism(config: ConfigService): SupportedSaslMechanism {
-  return config.getOrThrow<string>('KAFKA_SASL_MECHANISM').trim().toLowerCase() as SupportedSaslMechanism;
+  return config
+    .getOrThrow<string>('KAFKA_SASL_MECHANISM')
+    .trim()
+    .toLowerCase() as SupportedSaslMechanism;
 }
 
 function buildKafkaSaslOptions(config: ConfigService): SASLOptions {

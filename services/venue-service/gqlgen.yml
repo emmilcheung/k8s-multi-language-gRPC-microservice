@@ -1,0 +1,21 @@
+schema:
+  - internal/graphql/schema.graphqls
+
+exec:
+  filename: internal/graphql/generated.go
+  package: graph
+
+model:
+  filename: internal/graphql/model.go
+  package: graph
+
+resolver:
+  layout: follow-schema
+  dir: internal/graphql
+  package: graph
+  filename_template: "{name}.resolvers.go"
+
+federation:
+  filename: internal/graphql/federation.go
+  package: graph
+  version: 2

@@ -228,6 +228,39 @@ public class OrderService {
     // ── Read ──────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
+    public OrderResponse findById(UUID orderId) {
+        return orderRepository.findByIdWithTicket(orderId)
+                .map(order -> {
+                    List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
+                    return OrderResponse.from(order, seats);
+                })
+                .orElse(null);
+    }
+
+    /**
+     * Batch-load orders by a list of IDs in a single DB round-trip.
+     *
+     * <p>Used by the federation entity fetcher to avoid N+1 queries when Apollo
+     * Router resolves a batch of {@code Order} entity references.  The returned
+     * map preserves lookup by ID so the caller can fan results back in the order
+     * the representations were received.
+     *
+     * @param orderIds list of order UUIDs to fetch
+     * @return map from UUID → OrderResponse; missing orders are absent from the map
+     */
+    @Transactional(readOnly = true)
+    public java.util.Map<UUID, OrderResponse> findByIds(List<UUID> orderIds) {
+        // JpaRepository.findAllById issues a single WHERE id IN (...) query.
+        List<Order> orders = orderRepository.findAllById(orderIds);
+        java.util.Map<UUID, OrderResponse> result = new java.util.HashMap<>(orders.size());
+        for (Order order : orders) {
+            List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(order.getId());
+            result.put(order.getId(), OrderResponse.from(order, seats));
+        }
+        return result;
+    }
+
+    @Transactional(readOnly = true)
     public OrderResponse getOrder(UUID orderId, UUID userId) {
         Order order = orderRepository.findByIdWithTicket(orderId)
                 .orElseThrow(() -> new NotFoundException("Order not found: " + orderId));

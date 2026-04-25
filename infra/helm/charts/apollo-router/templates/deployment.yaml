@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "apollo-router.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apollo-router.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: {{ .Values.rollingUpdate.maxSurge | default 1 }}
+      maxUnavailable: {{ .Values.rollingUpdate.maxUnavailable | default 0 }}
+  selector:
+    matchLabels:
+      {{- include "apollo-router.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apollo-router.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "apollo-router.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        runAsNonRoot: true
+        runAsUser: 1000
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 30 }}
+      {{- if .Values.podAntiAffinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: {{ .Chart.Name }}
+                topologyKey: kubernetes.io/hostname
+      {{- end }}
+      {{- if .Values.topologySpreadConstraints.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              {{- include "apollo-router.selectorLabels" . | nindent 14 }}
+      {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "apollo-router.fullname" . }}-config
+        - name: tmp
+          emptyDir: {}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: {{ include "apollo-router.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+          args:
+            - "--config"
+            - "/dist/config/router.yaml"
+            - "--supergraph"
+            - "/dist/config/supergraph.graphql"
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.telemetry.otlpEndpoint | default "http://otel-collector:4317" | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: "apollo-router"
+          volumeMounts:
+            - name: config
+              mountPath: /dist/config/router.yaml
+              subPath: router.yaml
+              readOnly: true
+            - name: config
+              mountPath: /dist/config/supergraph.graphql
+              subPath: supergraph.graphql
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          {{- if .Values.startupProbe }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          {{- end }}

@@ -1,0 +1,30 @@
+{{- if and .Values.global.serviceMesh.enabled (eq .Values.global.serviceMesh.provider "linkerd") (.Capabilities.APIVersions.Has "policy.linkerd.io/v1beta1/Server") (.Capabilities.APIVersions.Has "policy.linkerd.io/v1beta1/ServerAuthorization") }}
+apiVersion: policy.linkerd.io/v1beta1
+kind: Server
+metadata:
+  name: {{ include "apollo-router.fullname" . }}-http
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apollo-router.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "apollo-router.selectorLabels" . | nindent 6 }}
+  port: http
+  proxyProtocol: HTTP/1
+---
+apiVersion: policy.linkerd.io/v1beta1
+kind: ServerAuthorization
+metadata:
+  name: {{ include "apollo-router.fullname" . }}-http
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apollo-router.labels" . | nindent 4 }}
+spec:
+  server:
+    name: {{ include "apollo-router.fullname" . }}-http
+  client:
+    meshTLS:
+      identities:
+        - {{ printf "ticketing-kong.%s.serviceaccount.identity.linkerd.%s" .Release.Namespace .Values.global.serviceMesh.linkerd.identityDomain | quote }}
+{{- end }}

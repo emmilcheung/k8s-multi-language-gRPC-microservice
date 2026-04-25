@@ -1,0 +1,34 @@
+supergraph:
+  listen: 0.0.0.0:4001
+  path: /graphql
+
+headers:
+  all:
+    request:
+      - propagate:
+          named: x-user-id
+      - propagate:
+          named: x-user-roles
+      - propagate:
+          named: x-user-id-sig
+      - propagate:
+          named: traceparent
+      - propagate:
+          named: tracestate
+
+telemetry:
+  exporters:
+    tracing:
+      otlp:
+        enabled: true
+        endpoint: "${env.OTEL_EXPORTER_OTLP_ENDPOINT}"
+        protocol: grpc
+    metrics:
+      otlp:
+        enabled: true
+        endpoint: "${env.OTEL_EXPORTER_OTLP_ENDPOINT}"
+        protocol: grpc
+        temporality: delta
+  instrumentation:
+    spans:
+      mode: spec_compliant

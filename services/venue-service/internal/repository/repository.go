@@ -208,6 +208,10 @@ type VenueRepository interface {
 type PlanRepository interface {
 	Create(ctx context.Context, p *SeatingPlan) error
 	FindByID(ctx context.Context, id string) (*SeatingPlan, error)
+	// FindByIDs fetches multiple seating plans in a single query, returning them
+	// in the same order as the input ids.  Missing plans are nil at the
+	// corresponding index.
+	FindByIDs(ctx context.Context, ids []string) ([]*SeatingPlan, error)
 	ListByVenue(ctx context.Context, venueID, organizerID string) ([]*SeatingPlan, error)
 	ListByTicket(ctx context.Context, ticketID string) ([]*SeatingPlan, error)
 	ListActivePlans(ctx context.Context) ([]*SeatingPlan, error)

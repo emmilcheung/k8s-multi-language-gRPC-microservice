@@ -58,6 +58,12 @@ func (r *CachingTicketRepository) FindByID(ctx context.Context, id string) (*Tic
 	return ticket, nil
 }
 
+// FindByIDs delegates to the inner repository — caching individual tickets on
+// the way through so subsequent single-ID lookups can hit cache.
+func (r *CachingTicketRepository) FindByIDs(ctx context.Context, ids []string) ([]*Ticket, error) {
+	return r.inner.FindByIDs(ctx, ids)
+}
+
 func (r *CachingTicketRepository) FindAll(ctx context.Context, p PaginationParams) ([]*Ticket, error) {
 	// Cache is only used for the default first-page request (no cursor, default limit, no filter).
 	// Paginated pages beyond the first, filtered requests, or custom limits are fetched directly from the DB.

@@ -11,6 +11,7 @@ HOST_PAYMENTS: ticketing-payment-service.ticketing.svc.cluster.local:3002
 HOST_USERS: ticketing-user-service.ticketing.svc.cluster.local:3004
 HOST_CLIENT: ticketing-client.ticketing.svc.cluster.local:4000
 HOST_VENUE: ticketing-venue-service.ticketing.svc.cluster.local:3003
+HOST_APOLLO_ROUTER: ticketing-apollo-router.ticketing.svc.cluster.local:4001
 
 RATE_LIMIT_ANONYMOUS_PER_MINUTE: 300
 RATE_LIMIT_POLICY: local

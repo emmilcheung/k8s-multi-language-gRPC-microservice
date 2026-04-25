@@ -1,0 +1,63 @@
+{{- if .Values.networkPolicy.enabled }}
+# NetworkPolicy for apollo-router
+# Ingress: only from Kong proxy pods (labelled app.kubernetes.io/name=kong)
+# Egress:  subgraph services (3000-3004, 8082), DNS (53)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "apollo-router.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apollo-router.selectorLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "apollo-router.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow HTTP from Kong proxy pods
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kong
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.port }}
+  egress:
+    # DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # auth-service
+    - ports:
+        - protocol: TCP
+          port: 3000
+    # ticket-service
+    - ports:
+        - protocol: TCP
+          port: 3001
+    # payment-service
+    - ports:
+        - protocol: TCP
+          port: 3002
+    # venue-service
+    - ports:
+        - protocol: TCP
+          port: 3003
+    # user-service
+    - ports:
+        - protocol: TCP
+          port: 3004
+    # order-service
+    - ports:
+        - protocol: TCP
+          port: 8082
+    # otel-collector
+    - ports:
+        - protocol: TCP
+          port: 4317
+{{- end }}

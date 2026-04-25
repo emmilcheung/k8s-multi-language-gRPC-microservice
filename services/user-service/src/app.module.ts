@@ -5,6 +5,7 @@ import { z } from "zod";
 import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./modules/health/health.module";
 import { UserSettingsModule } from "./modules/user-settings/user-settings.module";
+import { UserGraphQLModule } from "./graphql/graphql.module";
 
 const envSchema = z.object({
   NODE_ENV: z
@@ -52,6 +53,7 @@ const envSchema = z.object({
     DatabaseModule,
     HealthModule,
     UserSettingsModule,
+    UserGraphQLModule,
   ],
 })
 export class AppModule {}

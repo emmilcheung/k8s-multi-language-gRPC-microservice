@@ -31,6 +31,10 @@ func (r *countingRepo) FindByID(ctx context.Context, id string) (*repository.Tic
 	return r.repo.FindByID(ctx, id)
 }
 
+func (r *countingRepo) FindByIDs(ctx context.Context, ids []string) ([]*repository.Ticket, error) {
+	return r.repo.FindByIDs(ctx, ids)
+}
+
 func (r *countingRepo) FindAll(ctx context.Context, p repository.PaginationParams) ([]*repository.Ticket, error) {
 	r.findAllCalls++
 	return r.repo.FindAll(ctx, p)

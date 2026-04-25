@@ -1,0 +1,391 @@
+import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const PASSWORD = "Password123!";
+const KONG_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const GRAPHQL_URL = `${KONG_URL}/graphql`;
+const AUTH_POSTGRES_CONTAINER = "microservices-postgres-auth-1";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function uniqueEmail(prefix: string) {
+  return `${prefix}-${Date.now()}-${randomUUID().slice(0, 8)}@test.com`;
+}
+
+function sqlLiteral(value: string) {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function grantOrganizerRole(email: string) {
+  const sql = [
+    "WITH promoted AS (",
+    "  UPDATE users",
+    `  SET roles = '[\"organizer\"]'::json`,
+    `  WHERE email = ${sqlLiteral(email)}`,
+    "  RETURNING 1",
+    ")",
+    "SELECT COUNT(*) FROM promoted;",
+  ].join(" ");
+  const result = execFileSync(
+    "docker",
+    [
+      "exec",
+      "-i",
+      AUTH_POSTGRES_CONTAINER,
+      "psql",
+      "-U",
+      "auth_user",
+      "-d",
+      "auth_db",
+      "-t",
+      "-A",
+      "-c",
+      sql,
+    ],
+    { encoding: "utf8" },
+  ).trim();
+
+  if (result !== "1") {
+    throw new Error(`Failed to promote ${email} to organizer. Updated rows: ${result || "0"}`);
+  }
+}
+
+async function signup(page: Page, email: string) {
+  await page.goto("/auth/signup");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: /sign up/i }).click();
+  try {
+    await page.waitForURL("/", { timeout: 15000 });
+  } catch {
+    const alertContent = await page
+      .locator('[role="alert"]:not([id="__next-route-announcer__"])')
+      .first()
+      .textContent()
+      .catch(() => null);
+    throw new Error(`Signup failed for ${email}. Alert: ${alertContent}`);
+  }
+}
+
+async function signin(page: Page, email: string) {
+  await page.goto("/auth/signin");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.waitForURL("/");
+}
+
+async function signout(page: Page) {
+  await page.getByRole("button", { name: /sign out/i }).click();
+  await page.waitForURL(/\/auth\/signin/);
+}
+
+async function signupAsOrganizer(page: Page, email: string) {
+  await signup(page, email);
+  grantOrganizerRole(email);
+  await signout(page);
+  await signin(page, email);
+}
+
+async function fillInputAndTriggerChange(page: Page, selector: string, value: string) {
+  const input = page.locator(selector);
+  await input.evaluate((el: HTMLInputElement, val: string) => {
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+    if (nativeSetter) {
+      nativeSetter.call(el, val);
+    } else {
+      el.value = val;
+    }
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }, value);
+}
+
+async function createTicket(page: Page, title: string, price: string) {
+  await page.goto("/tickets/new");
+
+  const gaButton = page.getByRole("button", { name: /general admission/i });
+  await gaButton.waitFor({ state: "visible", timeout: 5000 });
+  await gaButton.click();
+
+  const titleInput = page.locator("#title");
+  await titleInput.waitFor({ state: "visible", timeout: 5000 });
+
+  await fillInputAndTriggerChange(page, "#title", title);
+  await fillInputAndTriggerChange(page, "#price", price);
+  await fillInputAndTriggerChange(page, "#startsAt", "2025-05-11T14:00");
+
+  const form = page.locator("form", { has: page.locator("#title") });
+  await form.waitFor({ state: "visible", timeout: 5000 });
+
+  const submitButton = form.getByRole("button", { name: /create ticket/i });
+  await submitButton.waitFor({ state: "visible", timeout: 5000 });
+  await submitButton.click();
+
+  try {
+    await page.waitForURL((url) => !url.pathname.endsWith("/new"), { timeout: 15000 });
+  } catch {
+    const alertContent = await page
+      .locator('[role="alert"]:not([id="__next-route-announcer__"])')
+      .first()
+      .textContent()
+      .catch(() => null);
+    throw new Error(`Ticket creation failed. Alert: ${alertContent}`);
+  }
+
+  return page.url();
+}
+
+async function createAttachedSeatedTicket(page: Page) {
+  await page.goto("/venues/new");
+  await page.getByLabel(/venue name/i).fill(`GraphQL Venue ${Date.now()}`);
+  await page.getByLabel(/total capacity/i).fill("200");
+  await page.getByLabel(/timezone/i).fill("America/New_York");
+  await page.getByRole("button", { name: /create venue/i }).click();
+  await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
+
+  await page.getByLabel(/section name/i).fill("Floor A");
+  await page.locator("#vs-rows").fill("5");
+  await page.locator("#vs-cols").fill("10");
+  await page.getByRole("button", { name: /add section/i }).click();
+  await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
+  await expect(page.getByText("Floor A")).toBeVisible();
+
+  await page.getByRole("link", { name: /new plan/i }).click();
+  await page.waitForURL(/\/venues\/[0-9a-f-]+\/plans\/new$/);
+  await page.getByLabel(/plan name/i).fill("Federation Seating Plan");
+  await page.getByRole("button", { name: /create seating plan/i }).click();
+  await page.waitForURL(/\/venues\/[0-9a-f-]+\/plans\/[0-9a-f-]+$/);
+  await expect(page.getByText("Floor A")).toBeVisible();
+
+  const planId = page.url().split("/").at(-1);
+  if (!planId) {
+    throw new Error("Failed to derive seating plan ID from plan URL");
+  }
+
+  await page.getByRole("button", { name: /activate/i }).click();
+  await expect(page.getByText(/active/i).first()).toBeVisible({ timeout: 10000 });
+
+  const ticketUrl = await createTicket(page, `GraphQL Seated ${Date.now()}`, "55.00");
+  const ticketId = ticketUrl.split("/").at(-1);
+  if (!ticketId) {
+    throw new Error("Failed to derive ticket ID from ticket URL");
+  }
+
+  await expect(page.getByText("Seating Plan").first()).toBeVisible();
+  await expect(page.locator("#planId")).toBeVisible();
+  await page.locator("#planId").selectOption({ index: 1 });
+  await page.getByRole("button", { name: /attach seating plan/i }).click();
+  await expect(page.getByText(/attached plan/i)).toBeVisible({ timeout: 10000 });
+
+  return { planId, ticketId };
+}
+
+/** Extract the JWT token cookie value from the current browser context. */
+async function getTokenCookie(page: Page): Promise<string | undefined> {
+  const cookies = await page.context().cookies();
+  return cookies.find((c) => c.name === "token")?.value;
+}
+
+/** Send a raw GraphQL query via Playwright API context. */
+async function graphqlRequest(
+  request: APIRequestContext,
+  query: string,
+  variables?: Record<string, unknown>,
+  cookie?: string,
+) {
+  return request.post(GRAPHQL_URL, {
+    data: { query, variables },
+    headers: {
+      "Content-Type": "application/json",
+      ...(cookie ? { Cookie: `token=${cookie}` } : {}),
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+test.describe("GraphQL Federation — Auth Propagation", () => {
+  test("authenticated user can query currentUser via GraphQL", async ({ page, request }) => {
+    const email = uniqueEmail("gql-auth");
+    await signup(page, email);
+    const token = await getTokenCookie(page);
+    expect(token).toBeTruthy();
+
+    const response = await graphqlRequest(
+      request,
+      `query { currentUser { id email } }`,
+      undefined,
+      token,
+    );
+
+    expect(response.status()).toBe(200);
+    const body = await response.json();
+    expect(body.errors).toBeUndefined();
+    expect(body.data.currentUser).toBeTruthy();
+    expect(body.data.currentUser.email).toBe(email);
+  });
+
+  test("unauthenticated GraphQL request returns null currentUser", async ({ request }) => {
+    const response = await graphqlRequest(
+      request,
+      `query { currentUser { id email } }`,
+    );
+
+    // Kong may return 401 for unauthenticated requests or the query may succeed
+    // with null currentUser depending on whether the route requires JWT.
+    // Either behavior is acceptable — the key is no data leaks.
+    if (response.status() === 200) {
+      const body = await response.json();
+      expect(body.data?.currentUser).toBeNull();
+    } else {
+      expect(response.status()).toBe(401);
+    }
+  });
+
+  test("expired/malformed JWT is rejected", async ({ request }) => {
+    const fakeToken = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmYWtlLXVzZXItaWQiLCJleHAiOjEwMDAwMDAwMDB9.invalid-signature";
+
+    const response = await graphqlRequest(
+      request,
+      `query { currentUser { id } }`,
+      undefined,
+      fakeToken,
+    );
+
+    // Kong should reject the invalid JWT
+    expect(response.status()).toBeGreaterThanOrEqual(400);
+  });
+
+  test("forged x-user-id header is stripped by Kong", async ({ request }) => {
+    // Send a request with a spoofed x-user-id header but no valid JWT
+    const response = await request.post(GRAPHQL_URL, {
+      data: { query: `query { currentUser { id email } }` },
+      headers: {
+        "Content-Type": "application/json",
+        "x-user-id": "forged-user-id",
+        "x-user-roles": '["admin"]',
+      },
+    });
+
+    // Kong should strip x-user-id and either return 401 (JWT required)
+    // or return null currentUser (header stripped, no auth)
+    if (response.status() === 200) {
+      const body = await response.json();
+      expect(body.data?.currentUser).toBeNull();
+    } else {
+      expect(response.status()).toBe(401);
+    }
+  });
+});
+
+test.describe("GraphQL Federation — Cross-Subgraph Resolution", () => {
+  test("order query resolves user entity across subgraphs", async ({ page, request }) => {
+    const email = uniqueEmail("gql-cross");
+    await signup(page, email);
+    const token = await getTokenCookie(page);
+    expect(token).toBeTruthy();
+
+    // Query the current user's orders — this exercises auth-service (User entity)
+    // and order-service (orders field on User) across federation boundaries.
+    const response = await graphqlRequest(
+      request,
+      `query {
+        currentUser {
+          id
+          orders {
+            id
+            status
+          }
+        }
+      }`,
+      undefined,
+      token,
+    );
+
+    expect(response.status()).toBe(200);
+    const body = await response.json();
+    expect(body.errors).toBeUndefined();
+    expect(body.data.currentUser).toBeTruthy();
+    // User may have no orders yet, but the cross-subgraph resolution should work
+    expect(body.data.currentUser.orders).toBeDefined();
+    expect(Array.isArray(body.data.currentUser.orders)).toBe(true);
+  });
+
+  test("ticket query resolves seatingPlan across ticket and venue subgraphs", async ({ page, request }) => {
+    const email = uniqueEmail("gql-venue");
+    await signupAsOrganizer(page, email);
+    const { planId, ticketId } = await createAttachedSeatedTicket(page);
+    const token = await getTokenCookie(page);
+    expect(token).toBeTruthy();
+
+    const response = await graphqlRequest(
+      request,
+      `query TicketWithSeatingPlan($id: ID!) {
+        ticket(id: $id) {
+          id
+          seatingPlan {
+            id
+            status
+            sections {
+              id
+              name
+              availableSeats
+              seats {
+                id
+                label
+                status
+                price
+              }
+            }
+          }
+        }
+      }`,
+      { id: ticketId },
+      token,
+    );
+
+    expect(response.status()).toBe(200);
+    const body = await response.json();
+    expect(body.errors).toBeUndefined();
+    expect(body.data.ticket.id).toBe(ticketId);
+    expect(body.data.ticket.seatingPlan.id).toBe(planId);
+    expect(body.data.ticket.seatingPlan.status).toBe("ACTIVE");
+    expect(body.data.ticket.seatingPlan.sections.length).toBeGreaterThan(0);
+    expect(body.data.ticket.seatingPlan.sections[0].name).toBe("Floor A");
+    expect(body.data.ticket.seatingPlan.sections[0].seats.length).toBeGreaterThan(0);
+  });
+});
+
+test.describe("GraphQL Federation — SSR Path", () => {
+  test("SSR page using GraphQL loads correctly for authenticated user", async ({ page }) => {
+    const email = uniqueEmail("gql-ssr");
+    await signup(page, email);
+
+    // Navigate to the orders page (uses SSR with GraphQL)
+    await page.goto("/orders");
+
+    // The page should load without errors and show the authenticated state
+    // (even if there are no orders yet)
+    await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible();
+
+    // Should NOT show an error or redirect to login
+    expect(page.url()).toContain("/orders");
+  });
+
+  test("SSR page redirects unauthenticated user", async ({ page }) => {
+    // Attempt to access orders page without auth
+    await page.goto("/orders");
+
+    // Should redirect to signin
+    await page.waitForURL(/\/auth\/signin/, { timeout: 10000 });
+  });
+});

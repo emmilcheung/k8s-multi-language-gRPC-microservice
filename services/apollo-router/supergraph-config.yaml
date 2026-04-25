@@ -1,0 +1,25 @@
+subgraphs:
+  auth:
+    routing_url: http://auth-service:3000/graphql
+    schema:
+      file: ../auth-service/src/graphql/schema.graphql
+  users:
+    routing_url: http://user-service:3004/graphql
+    schema:
+      file: ../user-service/src/graphql/schema.graphql
+  tickets:
+    routing_url: http://ticket-service:3001/graphql
+    schema:
+      file: ../ticket-service/internal/graphql/schema.graphqls
+  payments:
+    routing_url: http://payment-service:3002/graphql
+    schema:
+      file: ../payment-service/src/graphql/schema.graphql
+  venues:
+    routing_url: http://venue-service:3003/graphql
+    schema:
+      file: ../venue-service/internal/graphql/schema.graphqls
+  orders:
+    routing_url: http://order-service:8082/graphql
+    schema:
+      file: ../order-service/src/main/resources/schema/schema.graphqls

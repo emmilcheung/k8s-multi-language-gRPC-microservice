@@ -4,6 +4,7 @@
 
 - All external traffic enters through Kong — never expose a service pod directly.
 - Use **REST + JSON** for public/client-facing APIs.
+- **GraphQL** (via Apollo Federation v2) is an approved alternative for flexible client queries. See `docs/superpowers/specs/2026-04-20-graphql-federation-design.md` for architecture details. REST remains the default for new endpoints.
 - Versioning in the path prefix: `/v1/orders`, `/v2/tickets`. Never break an existing version.
 
 ### HTTP Semantics

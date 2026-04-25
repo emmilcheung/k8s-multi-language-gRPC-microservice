@@ -72,6 +72,48 @@ func (r *PlanRepo) FindByID(ctx context.Context, id string) (*repository.Seating
 	return p, nil
 }
 
+// FindByIDs fetches multiple seating plans in a single WHERE id = ANY($1) query
+// and returns them in the same order as the input ids slice.  Missing plans are
+// nil at the corresponding position.
+func (r *PlanRepo) FindByIDs(ctx context.Context, ids []string) ([]*repository.SeatingPlan, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	const q = `
+		SELECT id, venue_id, COALESCE(ticket_id::text, ''), organizer_id, name,
+		       status, max_seats_per_order, layout_json, version, assignment_mode, pricing_mode, created_at, updated_at
+		FROM seating_plans
+		WHERE id = ANY($1)`
+
+	rows, err := r.pool.Query(ctx, q, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	byID := make(map[string]*repository.SeatingPlan, len(ids))
+	for rows.Next() {
+		p := &repository.SeatingPlan{}
+		if err := rows.Scan(
+			&p.ID, &p.VenueID, &p.TicketID, &p.OrganizerID, &p.Name,
+			&p.Status, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version, &p.AssignmentMode, &p.PricingMode,
+			&p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		byID[p.ID] = p
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]*repository.SeatingPlan, len(ids))
+	for i, id := range ids {
+		out[i] = byID[id] // nil if not found
+	}
+	return out, nil
+}
+
 // ListByVenue returns all seating plans for the given venue belonging to the organizer,
 // ordered newest-first.
 func (r *PlanRepo) ListByVenue(ctx context.Context, venueID, organizerID string) ([]*repository.SeatingPlan, error) {

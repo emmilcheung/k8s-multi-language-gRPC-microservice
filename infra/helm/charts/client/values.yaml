@@ -1,3 +1,9 @@
+# Global defaults — overridden by the umbrella chart when rendered together.
+# These safe defaults allow standalone `helm lint` to succeed.
+global:
+  imageRegistry: ""
+  imagePullPolicy: IfNotPresent
+
 replicaCount: 2
 
 image:
@@ -12,6 +18,12 @@ env:
   NODE_ENV: production
   PORT: "4000"
   NEXT_PUBLIC_API_URL: "http://kong-proxy"
+  # Server-side GraphQL: Next.js Server Components / Actions reach the router
+  # via the in-cluster ClusterIP DNS name — never via the public LoadBalancer.
+  GRAPHQL_API_URL: "http://apollo-router:4001/graphql"
+  # Browser-facing GraphQL: routed through Kong so the browser uses one origin.
+  # Override per-env: dev/staging/prod set this to the public Kong hostname.
+  NEXT_PUBLIC_GRAPHQL_API_URL: "http://kong-proxy/graphql"
 
 resources:
   requests:

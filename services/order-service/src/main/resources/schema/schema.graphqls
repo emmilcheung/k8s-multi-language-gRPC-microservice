@@ -1,0 +1,45 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@tag"])
+
+type Order @key(fields: "id") {
+  id: ID!
+  userId: ID!
+  ticket: OrderTicket!
+  quantity: Int!
+  status: OrderStatus!
+  expiresAt: String
+  createdAt: String!
+}
+
+type OrderTicket {
+  id: ID!
+  title: String!
+  price: String!
+}
+
+type User @key(fields: "id") {
+  id: ID!
+  orders: [Order!]! @tag(name: "self-only")
+}
+
+enum OrderStatus {
+  CREATED
+  AWAITING_PAYMENT
+  COMPLETE
+  CANCELLED
+}
+
+type Query {
+  order(id: ID!): Order
+  orders: [Order!]!
+}
+
+type Mutation {
+  createOrder(input: CreateOrderInput!): Order!
+  cancelOrder(id: ID!): Order!
+}
+
+input CreateOrderInput {
+  ticketId: ID!
+  quantity: Int!
+}

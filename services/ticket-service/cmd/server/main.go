@@ -9,9 +9,11 @@ import (
 	"syscall"
 	"time"
 
+	gqlhandler "github.com/99designs/gqlgen/graphql/handler"
 	"github.com/acme/ticket-service/internal/cache"
 	"github.com/acme/ticket-service/internal/config"
 	grpcserver "github.com/acme/ticket-service/internal/grpc"
+	gqlgraph "github.com/acme/ticket-service/internal/graphql"
 	"github.com/acme/ticket-service/internal/handler"
 	"github.com/acme/ticket-service/internal/health"
 	"github.com/acme/ticket-service/internal/kafka"
@@ -188,6 +190,27 @@ func main() {
 	// CP-13: seated ticket catalog — attach/detach a venue-service seating plan
 	v1.PUT("/:id/seating-plan", ticketHandler.AttachSeatingPlan)
 	v1.DELETE("/:id/seating-plan", ticketHandler.DetachSeatingPlan)
+
+	// GraphQL federation subgraph endpoint.
+	// A per-request DataLoader middleware is wrapped around the handler so that
+	// every _entities batch call gets its own loader instance (prevents
+	// cross-request data leaks and keeps the per-request cache correct).
+	gqlResolver := &gqlgraph.Resolver{TicketService: svc}
+	gqlSrv := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{Resolvers: gqlResolver}))
+	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userID := r.Header.Get("X-User-Id")
+		sig := r.Header.Get("X-User-Id-Sig")
+		if userID != "" && !signatureValidator.IsValidSignature(userID, sig) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"errors":[{"message":"unauthorized: invalid user identity signature"}]}`)) //nolint:errcheck
+			return
+		}
+		loader := gqlgraph.NewTicketLoader(svc)
+		ctx := gqlgraph.WithTicketLoader(r.Context(), loader)
+		gqlSrv.ServeHTTP(w, r.WithContext(ctx))
+	})
+	e.POST("/graphql", echo.WrapHandler(gqlHandler))
 
 	// R-06: Use errgroup to propagate server errors back to main instead of
 	// calling log.Fatal inside goroutines (which calls os.Exit, skipping all deferred cleanup).

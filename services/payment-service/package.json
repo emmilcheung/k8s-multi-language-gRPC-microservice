@@ -31,9 +31,14 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
+    "@apollo/server": "^5.5.0",
+    "@apollo/subgraph": "^2.13.3",
+    "@as-integrations/express5": "^1.0.0",
+    "@nestjs/apollo": "^13.2.5",
     "@nestjs/common": "^11.1.18",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.1.18",
+    "@nestjs/graphql": "^13.2.5",
     "@nestjs/microservices": "^11.1.19",
     "@nestjs/platform-express": "^11.1.18",
     "@nestjs/schedule": "^6.1.1",
@@ -47,6 +52,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "drizzle-orm": "^0.45.2",
+    "graphql": "^16.13.2",
     "kafkajs": "^2.2.4",
     "nestjs-pino": "^4.6.1",
     "pg": "^8.20.0",

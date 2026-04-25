@@ -35,6 +35,9 @@ dependencies:
   - name: user-service
     version: "0.1.0"
     repository: "file://charts/user-service"
+  - name: apollo-router
+    version: "0.1.0"
+    repository: "file://charts/apollo-router"
   - name: observability
     version: "0.1.0"
     repository: "file://charts/observability"

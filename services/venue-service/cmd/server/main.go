@@ -9,7 +9,9 @@ import (
 	"syscall"
 	"time"
 
+	gqlhandler "github.com/99designs/gqlgen/graphql/handler"
 	"github.com/acme/venue-service/internal/config"
+	gqlgraph "github.com/acme/venue-service/internal/graphql"
 	grpcserver "github.com/acme/venue-service/internal/grpc"
 	"github.com/acme/venue-service/internal/handler"
 	"github.com/acme/venue-service/internal/health"
@@ -245,6 +247,19 @@ func main() {
 
 	sseHandler := handler.NewSSEHandler(sseBroadcaster, log)
 	sseHandler.RegisterRoutes(api.Group("/seating-plans/:planId"))
+
+	// GraphQL federation subgraph.
+	// A per-request DataLoader middleware is wrapped around the handler so that
+	// every _entities batch call gets its own loader instance (prevents
+	// cross-request data leaks and keeps the per-request cache correct).
+	gqlResolver := &gqlgraph.Resolver{PlanRepo: planRepo, SectionRepo: sectionRepo}
+	gqlSrv := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{Resolvers: gqlResolver}))
+	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		loader := gqlgraph.NewPlanLoader(planRepo, sectionRepo)
+		ctx := gqlgraph.WithPlanLoader(r.Context(), loader)
+		gqlSrv.ServeHTTP(w, r.WithContext(ctx))
+	})
+	e.POST("/graphql", echo.WrapHandler(gqlgraph.WrapWithUserIDSignatureValidation(gqlHandler, sigValidator)))
 
 	// R-06: Use errgroup to propagate server errors back to main instead of
 	// calling log.Fatal inside goroutines (which calls os.Exit, skipping all deferred cleanup).

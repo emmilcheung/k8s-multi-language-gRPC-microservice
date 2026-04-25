@@ -18,7 +18,7 @@ import { SeatingPlanPreview } from "@/components/seating-plan-preview";
 import { updateTicket } from "@/app/actions/tickets";
 import { fetchAllMyPlans, fetchPriceTiers } from "@/app/actions/venues";
 import { Separator } from "@/components/ui/separator";
-import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress";
+import { Progress, ProgressLabel } from "@/components/ui/progress";
 import {
   ArrowLeft,
   Ticket as TicketIcon,
@@ -231,7 +231,7 @@ export default async function TicketDetailPage({ params }: Props) {
                 value={Math.min(100, (((ticket.reserved ?? 0) + (ticket.sold ?? 0)) / ticket.quota) * 100)}
               >
                 <ProgressLabel>Availability</ProgressLabel>
-                <ProgressValue>{() => `${Math.max(0, ticket.quota! - (ticket.reserved ?? 0) - (ticket.sold ?? 0))} / ${ticket.quota} remaining`}</ProgressValue>
+                <span className="ml-auto text-sm text-muted-foreground tabular-nums">{Math.max(0, ticket.quota! - (ticket.reserved ?? 0) - (ticket.sold ?? 0))} / {ticket.quota} remaining</span>
               </Progress>
               {ticket.maxPerUser != null && ticket.maxPerUser > 1 && (
                 <p className="text-xs text-muted-foreground">

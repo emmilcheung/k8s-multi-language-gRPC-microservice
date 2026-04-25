@@ -73,6 +73,17 @@ func (m *mockRepo) FindByID(ctx context.Context, id string) (*repository.Ticket,
 	return t, nil
 }
 
+func (m *mockRepo) FindByIDs(ctx context.Context, ids []string) ([]*repository.Ticket, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	out := make([]*repository.Ticket, len(ids))
+	for i, id := range ids {
+		out[i] = m.tickets[id] // nil if not found
+	}
+	return out, nil
+}
+
 func (m *mockRepo) FindAll(ctx context.Context, _ repository.PaginationParams) ([]*repository.Ticket, error) {
 	if m.err != nil {
 		return nil, m.err

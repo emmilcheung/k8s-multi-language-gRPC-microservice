@@ -155,6 +155,16 @@ func (s *TicketService) GetTicketByID(ctx context.Context, id string) (*reposito
 	return ticket, nil
 }
 
+// GetTicketsByIDs retrieves multiple tickets by ID in a single query.
+// The returned slice is in the same order as the input ids; missing tickets are nil.
+func (s *TicketService) GetTicketsByIDs(ctx context.Context, ids []string) ([]*repository.Ticket, error) {
+	tickets, err := s.repo.FindByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("get tickets by ids: %w", err)
+	}
+	return tickets, nil
+}
+
 // ListTickets returns a page of tickets. Pass a zero-value PaginationParams for page 1 defaults.
 func (s *TicketService) ListTickets(ctx context.Context, p repository.PaginationParams) ([]*repository.Ticket, error) {
 	tickets, err := s.repo.FindAll(ctx, p)

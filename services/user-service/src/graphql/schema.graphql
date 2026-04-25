@@ -1,0 +1,30 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@tag", "@external"])
+
+type User @key(fields: "id") {
+  id: ID! @external
+  profile: UserProfile @tag(name: "self-only")
+  preferences: UserPreferences @tag(name: "self-only")
+}
+
+type UserProfile {
+  displayName: String
+  locale: String
+  timezone: String
+  billingAddress: BillingAddress @tag(name: "pii")
+}
+
+type BillingAddress {
+  line1: String
+  line2: String
+  city: String
+  state: String
+  postalCode: String
+  country: String
+}
+
+type UserPreferences {
+  marketingOptIn: Boolean
+  orderUpdates: Boolean
+  productUpdates: Boolean
+}
