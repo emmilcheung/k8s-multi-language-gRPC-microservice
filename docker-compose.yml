@@ -409,6 +409,7 @@ services:
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
       ORDER_SERVICE_URL: http://order-service:8082
+      ORDER_SERVICE_TIMEOUT_MS: "15000"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: payment-service
       X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
