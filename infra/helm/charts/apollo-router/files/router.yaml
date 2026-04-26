@@ -2,10 +2,6 @@ supergraph:
   listen: 0.0.0.0:4001
   path: /graphql
 
-rhai:
-  scripts: /dist/scripts
-  main: jwt_cookie.rhai
-
 headers:
   all:
     request:
