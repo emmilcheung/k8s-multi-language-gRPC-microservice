@@ -33,31 +33,59 @@ spec:
         - protocol: TCP
           port: 53
     # auth-service
-    - ports:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: auth-service
+      ports:
         - protocol: TCP
           port: 3000
     # ticket-service
-    - ports:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ticket-service
+      ports:
         - protocol: TCP
           port: 3001
     # payment-service
-    - ports:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: payment-service
+      ports:
         - protocol: TCP
           port: 3002
     # venue-service
-    - ports:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: venue-service
+      ports:
         - protocol: TCP
           port: 3003
     # user-service
-    - ports:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: user-service
+      ports:
         - protocol: TCP
           port: 3004
     # order-service
-    - ports:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: order-service
+      ports:
         - protocol: TCP
           port: 8082
     # otel-collector
-    - ports:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: otel-collector
+      ports:
         - protocol: TCP
           port: 4317
 {{- end }}
