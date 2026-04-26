@@ -49,23 +49,45 @@ public class FederationConfig {
                             ? Map.of()
                             : orderService.findByIds(orderIds);
 
-                    // Fan results back in the original representation order.
+                    String requesterId = env.getGraphQlContext().get(UserIdInterceptor.USER_ID_KEY);
+
                     return representations.stream()
-                        .map(ref -> {
-                            String typename = (String) ref.get("__typename");
-                            String id = (String) ref.get("id");
-                            if ("Order".equals(typename)) {
-                                return orderMap.get(UUID.fromString(id));
-                            }
-                            if ("User".equals(typename)) {
-                                return Map.of("id", id);
-                            }
-                            return null;
-                        })
+                        .map(ref -> resolveEntity(ref, orderMap, requesterId))
                         .toList();
                 })
                 .resolveEntityType(entityTypeResolver)
                 .build()
         );
+    }
+
+    Object resolveEntity(
+            Map<String, Object> reference,
+            Map<UUID, OrderResponse> orderMap,
+            String requesterId) {
+        String typename = (String) reference.get("__typename");
+        String id = (String) reference.get("id");
+
+        if ("Order".equals(typename)) {
+            if (requesterId == null || requesterId.isBlank()) {
+                return null;
+            }
+
+            OrderResponse order = orderMap.get(UUID.fromString(id));
+            if (order == null) {
+                return null;
+            }
+
+            if (!order.getUserId().toString().equals(requesterId)) {
+                return null;
+            }
+
+            return order;
+        }
+
+        if ("User".equals(typename)) {
+            return Map.of("id", id);
+        }
+
+        return null;
     }
 }

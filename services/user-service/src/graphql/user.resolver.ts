@@ -23,6 +23,7 @@ export class UserResolver {
   ) {}
 
   @ResolveReference()
+  @UseGuards(UserIdSigGuard)
   resolveReference(reference: {
     __typename: string;
     id: string;

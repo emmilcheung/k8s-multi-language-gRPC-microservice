@@ -256,6 +256,10 @@ input UpdateTicketInput
   maxPerUser: Int
 }
 
+# NOTE: @tag annotations are informational only.
+# Field-level authorization is enforced in subgraph resolvers, not by the router.
+# "self-only" = resolver returns null when requester ≠ owner.
+# "pii" = field contains personally identifiable information.
 type User
   @join__type(graph: AUTH, key: "id")
   @join__type(graph: ORDERS, key: "id")

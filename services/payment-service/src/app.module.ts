@@ -32,6 +32,14 @@ const envSchema = z
     X_USER_ID_SIGNING_KEY: z.string().optional().default(''),
   })
   .superRefine((config, ctx) => {
+    if (config.NODE_ENV === 'production' && (!config.X_USER_ID_SIGNING_KEY || config.X_USER_ID_SIGNING_KEY.length < 32)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['X_USER_ID_SIGNING_KEY'],
+        message: 'X_USER_ID_SIGNING_KEY must be at least 32 characters in production',
+      });
+    }
+
     if (config.NODE_ENV === 'production' && !config.STRIPE_WEBHOOK_SECRET) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -95,7 +103,7 @@ function otelMixin(): Record<string, string> {
               : undefined,
           // Inject OTel traceId + spanId into every log line (O-02)
           mixin: otelMixin,
-          redact: ['req.headers.authorization', 'req.headers.cookie'],
+          redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-user-id-sig"]'],
           serializers: {
             req(req: { method: string; url: string }) {
               return { method: req.method, url: req.url };

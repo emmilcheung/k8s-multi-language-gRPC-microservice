@@ -403,6 +403,10 @@ cp-kafka:
     nodePort: 30093        # unused for LoadBalancer but kept for schema completeness
     advertisedHost: "127.0.0.1"  # minikube tunnel exposes LoadBalancer on localhost
 
+apollo-router:
+  networkPolicy:
+    enabled: false
+
 kong:
   # Prefer A records over SRV to avoid CoreDNS NXDOMAIN on ClusterIP services.
   # Without this, Kong 3.x tries SRV (type 33) first; CoreDNS returns NXDOMAIN

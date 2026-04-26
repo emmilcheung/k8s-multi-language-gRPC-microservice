@@ -47,12 +47,12 @@ func (v *UserIDSignatureValidator) IsValidSignature(userID, signature string) bo
 	currentMinute := currentTime / 60
 
 	expectedCurrent := v.computeSignature(userID, currentMinute)
-	if expectedCurrent == signature {
+	if hmac.Equal([]byte(expectedCurrent), []byte(signature)) {
 		return true
 	}
 
 	expectedPrevious := v.computeSignature(userID, currentMinute-1)
-	return expectedPrevious == signature
+	return hmac.Equal([]byte(expectedPrevious), []byte(signature))
 }
 
 func (v *UserIDSignatureValidator) computeSignature(userID string, minute int64) string {

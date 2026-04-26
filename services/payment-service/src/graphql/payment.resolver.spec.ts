@@ -1,14 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PaymentResolver } from './payment.resolver';
+import type { PaymentsService } from '../modules/payments/payments.service';
+
+type PaymentContext = Parameters<PaymentResolver['resolveReference']>[1];
 
 describe('PaymentResolver', () => {
   let resolver: PaymentResolver;
   const mockPaymentsService = {
     findById: vi.fn(),
-  };
+  } satisfies Pick<PaymentsService, 'findById'>;
 
   beforeEach(() => {
-    resolver = new PaymentResolver(mockPaymentsService as any);
+    resolver = new PaymentResolver(mockPaymentsService as unknown as PaymentsService);
     vi.clearAllMocks();
   });
 
@@ -65,7 +68,8 @@ describe('PaymentResolver', () => {
       const payment = { id: 'pay-1', userId: 'user-123', amount: 5000 };
       mockPaymentsService.findById.mockResolvedValue(payment);
 
-      const result = await resolver.resolveReference({ __typename: 'Payment', id: 'pay-1' });
+      const ctx = { req: { headers: { 'x-user-id': 'user-123' } } };
+      const result = await resolver.resolveReference({ __typename: 'Payment', id: 'pay-1' }, ctx);
       expect(result).toEqual(payment);
     });
 
@@ -73,7 +77,27 @@ describe('PaymentResolver', () => {
       const { NotFoundException } = await import('@nestjs/common');
       mockPaymentsService.findById.mockRejectedValue(new NotFoundException());
 
-      const result = await resolver.resolveReference({ __typename: 'Payment', id: 'missing' });
+      const ctx = { req: { headers: { 'x-user-id': 'user-123' } } };
+      const result = await resolver.resolveReference({ __typename: 'Payment', id: 'missing' }, ctx);
+      expect(result).toBeNull();
+    });
+
+    it('returns null when requester identity is missing', async () => {
+      const payment = { id: 'pay-1', userId: 'user-123', amount: 5000 };
+      mockPaymentsService.findById.mockResolvedValue(payment);
+
+      const ctx: PaymentContext = { req: { headers: {} } };
+      const result = await resolver.resolveReference({ __typename: 'Payment', id: 'pay-1' }, ctx);
+
+      expect(result).toBeNull();
+    });
+
+    it('resolveReference — returns null for payment owned by different user', async () => {
+      const payment = { id: 'pay-1', userId: 'user-1', amount: 100 };
+      mockPaymentsService.findById.mockResolvedValue(payment as any);
+
+      const ctx: PaymentContext = { req: { headers: { 'x-user-id': 'user-2' } } };
+      const result = await resolver.resolveReference({ __typename: 'Payment', id: 'pay-1' }, ctx);
       expect(result).toBeNull();
     });
   });

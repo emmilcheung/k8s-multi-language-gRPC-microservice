@@ -28,6 +28,7 @@ export class AuthResolver {
   }
 
   @ResolveReference()
+  @UseGuards(UserIdSigGuard)
   async resolveReference(reference: { __typename: string; id: string }) {
     return this.usersRepository.findById(reference.id);
   }

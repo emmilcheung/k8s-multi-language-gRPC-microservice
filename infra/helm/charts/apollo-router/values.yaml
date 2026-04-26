@@ -86,9 +86,7 @@ topologySpreadConstraints:
   enabled: false
 
 networkPolicy:
-  # Enable in staging/production to restrict pod-to-pod communication.
-  # Disabled by default to avoid breaking local (minikube) environments.
-  enabled: false
+  enabled: true
 
 telemetry:
   otlpEndpoint: "http://otel-collector:4317"

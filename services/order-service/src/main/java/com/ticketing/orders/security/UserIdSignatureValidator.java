@@ -1,9 +1,11 @@
 package com.ticketing.orders.security;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Base64;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -21,8 +23,18 @@ public class UserIdSignatureValidator {
 
   private final String signingKey;
 
+  @Value("${SPRING_PROFILES_ACTIVE:}")
+  private String activeProfiles;
+
   public UserIdSignatureValidator(@Value("${X_USER_ID_SIGNING_KEY:}") String signingKey) {
     this.signingKey = signingKey != null ? signingKey.trim() : "";
+  }
+
+  @PostConstruct
+  void validateConfiguration() {
+    if (activeProfiles != null && activeProfiles.contains("production") && signingKey.length() < 32) {
+      throw new IllegalStateException("X_USER_ID_SIGNING_KEY must be at least 32 characters in production");
+    }
   }
 
   /**
@@ -58,12 +70,16 @@ public class UserIdSignatureValidator {
       long currentMinute = currentTime / 60;
 
       String expectedCurrent = computeSignature(userId, currentMinute);
-      if (expectedCurrent.equals(signature)) {
+      if (MessageDigest.isEqual(
+          expectedCurrent.getBytes(StandardCharsets.UTF_8),
+          signature.getBytes(StandardCharsets.UTF_8))) {
         return true;
       }
 
       String expectedPrevious = computeSignature(userId, currentMinute - 1);
-      if (expectedPrevious.equals(signature)) {
+      if (MessageDigest.isEqual(
+          expectedPrevious.getBytes(StandardCharsets.UTF_8),
+          signature.getBytes(StandardCharsets.UTF_8))) {
         return true;
       }
 
