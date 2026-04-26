@@ -107,7 +107,7 @@ function otelMixin(): Record<string, string> {
           // Inject OTel traceId + spanId into every log line (O-02)
           mixin: otelMixin,
           // Never log sensitive fields
-          redact: ['req.headers.authorization', 'req.headers.cookie'],
+          redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-user-id-sig"]'],
           serializers: {
             req(req: { method: string; url: string }) {
               return { method: req.method, url: req.url };
