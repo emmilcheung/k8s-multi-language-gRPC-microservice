@@ -1,6 +1,13 @@
 supergraph:
   listen: 0.0.0.0:4001
   path: /graphql
+  introspection: false
+
+limits:
+  max_depth: 15
+  max_height: 200
+  max_aliases: 30
+  max_root_fields: 20
 
 headers:
   all:
