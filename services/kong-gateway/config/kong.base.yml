@@ -772,11 +772,11 @@ services:
                   {{JWT_SUB_LUA}}
           - name: cors
             config:
-              origins: ["*"]
+              origins: ["{{CORS_ALLOWED_ORIGINS}}"]
               methods: [POST, OPTIONS]
               headers: [Content-Type, Authorization]
               exposed_headers: [X-Request-Id]
-              credentials: false
+              credentials: true
               max_age: 3600
           - name: rate-limiting
             config:
