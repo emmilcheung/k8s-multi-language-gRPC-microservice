@@ -35,7 +35,7 @@ export class PaymentResolver {
     try {
       const payment = await this.paymentsService.findById(reference.id);
       const requesterId = ctx.req.headers['x-user-id'] as string;
-      if (requesterId && payment.userId !== requesterId) return null;
+      if (!requesterId || payment.userId !== requesterId) return null;
       return payment;
     } catch (e) {
       if (e instanceof NotFoundException) return null;
