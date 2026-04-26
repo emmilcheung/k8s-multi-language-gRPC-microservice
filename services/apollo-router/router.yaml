@@ -2,11 +2,9 @@ supergraph:
   listen: 0.0.0.0:4001
   path: /graphql
 
-limits:
-  max_depth: 15
-  max_height: 200
-  max_aliases: 30
-  max_root_fields: 20
+# limits (max_depth, max_height, etc.) require a GraphOS Enterprise license.
+# They are configured in the Helm chart (infra/helm/charts/apollo-router/files/router.yaml)
+# for staging/production deployments connected to GraphOS.
 
 headers:
   all:
