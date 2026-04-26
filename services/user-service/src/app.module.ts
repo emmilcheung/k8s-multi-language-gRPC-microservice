@@ -14,6 +14,15 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3004),
   DATABASE_URL: z.string(),
   DB_POOL_MAX: z.coerce.number().int().positive().default(20),
+  X_USER_ID_SIGNING_KEY: z.string().optional().default(""),
+}).superRefine((config, ctx) => {
+  if (config.NODE_ENV === "production" && (!config.X_USER_ID_SIGNING_KEY || config.X_USER_ID_SIGNING_KEY.length < 32)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["X_USER_ID_SIGNING_KEY"],
+      message: "X_USER_ID_SIGNING_KEY must be at least 32 characters in production",
+    });
+  }
 });
 
 @Module({

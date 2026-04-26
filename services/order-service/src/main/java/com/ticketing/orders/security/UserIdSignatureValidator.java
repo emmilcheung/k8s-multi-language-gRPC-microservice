@@ -5,6 +5,7 @@ import java.security.MessageDigest;
 import java.util.Base64;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -22,8 +23,18 @@ public class UserIdSignatureValidator {
 
   private final String signingKey;
 
+  @Value("${SPRING_PROFILES_ACTIVE:}")
+  private String activeProfiles;
+
   public UserIdSignatureValidator(@Value("${X_USER_ID_SIGNING_KEY:}") String signingKey) {
     this.signingKey = signingKey != null ? signingKey.trim() : "";
+  }
+
+  @PostConstruct
+  void validateConfiguration() {
+    if (activeProfiles != null && activeProfiles.contains("production") && signingKey.length() < 32) {
+      throw new IllegalStateException("X_USER_ID_SIGNING_KEY must be at least 32 characters in production");
+    }
   }
 
   /**

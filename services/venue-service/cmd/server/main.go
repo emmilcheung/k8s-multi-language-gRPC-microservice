@@ -56,6 +56,10 @@ func main() {
 	}
 	defer log.Sync() //nolint:errcheck
 
+	if cfg.Env == "production" && len(cfg.UserIDSigningKey) < 32 {
+		log.Fatal("X_USER_ID_SIGNING_KEY must be at least 32 characters in production")
+	}
+
 	log.Info("starting venue-service",
 		zap.String("env", cfg.Env),
 		zap.Int("port", cfg.Port),

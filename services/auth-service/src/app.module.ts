@@ -53,6 +53,14 @@ const envSchema = z.object({
   KONG_BASE_URL: z.string().url().default('http://localhost:8000'),
   OAUTH_CLIENT_BASE_URL: z.string().url().default('http://localhost:4000'),
   X_USER_ID_SIGNING_KEY: z.string().optional().default(''),
+}).superRefine((config, ctx) => {
+  if (config.NODE_ENV === 'production' && (!config.X_USER_ID_SIGNING_KEY || config.X_USER_ID_SIGNING_KEY.length < 32)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['X_USER_ID_SIGNING_KEY'],
+      message: 'X_USER_ID_SIGNING_KEY must be at least 32 characters in production',
+    });
+  }
 });
 
 /** Inject the active OTel traceId and spanId into every pino log line (O-02). */

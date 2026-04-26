@@ -54,6 +54,10 @@ func main() {
 	}
 	defer log.Sync() //nolint:errcheck
 
+	if cfg.Env == "production" && len(os.Getenv("X_USER_ID_SIGNING_KEY")) < 32 {
+		log.Fatal("X_USER_ID_SIGNING_KEY must be at least 32 characters in production")
+	}
+
 	log.Info("starting ticket-service", zap.String("env", cfg.Env), zap.Int("port", cfg.Port), zap.Int("grpcPort", cfg.GrpcPort))
 
 	// Initialise OpenTelemetry — must happen before any network I/O
