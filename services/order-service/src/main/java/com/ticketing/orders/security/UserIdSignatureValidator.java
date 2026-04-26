@@ -1,6 +1,7 @@
 package com.ticketing.orders.security;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Base64;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -58,12 +59,16 @@ public class UserIdSignatureValidator {
       long currentMinute = currentTime / 60;
 
       String expectedCurrent = computeSignature(userId, currentMinute);
-      if (expectedCurrent.equals(signature)) {
+      if (MessageDigest.isEqual(
+          expectedCurrent.getBytes(StandardCharsets.UTF_8),
+          signature.getBytes(StandardCharsets.UTF_8))) {
         return true;
       }
 
       String expectedPrevious = computeSignature(userId, currentMinute - 1);
-      if (expectedPrevious.equals(signature)) {
+      if (MessageDigest.isEqual(
+          expectedPrevious.getBytes(StandardCharsets.UTF_8),
+          signature.getBytes(StandardCharsets.UTF_8))) {
         return true;
       }
 
