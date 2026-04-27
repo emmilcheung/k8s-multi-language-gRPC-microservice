@@ -1037,8 +1037,13 @@ test.describe("seating plan", () => {
     await signup(page, buyer2Email);
     await page.goto(ticketUrl);
 
-    // When quota is exhausted, the button is replaced with "Already Reserved" (disabled)
-    // This indicates the ticket is sold out from this buyer's perspective
+    // The UI computes isReserved = ticket.reserved > 0 (page.tsx:86), reading the
+    // reserved counter from the ticket-service REST response. When buyer1's purchase
+    // sets reserved=1 in MongoDB, the ticket endpoint returns reserved:1 and the CTA
+    // is proactively disabled for all visitors — no click is needed to trigger the
+    // backend 409. This is intentional UX: prevent the attempt rather than show an
+    // error after it. The disabled button is the observable signal that quota is
+    // exhausted from the user's perspective.
     await expect(
       page.getByRole("button", { name: /already reserved/i })
     ).toBeVisible({ timeout: 15000 });
@@ -1065,13 +1070,14 @@ test.describe("seating plan", () => {
     await page.getByRole("button", { name: /purchase ticket/i }).click({ timeout: 15000 });
     await page.waitForURL(/\/orders\/.+/, { timeout: 15000 });
 
-    // Second visit — per-user limit has been applied.
-    // After the first purchase completes, the ticket shows as "Already Reserved"
-    // because orderId (legacy field) is set, preventing further purchases.
+    // Second visit — per-user limit enforcement check.
+    // After the first purchase the ticket carries ticket.orderId for this user,
+    // which satisfies the isReserved condition (page.tsx:86: Boolean(ticket.orderId)).
+    // The CTA is disabled before any second click, enforcing maxPerUser=1 at the
+    // UI layer. The backend 422 (FAILED_PRECONDITION) would fire if the request were
+    // made anyway (e.g. directly via API), but the E2E path validates the UI gate.
     await page.goto(ticketUrl);
 
-    // When the buyer returns, the button should be disabled ("Already Reserved")
-    // This enforces the per-user limit for GA tickets with maxPerUser=1
     await expect(
       page.getByRole("button", { name: /already reserved/i })
     ).toBeVisible({ timeout: 15000 });
