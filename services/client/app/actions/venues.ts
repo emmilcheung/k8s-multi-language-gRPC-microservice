@@ -274,7 +274,8 @@ export async function createSeatingPlanForTicket(
   venueId: string,
   planName: string,
   assignmentMode: "manual" | "auto",
-  maxSeatsPerOrder?: number
+  maxSeatsPerOrder?: number,
+  pricingMode?: "single" | "section" | "seat"
 ): Promise<SeatingPlan | null> {
   if (!ticketId || !venueId || !planName) return null;
 
@@ -288,6 +289,7 @@ export async function createSeatingPlanForTicket(
       assignmentMode,
       holdTtlSec: 300,
       maxSeatsPerOrder: maxSeatsPerOrder ?? 10,
+      ...(pricingMode ? { pricingMode } : {}),
     }),
   });
 

@@ -673,7 +673,7 @@ func (r *MongoTicketRepository) Update(ctx context.Context, t *Ticket) error {
 	}
 
 	filter := bson.M{"_id": t.ID, "version": previousVersion}
-	update := bson.M{"$set": bson.M{
+	setFields := bson.M{
 		"title":         t.Title,
 		"price":         t.Price,
 		"orderId":       t.OrderID,
@@ -683,7 +683,11 @@ func (r *MongoTicketRepository) Update(ctx context.Context, t *Ticket) error {
 		"maxPerUser":    t.MaxPerUser,
 		"version":       t.Version,
 		"updatedAt":     t.UpdatedAt,
-	}}
+	}
+	if t.Event != nil {
+		setFields["event"] = t.Event
+	}
+	update := bson.M{"$set": setFields}
 	if len(t.PendingOutbox) > 0 {
 		update["$push"] = bson.M{"outbox": bson.M{"$each": t.PendingOutbox}}
 	}

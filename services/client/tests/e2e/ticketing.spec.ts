@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import { test, expect, type Page } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
@@ -7,12 +6,6 @@ import { test, expect, type Page } from "@playwright/test";
 // ---------------------------------------------------------------------------
 
 const PASSWORD = "Password123!";
-const AUTH_POSTGRES_CONTAINER = "microservices-postgres-auth-1";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function uniqueEmail(prefix: string) {
   return `${prefix}-${Date.now()}-${randomUUID().slice(0, 8)}@test.com`;
 }
@@ -39,57 +32,8 @@ async function signup(page: Page, email: string) {
   }
 }
 
-async function signin(page: Page, email: string) {
-  await page.goto("/auth/signin");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL("/");
-}
-
-function sqlLiteral(value: string) {
-  return `'${value.replaceAll("'", "''")}'`;
-}
-
-function grantOrganizerRole(email: string) {
-  const sql = [
-    "WITH promoted AS (",
-    "  UPDATE users",
-    `  SET roles = '["organizer"]'::json`,
-    `  WHERE email = ${sqlLiteral(email)}`,
-    "  RETURNING 1",
-    ")",
-    "SELECT COUNT(*) FROM promoted;",
-  ].join(" ");
-  const result = execFileSync(
-    "docker",
-    [
-      "exec",
-      "-i",
-      AUTH_POSTGRES_CONTAINER,
-      "psql",
-      "-U",
-      "auth_user",
-      "-d",
-      "auth_db",
-      "-t",
-      "-A",
-      "-c",
-      sql,
-    ],
-    { encoding: "utf8" }
-  ).trim();
-
-  if (result !== "1") {
-    throw new Error(`Failed to promote ${email} to organizer. Updated rows: ${result || "0"}`);
-  }
-}
-
-async function signupAsOrganizer(page: Page, email: string) {
+async function signupAsCreator(page: Page, email: string) {
   await signup(page, email);
-  grantOrganizerRole(email);
-  await signout(page);
-  await signin(page, email);
 }
 
 async function signout(page: Page) {
@@ -138,7 +82,7 @@ async function createTicket(page: Page, title: string, price: string) {
 
 /**
  * Creates a GA ticket with explicit quota and maxPerUser.
- * The caller must be signed in as an organizer.
+ * The caller must be signed in.
  */
 async function createTicketWithQuota(
   page: Page,
@@ -294,8 +238,6 @@ async function clickPayNowAndWaitForSubmitPayment(page: Page) {
   await response.finished().catch(() => undefined);
   return response;
 }
-
-
 
 test.describe("auth", () => {
   test("signup shows navbar as logged in", async ({ page }) => {
@@ -528,7 +470,7 @@ test.describe("settings", () => {
 test.describe("tickets", () => {
   test("seller can create a ticket and it appears on the homepage", async ({ page }) => {
     const email = uniqueEmail("seller-create");
-    await signupAsOrganizer(page, email);
+    await signupAsCreator(page, email);
 
     const title = `E2E Concert ${Date.now()}`;
     await createTicket(page, title, "75.00");
@@ -560,7 +502,7 @@ test.describe("tickets", () => {
 
   test("seller sees edit form on own ticket, not purchase button", async ({ page }) => {
     const email = uniqueEmail("seller-owner");
-    await signupAsOrganizer(page, email);
+    await signupAsCreator(page, email);
 
     await createTicket(page, `Owner Test ${Date.now()}`, "10.00");
 
@@ -573,7 +515,7 @@ test.describe("tickets", () => {
 
   test("seller sees 'Your listing' text on own ticket", async ({ page }) => {
     const email = uniqueEmail("seller-listing");
-    await signupAsOrganizer(page, email);
+    await signupAsCreator(page, email);
 
     await createTicket(page, `Listing Text ${Date.now()}`, "20.00");
 
@@ -585,7 +527,7 @@ test.describe("tickets", () => {
 
   test("seller can update a ticket", async ({ page }) => {
     const email = uniqueEmail("seller-update");
-    await signupAsOrganizer(page, email);
+    await signupAsCreator(page, email);
 
     const original = `Original ${Date.now()}`;
     await createTicket(page, original, "10.00");
@@ -606,9 +548,46 @@ test.describe("tickets", () => {
     await expect(page.getByText("$99.99")).toBeVisible();
   });
 
+  test("seller edit form stays in sync with stored event fields", async ({ page }) => {
+    const email = uniqueEmail("seller-sync");
+    await signupAsCreator(page, email);
+
+    await page.goto("/tickets/new");
+    await page.getByRole("button", { name: /general admission/i }).click();
+    await page.locator("#title").waitFor({ state: "visible", timeout: 5000 });
+
+    await fillInputAndTriggerChange(page, "#title", `Sync Test ${Date.now()}`);
+    await fillInputAndTriggerChange(page, "#price", "25.00");
+    await fillInputAndTriggerChange(page, "#startsAt", "2026-12-03T18:30");
+    await page.locator("#eventTitle").fill("Synced Event");
+    await page.locator("#eventDescription").fill("Original synced description");
+    await page.locator("#venueName").fill("Sync Venue");
+    await page.locator("#venueAddress").fill("1 Sync Street");
+
+    await page.getByRole("button", { name: /create ticket/i }).click();
+    await page.waitForURL(/\/tickets\/[0-9a-f-]+$/, { timeout: 15000 });
+
+    await expect(page.locator("#eventTitle")).toHaveValue("Synced Event");
+    await expect(page.locator("#eventDescription")).toHaveValue("Original synced description");
+    await expect(page.locator("#venueName")).toHaveValue("Sync Venue");
+    await expect(page.locator("#venueAddress")).toHaveValue("1 Sync Street");
+    await expect(page.locator("#startsAt")).toHaveValue(/.+/);
+
+    await page.locator("#eventTitle").fill("Updated Synced Event");
+    await page.locator("#eventDescription").fill("Updated synced description");
+    await expect(page.locator("#eventTitle")).toHaveValue("Updated Synced Event");
+    await page.getByRole("button", { name: /update ticket/i }).click();
+
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Updated Synced Event", {
+      timeout: 10000,
+    });
+    await expect(page.locator("#eventTitle")).toHaveValue("Updated Synced Event");
+    await expect(page.locator("#eventDescription")).toHaveValue("Updated synced description");
+  });
+
   test("create ticket requires a title", async ({ page }) => {
     const email = uniqueEmail("ticket-no-title");
-    await signupAsOrganizer(page, email);
+    await signupAsCreator(page, email);
 
     await page.goto("/tickets/new");
 
@@ -636,7 +615,7 @@ test.describe("tickets", () => {
 
   test("create ticket requires a positive price", async ({ page }) => {
     const email = uniqueEmail("ticket-bad-price");
-    await signupAsOrganizer(page, email);
+    await signupAsCreator(page, email);
 
     await page.goto("/tickets/new");
 
@@ -676,14 +655,25 @@ test.describe("orders", () => {
     const buyerEmail = uniqueEmail("buyer-ord");
     const ticketTitle = `Order E2E ${Date.now()}`;
 
-    await signupAsOrganizer(page, sellerEmail);
+    await signupAsCreator(page, sellerEmail);
     const ticketUrl = await createTicket(page, ticketTitle, "55.00");
 
     await signout(page);
     await signup(page, buyerEmail);
 
-    await page.goto(ticketUrl);
-    await expect(page.getByRole("button", { name: /purchase ticket/i })).toBeVisible({ timeout: 15000 });
+    await expect
+      .poll(
+        async () => {
+          await page.goto(ticketUrl);
+          await page
+            .getByRole("heading", { level: 1 })
+            .waitFor({ timeout: 5000 })
+            .catch(() => {});
+          return page.getByRole("button", { name: /purchase ticket/i }).isVisible();
+        },
+        { timeout: 15000, intervals: [1000, 2000, 3000] }
+      )
+      .toBe(true);
     await page.getByRole("button", { name: /purchase ticket/i }).click();
     await page.waitForURL(/\/orders\/.+/);
 
@@ -819,7 +809,7 @@ test.describe("orders", () => {
     await expect(page.getByText(ticketTitle)).toBeVisible({ timeout: 10000 });
   });
 
-  test("ticket shows 'Already Reserved' after order is created", async ({ page }) => {
+  test("ticket shows unavailable state after order is created", async ({ page }) => {
     const { ticketUrl } = await setupPurchase(page);
 
     // The ticket detail page is server-rendered: it reads ticket.reserved from ticket-service.
@@ -841,7 +831,7 @@ test.describe("orders", () => {
             .getByRole("heading", { level: 1 })
             .waitFor({ timeout: 5000 })
             .catch(() => {});
-          return page.getByRole("button", { name: /already reserved/i }).isVisible();
+          return page.getByRole("button", { name: /unavailable/i }).isVisible();
         },
         { timeout: 30000, intervals: [2000, 3000, 5000] }
       )
@@ -850,11 +840,12 @@ test.describe("orders", () => {
     await expect(
       page.getByRole("button", { name: /purchase ticket/i })
     ).toHaveCount(0);
+    await expect(page.getByText(/remaining tickets are currently reserved or unavailable/i)).toBeVisible();
   });
 
   test("seller cannot purchase own ticket — sees edit form instead", async ({ page }) => {
     const email = uniqueEmail("seller-no-buy");
-    await signupAsOrganizer(page, email);
+    await signupAsCreator(page, email);
 
     await createTicket(page, `No-Buy ${Date.now()}`, "25.00");
 
@@ -869,7 +860,7 @@ test.describe("orders", () => {
   test("unauthenticated visitor sees sign-in link instead of purchase button", async ({ page }) => {
     // Create a ticket as a seller, then sign out
     const email = uniqueEmail("seller-unauth");
-    await signupAsOrganizer(page, email);
+    await signupAsCreator(page, email);
     const ticketUrl = await createTicket(page, `Unauth Test ${Date.now()}`, "15.00");
     await signout(page);
 
@@ -886,10 +877,10 @@ test.describe("orders", () => {
 // ---------------------------------------------------------------------------
 
 test.describe("seating plan", () => {
-  test("organizer can create a seated ticket (Phase 3)", async ({ page }) => {
+  test("authenticated user can manage a seated ticket plan lifecycle (Phase 3)", async ({ page }) => {
     test.setTimeout(60_000);
     const email = uniqueEmail("org-seated-p3");
-    await signupAsOrganizer(page, email);
+    await signupAsCreator(page, email);
 
     // 1. Create a venue
     await page.goto("/venues/new");
@@ -907,19 +898,61 @@ test.describe("seating plan", () => {
     await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
     await expect(page.getByText("Floor A")).toBeVisible();
 
-    // 3. Create a GA ticket first (simpler baseline)
-    const gaTicketUrl = await createTicket(page, `Phase 3 GA Test ${Date.now()}`, "29.99");
-    await expect(page.getByText(/phase 3 ga test/i)).toBeVisible();
-    
-    // 4. Verify GA tickets still work in Phase 3
-    await page.goto(gaTicketUrl);
-    await expect(page.getByText(/\$29\.99/)).toBeVisible();
+    // 3. Create a manual seated ticket
+    await page.goto("/tickets/new");
+    await page.getByRole("button", { name: /manual assigned seating/i }).click();
+    await page.locator("#title").waitFor({ state: "visible", timeout: 5000 });
+
+    const ticketTitle = `Phase 3 Seated Test ${Date.now()}`;
+    await fillInputAndTriggerChange(page, "#title", ticketTitle);
+    await fillInputAndTriggerChange(page, "#price", "29.99");
+    await fillInputAndTriggerChange(page, "#startsAt", "2026-12-01T19:00");
+
+    const venueCombobox = page.getByRole("combobox").first();
+    await venueCombobox.waitFor({ state: "visible", timeout: 5000 });
+    await venueCombobox.click();
+    await page.getByRole("option", { name: "Phase 3 Test Venue" }).click();
+
+    await page.getByRole("button", { name: /create ticket/i }).click();
+    await page.waitForURL(/\/tickets\/[0-9a-f-]+$/, { timeout: 15000 });
+    await expect(page.getByRole("heading", { name: ticketTitle })).toBeVisible();
+
+    // 4. Manage plan should load without a runtime server-action error
+    await page.getByRole("link", { name: /manage plan/i }).click();
+    await page.waitForURL(/\/tickets\/[0-9a-f-]+\/plans\/[0-9a-f-]+$/, { timeout: 15000 });
+    await expect(page.getByRole("link", { name: /back to ticket/i })).toBeVisible();
+
+    const originalPlanUrl = page.url();
+    const originalPlanId = originalPlanUrl.match(/plans\/([0-9a-f-]+)/)?.[1];
+    expect(originalPlanId).toBeTruthy();
+
+    await page.getByRole("button", { name: /activate plan/i }).click();
+    await expect(page.getByRole("button", { name: /deactivate plan/i })).toBeVisible({ timeout: 10000 });
+
+    await page.getByRole("button", { name: /deactivate plan/i }).click();
+    await expect(page.getByRole("button", { name: /reactivate plan/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: /create replacement plan/i })).toBeVisible();
+
+    await page.getByRole("button", { name: /reactivate plan/i }).click();
+    await expect(page.getByRole("button", { name: /deactivate plan/i })).toBeVisible({ timeout: 10000 });
+
+    await page.getByRole("button", { name: /deactivate plan/i }).click();
+    await expect(page.getByRole("button", { name: /create replacement plan/i })).toBeVisible({ timeout: 10000 });
+
+    await page.getByRole("button", { name: /create replacement plan/i }).click();
+    await expect.poll(() => page.url(), { timeout: 15000 }).not.toBe(originalPlanUrl);
+
+    const replacementPlanId = page.url().match(/plans\/([0-9a-f-]+)/)?.[1];
+    expect(replacementPlanId).toBeTruthy();
+    expect(replacementPlanId).not.toBe(originalPlanId);
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Replacement");
+    await expect(page.getByText(/^draft$/i)).toBeVisible();
   });
 
-  test("organizer can create an auto-assigned seated ticket (Phase 3)", async ({ page }) => {
+  test("authenticated user can create an auto-assigned seated ticket (Phase 3)", async ({ page }) => {
     test.setTimeout(60_000);
     const email = uniqueEmail("org-auto-seated-p3");
-    await signupAsOrganizer(page, email);
+    await signupAsCreator(page, email);
     const venueName = `Auto-Assign Venue ${Date.now()}`;
 
     // 1. Create a venue
@@ -997,10 +1030,112 @@ test.describe("seating plan", () => {
     await expect(page.getByText("Type: Auto-assigned Seating")).toBeVisible({ timeout: 5000 });
   });
 
+  test("buyer cannot enter seat selection when the seating plan is inactive", async ({ page }) => {
+    test.setTimeout(60_000);
+    const sellerEmail = uniqueEmail("seller-inactive-plan");
+    const buyerEmail = uniqueEmail("buyer-inactive-plan");
+    await signupAsCreator(page, sellerEmail);
+
+    const venueName = `Inactive Plan Venue ${Date.now()}`;
+    await page.goto("/venues/new");
+    await page.getByLabel(/venue name/i).fill(venueName);
+    await page.getByLabel(/total capacity/i).fill("200");
+    await page.getByLabel(/timezone/i).fill("America/New_York");
+    await page.getByRole("button", { name: /create venue/i }).click();
+    await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
+
+    await page.getByLabel(/section name/i).fill("Floor A");
+    await page.locator('#vs-rows').fill("5");
+    await page.locator('#vs-cols').fill("10");
+    await page.getByRole("button", { name: /add section/i }).click();
+    await expect(page.getByText("Floor A")).toBeVisible();
+
+    await page.goto("/tickets/new");
+    await page.getByRole("button", { name: /manual assigned seating/i }).click();
+    await page.locator("#title").waitFor({ state: "visible", timeout: 5000 });
+
+    const ticketTitle = `Inactive Plan Ticket ${Date.now()}`;
+    await fillInputAndTriggerChange(page, "#title", ticketTitle);
+    await fillInputAndTriggerChange(page, "#price", "25.00");
+    await fillInputAndTriggerChange(page, "#startsAt", "2026-12-01T19:00");
+
+    const venueCombobox = page.getByRole("combobox").first();
+    await venueCombobox.click();
+    await page.getByRole("option", { name: venueName }).click();
+
+    await page.getByRole("button", { name: /create ticket/i }).click();
+    await page.waitForURL(/\/tickets\/[0-9a-f-]+$/, { timeout: 15000 });
+    const ticketUrl = page.url();
+
+    await page.getByRole("link", { name: /manage plan/i }).click();
+    await page.waitForURL(/\/tickets\/[0-9a-f-]+\/plans\/[0-9a-f-]+$/, { timeout: 15000 });
+    await page.getByRole("button", { name: /activate plan/i }).click();
+    await expect(page.getByRole("button", { name: /deactivate plan/i })).toBeVisible({ timeout: 10000 });
+    await page.getByRole("button", { name: /deactivate plan/i }).click();
+    await expect(page.getByRole("button", { name: /reactivate plan/i })).toBeVisible({ timeout: 10000 });
+
+    await signout(page);
+    await signup(page, buyerEmail);
+    await page.goto(ticketUrl);
+
+    await expect(page.getByRole("button", { name: /unavailable/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/seating plan is not active/i)).toBeVisible();
+    await expect(page.getByRole("link", { name: /choose seats/i })).toHaveCount(0);
+  });
+
+  test("draft seated tickets stay off the public listing until the plan is activated", async ({ page }) => {
+    test.setTimeout(60_000);
+    const sellerEmail = uniqueEmail("seller-draft-listing");
+    await signupAsCreator(page, sellerEmail);
+
+    const venueName = `Draft Listing Venue ${Date.now()}`;
+    await page.goto("/venues/new");
+    await page.getByLabel(/venue name/i).fill(venueName);
+    await page.getByLabel(/total capacity/i).fill("200");
+    await page.getByLabel(/timezone/i).fill("America/New_York");
+    await page.getByRole("button", { name: /create venue/i }).click();
+    await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
+
+    await page.getByLabel(/section name/i).fill("Floor A");
+    await page.locator('#vs-rows').fill("5");
+    await page.locator('#vs-cols').fill("10");
+    await page.getByRole("button", { name: /add section/i }).click();
+    await expect(page.getByText("Floor A")).toBeVisible();
+
+    await page.goto("/tickets/new");
+    await page.getByRole("button", { name: /manual assigned seating/i }).click();
+    await page.locator("#title").waitFor({ state: "visible", timeout: 5000 });
+
+    const ticketTitle = `Draft Listing Ticket ${Date.now()}`;
+    await fillInputAndTriggerChange(page, "#title", ticketTitle);
+    await fillInputAndTriggerChange(page, "#price", "25.00");
+    await fillInputAndTriggerChange(page, "#startsAt", "2026-12-01T19:00");
+
+    const venueCombobox = page.getByRole("combobox").first();
+    await venueCombobox.click();
+    await page.getByRole("option", { name: venueName }).click();
+
+    await page.getByRole("button", { name: /create ticket/i }).click();
+    await page.waitForURL(/\/tickets\/[0-9a-f-]+$/, { timeout: 15000 });
+    const ticketUrl = page.url();
+
+    await page.goto("/");
+    await expect(page.getByText(ticketTitle)).toHaveCount(0);
+
+    await page.goto(ticketUrl);
+    await page.getByRole("link", { name: /manage plan/i }).click();
+    await page.waitForURL(/\/tickets\/[0-9a-f-]+\/plans\/[0-9a-f-]+$/, { timeout: 15000 });
+    await page.getByRole("button", { name: /activate plan/i }).click();
+    await expect(page.getByRole("button", { name: /deactivate plan/i })).toBeVisible({ timeout: 10000 });
+
+    await page.goto("/");
+    await expect(page.getByText(ticketTitle)).toBeVisible({ timeout: 10000 });
+  });
+
   test("GA ticket with default quota does not show quantity stepper", async ({ page }) => {
     const sellerEmail = uniqueEmail("seller-ga-qty");
     const buyerEmail = uniqueEmail("buyer-ga-qty");
-    await signupAsOrganizer(page, sellerEmail);
+    await signupAsCreator(page, sellerEmail);
 
     const ticketUrl = await createTicket(page, `GA No Stepper ${Date.now()}`, "20.00");
 
@@ -1020,7 +1155,7 @@ test.describe("seating plan", () => {
     const sellerEmail = uniqueEmail("seller-multi-qty");
     const buyerEmail = uniqueEmail("buyer-multi-qty");
 
-    await signupAsOrganizer(page, sellerEmail);
+    await signupAsCreator(page, sellerEmail);
     const ticketUrl = await createTicketWithQuota(
       page,
       `Multi Qty ${Date.now()}`,
@@ -1054,12 +1189,12 @@ test.describe("seating plan", () => {
     });
   });
 
-  test("buyer sees sold-out error when quota is exhausted (409)", async ({ page }) => {
+  test("buyer sees unavailable CTA when quota is exhausted", async ({ page }) => {
     const sellerEmail = uniqueEmail("seller-sold-out");
     const buyer1Email = uniqueEmail("buyer1-sold-out");
     const buyer2Email = uniqueEmail("buyer2-sold-out");
 
-    await signupAsOrganizer(page, sellerEmail);
+    await signupAsCreator(page, sellerEmail);
     const ticketUrl = await createTicketWithQuota(
       page,
       `Sold Out Test ${Date.now()}`,
@@ -1080,23 +1215,17 @@ test.describe("seating plan", () => {
     await signup(page, buyer2Email);
     await page.goto(ticketUrl);
 
-    // The UI computes isReserved = ticket.reserved > 0 (page.tsx:86), reading the
-    // reserved counter from the ticket-service REST response. When buyer1's purchase
-    // sets reserved=1 in MongoDB, the ticket endpoint returns reserved:1 and the CTA
-    // is proactively disabled for all visitors — no click is needed to trigger the
-    // backend 409. This is intentional UX: prevent the attempt rather than show an
-    // error after it. The disabled button is the observable signal that quota is
-    // exhausted from the user's perspective.
     await expect(
-      page.getByRole("button", { name: /already reserved/i })
+      page.getByRole("button", { name: /unavailable/i })
     ).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/remaining tickets are currently reserved or unavailable/i)).toBeVisible();
   });
 
   test("buyer sees purchase-limit error when per-user cap is hit (422)", async ({ page }) => {
     const sellerEmail = uniqueEmail("seller-pul");
     const buyerEmail = uniqueEmail("buyer-pul");
 
-    await signupAsOrganizer(page, sellerEmail);
+    await signupAsCreator(page, sellerEmail);
     const ticketUrl = await createTicketWithQuota(
       page,
       `Per User Limit Test ${Date.now()}`,

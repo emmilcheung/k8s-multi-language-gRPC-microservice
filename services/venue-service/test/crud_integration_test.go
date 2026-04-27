@@ -149,7 +149,20 @@ func TestCRUD_ShouldSupportFullVenuePlanLifecycle(t *testing.T) {
 	assert.ErrorIs(t, err, repository.ErrPlanAlreadyActive,
 		"second activate should return ErrPlanAlreadyActive")
 
-	// ── Step 7: not-found sentinel ──────────────────────────────────────────
+	// ── Step 7: deactivate then reactivate from inactive ─────────────────────
+	require.NoError(t, planRepo.Deactivate(ctx, p.ID, organizerID))
+
+	inactivePlan, err := planRepo.FindByID(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, repository.PlanStatusInactive, inactivePlan.Status)
+
+	require.NoError(t, planRepo.Activate(ctx, p.ID, inactivePlan.Version))
+
+	reactivatedPlan, err := planRepo.FindByID(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, repository.PlanStatusActive, reactivatedPlan.Status)
+
+	// ── Step 8: not-found sentinel ──────────────────────────────────────────
 	_, err = planRepo.FindByID(ctx, "00000000-0000-0000-0000-000000000000")
 	assert.ErrorIs(t, err, repository.ErrPlanNotFound)
 

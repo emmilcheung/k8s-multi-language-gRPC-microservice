@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
@@ -9,52 +8,8 @@ import { test, expect, type Page, type APIRequestContext } from "@playwright/tes
 const PASSWORD = "Password123!";
 const KONG_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const GRAPHQL_URL = `${KONG_URL}/graphql`;
-const AUTH_POSTGRES_CONTAINER = "microservices-postgres-auth-1";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function uniqueEmail(prefix: string) {
   return `${prefix}-${Date.now()}-${randomUUID().slice(0, 8)}@test.com`;
-}
-
-function sqlLiteral(value: string) {
-  return `'${value.replaceAll("'", "''")}'`;
-}
-
-function grantOrganizerRole(email: string) {
-  const sql = [
-    "WITH promoted AS (",
-    "  UPDATE users",
-    `  SET roles = '[\"organizer\"]'::json`,
-    `  WHERE email = ${sqlLiteral(email)}`,
-    "  RETURNING 1",
-    ")",
-    "SELECT COUNT(*) FROM promoted;",
-  ].join(" ");
-  const result = execFileSync(
-    "docker",
-    [
-      "exec",
-      "-i",
-      AUTH_POSTGRES_CONTAINER,
-      "psql",
-      "-U",
-      "auth_user",
-      "-d",
-      "auth_db",
-      "-t",
-      "-A",
-      "-c",
-      sql,
-    ],
-    { encoding: "utf8" },
-  ).trim();
-
-  if (result !== "1") {
-    throw new Error(`Failed to promote ${email} to organizer. Updated rows: ${result || "0"}`);
-  }
 }
 
 async function signup(page: Page, email: string) {
@@ -74,24 +29,8 @@ async function signup(page: Page, email: string) {
   }
 }
 
-async function signin(page: Page, email: string) {
-  await page.goto("/auth/signin");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL("/");
-}
-
-async function signout(page: Page) {
-  await page.getByRole("button", { name: /sign out/i }).click();
-  await page.waitForURL(/\/auth\/signin/);
-}
-
-async function signupAsOrganizer(page: Page, email: string) {
+async function signupAsCreator(page: Page, email: string) {
   await signup(page, email);
-  grantOrganizerRole(email);
-  await signout(page);
-  await signin(page, email);
 }
 
 async function fillInputAndTriggerChange(page: Page, selector: string, value: string) {
@@ -327,7 +266,7 @@ test.describe("GraphQL Federation — Cross-Subgraph Resolution", () => {
 
   test("ticket query resolves seatingPlan across ticket and venue subgraphs", async ({ page, request }) => {
     const email = uniqueEmail("gql-venue");
-    await signupAsOrganizer(page, email);
+    await signupAsCreator(page, email);
     const { planId, ticketId } = await createAttachedSeatedTicket(page);
     const token = await getTokenCookie(page);
     expect(token).toBeTruthy();

@@ -4,7 +4,6 @@
 
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { cache } from "react";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
 import { base } from "@/lib/server-utils";
@@ -20,9 +19,9 @@ interface Props {
   params: Promise<{ ticketId: string }>;
 }
 
-const getTicket = cache(async (ticketId: string): Promise<Ticket> => {
+async function getTicket(ticketId: string): Promise<Ticket> {
   return serverApi<Ticket>(`/api/tickets/${ticketId}`);
-});
+}
 
 export async function generateMetadata({ params }: Props) {
   const { ticketId } = await params;
@@ -86,6 +85,29 @@ export default async function SeatsPage({ params }: Props) {
     );
   }
 
+  if (plan.status !== "active") {
+    return (
+      <div className="flex flex-col gap-8 max-w-4xl mx-auto">
+        <Link
+          href={`/tickets/${ticketId}`}
+          className={cn(
+            buttonVariants({ variant: "ghost", size: "sm" }),
+            "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2"
+          )}
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          Back to ticket
+        </Link>
+        <div className="glass rounded-2xl p-8 text-center">
+          <p className="text-destructive font-semibold">Ticket unavailable</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            This seating plan is not active, so seats cannot be selected right now.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // Fetch initial availability snapshot + price tiers (server-side for first paint).
   let initialAvailability: AvailabilitySnapshot | null = null;
   let priceTiers: PriceTier[] = [];
@@ -103,6 +125,29 @@ export default async function SeatsPage({ params }: Props) {
     priceTiers = await fetchPriceTiers(planId);
   } catch {
     // Non-fatal — client will re-fetch.
+  }
+
+  if (initialAvailability && initialAvailability.counts.available === 0) {
+    return (
+      <div className="flex flex-col gap-8 max-w-4xl mx-auto">
+        <Link
+          href={`/tickets/${ticketId}`}
+          className={cn(
+            buttonVariants({ variant: "ghost", size: "sm" }),
+            "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2"
+          )}
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
+          Back to ticket
+        </Link>
+        <div className="glass rounded-2xl p-8 text-center">
+          <p className="text-destructive font-semibold">Sold out</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            No seats are currently available for this ticket.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (

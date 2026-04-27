@@ -7,11 +7,13 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
 import { activatePlan, deactivatePlan, createPriceTier, fetchPriceTiers } from "@/app/actions/venues";
+import { replaceInactivePlan } from "@/app/actions/tickets";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { SeatingPlanCanvas } from "@/components/seating-plan-canvas";
 import { ActivatePlanButton } from "@/components/activate-plan-button";
 import { DeactivatePlanButton } from "@/components/deactivate-plan-button";
+import { ReplacePlanButton } from "@/components/replace-plan-button";
 import { PriceTierForm } from "@/components/price-tier-form";
 import { cn } from "@/lib/utils";
 import {
@@ -21,7 +23,7 @@ import {
   Users,
   Grid3X3,
 } from "lucide-react";
-import type { SeatingPlan, Section, PriceTier } from "@/lib/types";
+import type { SeatingPlan, Section, PriceTier, Ticket } from "@/lib/types";
 import type { PlanState } from "@/app/actions/venues";
 
 interface Props {
@@ -41,11 +43,13 @@ export default async function TicketPlanDetailPage({ params }: Props) {
 
   const { ticketId, planId } = await params;
 
+  let ticket: Ticket;
   let plan: SeatingPlan;
   let sectionsData: { sections: Section[] };
   let tiers: PriceTier[] = [];
   try {
-    [plan, sectionsData, tiers] = await Promise.all([
+    [ticket, plan, sectionsData, tiers] = await Promise.all([
+      serverApi<Ticket>(`/api/tickets/${ticketId}`),
       serverApi<SeatingPlan>(`/api/seating-plans/${planId}`),
       serverApi<{ sections: Section[] }>(`/api/seating-plans/${planId}/sections`),
       fetchPriceTiers(planId),
@@ -61,21 +65,31 @@ export default async function TicketPlanDetailPage({ params }: Props) {
 
   const sections = sectionsData?.sections ?? [];
 
-  // Wrapper actions that bind the ticket context
-  const addTierAction = async (_prev: PlanState, formData: FormData) => {
-    return createPriceTier(planId, "", ticketId, _prev, formData);
-  };
-
-  const activatePlanAction = async (_prev: PlanState, formData: FormData) => {
-    return activatePlan(planId, "", ticketId, _prev, formData);
-  };
-
-  const deactivatePlanAction = async (_prev: PlanState, formData: FormData) => {
-    return deactivatePlan(planId, "", ticketId, _prev, formData);
-  };
+  const addTierAction = createPriceTier.bind(null, planId, "", ticketId) as (
+    prev: PlanState,
+    formData: FormData
+  ) => Promise<PlanState>;
+  const activatePlanAction = activatePlan.bind(null, planId, "", ticketId) as (
+    prev: PlanState,
+    formData: FormData
+  ) => Promise<PlanState>;
+  const deactivatePlanAction = deactivatePlan.bind(null, planId, "", ticketId) as (
+    prev: PlanState,
+    formData: FormData
+  ) => Promise<PlanState>;
+  const replacePlanAction = replaceInactivePlan.bind(
+    null,
+    ticketId,
+    planId,
+    ticket.title,
+    ticket.price,
+    ticket.ticketType ?? (plan.assignmentMode === "auto" ? "SEATED_AUTO" : "SEATED_MANUAL")
+  );
 
   const isDraft = plan.status === "draft";
   const isActive = plan.status === "active";
+  const isInactive = plan.status === "inactive";
+  const canActivate = (isDraft || isInactive) && sections.length > 0;
 
   return (
     <div className="flex flex-col gap-8 max-w-5xl mx-auto">
@@ -119,13 +133,25 @@ export default async function TicketPlanDetailPage({ params }: Props) {
 
         {/* Activate / Deactivate buttons */}
         <div className="flex gap-3 pt-2">
-          {isDraft && sections.length > 0 && (
-            <ActivatePlanButton action={activatePlanAction} />
+          {canActivate && (
+            <ActivatePlanButton
+              action={activatePlanAction}
+              label={isInactive ? "Reactivate Plan" : "Activate Plan"}
+            />
           )}
           {isActive && (
             <DeactivatePlanButton action={deactivatePlanAction} />
           )}
+          {isInactive && (
+            <ReplacePlanButton action={replacePlanAction} />
+          )}
         </div>
+        {isInactive && (
+          <p className="text-sm text-muted-foreground">
+            Inactive plans stay attached for history, but you can reactivate this one or create a fresh
+            replacement plan for the same ticket.
+          </p>
+        )}
       </div>
 
       {/* Canvas for draft plans */}

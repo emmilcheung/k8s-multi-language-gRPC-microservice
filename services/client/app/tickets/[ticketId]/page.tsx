@@ -3,10 +3,9 @@
 
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
-import { cache } from "react";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
-import type { Ticket, SeatingPlan, PriceTier } from "@/lib/types";
+import type { Ticket, SeatingPlan, PriceTier, AvailabilitySnapshot } from "@/lib/types";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,9 +32,17 @@ interface Props {
   params: Promise<{ ticketId: string }>;
 }
 
-const getTicket = cache(async (ticketId: string): Promise<Ticket> => {
+function toDateTimeLocalInput(value?: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+async function getTicket(ticketId: string): Promise<Ticket> {
   return serverApi<Ticket>(`/api/tickets/${ticketId}`);
-});
+}
 
 export async function generateMetadata({ params }: Props) {
   const { ticketId } = await params;
@@ -89,14 +96,22 @@ export default async function TicketDetailPage({ params }: Props) {
   // so the organizer can see a read-only preview of what is attached.
   let attachedPlan: SeatingPlan | null = null;
   let attachedPlanTiers: PriceTier[] = [];
-  if (isOwner && ticket.seatingPlanId) {
-    try {
-      [attachedPlan, attachedPlanTiers] = await Promise.all([
-        serverApi<SeatingPlan>(`/api/seating-plans/${ticket.seatingPlanId}`),
-        fetchPriceTiers(ticket.seatingPlanId),
-      ]);
-    } catch {
-      // Non-fatal — preview is hidden, plan details can't be shown.
+  let attachedPlanAvailability: AvailabilitySnapshot | null = null;
+  if (ticket.seatingPlanId) {
+    const results = await Promise.allSettled([
+      serverApi<SeatingPlan>(`/api/seating-plans/${ticket.seatingPlanId}`),
+      serverApi<AvailabilitySnapshot>(`/api/seating-plans/${ticket.seatingPlanId}/availability`),
+      ...(isOwner ? [fetchPriceTiers(ticket.seatingPlanId)] : []),
+    ]);
+
+    if (results[0]?.status === "fulfilled") {
+      attachedPlan = results[0].value;
+    }
+    if (results[1]?.status === "fulfilled") {
+      attachedPlanAvailability = results[1].value;
+    }
+    if (isOwner && results[2]?.status === "fulfilled") {
+      attachedPlanTiers = results[2].value as PriceTier[];
     }
   }
 
@@ -105,6 +120,50 @@ export default async function TicketDetailPage({ params }: Props) {
   const gaMaxQuantity = ticket.quota
     ? Math.min(ticket.maxPerUser ?? ticket.quota, Math.min(ticket.quota, 10))
     : 1;
+  const gaRemaining =
+    !isSeated && ticket.quota != null
+      ? Math.max(0, ticket.quota - (ticket.reserved ?? 0) - (ticket.sold ?? 0))
+      : null;
+  const seatedPlanInactive = isSeated && attachedPlan != null && attachedPlan.status !== "active";
+  const seatedSoldOut =
+    isSeated &&
+    attachedPlan?.status === "active" &&
+    attachedPlanAvailability != null &&
+    attachedPlanAvailability.counts.available === 0;
+  const gaUnavailable = !isSeated && gaRemaining != null && gaRemaining <= 0;
+  const purchaseGate = isSeated
+    ? seatedPlanInactive
+      ? {
+          label: "Unavailable",
+          badge: "Unavailable",
+          badgeClass: "bg-muted/40 text-muted-foreground border-muted/20",
+          message: "This seating plan is not active, so this ticket cannot be purchased right now.",
+        }
+      : seatedSoldOut
+        ? {
+            label: "Sold Out",
+            badge: "Sold Out",
+            badgeClass: "bg-destructive/15 text-destructive border-destructive/20",
+            message: "No seats are currently available for this ticket.",
+          }
+        : null
+    : gaUnavailable
+      ? {
+          label: ticket.sold != null && ticket.quota != null && ticket.sold >= ticket.quota ? "Sold Out" : "Unavailable",
+          badge:
+            ticket.sold != null && ticket.quota != null && ticket.sold >= ticket.quota
+              ? "Sold Out"
+              : "Unavailable",
+          badgeClass:
+            ticket.sold != null && ticket.quota != null && ticket.sold >= ticket.quota
+              ? "bg-destructive/15 text-destructive border-destructive/20"
+              : "bg-muted/40 text-muted-foreground border-muted/20",
+          message:
+            ticket.sold != null && ticket.quota != null && ticket.sold >= ticket.quota
+              ? "This ticket is sold out."
+              : "All remaining tickets are currently reserved or unavailable.",
+        }
+      : null;
 
   return (
     <div className="flex flex-col gap-8 max-w-4xl mx-auto">
@@ -150,6 +209,9 @@ export default async function TicketDetailPage({ params }: Props) {
                 <Badge className="bg-destructive/15 text-destructive border-destructive/20">
                   Reserved
                 </Badge>
+              )}
+              {!isOwner && purchaseGate && (
+                <Badge className={purchaseGate.badgeClass}>{purchaseGate.badge}</Badge>
               )}
             </div>
           </div>
@@ -251,6 +313,15 @@ export default async function TicketDetailPage({ params }: Props) {
                   defaultQuota={ticket.quota}
                   defaultMaxPerUser={ticket.maxPerUser}
                   defaultTicketType={(ticket.ticketType as "GA" | "SEATED_MANUAL" | "SEATED_AUTO") ?? "GA"}
+                  defaultVenueId={attachedPlan?.venueId ?? undefined}
+                  defaultPricingMode={attachedPlan?.pricingMode}
+                  defaultStartsAt={toDateTimeLocalInput(ticket.event?.startsAt)}
+                  defaultEndsAt={toDateTimeLocalInput(ticket.event?.endsAt)}
+                  defaultEventTitle={ticket.event?.title ?? ""}
+                  defaultEventDescription={ticket.event?.description ?? ""}
+                  defaultEventImageUrl={ticket.event?.imageUrl ?? ""}
+                  defaultVenueName={ticket.event?.venueName ?? ""}
+                  defaultVenueAddress={ticket.event?.venueAddress ?? ""}
                   submitLabel="Update Ticket"
                 />
               ) : (
@@ -283,7 +354,11 @@ export default async function TicketDetailPage({ params }: Props) {
                 </p>
               </div>
               <Separator />
-              {isSeated ? (
+              {purchaseGate ? (
+                <Button disabled className="w-full" variant="outline">
+                  {purchaseGate.label}
+                </Button>
+              ) : isSeated ? (
                 /* Seated ticket — CTA navigates to seat map */
                 token ? (
                   <Link
@@ -325,7 +400,7 @@ export default async function TicketDetailPage({ params }: Props) {
                 </Link>
               )}
               <p className="text-xs text-muted-foreground text-center">
-                No hidden fees. Cancel before payment completes.
+                {purchaseGate?.message ?? "No hidden fees. Cancel before payment completes."}
               </p>
             </div>
           )}

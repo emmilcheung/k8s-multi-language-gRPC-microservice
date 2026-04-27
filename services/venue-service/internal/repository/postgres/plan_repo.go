@@ -207,7 +207,7 @@ func (r *PlanRepo) ListByTicket(ctx context.Context, ticketID, organizerID strin
 	return plans, rows.Err()
 }
 
-// Activate transitions a seating plan from draft to active.
+// Activate transitions a seating plan from draft or inactive to active.
 // Validates that at least one section exists.
 // Returns ErrPlanHasNoSections if no sections exist.
 // Returns ErrPlanAlreadyActive if already active.
@@ -237,7 +237,7 @@ func (r *PlanRepo) Activate(ctx context.Context, planID string, expectedVersion 
 	const q = `
 		UPDATE seating_plans
 		SET status = 'active', updated_at = now()
-		WHERE id = $1 AND version = $2 AND status = 'draft'
+		WHERE id = $1 AND version = $2 AND status IN ('draft', 'inactive')
 		RETURNING id`
 
 	var id string

@@ -345,6 +345,39 @@ func (*mockVenueClientEmptyMode) GetSeatingPlan(_ context.Context, _ *venuev1.Ge
 	}, nil
 }
 
+type mockVenueClientInactiveCurrent struct{}
+
+func (*mockVenueClientInactiveCurrent) ReserveHeldSeats(_ context.Context, _ *venuev1.ReserveHeldSeatsRequest, _ ...grpc.CallOption) (*venuev1.ReserveHeldSeatsResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientInactiveCurrent) AutoAssignAndReserve(_ context.Context, _ *venuev1.AutoAssignAndReserveRequest, _ ...grpc.CallOption) (*venuev1.AutoAssignAndReserveResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientInactiveCurrent) ReleaseSeatReservation(_ context.Context, _ *venuev1.ReleaseSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.ReleaseSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientInactiveCurrent) FinalizeSeatReservation(_ context.Context, _ *venuev1.FinalizeSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.FinalizeSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientInactiveCurrent) GetSeatingPlan(_ context.Context, req *venuev1.GetSeatingPlanRequest, _ ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error) {
+	if req.PlanId == "plan-1" {
+		return &venuev1.GetSeatingPlanResponse{
+			PlanId:         req.PlanId,
+			Status:         "inactive",
+			AssignmentMode: "manual",
+		}, nil
+	}
+	return &venuev1.GetSeatingPlanResponse{
+		PlanId:         req.PlanId,
+		Status:         "draft",
+		AssignmentMode: "manual",
+	}, nil
+}
+
 func newSvc(repo repository.TicketRepository, pub service.EventPublisher) *service.TicketService {
 	// For tests, we provide a no-op venue client since most tests don't attach plans
 	return service.NewTicketService(repo, pub, zap.NewNop(), &mockVenueClient{})
@@ -665,6 +698,35 @@ func TestUpdateTicket_ShouldAllowIdempotentSeatingPlanReattachment(t *testing.T)
 	assert.Equal(t, "SEATED_MANUAL", ticket.TicketType)
 	assert.Equal(t, "Concert Updated", ticket.Title)
 	assert.Equal(t, "150.00", ticket.Price)
+}
+
+func TestUpdateTicket_ShouldAllowReplacingInactiveSeatingPlan(t *testing.T) {
+	repo := newMockRepo()
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientInactiveCurrent{})
+
+	repo.tickets["t1"] = &repository.Ticket{
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-1",
+		TicketType:    "SEATED_MANUAL",
+		Quota:         1,
+		MaxPerUser:    1,
+		Version:       1,
+	}
+
+	ticket, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-2",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "plan-2", ticket.SeatingPlanID)
+	assert.Equal(t, "SEATED_MANUAL", ticket.TicketType)
 }
 
 func TestUpdateTicket_ShouldReturnUnavailableWhenVenueServiceUnreachable(t *testing.T) {

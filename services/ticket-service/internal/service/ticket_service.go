@@ -50,6 +50,7 @@ type UpdateTicketInput struct {
 	UserID        string // used for ownership check
 	SeatingPlanID string // optional; attach plan if non-empty
 	TicketType    string // optional; fallback if venue-service returns empty assignment mode
+	Event         *repository.TicketEvent
 }
 
 // ErrUnauthorized is returned when a user tries to modify a ticket they don't own.
@@ -191,12 +192,30 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 
 	ticket.Title = input.Title
 	ticket.Price = input.Price
+	if input.Event != nil {
+		ticket.Event = input.Event
+	}
 
 	// Handle seating plan attachment if provided
 	if input.SeatingPlanID != "" {
 		// Check if trying to replace an existing different plan
 		if ticket.SeatingPlanID != "" && ticket.SeatingPlanID != input.SeatingPlanID {
-			return nil, repository.ErrSeatingPlanAlreadyAttached
+			currentPlanResp, err := s.venueServiceClient.GetSeatingPlan(ctx, &venuev1.GetSeatingPlanRequest{
+				PlanId: ticket.SeatingPlanID,
+			})
+			if err != nil {
+				s.log.Error("failed to fetch current seating plan from venue-service", zap.Error(err), zap.String("planId", ticket.SeatingPlanID))
+				if errors.Is(err, ErrVenueServiceTimeout) {
+					return nil, ErrVenueServiceTimeout
+				}
+				if errors.Is(err, ErrVenueServiceUnavailable) {
+					return nil, ErrVenueServiceUnavailable
+				}
+				return nil, fmt.Errorf("venue-service lookup failed: %w", err)
+			}
+			if currentPlanResp.Status != "inactive" {
+				return nil, repository.ErrSeatingPlanAlreadyAttached
+			}
 		}
 
 		// If same plan ID is being reattached, treat as idempotent (no-op on plan)

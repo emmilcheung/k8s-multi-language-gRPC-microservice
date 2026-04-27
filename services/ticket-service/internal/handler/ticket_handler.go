@@ -65,6 +65,15 @@ type updateTicketRequest struct {
 	Price         string `json:"price"`
 	SeatingPlanID string `json:"seatingPlanId,omitempty"`
 	TicketType    string `json:"ticketType,omitempty"`
+	Event         *struct {
+		Title        string     `json:"title"`
+		Description  string     `json:"description,omitempty"`
+		StartsAt     time.Time  `json:"startsAt"`
+		EndsAt       *time.Time `json:"endsAt,omitempty"`
+		ImageURL     string     `json:"imageUrl,omitempty"`
+		VenueName    string     `json:"venueName,omitempty"`
+		VenueAddress string     `json:"venueAddress,omitempty"`
+	} `json:"event,omitempty"`
 }
 
 // ticketResponse is the JSON response shape for a ticket.
@@ -164,12 +173,6 @@ func (h *TicketHandler) Create(c echo.Context) error {
 	signature := c.Request().Header.Get("X-User-Id-Sig")
 	if !h.signatureValidator.IsValidSignature(userID, signature) {
 		return errorResponse(c, http.StatusUnauthorized, "INVALID_SIGNATURE", "Invalid user ID signature", nil)
-	}
-
-	rolesHeader := c.Request().Header.Get("X-User-Roles")
-	roles := security.ParseUserRoles(rolesHeader)
-	if !security.HasRole(roles, "organizer") {
-		return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Only organizers can create tickets", nil)
 	}
 
 	var req createTicketRequest
@@ -292,12 +295,6 @@ func (h *TicketHandler) Update(c echo.Context) error {
 		return errorResponse(c, http.StatusUnauthorized, "INVALID_SIGNATURE", "Invalid user ID signature", nil)
 	}
 
-	rolesHeader := c.Request().Header.Get("X-User-Roles")
-	roles := security.ParseUserRoles(rolesHeader)
-	if !security.HasRole(roles, "organizer") {
-		return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Only organizers can update tickets", nil)
-	}
-
 	id := c.Param("id")
 	if !uuidRE.MatchString(id) {
 		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "id must be a valid UUID", nil)
@@ -323,8 +320,24 @@ func (h *TicketHandler) Update(c echo.Context) error {
 	if req.SeatingPlanID != "" && !uuidRE.MatchString(req.SeatingPlanID) {
 		details = append(details, map[string]string{"field": "seatingPlanId", "issue": "must be a valid UUID"})
 	}
+	if req.Event != nil && req.Event.StartsAt.IsZero() {
+		details = append(details, map[string]string{"field": "event.startsAt", "issue": "must not be empty"})
+	}
 	if len(details) > 0 {
 		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "Request validation failed", details)
+	}
+
+	var eventData *repository.TicketEvent
+	if req.Event != nil {
+		eventData = &repository.TicketEvent{
+			Title:        req.Event.Title,
+			Description:  req.Event.Description,
+			StartsAt:     req.Event.StartsAt,
+			EndsAt:       req.Event.EndsAt,
+			ImageURL:     req.Event.ImageURL,
+			VenueName:    req.Event.VenueName,
+			VenueAddress: req.Event.VenueAddress,
+		}
 	}
 
 	ticket, err := h.svc.UpdateTicket(c.Request().Context(), service.UpdateTicketInput{
@@ -334,6 +347,7 @@ func (h *TicketHandler) Update(c echo.Context) error {
 		UserID:        userID,
 		SeatingPlanID: req.SeatingPlanID,
 		TicketType:    req.TicketType,
+		Event:         eventData,
 	})
 	if err != nil {
 		switch {
