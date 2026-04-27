@@ -97,6 +97,10 @@ type TicketOutboxPayload struct {
 	UserID        string              `bson:"userId"`
 	SeatingPlanID string              `bson:"seatingPlanId,omitempty"`
 	TicketType    string              `bson:"ticketType,omitempty"`
+	Quota         int                 `bson:"quota"`
+	Reserved      int                 `bson:"reserved"`
+	Sold          int                 `bson:"sold"`
+	MaxPerUser    int                 `bson:"maxPerUser"`
 	Version       int                 `bson:"version"`
 	Event         *TicketOutboxDetail `bson:"event,omitempty"`
 }
@@ -150,6 +154,10 @@ func normalizePendingOutboxEvent(ticket *Ticket, event *TicketOutboxEvent) {
 	event.Payload.UserID = ticket.UserID
 	event.Payload.SeatingPlanID = ticket.SeatingPlanID
 	event.Payload.TicketType = ticket.TicketType
+	event.Payload.Quota = ticket.Quota
+	event.Payload.Reserved = ticket.Reserved
+	event.Payload.Sold = ticket.Sold
+	event.Payload.MaxPerUser = ticket.MaxPerUser
 	event.Payload.Version = ticket.Version
 	if ticket.Event != nil && event.Payload.Event == nil {
 		var endsAt string
