@@ -5,7 +5,7 @@
 import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { serverApi } from "@/lib/api";
+import { ApiError, serverApi } from "@/lib/api";
 import { activatePlan, deactivatePlan, createPriceTier, fetchPriceTiers } from "@/app/actions/venues";
 import { replaceInactivePlan } from "@/app/actions/tickets";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -30,6 +30,39 @@ interface Props {
   params: Promise<{ ticketId: string; planId: string }>;
 }
 
+const TICKET_PLAN_LOAD_RETRY_DELAYS_MS = [250, 500, 750, 1000, 1250, 1500];
+
+async function loadTicketAndPlan(ticketId: string, planId: string) {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= TICKET_PLAN_LOAD_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const [ticket, plan, sectionsData, tiers] = await Promise.all([
+        serverApi<Ticket>(`/api/tickets/${ticketId}`),
+        serverApi<SeatingPlan>(`/api/seating-plans/${planId}`),
+        serverApi<{ sections: Section[] }>(`/api/seating-plans/${planId}/sections`),
+        fetchPriceTiers(planId),
+      ]);
+      return { ticket, plan, sectionsData, tiers };
+    } catch (error) {
+      lastError = error;
+      const status = error instanceof ApiError ? error.status : null;
+      const shouldRetry =
+        status === 404 ||
+        (status !== null && status >= 500) ||
+        !(error instanceof ApiError);
+      if (!shouldRetry || attempt === TICKET_PLAN_LOAD_RETRY_DELAYS_MS.length) {
+        throw error;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, TICKET_PLAN_LOAD_RETRY_DELAYS_MS[attempt])
+      );
+    }
+  }
+
+  throw lastError ?? new Error("Failed to load ticket plan.");
+}
+
 const planStatusColor: Record<SeatingPlan["status"], string> = {
   draft: "bg-yellow-500/15 text-yellow-400 border-yellow-500/20",
   active: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
@@ -48,13 +81,11 @@ export default async function TicketPlanDetailPage({ params }: Props) {
   let sectionsData: { sections: Section[] };
   let tiers: PriceTier[] = [];
   try {
-    [ticket, plan, sectionsData, tiers] = await Promise.all([
-      serverApi<Ticket>(`/api/tickets/${ticketId}`),
-      serverApi<SeatingPlan>(`/api/seating-plans/${planId}`),
-      serverApi<{ sections: Section[] }>(`/api/seating-plans/${planId}/sections`),
-      fetchPriceTiers(planId),
-    ]);
-  } catch {
+    ({ ticket, plan, sectionsData, tiers } = await loadTicketAndPlan(ticketId, planId));
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) {
+      throw error;
+    }
     notFound();
   }
 

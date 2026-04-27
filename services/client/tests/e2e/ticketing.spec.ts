@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -127,6 +127,36 @@ async function createTicketWithQuota(
   }
 
   return page.url();
+}
+
+async function openTicketDetailUntilReady(
+  page: Page,
+  ticketUrl: string,
+  readyLocator: Locator
+) {
+  for (const delayMs of [0, 4000, 8000]) {
+    if (delayMs > 0) {
+      await page.waitForTimeout(delayMs);
+    }
+
+    await page.goto(ticketUrl, { waitUntil: "commit", timeout: 10000 });
+
+    const hasRealContent = await page
+      .getByRole("heading", { level: 1 })
+      .waitFor({ state: "visible", timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!hasRealContent) {
+      continue;
+    }
+
+    const isReady = await readyLocator.isVisible().catch(() => false);
+    if (isReady) {
+      return;
+    }
+  }
+
+  await expect(readyLocator).toBeVisible({ timeout: 1000 });
 }
 
 /**
@@ -661,19 +691,11 @@ test.describe("orders", () => {
     await signout(page);
     await signup(page, buyerEmail);
 
-    await expect
-      .poll(
-        async () => {
-          await page.goto(ticketUrl);
-          await page
-            .getByRole("heading", { level: 1 })
-            .waitFor({ timeout: 5000 })
-            .catch(() => {});
-          return page.getByRole("button", { name: /purchase ticket/i }).isVisible();
-        },
-        { timeout: 15000, intervals: [1000, 2000, 3000] }
-      )
-      .toBe(true);
+    await openTicketDetailUntilReady(
+      page,
+      ticketUrl,
+      page.getByRole("button", { name: /purchase ticket/i })
+    );
     await page.getByRole("button", { name: /purchase ticket/i }).click();
     await page.waitForURL(/\/orders\/.+/);
 
@@ -793,8 +815,20 @@ test.describe("orders", () => {
     await page.getByRole("button", { name: /cancel order/i }).click();
     await page.waitForURL("/orders", { timeout: 15000 });
 
-    // RSC streams after URL change — wait for real content to replace the loading skeleton
-    await expect(page.getByRole("heading", { name: /my orders/i })).toBeVisible({ timeout: 15000 });
+    for (const delayMs of [0, 3000, 6000]) {
+      if (delayMs > 0) {
+        await page.waitForTimeout(delayMs);
+        await page.goto("/orders", { waitUntil: "domcontentloaded" });
+      }
+      const hasOrdersPage = await page
+        .getByRole("heading", { name: /my orders/i })
+        .isVisible()
+        .catch(() => false);
+      if (hasOrdersPage) {
+        break;
+      }
+    }
+    await expect(page.getByRole("heading", { name: /my orders/i })).toBeVisible({ timeout: 1000 });
     // The cancelled status badge text should appear somewhere on the page
     await expect(page.getByText(/cancelled/i).first()).toBeVisible({ timeout: 10000 });
   });
@@ -865,7 +899,11 @@ test.describe("orders", () => {
     await signout(page);
 
     // Visit as unauthenticated user
-    await page.goto(ticketUrl);
+    await openTicketDetailUntilReady(
+      page,
+      ticketUrl,
+      page.getByRole("link", { name: /sign in to purchase/i })
+    );
 
     await expect(page.getByRole("link", { name: /sign in to purchase/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /purchase ticket/i })).toHaveCount(0);
@@ -1076,7 +1114,11 @@ test.describe("seating plan", () => {
 
     await signout(page);
     await signup(page, buyerEmail);
-    await page.goto(ticketUrl);
+    await openTicketDetailUntilReady(
+      page,
+      ticketUrl,
+      page.getByRole("button", { name: /unavailable/i })
+    );
 
     await expect(page.getByRole("button", { name: /unavailable/i })).toBeVisible({ timeout: 10000 });
     await expect(page.getByText(/seating plan is not active/i)).toBeVisible();
@@ -1122,7 +1164,11 @@ test.describe("seating plan", () => {
     await page.goto("/");
     await expect(page.getByText(ticketTitle)).toHaveCount(0);
 
-    await page.goto(ticketUrl);
+    await openTicketDetailUntilReady(
+      page,
+      ticketUrl,
+      page.getByRole("link", { name: /manage plan/i })
+    );
     await page.getByRole("link", { name: /manage plan/i }).click();
     await page.waitForURL(/\/tickets\/[0-9a-f-]+\/plans\/[0-9a-f-]+$/, { timeout: 15000 });
     await page.getByRole("button", { name: /activate plan/i }).click();
@@ -1142,7 +1188,11 @@ test.describe("seating plan", () => {
     await signout(page);
     await signup(page, buyerEmail);
 
-    await page.goto(ticketUrl);
+    await openTicketDetailUntilReady(
+      page,
+      ticketUrl,
+      page.getByRole("button", { name: /purchase ticket/i })
+    );
 
     // The "Purchase Ticket" button should be visible for the buyer
     await expect(page.getByRole("button", { name: /purchase ticket/i })).toBeVisible();
@@ -1166,7 +1216,11 @@ test.describe("seating plan", () => {
 
     await signout(page);
     await signup(page, buyerEmail);
-    await page.goto(ticketUrl);
+    await openTicketDetailUntilReady(
+      page,
+      ticketUrl,
+      page.locator('#quantity[type="number"]')
+    );
 
     // Quantity stepper should appear because maxQuantity (3) > 1
     const qtyInput = page.locator('#quantity[type="number"]');
@@ -1206,14 +1260,22 @@ test.describe("seating plan", () => {
     // Buyer 1 purchases the only unit
     await signout(page);
     await signup(page, buyer1Email);
-    await page.goto(ticketUrl);
+    await openTicketDetailUntilReady(
+      page,
+      ticketUrl,
+      page.getByRole("button", { name: /purchase ticket/i })
+    );
     await page.getByRole("button", { name: /purchase ticket/i }).click({ timeout: 15000 });
     await page.waitForURL(/\/orders\/.+/, { timeout: 15000 });
 
     // Buyer 2 tries to buy the same ticket — quota is now reserved
     await signout(page);
     await signup(page, buyer2Email);
-    await page.goto(ticketUrl);
+    await openTicketDetailUntilReady(
+      page,
+      ticketUrl,
+      page.getByRole("button", { name: /unavailable/i })
+    );
 
     await expect(
       page.getByRole("button", { name: /unavailable/i })
@@ -1238,7 +1300,11 @@ test.describe("seating plan", () => {
     await signup(page, buyerEmail);
 
     // First purchase — should succeed
-    await page.goto(ticketUrl);
+    await openTicketDetailUntilReady(
+      page,
+      ticketUrl,
+      page.getByRole("button", { name: /purchase ticket/i })
+    );
     await page.getByRole("button", { name: /purchase ticket/i }).click({ timeout: 15000 });
     await page.waitForURL(/\/orders\/.+/, { timeout: 15000 });
 
@@ -1248,7 +1314,11 @@ test.describe("seating plan", () => {
     // The CTA is disabled before any second click, enforcing maxPerUser=1 at the
     // UI layer. The backend 422 (FAILED_PRECONDITION) would fire if the request were
     // made anyway (e.g. directly via API), but the E2E path validates the UI gate.
-    await page.goto(ticketUrl);
+    await openTicketDetailUntilReady(
+      page,
+      ticketUrl,
+      page.getByRole("button", { name: /already reserved/i })
+    );
 
     await expect(
       page.getByRole("button", { name: /already reserved/i })

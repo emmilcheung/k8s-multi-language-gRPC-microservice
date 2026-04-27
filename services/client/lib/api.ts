@@ -12,9 +12,28 @@ const CACHEABLE_PATHS = ["/api/tickets"];
 
 // Default ISR revalidation window in seconds for cacheable paths.
 const ISR_REVALIDATE_SECONDS = 10;
+const READ_RETRY_DELAYS_MS = [250, 500, 750, 1000, 1250, 1500];
 
 function isCacheable(path: string): boolean {
   return CACHEABLE_PATHS.some((p) => path === p || path.startsWith(p + "?"));
+}
+
+function isRetryableReadMethod(method?: string): boolean {
+  const normalized = (method ?? "GET").toUpperCase();
+  return normalized === "GET" || normalized === "HEAD";
+}
+
+function parseRetryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number.parseInt(value, 10);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const dateMs = Date.parse(value);
+  if (Number.isNaN(dateMs)) return null;
+
+  return Math.max(0, dateMs - Date.now());
 }
 
 // ─── Server-side client (used in Server Components / Server Actions) ─────────
@@ -47,24 +66,50 @@ export async function serverApi<T = unknown>(
       ? Object.fromEntries(options.headers.entries())
       : (options.headers ?? {});
 
-  const res = await fetch(`${base}${path}`, {
-    ...nextCacheOptions,
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...traceHeaders(),
-      ...(token ? { Cookie: `token=${token}` } : {}),
-      ...headers,
-    },
-  });
+  const canRetry = isRetryableReadMethod(options.method);
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, body?.error?.message ?? res.statusText, body);
+  for (let attempt = 0; attempt <= READ_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const res = await fetch(`${base}${path}`, {
+        ...nextCacheOptions,
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          ...traceHeaders(),
+          ...(token ? { Cookie: `token=${token}` } : {}),
+          ...headers,
+        },
+      });
+
+      if (!res.ok) {
+        const shouldRetry =
+          canRetry &&
+          attempt < READ_RETRY_DELAYS_MS.length &&
+          (res.status === 429 || res.status >= 500);
+        if (shouldRetry) {
+          const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
+          await new Promise((resolve) =>
+            setTimeout(resolve, retryAfterMs ?? READ_RETRY_DELAYS_MS[attempt])
+          );
+          continue;
+        }
+
+        const body = await res.json().catch(() => ({}));
+        throw new ApiError(res.status, body?.error?.message ?? res.statusText, body);
+      }
+
+      if (res.status === 204) return undefined as T;
+      return res.json();
+    } catch (error) {
+      if (!canRetry || attempt === READ_RETRY_DELAYS_MS.length || error instanceof ApiError) {
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, READ_RETRY_DELAYS_MS[attempt]));
+    }
   }
 
-  if (res.status === 204) return undefined as T;
-  return res.json();
+  throw new Error(`Failed to fetch ${path}.`);
 }
 
 // ─── Shared error type ────────────────────────────────────────────────────────

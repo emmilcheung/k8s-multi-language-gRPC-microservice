@@ -5,7 +5,7 @@
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { serverApi } from "@/lib/api";
+import { ApiError, serverApi } from "@/lib/api";
 import { base } from "@/lib/server-utils";
 import { traceHeaders } from "@/lib/tracing";
 import type { Ticket, SeatingPlan, AvailabilitySnapshot, PriceTier } from "@/lib/types";
@@ -19,18 +19,33 @@ interface Props {
   params: Promise<{ ticketId: string }>;
 }
 
+const TICKET_LOAD_RETRY_DELAYS_MS = [250, 500, 750, 1000, 1250, 1500];
+
 async function getTicket(ticketId: string): Promise<Ticket> {
-  return serverApi<Ticket>(`/api/tickets/${ticketId}`);
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= TICKET_LOAD_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await serverApi<Ticket>(`/api/tickets/${ticketId}`);
+    } catch (error) {
+      lastError = error;
+      const status = error instanceof ApiError ? error.status : null;
+      const shouldRetry =
+        status === 404 ||
+        (status !== null && status >= 500) ||
+        !(error instanceof ApiError);
+      if (!shouldRetry || attempt === TICKET_LOAD_RETRY_DELAYS_MS.length) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, TICKET_LOAD_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+
+  throw lastError ?? new Error("Failed to load ticket.");
 }
 
-export async function generateMetadata({ params }: Props) {
-  const { ticketId } = await params;
-  try {
-    const ticket = await getTicket(ticketId);
-    return { title: `Seats — ${ticket.title} — Ticketing` };
-  } catch {
-    return { title: "Seat Map — Ticketing" };
-  }
+export async function generateMetadata() {
+  return { title: "Seat Map — Ticketing" };
 }
 
 export default async function SeatsPage({ params }: Props) {
@@ -46,7 +61,10 @@ export default async function SeatsPage({ params }: Props) {
   let ticket: Ticket;
   try {
     ticket = await getTicket(ticketId);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) {
+      throw error;
+    }
     notFound();
   }
 
