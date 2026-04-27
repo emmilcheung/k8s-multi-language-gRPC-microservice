@@ -244,7 +244,7 @@ services:
         methods: [GET]
         strip_path: false
 
-      # Protected: create / update / delete ticket — JWT + organizer role required
+      # Protected: create / update / delete ticket — JWT required; ownership enforced in ticket-service
       - name: tickets-write
         paths:
           - ~/api/tickets$
@@ -264,8 +264,6 @@ services:
               access:
                 - |
                   {{JWT_SUB_LUA}}
-                - |
-                  {{ROLE_CHECK_LUA:organizer}}
 
   # ── order-service ─────────────────────────────────────────────────────────────
   - name: order-service
@@ -599,8 +597,8 @@ services:
               max_age: 3600
               credentials: false
 
-      # Protected: organizer-only seating plan management — JWT + organizer role required
-      - name: venue-seating-plans-write-organizer
+      # Protected: seating plan management — JWT required; ownership enforced in venue-service
+      - name: venue-seating-plans-write
         paths:
           - ~/api/seating-plans$
           - ~/api/seating-plans/[^/]+$
@@ -624,8 +622,6 @@ services:
               access:
                 - |
                   {{JWT_SUB_LUA}}
-                - |
-                  {{ROLE_CHECK_LUA:organizer}}
 
       # Protected: buyer seat hold/release — JWT required only
       - name: venue-seats-buyer
@@ -647,7 +643,7 @@ services:
                 - |
                   {{JWT_SUB_LUA}}
 
-      # Protected: list seating plans by venue — JWT + organizer role required
+      # Protected: list seating plans by venue — JWT required; results scoped to caller in venue-service
       - name: venue-seating-plans-list
         paths:
           - ~/api/seating-plans$
@@ -665,8 +661,6 @@ services:
               access:
                 - |
                   {{JWT_SUB_LUA}}
-                - |
-                  {{ROLE_CHECK_LUA:organizer}}
 
       # Protected: catch-all for nested plan write paths not listed explicitly above
       - name: venue-seating-plans-nested-write
