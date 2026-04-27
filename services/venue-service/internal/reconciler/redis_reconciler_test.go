@@ -32,13 +32,12 @@ func (s *stubPlanRepo) FindByIDs(_ context.Context, _ []string) ([]*repository.S
 func (s *stubPlanRepo) ListByVenue(_ context.Context, _, _ string) ([]*repository.SeatingPlan, error) {
 	return nil, nil
 }
-func (s *stubPlanRepo) ListByTicket(_ context.Context, _ string) ([]*repository.SeatingPlan, error) {
+func (s *stubPlanRepo) ListByTicket(_ context.Context, _, _ string) ([]*repository.SeatingPlan, error) {
 	return nil, nil
 }
 func (s *stubPlanRepo) ListActivePlans(_ context.Context) ([]*repository.SeatingPlan, error) {
 	return s.plans, nil
 }
-func (s *stubPlanRepo) AttachTicket(_ context.Context, _, _ string, _ int) error  { return nil }
 func (s *stubPlanRepo) Activate(_ context.Context, _ string, _ int) error         { return nil }
 func (s *stubPlanRepo) Deactivate(_ context.Context, _, _ string) error           { return nil }
 func (s *stubPlanRepo) Update(_ context.Context, _ *repository.SeatingPlan) error { return nil }

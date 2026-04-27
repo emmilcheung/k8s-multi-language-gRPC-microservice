@@ -87,9 +87,10 @@ func TestCRUD_ShouldSupportFullVenuePlanLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Updated Arena", updated.Name)
 
-	// ── Step 2: create seating plan (draft, no ticket yet) ───────────────────
+	// ── Step 2: create seating plan (ticket-first: ticketId provided at creation) ─
 	p := &repository.SeatingPlan{
 		VenueID:          v.ID,
+		TicketID:         ticketID,
 		OrganizerID:      organizerID,
 		Name:             "Main Floor",
 		MaxSeatsPerOrder: 4,
@@ -103,7 +104,7 @@ func TestCRUD_ShouldSupportFullVenuePlanLifecycle(t *testing.T) {
 	fetchedPlan, err := planRepo.FindByID(ctx, p.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "Main Floor", fetchedPlan.Name)
-	assert.Empty(t, fetchedPlan.TicketID, "ticket_id should be empty before attach")
+	assert.Equal(t, ticketID, fetchedPlan.TicketID, "ticket_id should be set from creation")
 
 	// ── Step 3: create section ───────────────────────────────────────────────
 	sec := &repository.Section{
@@ -135,37 +136,20 @@ func TestCRUD_ShouldSupportFullVenuePlanLifecycle(t *testing.T) {
 	require.Len(t, tiers, 1)
 	assert.Equal(t, "75.00", tiers[0].Price)
 
-	// ── Step 5: activate without ticket should succeed ───────────────────────
+	// ── Step 5: activate with ticket (ticket-first model) ───────────────────
 	require.NoError(t, planRepo.Activate(ctx, p.ID, p.Version))
 
 	activatedPlan, err := planRepo.FindByID(ctx, p.ID)
 	require.NoError(t, err)
 	assert.Equal(t, repository.PlanStatusActive, activatedPlan.Status)
-	assert.Empty(t, activatedPlan.TicketID, "ticket_id should still be empty after activation")
+	assert.Equal(t, ticketID, activatedPlan.TicketID, "ticket_id should be maintained after activation")
 
-	// ── Step 6: attach ticket ────────────────────────────────────────────────
-	require.NoError(t, planRepo.AttachTicket(ctx, p.ID, ticketID, p.Version))
-
-	attachedPlan, err := planRepo.FindByID(ctx, p.ID)
-	require.NoError(t, err)
-	assert.Equal(t, ticketID, attachedPlan.TicketID)
-
-	// ── Step 7: version conflict on stale attach ──────────────────────────────
-	err = planRepo.AttachTicket(ctx, p.ID, otherTicketID, 0 /* stale version */)
-	assert.ErrorIs(t, err, repository.ErrVersionConflict,
-		"attach with wrong version should return ErrVersionConflict")
-
-	// ── Step 8: active plan remains active after attach ───────────────────────
-	activatedPlan, err = planRepo.FindByID(ctx, p.ID)
-	require.NoError(t, err)
-	assert.Equal(t, repository.PlanStatusActive, activatedPlan.Status)
-
-	// ── Step 9: idempotent activate (ErrPlanAlreadyActive) ───────────────────
+	// ── Step 6: idempotent activate (ErrPlanAlreadyActive) ───────────────────
 	err = planRepo.Activate(ctx, p.ID, activatedPlan.Version)
 	assert.ErrorIs(t, err, repository.ErrPlanAlreadyActive,
 		"second activate should return ErrPlanAlreadyActive")
 
-	// ── Step 10: not-found sentinel ──────────────────────────────────────────
+	// ── Step 7: not-found sentinel ──────────────────────────────────────────
 	_, err = planRepo.FindByID(ctx, "00000000-0000-0000-0000-000000000000")
 	assert.ErrorIs(t, err, repository.ErrPlanNotFound)
 

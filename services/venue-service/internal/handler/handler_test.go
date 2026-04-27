@@ -46,8 +46,7 @@ type stubPlanRepo struct {
 	createFn       func(ctx context.Context, p *repository.SeatingPlan) error
 	findByIDFn     func(ctx context.Context, id string) (*repository.SeatingPlan, error)
 	listByVenueFn  func(ctx context.Context, venueID, organizerID string) ([]*repository.SeatingPlan, error)
-	listByTicketFn func(ctx context.Context, ticketID string) ([]*repository.SeatingPlan, error)
-	attachTicketFn func(ctx context.Context, planID, ticketID string, version int) error
+	listByTicketFn func(ctx context.Context, ticketID, organizerID string) ([]*repository.SeatingPlan, error)
 	activateFn     func(ctx context.Context, planID string, version int) error
 	updateFn       func(ctx context.Context, p *repository.SeatingPlan) error
 }
@@ -67,11 +66,11 @@ func (s *stubPlanRepo) ListByVenue(ctx context.Context, venueID, organizerID str
 	}
 	return nil, nil
 }
-func (s *stubPlanRepo) ListByTicket(ctx context.Context, ticketID string) ([]*repository.SeatingPlan, error) {
-	return s.listByTicketFn(ctx, ticketID)
-}
-func (s *stubPlanRepo) AttachTicket(ctx context.Context, planID, ticketID string, version int) error {
-	return s.attachTicketFn(ctx, planID, ticketID, version)
+func (s *stubPlanRepo) ListByTicket(ctx context.Context, ticketID, organizerID string) ([]*repository.SeatingPlan, error) {
+	if s.listByTicketFn != nil {
+		return s.listByTicketFn(ctx, ticketID, organizerID)
+	}
+	return nil, nil
 }
 func (s *stubPlanRepo) Activate(ctx context.Context, planID string, version int) error {
 	return s.activateFn(ctx, planID, version)
@@ -436,65 +435,6 @@ func TestPlanHandler_Activate_ShouldReturn409_WhenAlreadyActive(t *testing.T) {
 
 	require.NoError(t, h.Activate(c))
 	assert.Equal(t, http.StatusConflict, rec.Code)
-}
-
-func TestPlanHandler_AttachTicket_ShouldReturn409_WhenVersionConflict(t *testing.T) {
-	planStub := &stubPlanRepo{
-		findByIDFn: func(_ context.Context, id string) (*repository.SeatingPlan, error) {
-			return &repository.SeatingPlan{
-				ID:          id,
-				OrganizerID: "organizer-1",
-				Status:      repository.PlanStatusDraft,
-				Version:     2, // remote version is now 2
-			}, nil
-		},
-		attachTicketFn: func(_ context.Context, _, _ string, _ int) error {
-			return repository.ErrVersionConflict
-		},
-	}
-
-	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, newSignatureValidator(), zap.NewNop())
-	e := newEcho()
-
-	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/attach-ticket",
-		jsonBody(t, map[string]interface{}{"ticketId": "ticket-1", "expectedVersion": 1}))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-Id", "organizer-1")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetParamNames("id")
-	c.SetParamValues("plan-1")
-
-	require.NoError(t, h.AttachTicket(c))
-	assert.Equal(t, http.StatusConflict, rec.Code)
-}
-
-func TestPlanHandler_AttachTicket_ShouldReturn403_WhenNotOwner(t *testing.T) {
-	planStub := &stubPlanRepo{
-		findByIDFn: func(_ context.Context, id string) (*repository.SeatingPlan, error) {
-			return &repository.SeatingPlan{
-				ID:          id,
-				OrganizerID: "other-organizer",
-				Status:      repository.PlanStatusDraft,
-				Version:     1,
-			}, nil
-		},
-	}
-
-	h := handler.NewPlanHandler(planStub, &nopSectionRepo{}, newSignatureValidator(), zap.NewNop())
-	e := newEcho()
-
-	req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/attach-ticket",
-		jsonBody(t, map[string]interface{}{"ticketId": "ticket-1", "expectedVersion": 1}))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-Id", "organizer-1")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetParamNames("id")
-	c.SetParamValues("plan-1")
-
-	require.NoError(t, h.AttachTicket(c))
-	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
 func TestPlanHandler_Create_ShouldReturn422_WhenVenueIDMissing(t *testing.T) {
