@@ -115,6 +115,7 @@ func TestHold_ShouldRejectHoldOnInactivePlan(t *testing.T) {
 
 	p := &repository.SeatingPlan{
 		VenueID:          v.ID,
+		TicketID:         "00000000-0000-0000-0000-000000000099",
 		OrganizerID:      "00000000-0000-0000-0000-000000000001",
 		Name:             "Draft Plan",
 		MaxSeatsPerOrder: 4,
@@ -273,6 +274,7 @@ func setupHoldFixture(t *testing.T, ctx context.Context) (*pgxpool.Pool, string,
 
 	p := &repository.SeatingPlan{
 		VenueID:          v.ID,
+		TicketID:         ticketID,
 		OrganizerID:      organizerID,
 		Name:             "Hold Test Plan",
 		MaxSeatsPerOrder: 4,
@@ -306,11 +308,8 @@ func setupHoldFixture(t *testing.T, ctx context.Context) (*pgxpool.Pool, string,
 		seatIDs[i] = seat.ID
 	}
 
-	// Attach ticket and activate plan so holds are allowed.
-	require.NoError(t, planRepo.AttachTicket(ctx, p.ID, ticketID, p.Version))
-	freshPlan, err := planRepo.FindByID(ctx, p.ID)
-	require.NoError(t, err)
-	require.NoError(t, planRepo.Activate(ctx, p.ID, freshPlan.Version))
+	// Activate plan with ticket so holds are allowed.
+	require.NoError(t, planRepo.Activate(ctx, p.ID, p.Version))
 
 	return pool, p.ID, seatIDs
 }

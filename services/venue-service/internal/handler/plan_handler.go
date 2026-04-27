@@ -32,7 +32,6 @@ func (h *PlanHandler) RegisterRoutes(g *echo.Group) {
 	g.GET("/:id", h.Get)
 	g.PUT("/:id", h.Update)
 	g.PATCH("/:id/layout", h.SaveLayout)
-	g.POST("/:id/attach-ticket", h.AttachTicket)
 	g.POST("/:id/activate", h.Activate)
 	g.POST("/:id/deactivate", h.Deactivate)
 }
@@ -40,6 +39,7 @@ func (h *PlanHandler) RegisterRoutes(g *echo.Group) {
 // createPlanRequest is the request body for creating a seating plan.
 type createPlanRequest struct {
 	VenueID          string `json:"venueId"`
+	TicketID         string `json:"ticketId"`
 	Name             string `json:"name"`
 	MaxSeatsPerOrder int    `json:"maxSeatsPerOrder"`
 	AssignmentMode   string `json:"assignmentMode"`
@@ -54,19 +54,15 @@ type updatePlanRequest struct {
 	PricingMode      string `json:"pricingMode"`
 }
 
-// attachTicketRequest is the request body for attaching a ticket to a plan.
-type attachTicketRequest struct {
-	TicketID        string `json:"ticketId"`
-	ExpectedVersion int    `json:"expectedVersion"`
-}
-
 // activatePlanRequest is the request body for activating a plan.
 type activatePlanRequest struct {
 	ExpectedVersion int `json:"expectedVersion"`
 }
 
-// List handles GET /api/seating-plans?venueId=<venueId>.
-// Returns all seating plans belonging to the authenticated organizer for the given venue.
+// List handles GET /api/seating-plans?ticketId=<ticketId> or ?venueId=<venueId>.
+// When ticketId is provided, returns plans for that ticket (primary).
+// Falls back to venueId filter if ticketId is not provided.
+// Returns all seating plans belonging to the authenticated organizer.
 func (h *PlanHandler) List(c echo.Context) error {
 	organizerID := c.Request().Header.Get("X-User-Id")
 	if organizerID == "" {
@@ -78,15 +74,29 @@ func (h *PlanHandler) List(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
 	}
 
+	ticketID := c.QueryParam("ticketId")
 	venueID := c.QueryParam("venueId")
-	if venueID == "" {
-		return c.JSON(http.StatusUnprocessableEntity, errorResponse("venueId query parameter is required"))
-	}
 
-	plans, err := h.planRepo.ListByVenue(c.Request().Context(), venueID, organizerID)
-	if err != nil {
-		h.log.Error("plan list failed", zap.Error(err), zap.String("venueId", venueID))
-		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+	var plans []*repository.SeatingPlan
+	var err error
+
+	if ticketID != "" {
+		// Primary: filter by ticket (organizer-scoped)
+		plans, err = h.planRepo.ListByTicket(c.Request().Context(), ticketID, organizerID)
+		if err != nil {
+			h.log.Error("plan list by ticket failed", zap.Error(err), zap.String("ticketId", ticketID))
+			return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+		}
+	} else if venueID != "" {
+		// Fallback: filter by venue (organizer-scoped)
+		plans, err = h.planRepo.ListByVenue(c.Request().Context(), venueID, organizerID)
+		if err != nil {
+			h.log.Error("plan list by venue failed", zap.Error(err), zap.String("venueId", venueID))
+			return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+		}
+	} else {
+		// Neither provided: error
+		return c.JSON(http.StatusUnprocessableEntity, errorResponse("either ticketId or venueId query parameter is required"))
 	}
 
 	// Always return an array, never null.
@@ -116,12 +126,16 @@ func (h *PlanHandler) Create(c echo.Context) error {
 	if req.VenueID == "" {
 		return c.JSON(http.StatusUnprocessableEntity, errorResponse("venueId is required"))
 	}
+	if req.TicketID == "" {
+		return c.JSON(http.StatusUnprocessableEntity, errorResponse("ticketId is required"))
+	}
 	if req.Name == "" {
 		return c.JSON(http.StatusUnprocessableEntity, errorResponse("name is required"))
 	}
 
 	p := &repository.SeatingPlan{
 		VenueID:          req.VenueID,
+		TicketID:         req.TicketID,
 		OrganizerID:      organizerID,
 		Name:             req.Name,
 		MaxSeatsPerOrder: req.MaxSeatsPerOrder,
@@ -216,70 +230,6 @@ func (h *PlanHandler) Update(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, p)
-}
-
-// AttachTicket handles POST /api/seating-plans/:id/attach-ticket.
-func (h *PlanHandler) AttachTicket(c echo.Context) error {
-	organizerID := c.Request().Header.Get("X-User-Id")
-	if organizerID == "" {
-		return c.JSON(http.StatusUnauthorized, errorResponse("missing X-User-Id header"))
-	}
-
-	signature := c.Request().Header.Get("X-User-Id-Sig")
-	if !h.validator.IsValidSignature(organizerID, signature) {
-		return c.JSON(http.StatusUnauthorized, errorResponse("invalid X-User-Id-Sig signature"))
-	}
-
-	id := c.Param("id")
-
-	var req attachTicketRequest
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, errorResponse("invalid request body"))
-	}
-	if req.TicketID == "" {
-		return c.JSON(http.StatusUnprocessableEntity, errorResponse("ticketId is required"))
-	}
-
-	// Validate ownership before mutating.
-	existing, err := h.planRepo.FindByID(c.Request().Context(), id)
-	if err != nil {
-		if errors.Is(err, repository.ErrPlanNotFound) {
-			return c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
-		}
-		h.log.Error("plan attach-ticket lookup failed", zap.Error(err), zap.String("planId", id))
-		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
-	}
-	if existing.OrganizerID != organizerID {
-		return c.JSON(http.StatusForbidden, errorResponse("not the plan owner"))
-	}
-
-	version := req.ExpectedVersion
-	if version == 0 {
-		version = existing.Version
-	}
-
-	if err := h.planRepo.AttachTicket(c.Request().Context(), id, req.TicketID, version); err != nil {
-		switch {
-		case errors.Is(err, repository.ErrPlanNotFound):
-			return c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
-		case errors.Is(err, repository.ErrPlanNotActive):
-			return c.JSON(http.StatusConflict, errorResponse("cannot attach ticket to an inactive plan"))
-		case errors.Is(err, repository.ErrVersionConflict):
-			return c.JSON(http.StatusConflict, errorResponse("version conflict: plan was modified concurrently"))
-		default:
-			h.log.Error("plan attach-ticket failed", zap.Error(err), zap.String("planId", id))
-			return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
-		}
-	}
-
-	// Return the updated plan.
-	updated, err := h.planRepo.FindByID(c.Request().Context(), id)
-	if err != nil {
-		h.log.Error("plan attach-ticket re-fetch failed", zap.Error(err), zap.String("planId", id))
-		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
-	}
-
-	return c.JSON(http.StatusOK, updated)
 }
 
 // Activate handles POST /api/seating-plans/:id/activate.

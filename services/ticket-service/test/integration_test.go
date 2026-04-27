@@ -101,8 +101,6 @@ func setupTestServer(t *testing.T) (*httptest.Server, func()) {
 	g.GET("", ticketH.List)
 	g.GET("/:id", ticketH.GetByID)
 	g.PUT("/:id", ticketH.Update)
-	g.PUT("/:id/seating-plan", ticketH.AttachSeatingPlan)
-	g.DELETE("/:id/seating-plan", ticketH.DetachSeatingPlan)
 
 	ts := httptest.NewServer(e)
 
@@ -140,7 +138,6 @@ func TestCreateTicket_ShouldReturn201WithTicketBody(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "user-123")
-	req.Header.Set("X-User-Roles", "organizer")
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
@@ -180,7 +177,6 @@ func TestCreateTicket_ShouldReturn400WhenTitleIsEmpty(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "user-1")
-	req.Header.Set("X-User-Roles", "organizer")
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
@@ -197,7 +193,6 @@ func TestCreateTicket_ShouldReturn400WhenPriceIsNegative(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "user-1")
-	req.Header.Set("X-User-Roles", "organizer")
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
@@ -215,7 +210,6 @@ func TestGetTicketByID_ShouldReturn200ForExistingTicket(t *testing.T) {
 	createReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("X-User-Id", "user-1")
-	createReq.Header.Set("X-User-Roles", "organizer")
 	createResp, err := http.DefaultClient.Do(createReq)
 	require.NoError(t, err)
 	defer createResp.Body.Close() //nolint:errcheck
@@ -275,7 +269,6 @@ func TestListTickets_ShouldReturnAllCreatedTickets(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-User-Id", "user-1")
-		req.Header.Set("X-User-Roles", "organizer")
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		resp.Body.Close() //nolint:errcheck
@@ -298,11 +291,18 @@ func TestUpdateTicket_ShouldReturn200WhenOwnerUpdates(t *testing.T) {
 	defer cleanup()
 
 	// Create ticket
-	body := jsonBody(t, map[string]interface{}{"title": "Old Title", "price": "10.00"})
+	body := jsonBody(t, map[string]interface{}{
+		"title": "Old Title",
+		"price": "10.00",
+		"event": map[string]interface{}{
+			"title":       "Original Event",
+			"description": "Original description",
+			"startsAt":    "2026-12-01T19:00:00Z",
+		},
+	})
 	createReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("X-User-Id", "owner-user")
-	createReq.Header.Set("X-User-Roles", "organizer")
 	createResp, err := http.DefaultClient.Do(createReq)
 	require.NoError(t, err)
 	defer createResp.Body.Close() //nolint:errcheck
@@ -313,11 +313,22 @@ func TestUpdateTicket_ShouldReturn200WhenOwnerUpdates(t *testing.T) {
 	ticketID := created["id"].(string)
 
 	// Update ticket
-	updateBody := jsonBody(t, map[string]interface{}{"title": "New Title", "price": "99.99"})
+	updateBody := jsonBody(t, map[string]interface{}{
+		"title": "New Title",
+		"price": "99.99",
+		"event": map[string]interface{}{
+			"title":        "Updated Event",
+			"description":  "Updated description",
+			"startsAt":     "2026-12-02T20:00:00Z",
+			"endsAt":       "2026-12-02T22:30:00Z",
+			"imageUrl":     "https://example.com/poster.png",
+			"venueName":    "Updated Venue",
+			"venueAddress": "123 Main St",
+		},
+	})
 	updateReq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/tickets/"+ticketID, updateBody)
 	updateReq.Header.Set("Content-Type", "application/json")
 	updateReq.Header.Set("X-User-Id", "owner-user")
-	updateReq.Header.Set("X-User-Roles", "organizer")
 	updateResp, err := http.DefaultClient.Do(updateReq)
 	require.NoError(t, err)
 	defer updateResp.Body.Close() //nolint:errcheck
@@ -327,6 +338,15 @@ func TestUpdateTicket_ShouldReturn200WhenOwnerUpdates(t *testing.T) {
 	require.NoError(t, json.NewDecoder(updateResp.Body).Decode(&updated))
 	assert.Equal(t, "New Title", updated["title"])
 	assert.Equal(t, "99.99", updated["price"])
+	event, ok := updated["event"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Updated Event", event["title"])
+	assert.Equal(t, "Updated description", event["description"])
+	assert.Equal(t, "2026-12-02T20:00:00Z", event["startsAt"])
+	assert.Equal(t, "2026-12-02T22:30:00Z", event["endsAt"])
+	assert.Equal(t, "https://example.com/poster.png", event["imageUrl"])
+	assert.Equal(t, "Updated Venue", event["venueName"])
+	assert.Equal(t, "123 Main St", event["venueAddress"])
 }
 
 func TestUpdateTicket_ShouldReturn403WhenNonOwnerUpdates(t *testing.T) {
@@ -338,7 +358,6 @@ func TestUpdateTicket_ShouldReturn403WhenNonOwnerUpdates(t *testing.T) {
 	createReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tickets", body)
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("X-User-Id", "owner-user")
-	createReq.Header.Set("X-User-Roles", "organizer")
 	createResp, err := http.DefaultClient.Do(createReq)
 	require.NoError(t, err)
 	defer createResp.Body.Close() //nolint:errcheck
@@ -352,7 +371,6 @@ func TestUpdateTicket_ShouldReturn403WhenNonOwnerUpdates(t *testing.T) {
 	updateReq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/tickets/"+ticketID, updateBody)
 	updateReq.Header.Set("Content-Type", "application/json")
 	updateReq.Header.Set("X-User-Id", "attacker-user")
-	updateReq.Header.Set("X-User-Roles", "organizer")
 	updateResp, err := http.DefaultClient.Do(updateReq)
 	require.NoError(t, err)
 	defer updateResp.Body.Close() //nolint:errcheck
@@ -368,7 +386,6 @@ func TestUpdateTicket_ShouldReturn404ForNonExistentTicket(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/tickets/22222222-2222-4222-8222-222222222222", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "user-1")
-	req.Header.Set("X-User-Roles", "organizer")
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close() //nolint:errcheck

@@ -10,9 +10,10 @@ import type { PlanState } from "@/app/actions/venues";
 
 interface ActivatePlanButtonProps {
   action: (_prev: PlanState, formData: FormData) => Promise<PlanState>;
+  label?: string;
 }
 
-export function ActivatePlanButton({ action }: ActivatePlanButtonProps) {
+export function ActivatePlanButton({ action, label = "Activate Plan" }: ActivatePlanButtonProps) {
   const [state, formAction, pending] = useActionState(action, {});
 
   return (
@@ -29,7 +30,7 @@ export function ActivatePlanButton({ action }: ActivatePlanButtonProps) {
         ) : (
           <Zap className="w-4 h-4" />
         )}
-        {pending ? "Activating…" : "Activate Plan"}
+        {pending ? "Activating…" : label}
       </Button>
     </form>
   );

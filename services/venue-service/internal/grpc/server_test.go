@@ -148,11 +148,8 @@ func (n *nopPlanRepo) FindByIDs(_ context.Context, _ []string) ([]*repository.Se
 func (n *nopPlanRepo) ListByVenue(ctx context.Context, venueID, organizerID string) ([]*repository.SeatingPlan, error) {
 	return nil, nil
 }
-func (n *nopPlanRepo) ListByTicket(ctx context.Context, ticketID string) ([]*repository.SeatingPlan, error) {
+func (n *nopPlanRepo) ListByTicket(ctx context.Context, ticketID, organizerID string) ([]*repository.SeatingPlan, error) {
 	return nil, nil
-}
-func (n *nopPlanRepo) AttachTicket(ctx context.Context, planID, ticketID string, expectedVersion int) error {
-	return nil
 }
 func (n *nopPlanRepo) Activate(ctx context.Context, planID string, expectedVersion int) error {
 	return nil

@@ -209,8 +209,9 @@ describe("TicketDetailPage", () => {
     expect(screen.getAllByText("$49.99").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("calls notFound() when the API throws", async () => {
-    serverApiMock.mockRejectedValue(new Error("404"));
+  it("calls notFound() when the API throws a 404 ApiError", async () => {
+    const { ApiError } = await import("@/lib/api");
+    serverApiMock.mockRejectedValue(new ApiError(404, "not found"));
 
     const { notFound } = await import("next/navigation");
     const { default: TicketDetailPage } = await import(
@@ -219,7 +220,7 @@ describe("TicketDetailPage", () => {
 
     await expect(TicketDetailPage({ params })).rejects.toThrow("NEXT_NOT_FOUND");
     expect(notFound).toHaveBeenCalledOnce();
-  });
+  }, 10000);
 
   it("shows TicketForm when the viewer is the owner and ticket is not reserved", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });

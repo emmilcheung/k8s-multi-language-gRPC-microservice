@@ -24,9 +24,9 @@ var decimalPriceRE = regexp.MustCompile(`^\d{1,15}(\.\d{1,4})?$`)
 
 // TicketHandler handles HTTP requests for ticket operations.
 type TicketHandler struct {
-	svc                    *service.TicketService
-	log                    *zap.Logger
-	signatureValidator     *security.UserIDSignatureValidator
+	svc                *service.TicketService
+	log                *zap.Logger
+	signatureValidator *security.UserIDSignatureValidator
 }
 
 // NewTicketHandler creates a new TicketHandler.
@@ -59,9 +59,21 @@ type createTicketRequest struct {
 }
 
 // updateTicketRequest is the request body for PUT /api/tickets/:id.
+// SeatingPlanID is optional; if provided and non-empty, the ticket will be linked to a venue-service seating plan.
 type updateTicketRequest struct {
-	Title string `json:"title"`
-	Price string `json:"price"`
+	Title         string `json:"title"`
+	Price         string `json:"price"`
+	SeatingPlanID string `json:"seatingPlanId,omitempty"`
+	TicketType    string `json:"ticketType,omitempty"`
+	Event         *struct {
+		Title        string     `json:"title"`
+		Description  string     `json:"description,omitempty"`
+		StartsAt     time.Time  `json:"startsAt"`
+		EndsAt       *time.Time `json:"endsAt,omitempty"`
+		ImageURL     string     `json:"imageUrl,omitempty"`
+		VenueName    string     `json:"venueName,omitempty"`
+		VenueAddress string     `json:"venueAddress,omitempty"`
+	} `json:"event,omitempty"`
 }
 
 // ticketResponse is the JSON response shape for a ticket.
@@ -161,12 +173,6 @@ func (h *TicketHandler) Create(c echo.Context) error {
 	signature := c.Request().Header.Get("X-User-Id-Sig")
 	if !h.signatureValidator.IsValidSignature(userID, signature) {
 		return errorResponse(c, http.StatusUnauthorized, "INVALID_SIGNATURE", "Invalid user ID signature", nil)
-	}
-
-	rolesHeader := c.Request().Header.Get("X-User-Roles")
-	roles := security.ParseUserRoles(rolesHeader)
-	if !security.HasRole(roles, "organizer") {
-		return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Only organizers can create tickets", nil)
 	}
 
 	var req createTicketRequest
@@ -289,12 +295,6 @@ func (h *TicketHandler) Update(c echo.Context) error {
 		return errorResponse(c, http.StatusUnauthorized, "INVALID_SIGNATURE", "Invalid user ID signature", nil)
 	}
 
-	rolesHeader := c.Request().Header.Get("X-User-Roles")
-	roles := security.ParseUserRoles(rolesHeader)
-	if !security.HasRole(roles, "organizer") {
-		return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Only organizers can update tickets", nil)
-	}
-
 	id := c.Param("id")
 	if !uuidRE.MatchString(id) {
 		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "id must be a valid UUID", nil)
@@ -317,15 +317,37 @@ func (h *TicketHandler) Update(c echo.Context) error {
 	if priceErr != nil {
 		details = append(details, map[string]string{"field": "price", "issue": priceErr.Error()})
 	}
+	if req.SeatingPlanID != "" && !uuidRE.MatchString(req.SeatingPlanID) {
+		details = append(details, map[string]string{"field": "seatingPlanId", "issue": "must be a valid UUID"})
+	}
+	if req.Event != nil && req.Event.StartsAt.IsZero() {
+		details = append(details, map[string]string{"field": "event.startsAt", "issue": "must not be empty"})
+	}
 	if len(details) > 0 {
 		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "Request validation failed", details)
 	}
 
+	var eventData *repository.TicketEvent
+	if req.Event != nil {
+		eventData = &repository.TicketEvent{
+			Title:        req.Event.Title,
+			Description:  req.Event.Description,
+			StartsAt:     req.Event.StartsAt,
+			EndsAt:       req.Event.EndsAt,
+			ImageURL:     req.Event.ImageURL,
+			VenueName:    req.Event.VenueName,
+			VenueAddress: req.Event.VenueAddress,
+		}
+	}
+
 	ticket, err := h.svc.UpdateTicket(c.Request().Context(), service.UpdateTicketInput{
-		ID:     id,
-		Title:  req.Title,
-		Price:  normPrice,
-		UserID: userID,
+		ID:            id,
+		Title:         req.Title,
+		Price:         normPrice,
+		UserID:        userID,
+		SeatingPlanID: req.SeatingPlanID,
+		TicketType:    req.TicketType,
+		Event:         eventData,
 	})
 	if err != nil {
 		switch {
@@ -337,6 +359,12 @@ func (h *TicketHandler) Update(c echo.Context) error {
 			return errorResponse(c, http.StatusConflict, "CONFLICT", "Cannot edit a reserved ticket", nil)
 		case errors.Is(err, repository.ErrVersionConflict):
 			return errorResponse(c, http.StatusConflict, "VERSION_CONFLICT", "Ticket was modified concurrently — please retry with fresh data", nil)
+		case errors.Is(err, repository.ErrSeatingPlanAlreadyAttached):
+			return errorResponse(c, http.StatusConflict, "CONFLICT", "Ticket already has a seating plan attached — detach it first", nil)
+		case errors.Is(err, service.ErrVenueServiceUnavailable):
+			return errorResponse(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "Venue service is temporarily unavailable", nil)
+		case errors.Is(err, service.ErrVenueServiceTimeout):
+			return errorResponse(c, http.StatusGatewayTimeout, "DEPENDENCY_TIMEOUT", "Venue service did not respond in time", nil)
 		default:
 			h.log.Error("update ticket failed", zap.Error(err), zap.String("ticketId", id))
 			return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred", nil)
@@ -356,113 +384,4 @@ func errorResponse(c echo.Context, status int, code, message string, details int
 		},
 	}
 	return c.JSON(status, body)
-}
-
-// attachSeatingPlanRequest is the request body for PUT /api/tickets/:id/seating-plan.
-type attachSeatingPlanRequest struct {
-	SeatingPlanID string `json:"seatingPlanId"`
-}
-
-// AttachSeatingPlan handles PUT /api/tickets/:id/seating-plan.
-// Links a venue-service seating plan UUID to the ticket. Once attached, the ticket
-// is treated as "seated" and the GA quota reservation path (ReserveQuota gRPC) will
-// refuse reservations, directing callers to the venue-service instead.
-func (h *TicketHandler) AttachSeatingPlan(c echo.Context) error {
-	userID := c.Request().Header.Get("X-User-Id")
-	if userID == "" {
-		return errorResponse(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
-	}
-
-	signature := c.Request().Header.Get("X-User-Id-Sig")
-	if !h.signatureValidator.IsValidSignature(userID, signature) {
-		return errorResponse(c, http.StatusUnauthorized, "INVALID_SIGNATURE", "Invalid user ID signature", nil)
-	}
-
-	rolesHeader := c.Request().Header.Get("X-User-Roles")
-	roles := security.ParseUserRoles(rolesHeader)
-	if !security.HasRole(roles, "organizer") {
-		return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Only organizers can attach seating plans", nil)
-	}
-
-	id := c.Param("id")
-	if !uuidRE.MatchString(id) {
-		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "id must be a valid UUID", nil)
-	}
-
-	var req attachSeatingPlanRequest
-	if err := c.Bind(&req); err != nil {
-		return errorResponse(c, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil)
-	}
-
-	if !uuidRE.MatchString(req.SeatingPlanID) {
-		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "seatingPlanId must be a valid UUID", nil)
-	}
-
-	ticket, err := h.svc.AttachSeatingPlan(c.Request().Context(), service.AttachSeatingPlanInput{
-		TicketID: id,
-		PlanID:   req.SeatingPlanID,
-		UserID:   userID,
-	})
-	if err != nil {
-		switch {
-		case errors.Is(err, repository.ErrTicketNotFound):
-			return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Ticket not found", nil)
-		case errors.Is(err, service.ErrUnauthorized):
-			return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Not authorised to modify this ticket", nil)
-		case errors.Is(err, service.ErrVenueServiceUnavailable):
-			return errorResponse(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "Venue service is temporarily unavailable", nil)
-		case errors.Is(err, service.ErrVenueServiceTimeout):
-			return errorResponse(c, http.StatusGatewayTimeout, "DEPENDENCY_TIMEOUT", "Venue service did not respond in time", nil)
-		case errors.Is(err, repository.ErrSeatingPlanAlreadyAttached):
-			return errorResponse(c, http.StatusConflict, "CONFLICT", "Ticket already has a seating plan attached — detach it first", nil)
-		default:
-			h.log.Error("attach seating plan failed", zap.Error(err), zap.String("ticketId", id))
-			return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred", nil)
-		}
-	}
-
-	return c.JSON(http.StatusOK, toResponse(ticket))
-}
-
-// DetachSeatingPlan handles DELETE /api/tickets/:id/seating-plan.
-// Removes the seating plan association, reverting the ticket to a GA (general-admission) ticket.
-func (h *TicketHandler) DetachSeatingPlan(c echo.Context) error {
-	userID := c.Request().Header.Get("X-User-Id")
-	if userID == "" {
-		return errorResponse(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
-	}
-
-	signature := c.Request().Header.Get("X-User-Id-Sig")
-	if !h.signatureValidator.IsValidSignature(userID, signature) {
-		return errorResponse(c, http.StatusUnauthorized, "INVALID_SIGNATURE", "Invalid user ID signature", nil)
-	}
-
-	rolesHeader := c.Request().Header.Get("X-User-Roles")
-	roles := security.ParseUserRoles(rolesHeader)
-	if !security.HasRole(roles, "organizer") {
-		return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Only organizers can detach seating plans", nil)
-	}
-
-	id := c.Param("id")
-	if !uuidRE.MatchString(id) {
-		return errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "id must be a valid UUID", nil)
-	}
-
-	ticket, err := h.svc.DetachSeatingPlan(c.Request().Context(), service.DetachSeatingPlanInput{
-		TicketID: id,
-		UserID:   userID,
-	})
-	if err != nil {
-		switch {
-		case errors.Is(err, repository.ErrTicketNotFound):
-			return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Ticket not found", nil)
-		case errors.Is(err, service.ErrUnauthorized):
-			return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Not authorised to modify this ticket", nil)
-		default:
-			h.log.Error("detach seating plan failed", zap.Error(err), zap.String("ticketId", id))
-			return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred", nil)
-		}
-	}
-
-	return c.JSON(http.StatusOK, toResponse(ticket))
 }

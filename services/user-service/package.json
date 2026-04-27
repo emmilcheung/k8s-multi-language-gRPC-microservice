@@ -8,7 +8,9 @@
   "packageManager": "pnpm@10.32.1",
   "pnpm": {
     "overrides": {
-      "yaml": "2.8.3"
+      "yaml": "2.8.3",
+      "protobufjs": "7.5.5",
+      "uuid": "14.0.0"
     }
   },
   "engines": {

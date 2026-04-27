@@ -25,8 +25,8 @@ func NewPlanRepo(pool *pgxpool.Pool) *PlanRepo {
 // p.LayoutJSON, p.CreatedAt, p.UpdatedAt, and mode defaults are populated.
 func (r *PlanRepo) Create(ctx context.Context, p *repository.SeatingPlan) error {
 	const q = `
-		INSERT INTO seating_plans (venue_id, organizer_id, name, max_seats_per_order, assignment_mode, pricing_mode)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO seating_plans (venue_id, ticket_id, organizer_id, name, max_seats_per_order, assignment_mode, pricing_mode)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, status, layout_json, version, assignment_mode, pricing_mode, created_at, updated_at`
 
 	maxSeats := p.MaxSeatsPerOrder
@@ -45,7 +45,7 @@ func (r *PlanRepo) Create(ctx context.Context, p *repository.SeatingPlan) error 
 	}
 
 	return r.pool.QueryRow(ctx, q,
-		p.VenueID, p.OrganizerID, p.Name, maxSeats, assignmentMode, pricingMode,
+		p.VenueID, p.TicketID, p.OrganizerID, p.Name, maxSeats, assignmentMode, pricingMode,
 	).Scan(&p.ID, &p.Status, &p.LayoutJSON, &p.Version, &p.AssignmentMode, &p.PricingMode, &p.CreatedAt, &p.UpdatedAt)
 }
 
@@ -176,16 +176,17 @@ func (r *PlanRepo) ListActivePlans(ctx context.Context) ([]*repository.SeatingPl
 	return plans, rows.Err()
 }
 
-// ListByTicket returns all seating plans attached to the given ticket.
-func (r *PlanRepo) ListByTicket(ctx context.Context, ticketID string) ([]*repository.SeatingPlan, error) {
+// ListByTicket returns all seating plans attached to the given ticket for the organizer.
+// Organizer-scoped to prevent unauthorized access to other organizers' plans.
+func (r *PlanRepo) ListByTicket(ctx context.Context, ticketID, organizerID string) ([]*repository.SeatingPlan, error) {
 	const q = `
 		SELECT id, venue_id, COALESCE(ticket_id::text, ''), organizer_id, name,
 		       status, max_seats_per_order, layout_json, version, assignment_mode, pricing_mode, created_at, updated_at
 		FROM seating_plans
-		WHERE ticket_id = $1
+		WHERE ticket_id = $1 AND organizer_id = $2
 		ORDER BY created_at DESC`
 
-	rows, err := r.pool.Query(ctx, q, ticketID)
+	rows, err := r.pool.Query(ctx, q, ticketID, organizerID)
 	if err != nil {
 		return nil, err
 	}
@@ -206,36 +207,7 @@ func (r *PlanRepo) ListByTicket(ctx context.Context, ticketID string) ([]*reposi
 	return plans, rows.Err()
 }
 
-// AttachTicket sets ticket_id on a seating plan using optimistic concurrency.
-// Returns ErrVersionConflict if the version doesn't match.
-// Returns ErrPlanAlreadyActive if the plan is already active.
-func (r *PlanRepo) AttachTicket(ctx context.Context, planID, ticketID string, expectedVersion int) error {
-	const q = `
-		UPDATE seating_plans
-		SET ticket_id = $1, version = version + 1, updated_at = now()
-		WHERE id = $2 AND version = $3 AND status IN ('draft', 'active')
-		RETURNING id`
-
-	var id string
-	err := r.pool.QueryRow(ctx, q, ticketID, planID, expectedVersion).Scan(&id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			// Disambiguate: version conflict or inactive plan?
-			p, findErr := r.FindByID(ctx, planID)
-			if findErr != nil {
-				return findErr
-			}
-			if p.Status == repository.PlanStatusInactive {
-				return repository.ErrPlanNotActive
-			}
-			return repository.ErrVersionConflict
-		}
-		return err
-	}
-	return nil
-}
-
-// Activate transitions a seating plan from draft to active.
+// Activate transitions a seating plan from draft or inactive to active.
 // Validates that at least one section exists.
 // Returns ErrPlanHasNoSections if no sections exist.
 // Returns ErrPlanAlreadyActive if already active.
@@ -265,7 +237,7 @@ func (r *PlanRepo) Activate(ctx context.Context, planID string, expectedVersion 
 	const q = `
 		UPDATE seating_plans
 		SET status = 'active', updated_at = now()
-		WHERE id = $1 AND version = $2 AND status = 'draft'
+		WHERE id = $1 AND version = $2 AND status IN ('draft', 'inactive')
 		RETURNING id`
 
 	var id string

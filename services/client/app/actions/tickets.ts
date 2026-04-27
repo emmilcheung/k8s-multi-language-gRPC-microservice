@@ -4,7 +4,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { base, authHeaders } from "@/lib/server-utils";
-import type { Ticket } from "@/lib/types";
+import type { AvailabilitySnapshot, SeatingPlan, Ticket } from "@/lib/types";
 import { createSeatingPlanForTicket } from "./venues";
 
 // ─── Pagination ───────────────────────────────────────────────────────────────
@@ -18,6 +18,26 @@ export interface TicketPage {
 }
 
 const PAGE_SIZE = 20;
+
+async function isPubliclyAvailableTicket(ticket: Ticket): Promise<boolean> {
+  if (!ticket.seatingPlanId) {
+    return !ticket.orderId;
+  }
+
+  const [planRes, availabilityRes] = await Promise.all([
+    fetch(`${base()}/api/seating-plans/${ticket.seatingPlanId}`, { cache: "no-store" }),
+    fetch(`${base()}/api/seating-plans/${ticket.seatingPlanId}/availability`, { cache: "no-store" }),
+  ]);
+
+  if (!planRes.ok || !availabilityRes.ok) {
+    return false;
+  }
+
+  const plan = await planRes.json() as SeatingPlan;
+  const availability = await availabilityRes.json() as AvailabilitySnapshot;
+
+  return plan.status === "active" && availability.counts.available > 0;
+}
 
 /**
  * Fetches one page of available (unreserved) tickets using cursor-based
@@ -42,13 +62,17 @@ export async function fetchTicketPage(after: string | null): Promise<TicketPage>
   }
 
   const all: Ticket[] = await res.json();
+  const filtered = await Promise.all(
+    all.map(async (ticket) => ((await isPubliclyAvailableTicket(ticket)) ? ticket : null))
+  );
+  const tickets = filtered.filter((ticket): ticket is Ticket => ticket !== null);
   // Compound cursor: "<createdAtUnixMilli>:<id>" matches the backend EncodeCursor format.
   const lastTicket = all.length > 0 ? all[all.length - 1] : null;
   const cursor = lastTicket?.createdAt
     ? `${new Date(lastTicket.createdAt).getTime()}:${lastTicket.id}`
     : (lastTicket?.id ?? null);
   const hasMore = all.length === PAGE_SIZE;
-  return { tickets: all, cursor, hasMore };
+  return { tickets, cursor, hasMore };
 }
 
 export interface TicketState {
@@ -63,6 +87,30 @@ function parseOptionalPositiveInt(raw: string | null): number | undefined {
   const n = parseInt(raw.trim(), 10);
   if (!Number.isFinite(n) || n < 1) return undefined;
   return n;
+}
+
+async function linkSeatingPlanToTicket(
+  ticketId: string,
+  title: string,
+  price: string,
+  seatingPlanId: string,
+  ticketType: string
+): Promise<string | null> {
+  const updateRes = await fetch(`${base()}/api/tickets/${ticketId}`, {
+    method: "PUT",
+    headers: await authHeaders(),
+    body: JSON.stringify({
+      title,
+      price,
+      seatingPlanId,
+      ticketType,
+    }),
+  });
+
+  if (updateRes.ok) return null;
+
+  const errBody = await updateRes.json().catch(() => ({}));
+  return errBody?.error?.message ?? "Failed to attach seating plan to ticket.";
 }
 
 // ─── Mutations ────────────────────────────────────────────────────────────────
@@ -172,30 +220,34 @@ export async function createTicket(
   // Phase 3: If seating plan, create it with ticketId (no separate attach)
   if (ticketType.startsWith("SEATED") && venueId) {
     const planName = `${title.trim()} Seating Plan`;
-    const plan = await createSeatingPlanForTicket(ticket.id, venueId, planName, maxSeatsPerOrder);
+    const assignmentMode = ticketType === "SEATED_AUTO" ? "auto" : "manual";
+    const plan = await createSeatingPlanForTicket(
+      ticket.id,
+      venueId,
+      planName,
+      assignmentMode,
+      maxSeatsPerOrder,
+    );
 
     if (!plan) {
       return { error: "Failed to create seating plan for this ticket." };
     }
 
-    // Update ticket with the new seatingPlanId
-    const updateRes = await fetch(`${base()}/api/tickets/${ticket.id}`, {
-      method: "PUT",
-      headers: await authHeaders(),
-      body: JSON.stringify({ 
-        title: ticket.title,
-        price: ticket.price,
-        seatingPlanId: plan.id 
-      }),
-    });
+    const updateError = await linkSeatingPlanToTicket(
+      ticket.id,
+      ticket.title,
+      ticket.price,
+      plan.id,
+      ticketType
+    );
 
-    if (!updateRes.ok) {
-      const errBody = await updateRes.json().catch(() => ({}));
-      return { error: errBody?.error?.message ?? "Failed to attach seating plan to ticket." };
+    if (updateError) {
+      return { error: updateError };
     }
   }
 
   revalidatePath("/");
+  revalidatePath(`/tickets/${ticket.id}`);
   redirect(`/tickets/${ticket.id}`);
 }
 
@@ -209,16 +261,40 @@ export async function updateTicket(
   const priceNum = parseFloat(priceRaw);
   const quota = parseOptionalPositiveInt(formData.get("quota") as string | null);
   const maxPerUser = parseOptionalPositiveInt(formData.get("maxPerUser") as string | null);
+  let startsAt = (formData.get("startsAt") as string)?.trim() || "";
+  let endsAt = (formData.get("endsAt") as string)?.trim() || "";
+  const eventTitle = (formData.get("eventTitle") as string)?.trim() || "";
+  const eventDescription = (formData.get("eventDescription") as string)?.trim() || "";
+  const eventImageUrl = (formData.get("eventImageUrl") as string)?.trim() || "";
+  const venueName = (formData.get("venueName") as string)?.trim() || "";
+  const venueAddress = (formData.get("venueAddress") as string)?.trim() || "";
 
   if (!title?.trim()) return { error: "Title is required." };
   if (!priceRaw || isNaN(priceNum) || priceNum <= 0) return { error: "Price must be a positive number." };
   if (maxPerUser !== undefined && quota !== undefined && maxPerUser > quota) {
     return { error: "Max per buyer cannot exceed the total capacity." };
   }
+  if (!startsAt) return { error: "Event start date/time is required." };
+
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(startsAt)) {
+    startsAt += ":00Z";
+  }
+  if (endsAt && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(endsAt)) {
+    endsAt += ":00Z";
+  }
 
   const reqBody: Record<string, unknown> = { title: title.trim(), price: priceRaw };
   if (quota !== undefined) reqBody.quota = quota;
   if (maxPerUser !== undefined) reqBody.maxPerUser = maxPerUser;
+  reqBody.event = {
+    title: eventTitle,
+    description: eventDescription,
+    startsAt,
+    imageUrl: eventImageUrl,
+    venueName,
+    venueAddress,
+    ...(endsAt ? { endsAt } : {}),
+  };
 
   const res = await fetch(`${base()}/api/tickets/${ticketId}`, {
     method: "PUT",
@@ -238,6 +314,82 @@ export async function updateTicket(
   revalidatePath(`/tickets/${ticketId}`);
   revalidatePath("/");
   redirect(`/tickets/${ticketId}`);
+}
+
+export async function replaceInactivePlan(
+  ticketId: string,
+  currentPlanId: string,
+  title: string,
+  price: string,
+  fallbackTicketType: string,
+  _prev: TicketState,
+  _formData: FormData
+): Promise<TicketState> {
+  void _prev;
+  void _formData;
+
+  if (!ticketId || !currentPlanId) {
+    return { error: "Ticket and seating plan are required." };
+  }
+
+  const planRes = await fetch(`${base()}/api/seating-plans/${currentPlanId}`, {
+    method: "GET",
+    cache: "no-store",
+    headers: await authHeaders(),
+  });
+
+  if (!planRes.ok) {
+    const errBody = await planRes.json().catch(() => ({}));
+    return { error: errBody?.error ?? "Failed to load the current seating plan." };
+  }
+
+  const currentPlan = (await planRes.json()) as SeatingPlan;
+  if (currentPlan.ticketId !== ticketId) {
+    return { error: "This seating plan is not attached to the current ticket." };
+  }
+  if (currentPlan.status !== "inactive") {
+    return { error: "Only inactive plans can be replaced." };
+  }
+
+  const assignmentMode = currentPlan.assignmentMode === "auto" ? "auto" : "manual";
+  const ticketType =
+    assignmentMode === "auto"
+      ? "SEATED_AUTO"
+      : fallbackTicketType === "SEATED_AUTO"
+        ? "SEATED_AUTO"
+        : "SEATED_MANUAL";
+  const replacementName = currentPlan.name.includes("Replacement")
+    ? currentPlan.name
+    : `${currentPlan.name} Replacement`;
+
+  const replacementPlan = await createSeatingPlanForTicket(
+    ticketId,
+    currentPlan.venueId,
+    replacementName,
+    assignmentMode,
+    currentPlan.maxSeatsPerOrder,
+    currentPlan.pricingMode
+  );
+
+  if (!replacementPlan) {
+    return { error: "Failed to create a replacement seating plan." };
+  }
+
+  const updateError = await linkSeatingPlanToTicket(
+    ticketId,
+    title,
+    price,
+    replacementPlan.id,
+    ticketType
+  );
+  if (updateError) {
+    return { error: updateError };
+  }
+
+  revalidatePath(`/tickets/${ticketId}`);
+  revalidatePath(`/tickets/${ticketId}/plans/${currentPlanId}`);
+  revalidatePath(`/tickets/${ticketId}/plans/${replacementPlan.id}`);
+  redirect(`/tickets/${ticketId}/plans/${replacementPlan.id}`);
 }
 
 // ─── Seating plan attach / detach (deprecated in Phase 3) ────────────────────

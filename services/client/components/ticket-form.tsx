@@ -47,6 +47,15 @@ interface TicketFormProps {
   defaultQuota?: number;
   defaultMaxPerUser?: number;
   defaultTicketType?: TicketType;
+   defaultVenueId?: string;
+   defaultPricingMode?: "single" | "section" | "seat";
+   defaultStartsAt?: string;
+   defaultEndsAt?: string;
+   defaultEventTitle?: string;
+   defaultEventDescription?: string;
+   defaultEventImageUrl?: string;
+   defaultVenueName?: string;
+   defaultVenueAddress?: string;
   submitLabel?: string;
 }
 
@@ -111,6 +120,15 @@ export function TicketForm({
   defaultQuota,
   defaultMaxPerUser,
   defaultTicketType,
+  defaultVenueId,
+  defaultPricingMode,
+  defaultStartsAt = "",
+  defaultEndsAt = "",
+  defaultEventTitle = "",
+  defaultEventDescription = "",
+  defaultEventImageUrl = "",
+  defaultVenueName = "",
+  defaultVenueAddress = "",
   submitLabel = "Create Ticket",
 }: TicketFormProps) {
   const [step, setStep] = useState<"type" | "details">(defaultTicketType ? "details" : "type");
@@ -121,6 +139,15 @@ export function TicketForm({
     price: String(defaultPrice ?? ""),
     quota: defaultQuota,
     maxPerUser: defaultMaxPerUser,
+    venueId: defaultVenueId,
+    pricingMode: defaultPricingMode,
+    startsAt: defaultStartsAt,
+    endsAt: defaultEndsAt,
+    eventTitle: defaultEventTitle,
+    eventDescription: defaultEventDescription,
+    eventImageUrl: defaultEventImageUrl,
+    venueName: defaultVenueName,
+    venueAddress: defaultVenueAddress,
   });
   const [error, setError] = useState<string>("");
   const [pending, setPending] = useState(false);
@@ -164,22 +191,50 @@ export function TicketForm({
 
     try {
       const form = e.currentTarget as HTMLFormElement;
+      const getFieldValue = (name: string): string => {
+        const el = form.elements.namedItem(name) as
+          | HTMLInputElement
+          | HTMLTextAreaElement
+          | null;
+        return el?.value ?? "";
+      };
       const getTitleValue = (): string => {
-        const el = form.elements.namedItem("title") as HTMLInputElement | null;
-        return el?.value || formData.title;
+        return getFieldValue("title") || formData.title;
       };
       const getPriceValue = (): string => {
-        const el = form.elements.namedItem("price") as HTMLInputElement | null;
-        return el?.value || formData.price;
+        return getFieldValue("price") || formData.price;
       };
       const getStartsAtValue = (): string => {
-        const el = form.elements.namedItem("startsAt") as HTMLInputElement | null;
-        return el?.value || formData.startsAt;
+        return getFieldValue("startsAt") || formData.startsAt;
+      };
+      const getEndsAtValue = (): string => {
+        return getFieldValue("endsAt") || formData.endsAt;
+      };
+      const getEventTitleValue = (): string => {
+        return getFieldValue("eventTitle") || formData.eventTitle;
+      };
+      const getEventDescriptionValue = (): string => {
+        return getFieldValue("eventDescription") || formData.eventDescription;
+      };
+      const getEventImageUrlValue = (): string => {
+        return getFieldValue("eventImageUrl") || formData.eventImageUrl;
+      };
+      const getVenueNameValue = (): string => {
+        return getFieldValue("venueName") || formData.venueName;
+      };
+      const getVenueAddressValue = (): string => {
+        return getFieldValue("venueAddress") || formData.venueAddress;
       };
 
       const title = getTitleValue();
       const price = getPriceValue();
       const startsAt = getStartsAtValue();
+      const endsAt = getEndsAtValue();
+      const eventTitle = getEventTitleValue().trim();
+      const eventDescription = getEventDescriptionValue().trim();
+      const eventImageUrl = getEventImageUrlValue().trim();
+      const venueName = getVenueNameValue().trim();
+      const venueAddress = getVenueAddressValue().trim();
 
       const formDataObj = new FormData();
       formDataObj.append("title", title);
@@ -202,12 +257,12 @@ export function TicketForm({
       if (startsAt) {
         formDataObj.append("startsAt", startsAt);
       }
-      if (formData.eventTitle.trim()) formDataObj.append("eventTitle", formData.eventTitle.trim());
-      if (formData.endsAt) formDataObj.append("endsAt", formData.endsAt);
-      if (formData.eventDescription.trim()) formDataObj.append("eventDescription", formData.eventDescription.trim());
-      if (formData.eventImageUrl.trim()) formDataObj.append("eventImageUrl", formData.eventImageUrl.trim());
-      if (formData.venueName.trim()) formDataObj.append("venueName", formData.venueName.trim());
-      if (formData.venueAddress.trim()) formDataObj.append("venueAddress", formData.venueAddress.trim());
+      if (eventTitle) formDataObj.append("eventTitle", eventTitle);
+      if (endsAt) formDataObj.append("endsAt", endsAt);
+      if (eventDescription) formDataObj.append("eventDescription", eventDescription);
+      if (eventImageUrl) formDataObj.append("eventImageUrl", eventImageUrl);
+      if (venueName) formDataObj.append("venueName", venueName);
+      if (venueAddress) formDataObj.append("venueAddress", venueAddress);
 
       const result = await action({}, formDataObj);
       if (result.error) {

@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
@@ -9,52 +8,8 @@ import { test, expect, type Page, type APIRequestContext } from "@playwright/tes
 const PASSWORD = "Password123!";
 const KONG_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const GRAPHQL_URL = `${KONG_URL}/graphql`;
-const AUTH_POSTGRES_CONTAINER = "microservices-postgres-auth-1";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function uniqueEmail(prefix: string) {
   return `${prefix}-${Date.now()}-${randomUUID().slice(0, 8)}@test.com`;
-}
-
-function sqlLiteral(value: string) {
-  return `'${value.replaceAll("'", "''")}'`;
-}
-
-function grantOrganizerRole(email: string) {
-  const sql = [
-    "WITH promoted AS (",
-    "  UPDATE users",
-    `  SET roles = '[\"organizer\"]'::json`,
-    `  WHERE email = ${sqlLiteral(email)}`,
-    "  RETURNING 1",
-    ")",
-    "SELECT COUNT(*) FROM promoted;",
-  ].join(" ");
-  const result = execFileSync(
-    "docker",
-    [
-      "exec",
-      "-i",
-      AUTH_POSTGRES_CONTAINER,
-      "psql",
-      "-U",
-      "auth_user",
-      "-d",
-      "auth_db",
-      "-t",
-      "-A",
-      "-c",
-      sql,
-    ],
-    { encoding: "utf8" },
-  ).trim();
-
-  if (result !== "1") {
-    throw new Error(`Failed to promote ${email} to organizer. Updated rows: ${result || "0"}`);
-  }
 }
 
 async function signup(page: Page, email: string) {
@@ -74,24 +29,8 @@ async function signup(page: Page, email: string) {
   }
 }
 
-async function signin(page: Page, email: string) {
-  await page.goto("/auth/signin");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL("/");
-}
-
-async function signout(page: Page) {
-  await page.getByRole("button", { name: /sign out/i }).click();
-  await page.waitForURL(/\/auth\/signin/);
-}
-
-async function signupAsOrganizer(page: Page, email: string) {
+async function signupAsCreator(page: Page, email: string) {
   await signup(page, email);
-  grantOrganizerRole(email);
-  await signout(page);
-  await signin(page, email);
 }
 
 async function fillInputAndTriggerChange(page: Page, selector: string, value: string) {
@@ -109,9 +48,10 @@ async function fillInputAndTriggerChange(page: Page, selector: string, value: st
 
 async function createAttachedSeatedTicket(page: Page) {
   // Phase 3: Create venue template, then create a seated ticket which auto-creates a plan
-  
+  const venueName = `GraphQL Venue ${Date.now()}`;
+
   await page.goto("/venues/new");
-  await page.getByLabel(/venue name/i).fill(`GraphQL Venue ${Date.now()}`);
+  await page.getByLabel(/venue name/i).fill(venueName);
   await page.getByLabel(/total capacity/i).fill("200");
   await page.getByLabel(/timezone/i).fill("America/New_York");
   await page.getByRole("button", { name: /create venue/i }).click();
@@ -134,8 +74,8 @@ async function createAttachedSeatedTicket(page: Page) {
   // This will auto-create and attach a seating plan
   await page.goto("/tickets/new");
 
-  // Click the seated ticket button (SEATED_MANUAL or similar)
-  const seatedButton = page.getByRole("button", { name: /seated/i });
+  // Select the manual seated flow in the ticket type picker.
+  const seatedButton = page.getByRole("button", { name: /manual assigned seating/i });
   await seatedButton.waitFor({ state: "visible", timeout: 5000 });
   await seatedButton.click();
 
@@ -146,11 +86,13 @@ async function createAttachedSeatedTicket(page: Page) {
   await fillInputAndTriggerChange(page, "#price", "55.00");
   await fillInputAndTriggerChange(page, "#startsAt", "2025-05-11T14:00");
   
-  // Select the venue we just created
-  // The venue selector should be a dropdown or similar
-  const venueSelect = page.locator("select[name='venueId'], [role='combobox'][aria-label*='venue' i]").first();
-  if (await venueSelect.isVisible()) {
-    await venueSelect.selectOption(venueId);
+  // Select the venue template we just created.
+  const venueCombobox = page.getByRole("combobox").first();
+  if (await venueCombobox.isVisible()) {
+    await venueCombobox.click();
+    await page.getByRole("option", { name: venueName }).click();
+  } else {
+    await fillInputAndTriggerChange(page, "#venueId", venueId);
   }
 
   const form = page.locator("form", { has: page.locator("#title") });
@@ -177,25 +119,10 @@ async function createAttachedSeatedTicket(page: Page) {
     throw new Error("Failed to derive ticket ID from ticket URL");
   }
 
-  // Fetch the ticket to get the auto-created plan ID
-  // For now, we'll query the GraphQL to get the plan
-  // But we can also assume it was created and visible on the ticket page
-  const token = await getTokenCookie(page);
-  
-  // Get the seating plan ID from the ticket via API call
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  const ticketRes = await fetch(`${baseUrl}/api/tickets/${ticketId}`, {
-    headers: {
-      Cookie: `token=${token}`,
-    },
-  });
-
-  if (!ticketRes.ok) {
-    throw new Error(`Failed to fetch ticket: ${ticketRes.status}`);
-  }
-
-  const ticketData = await ticketRes.json() as { seatingPlanId?: string };
-  const planId = ticketData.seatingPlanId;
+  const managePlanLink = page.getByRole("link", { name: /manage plan/i });
+  await managePlanLink.waitFor({ state: "visible", timeout: 15000 });
+  const managePlanHref = await managePlanLink.getAttribute("href");
+  const planId = managePlanHref?.split("/").at(-1);
   
   if (!planId) {
     throw new Error("Ticket does not have an auto-created seating plan");
@@ -339,7 +266,7 @@ test.describe("GraphQL Federation — Cross-Subgraph Resolution", () => {
 
   test("ticket query resolves seatingPlan across ticket and venue subgraphs", async ({ page, request }) => {
     const email = uniqueEmail("gql-venue");
-    await signupAsOrganizer(page, email);
+    await signupAsCreator(page, email);
     const { planId, ticketId } = await createAttachedSeatedTicket(page);
     const token = await getTokenCookie(page);
     expect(token).toBeTruthy();
@@ -375,7 +302,7 @@ test.describe("GraphQL Federation — Cross-Subgraph Resolution", () => {
     expect(body.errors).toBeUndefined();
     expect(body.data.ticket.id).toBe(ticketId);
     expect(body.data.ticket.seatingPlan.id).toBe(planId);
-    expect(body.data.ticket.seatingPlan.status).toBe("ACTIVE");
+    expect(body.data.ticket.seatingPlan.status).toBe("DRAFT");
     expect(body.data.ticket.seatingPlan.sections.length).toBeGreaterThan(0);
     expect(body.data.ticket.seatingPlan.sections[0].name).toBe("Floor A");
     expect(body.data.ticket.seatingPlan.sections[0].seats.length).toBeGreaterThan(0);

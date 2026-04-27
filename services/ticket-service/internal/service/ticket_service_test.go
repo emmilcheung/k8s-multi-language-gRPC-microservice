@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -190,64 +191,6 @@ func (m *mockRepo) FinalizeReservation(ctx context.Context, reservationID, order
 	return nil
 }
 
-// attachErr / detachErr allow per-call error injection distinct from the generic m.err.
-// These are separate fields so tests can inject targeted errors without breaking other methods.
-
-func (m *mockRepo) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string, outbox *repository.TicketOutboxEvent) error {
-	if m.err != nil {
-		return m.err
-	}
-	t, ok := m.tickets[ticketID]
-	if !ok {
-		return repository.ErrTicketNotFound
-	}
-	if t.UserID != userID {
-		return repository.ErrOwnership
-	}
-	if t.SeatingPlanID != "" {
-		return repository.ErrSeatingPlanAlreadyAttached
-	}
-	t.SeatingPlanID = planID
-	t.TicketType = ticketType
-	t.Version++
-	if outbox != nil {
-		outbox.Payload.ID = t.ID
-		outbox.Payload.Title = t.Title
-		outbox.Payload.Price = t.Price
-		outbox.Payload.UserID = t.UserID
-		outbox.Payload.SeatingPlanID = t.SeatingPlanID
-		outbox.Payload.TicketType = t.TicketType
-		outbox.Payload.Version = t.Version
-		t.Outbox = append(t.Outbox, *outbox)
-	}
-	return nil
-}
-
-func (m *mockRepo) DetachSeatingPlan(ctx context.Context, ticketID, userID string, outbox *repository.TicketOutboxEvent) error {
-	if m.err != nil {
-		return m.err
-	}
-	t, ok := m.tickets[ticketID]
-	if !ok {
-		return repository.ErrTicketNotFound
-	}
-	if t.UserID != userID {
-		return repository.ErrOwnership
-	}
-	t.SeatingPlanID = ""
-	t.TicketType = ""
-	t.Version++
-	if outbox != nil {
-		outbox.Payload.ID = t.ID
-		outbox.Payload.Title = t.Title
-		outbox.Payload.Price = t.Price
-		outbox.Payload.UserID = t.UserID
-		outbox.Payload.Version = t.Version
-		t.Outbox = append(t.Outbox, *outbox)
-	}
-	return nil
-}
-
 // --- Mock event publisher ---
 
 type mockPublisher struct {
@@ -327,6 +270,111 @@ func (*mockVenueClient) GetSeatingPlan(_ context.Context, req *venuev1.GetSeatin
 	return &venuev1.GetSeatingPlanResponse{
 		PlanId:         req.PlanId,
 		AssignmentMode: assignmentMode,
+	}, nil
+}
+
+// mockVenueClientUnavailable simulates venue-service being unavailable
+type mockVenueClientUnavailable struct{}
+
+func (*mockVenueClientUnavailable) ReserveHeldSeats(_ context.Context, _ *venuev1.ReserveHeldSeatsRequest, _ ...grpc.CallOption) (*venuev1.ReserveHeldSeatsResponse, error) {
+	return nil, fmt.Errorf("%w: connection refused", service.ErrVenueServiceUnavailable)
+}
+
+func (*mockVenueClientUnavailable) AutoAssignAndReserve(_ context.Context, _ *venuev1.AutoAssignAndReserveRequest, _ ...grpc.CallOption) (*venuev1.AutoAssignAndReserveResponse, error) {
+	return nil, fmt.Errorf("%w: connection refused", service.ErrVenueServiceUnavailable)
+}
+
+func (*mockVenueClientUnavailable) ReleaseSeatReservation(_ context.Context, _ *venuev1.ReleaseSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.ReleaseSeatReservationResponse, error) {
+	return nil, fmt.Errorf("%w: connection refused", service.ErrVenueServiceUnavailable)
+}
+
+func (*mockVenueClientUnavailable) FinalizeSeatReservation(_ context.Context, _ *venuev1.FinalizeSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.FinalizeSeatReservationResponse, error) {
+	return nil, fmt.Errorf("%w: connection refused", service.ErrVenueServiceUnavailable)
+}
+
+func (*mockVenueClientUnavailable) GetSeatingPlan(_ context.Context, _ *venuev1.GetSeatingPlanRequest, _ ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error) {
+	return nil, fmt.Errorf("%w: unavailable", service.ErrVenueServiceUnavailable)
+}
+
+// mockVenueClientTimeout simulates venue-service timing out
+type mockVenueClientTimeout struct{}
+
+func (*mockVenueClientTimeout) ReserveHeldSeats(_ context.Context, _ *venuev1.ReserveHeldSeatsRequest, _ ...grpc.CallOption) (*venuev1.ReserveHeldSeatsResponse, error) {
+	return nil, fmt.Errorf("%w: deadline exceeded", service.ErrVenueServiceTimeout)
+}
+
+func (*mockVenueClientTimeout) AutoAssignAndReserve(_ context.Context, _ *venuev1.AutoAssignAndReserveRequest, _ ...grpc.CallOption) (*venuev1.AutoAssignAndReserveResponse, error) {
+	return nil, fmt.Errorf("%w: deadline exceeded", service.ErrVenueServiceTimeout)
+}
+
+func (*mockVenueClientTimeout) ReleaseSeatReservation(_ context.Context, _ *venuev1.ReleaseSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.ReleaseSeatReservationResponse, error) {
+	return nil, fmt.Errorf("%w: deadline exceeded", service.ErrVenueServiceTimeout)
+}
+
+func (*mockVenueClientTimeout) FinalizeSeatReservation(_ context.Context, _ *venuev1.FinalizeSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.FinalizeSeatReservationResponse, error) {
+	return nil, fmt.Errorf("%w: deadline exceeded", service.ErrVenueServiceTimeout)
+}
+
+func (*mockVenueClientTimeout) GetSeatingPlan(_ context.Context, _ *venuev1.GetSeatingPlanRequest, _ ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error) {
+	return nil, fmt.Errorf("%w: deadline exceeded", service.ErrVenueServiceTimeout)
+}
+
+// mockVenueClientEmptyMode simulates venue-service returning empty assignment mode
+type mockVenueClientEmptyMode struct{}
+
+func (*mockVenueClientEmptyMode) ReserveHeldSeats(_ context.Context, _ *venuev1.ReserveHeldSeatsRequest, _ ...grpc.CallOption) (*venuev1.ReserveHeldSeatsResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientEmptyMode) AutoAssignAndReserve(_ context.Context, _ *venuev1.AutoAssignAndReserveRequest, _ ...grpc.CallOption) (*venuev1.AutoAssignAndReserveResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientEmptyMode) ReleaseSeatReservation(_ context.Context, _ *venuev1.ReleaseSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.ReleaseSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientEmptyMode) FinalizeSeatReservation(_ context.Context, _ *venuev1.FinalizeSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.FinalizeSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientEmptyMode) GetSeatingPlan(_ context.Context, _ *venuev1.GetSeatingPlanRequest, _ ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error) {
+	return &venuev1.GetSeatingPlanResponse{
+		PlanId:         "plan-empty",
+		AssignmentMode: "",
+	}, nil
+}
+
+type mockVenueClientInactiveCurrent struct{}
+
+func (*mockVenueClientInactiveCurrent) ReserveHeldSeats(_ context.Context, _ *venuev1.ReserveHeldSeatsRequest, _ ...grpc.CallOption) (*venuev1.ReserveHeldSeatsResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientInactiveCurrent) AutoAssignAndReserve(_ context.Context, _ *venuev1.AutoAssignAndReserveRequest, _ ...grpc.CallOption) (*venuev1.AutoAssignAndReserveResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientInactiveCurrent) ReleaseSeatReservation(_ context.Context, _ *venuev1.ReleaseSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.ReleaseSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientInactiveCurrent) FinalizeSeatReservation(_ context.Context, _ *venuev1.FinalizeSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.FinalizeSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientInactiveCurrent) GetSeatingPlan(_ context.Context, req *venuev1.GetSeatingPlanRequest, _ ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error) {
+	if req.PlanId == "plan-1" {
+		return &venuev1.GetSeatingPlanResponse{
+			PlanId:         req.PlanId,
+			Status:         "inactive",
+			AssignmentMode: "manual",
+		}, nil
+	}
+	return &venuev1.GetSeatingPlanResponse{
+		PlanId:         req.PlanId,
+		Status:         "draft",
+		AssignmentMode: "manual",
 	}, nil
 }
 
@@ -541,156 +589,223 @@ func TestUpdateTicket_ShouldReturnNotFoundWhenTicketMissing(t *testing.T) {
 	assert.True(t, errors.Is(err, repository.ErrTicketNotFound))
 }
 
-// ── AttachSeatingPlan ─────────────────────────────────────────────────────────
+// --- Seating plan update tests ---
 
-func TestAttachSeatingPlan_ShouldAttachAndStoreOutboxEvent(t *testing.T) {
+func TestUpdateTicket_ShouldAttachSeatingPlanWhenProvidedAndTicketHasNone(t *testing.T) {
 	repo := newMockRepo()
 	pub := &mockPublisher{}
 	svc := newSvc(repo, pub)
 
-	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "50.00", UserID: "owner-1"})
+	// Create a ticket without seating plan
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "100.00", UserID: "user-1"})
 
-	ticket, err := svc.AttachSeatingPlan(context.Background(), service.AttachSeatingPlanInput{
-		TicketID: "t1",
-		PlanID:   "plan-uuid-1",
-		UserID:   "owner-1",
+	// Update with seating plan
+	ticket, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "manual-plan",
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, "plan-uuid-1", ticket.SeatingPlanID)
+	assert.Equal(t, "manual-plan", ticket.SeatingPlanID)
 	assert.Equal(t, "SEATED_MANUAL", ticket.TicketType)
-	require.Len(t, ticket.Outbox, 1)
-	assert.Equal(t, repository.OutboxEventTypeTicketUpdated, ticket.Outbox[len(ticket.Outbox)-1].Type)
-	assert.Equal(t, "plan-uuid-1", ticket.Outbox[len(ticket.Outbox)-1].Payload.SeatingPlanID)
-	assert.Equal(t, "SEATED_MANUAL", ticket.Outbox[len(ticket.Outbox)-1].Payload.TicketType)
-	assert.Empty(t, pub.updatedEvents)
+	assert.Len(t, ticket.Outbox, 1)
 }
 
-func TestAttachSeatingPlan_ShouldStoreAutoAssignedTicketTypeInOutbox(t *testing.T) {
+func TestUpdateTicket_ShouldAttachSeatingPlanWithAutoAssignment(t *testing.T) {
 	repo := newMockRepo()
 	pub := &mockPublisher{}
 	svc := newSvc(repo, pub)
 
-	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "50.00", UserID: "owner-1"})
+	// Create a ticket without seating plan
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "100.00", UserID: "user-1"})
 
-	ticket, err := svc.AttachSeatingPlan(context.Background(), service.AttachSeatingPlanInput{
-		TicketID: "t1",
-		PlanID:   "auto-plan",
-		UserID:   "owner-1",
+	// Update with auto-assignment plan
+	ticket, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "auto-plan",
 	})
 
 	require.NoError(t, err)
+	assert.Equal(t, "auto-plan", ticket.SeatingPlanID)
 	assert.Equal(t, "SEATED_AUTO", ticket.TicketType)
-	require.Len(t, ticket.Outbox, 1)
-	assert.Equal(t, "SEATED_AUTO", ticket.Outbox[len(ticket.Outbox)-1].Payload.TicketType)
-	assert.Empty(t, pub.updatedEvents)
 }
 
-func TestAttachSeatingPlan_ShouldReturnUnauthorizedWhenNotOwner(t *testing.T) {
+func TestUpdateTicket_ShouldReturnErrorWhenTryingToReplaceDifferentSeatingPlan(t *testing.T) {
 	repo := newMockRepo()
 	svc := newSvc(repo, &mockPublisher{})
 
-	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "50.00", UserID: "owner-1"})
-
-	_, err := svc.AttachSeatingPlan(context.Background(), service.AttachSeatingPlanInput{
-		TicketID: "t1",
-		PlanID:   "plan-uuid-1",
-		UserID:   "attacker",
-	})
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, service.ErrUnauthorized))
-}
-
-func TestAttachSeatingPlan_ShouldReturnNotFoundWhenTicketMissing(t *testing.T) {
-	repo := newMockRepo()
-	svc := newSvc(repo, &mockPublisher{})
-
-	_, err := svc.AttachSeatingPlan(context.Background(), service.AttachSeatingPlanInput{
-		TicketID: "nonexistent",
-		PlanID:   "plan-uuid-1",
-		UserID:   "owner-1",
-	})
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, repository.ErrTicketNotFound))
-}
-
-func TestAttachSeatingPlan_ShouldReturnErrorWhenPlanAlreadyAttached(t *testing.T) {
-	repo := newMockRepo()
-	svc := newSvc(repo, &mockPublisher{})
-
-	// Seed a ticket that already has a seating plan.
+	// Create a ticket with seating plan already attached
 	repo.tickets["t1"] = &repository.Ticket{
-		ID: "t1", Title: "Concert", Price: "50.00", UserID: "owner-1",
-		SeatingPlanID: "existing-plan", Quota: 1, MaxPerUser: 1, Version: 1,
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-1",
+		TicketType:    "SEATED_MANUAL",
+		Quota:         1,
+		MaxPerUser:    1,
+		Version:       1,
 	}
 
-	_, err := svc.AttachSeatingPlan(context.Background(), service.AttachSeatingPlanInput{
-		TicketID: "t1",
-		PlanID:   "new-plan",
-		UserID:   "owner-1",
+	// Try to update with a different seating plan
+	_, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-2",
 	})
 
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, repository.ErrSeatingPlanAlreadyAttached))
 }
 
-// ── DetachSeatingPlan ─────────────────────────────────────────────────────────
-
-func TestDetachSeatingPlan_ShouldDetachAndStoreOutboxEvent(t *testing.T) {
+func TestUpdateTicket_ShouldAllowIdempotentSeatingPlanReattachment(t *testing.T) {
 	repo := newMockRepo()
 	pub := &mockPublisher{}
 	svc := newSvc(repo, pub)
 
-	// Seed a ticket with a seating plan already attached.
+	// Create a ticket with seating plan already attached
 	repo.tickets["t1"] = &repository.Ticket{
-		ID: "t1", Title: "Concert", Price: "50.00", UserID: "owner-1",
-		SeatingPlanID: "plan-uuid-1", TicketType: "SEATED_MANUAL", Quota: 1, MaxPerUser: 1, Version: 1,
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-1",
+		TicketType:    "SEATED_MANUAL",
+		Quota:         1,
+		MaxPerUser:    1,
+		Version:       1,
 	}
 
-	ticket, err := svc.DetachSeatingPlan(context.Background(), service.DetachSeatingPlanInput{
-		TicketID: "t1",
-		UserID:   "owner-1",
+	// Resend the same plan ID (idempotent)
+	ticket, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
+		ID:            "t1",
+		Title:         "Concert Updated",
+		Price:         "150.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-1",
 	})
 
 	require.NoError(t, err)
-	assert.Empty(t, ticket.SeatingPlanID)
-	assert.Empty(t, ticket.TicketType)
-	require.Len(t, ticket.Outbox, 1)
-	assert.Equal(t, repository.OutboxEventTypeTicketUpdated, ticket.Outbox[len(ticket.Outbox)-1].Type)
-	assert.Empty(t, ticket.Outbox[len(ticket.Outbox)-1].Payload.SeatingPlanID)
-	assert.Empty(t, ticket.Outbox[len(ticket.Outbox)-1].Payload.TicketType)
-	assert.Empty(t, pub.updatedEvents)
+	assert.Equal(t, "plan-1", ticket.SeatingPlanID)
+	assert.Equal(t, "SEATED_MANUAL", ticket.TicketType)
+	assert.Equal(t, "Concert Updated", ticket.Title)
+	assert.Equal(t, "150.00", ticket.Price)
 }
 
-func TestDetachSeatingPlan_ShouldReturnUnauthorizedWhenNotOwner(t *testing.T) {
+func TestUpdateTicket_ShouldAllowReplacingInactiveSeatingPlan(t *testing.T) {
 	repo := newMockRepo()
-	svc := newSvc(repo, &mockPublisher{})
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientInactiveCurrent{})
 
 	repo.tickets["t1"] = &repository.Ticket{
-		ID: "t1", Title: "Concert", Price: "50.00", UserID: "owner-1",
-		SeatingPlanID: "plan-uuid-1", Quota: 1, MaxPerUser: 1, Version: 1,
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-1",
+		TicketType:    "SEATED_MANUAL",
+		Quota:         1,
+		MaxPerUser:    1,
+		Version:       1,
 	}
 
-	_, err := svc.DetachSeatingPlan(context.Background(), service.DetachSeatingPlanInput{
-		TicketID: "t1",
-		UserID:   "attacker",
+	ticket, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-2",
 	})
 
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, service.ErrUnauthorized))
+	require.NoError(t, err)
+	assert.Equal(t, "plan-2", ticket.SeatingPlanID)
+	assert.Equal(t, "SEATED_MANUAL", ticket.TicketType)
 }
 
-func TestDetachSeatingPlan_ShouldReturnNotFoundWhenTicketMissing(t *testing.T) {
+func TestUpdateTicket_ShouldReturnUnavailableWhenVenueServiceUnreachable(t *testing.T) {
 	repo := newMockRepo()
-	svc := newSvc(repo, &mockPublisher{})
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientUnavailable{})
 
-	_, err := svc.DetachSeatingPlan(context.Background(), service.DetachSeatingPlanInput{
-		TicketID: "nonexistent",
-		UserID:   "owner-1",
+	// Create a ticket without seating plan
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "100.00", UserID: "user-1"})
+
+	// Try to update with seating plan when venue-service is unavailable
+	_, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-1",
 	})
 
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, repository.ErrTicketNotFound))
+	assert.True(t, errors.Is(err, service.ErrVenueServiceUnavailable))
+}
+
+func TestUpdateTicket_ShouldReturnTimeoutWhenVenueServiceTimesOut(t *testing.T) {
+	repo := newMockRepo()
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientTimeout{})
+
+	// Create a ticket without seating plan
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "100.00", UserID: "user-1"})
+
+	// Try to update with seating plan when venue-service times out
+	_, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-1",
+	})
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, service.ErrVenueServiceTimeout))
+}
+
+func TestUpdateTicket_ShouldUseFallbackTicketTypeWhenVenueReturnsEmptyMode(t *testing.T) {
+	repo := newMockRepo()
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientEmptyMode{})
+
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "100.00", UserID: "user-1"})
+
+	ticket, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-empty",
+		TicketType:    "SEATED_AUTO",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "plan-empty", ticket.SeatingPlanID)
+	assert.Equal(t, "SEATED_AUTO", ticket.TicketType)
+	assert.Len(t, ticket.Outbox, 1)
+}
+
+func TestUpdateTicket_ShouldUseEmptyTicketTypeWhenVenueReturnsEmptyModeAndNoFallback(t *testing.T) {
+	repo := newMockRepo()
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientEmptyMode{})
+
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "100.00", UserID: "user-1"})
+
+	ticket, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-empty",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "plan-empty", ticket.SeatingPlanID)
+	assert.Equal(t, "", ticket.TicketType)
+	assert.Len(t, ticket.Outbox, 1)
 }

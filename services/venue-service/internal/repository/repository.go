@@ -79,11 +79,11 @@ type Venue struct {
 }
 
 // SeatingPlan links a set of sections to a specific ticket.
-// ticket_id is nullable during draft creation and required before activation.
+// ticket_id is required and must be set at creation (ticket-first model).
 type SeatingPlan struct {
 	ID               string     `db:"id"               json:"id"`
 	VenueID          string     `db:"venue_id"         json:"venueId"`
-	TicketID         string     `db:"ticket_id"        json:"ticketId"` // empty until attached
+	TicketID         string     `db:"ticket_id"        json:"ticketId"` // required at creation
 	OrganizerID      string     `db:"organizer_id"     json:"organizerId"`
 	Name             string     `db:"name"             json:"name"`
 	Status           PlanStatus `db:"status"           json:"status"`
@@ -213,9 +213,8 @@ type PlanRepository interface {
 	// corresponding index.
 	FindByIDs(ctx context.Context, ids []string) ([]*SeatingPlan, error)
 	ListByVenue(ctx context.Context, venueID, organizerID string) ([]*SeatingPlan, error)
-	ListByTicket(ctx context.Context, ticketID string) ([]*SeatingPlan, error)
+	ListByTicket(ctx context.Context, ticketID, organizerID string) ([]*SeatingPlan, error)
 	ListActivePlans(ctx context.Context) ([]*SeatingPlan, error)
-	AttachTicket(ctx context.Context, planID, ticketID string, expectedVersion int) error
 	Activate(ctx context.Context, planID string, expectedVersion int) error
 	Deactivate(ctx context.Context, planID, organizerID string) error
 	Update(ctx context.Context, p *SeatingPlan) error

@@ -5,13 +5,15 @@
 import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { serverApi } from "@/lib/api";
+import { ApiError, serverApi } from "@/lib/api";
 import { activatePlan, deactivatePlan, createPriceTier, fetchPriceTiers } from "@/app/actions/venues";
+import { replaceInactivePlan } from "@/app/actions/tickets";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { SeatingPlanCanvas } from "@/components/seating-plan-canvas";
 import { ActivatePlanButton } from "@/components/activate-plan-button";
 import { DeactivatePlanButton } from "@/components/deactivate-plan-button";
+import { ReplacePlanButton } from "@/components/replace-plan-button";
 import { PriceTierForm } from "@/components/price-tier-form";
 import { cn } from "@/lib/utils";
 import {
@@ -21,11 +23,44 @@ import {
   Users,
   Grid3X3,
 } from "lucide-react";
-import type { SeatingPlan, Section, PriceTier } from "@/lib/types";
+import type { SeatingPlan, Section, PriceTier, Ticket } from "@/lib/types";
 import type { PlanState } from "@/app/actions/venues";
 
 interface Props {
   params: Promise<{ ticketId: string; planId: string }>;
+}
+
+const TICKET_PLAN_LOAD_RETRY_DELAYS_MS = [250, 500, 750, 1000, 1250, 1500];
+
+async function loadTicketAndPlan(ticketId: string, planId: string) {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= TICKET_PLAN_LOAD_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const [ticket, plan, sectionsData, tiers] = await Promise.all([
+        serverApi<Ticket>(`/api/tickets/${ticketId}`),
+        serverApi<SeatingPlan>(`/api/seating-plans/${planId}`),
+        serverApi<{ sections: Section[] }>(`/api/seating-plans/${planId}/sections`),
+        fetchPriceTiers(planId),
+      ]);
+      return { ticket, plan, sectionsData, tiers };
+    } catch (error) {
+      lastError = error;
+      const status = error instanceof ApiError ? error.status : null;
+      const shouldRetry =
+        status === 404 ||
+        (status !== null && status >= 500) ||
+        !(error instanceof ApiError);
+      if (!shouldRetry || attempt === TICKET_PLAN_LOAD_RETRY_DELAYS_MS.length) {
+        throw error;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, TICKET_PLAN_LOAD_RETRY_DELAYS_MS[attempt])
+      );
+    }
+  }
+
+  throw lastError ?? new Error("Failed to load ticket plan.");
 }
 
 const planStatusColor: Record<SeatingPlan["status"], string> = {
@@ -41,16 +76,16 @@ export default async function TicketPlanDetailPage({ params }: Props) {
 
   const { ticketId, planId } = await params;
 
+  let ticket: Ticket;
   let plan: SeatingPlan;
   let sectionsData: { sections: Section[] };
   let tiers: PriceTier[] = [];
   try {
-    [plan, sectionsData, tiers] = await Promise.all([
-      serverApi<SeatingPlan>(`/api/seating-plans/${planId}`),
-      serverApi<{ sections: Section[] }>(`/api/seating-plans/${planId}/sections`),
-      fetchPriceTiers(planId),
-    ]);
-  } catch {
+    ({ ticket, plan, sectionsData, tiers } = await loadTicketAndPlan(ticketId, planId));
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) {
+      throw error;
+    }
     notFound();
   }
 
@@ -61,21 +96,31 @@ export default async function TicketPlanDetailPage({ params }: Props) {
 
   const sections = sectionsData?.sections ?? [];
 
-  // Wrapper actions that bind the ticket context
-  const addTierAction = async (_prev: PlanState, formData: FormData) => {
-    return createPriceTier(planId, "", ticketId, _prev, formData);
-  };
-
-  const activatePlanAction = async (_prev: PlanState, formData: FormData) => {
-    return activatePlan(planId, "", ticketId, _prev, formData);
-  };
-
-  const deactivatePlanAction = async (_prev: PlanState, formData: FormData) => {
-    return deactivatePlan(planId, "", ticketId, _prev, formData);
-  };
+  const addTierAction = createPriceTier.bind(null, planId, "", ticketId) as (
+    prev: PlanState,
+    formData: FormData
+  ) => Promise<PlanState>;
+  const activatePlanAction = activatePlan.bind(null, planId, "", ticketId) as (
+    prev: PlanState,
+    formData: FormData
+  ) => Promise<PlanState>;
+  const deactivatePlanAction = deactivatePlan.bind(null, planId, "", ticketId) as (
+    prev: PlanState,
+    formData: FormData
+  ) => Promise<PlanState>;
+  const replacePlanAction = replaceInactivePlan.bind(
+    null,
+    ticketId,
+    planId,
+    ticket.title,
+    ticket.price,
+    ticket.ticketType ?? (plan.assignmentMode === "auto" ? "SEATED_AUTO" : "SEATED_MANUAL")
+  );
 
   const isDraft = plan.status === "draft";
   const isActive = plan.status === "active";
+  const isInactive = plan.status === "inactive";
+  const canActivate = (isDraft || isInactive) && sections.length > 0;
 
   return (
     <div className="flex flex-col gap-8 max-w-5xl mx-auto">
@@ -119,13 +164,25 @@ export default async function TicketPlanDetailPage({ params }: Props) {
 
         {/* Activate / Deactivate buttons */}
         <div className="flex gap-3 pt-2">
-          {isDraft && sections.length > 0 && (
-            <ActivatePlanButton action={activatePlanAction} />
+          {canActivate && (
+            <ActivatePlanButton
+              action={activatePlanAction}
+              label={isInactive ? "Reactivate Plan" : "Activate Plan"}
+            />
           )}
           {isActive && (
             <DeactivatePlanButton action={deactivatePlanAction} />
           )}
+          {isInactive && (
+            <ReplacePlanButton action={replacePlanAction} />
+          )}
         </div>
+        {isInactive && (
+          <p className="text-sm text-muted-foreground">
+            Inactive plans stay attached for history, but you can reactivate this one or create a fresh
+            replacement plan for the same ticket.
+          </p>
+        )}
       </div>
 
       {/* Canvas for draft plans */}
