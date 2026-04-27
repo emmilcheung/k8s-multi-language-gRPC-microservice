@@ -1267,6 +1267,8 @@ jobs:
   # Succeeds when every triggered job succeeded or was skipped.
   # Fails when any triggered job failed or was cancelled.
   # Configure branch protection to require: "ci / CI"
+  # Compatibility note: some existing branch protection rules still require
+  # "ci / CIExpected". Keep the alias job below until those rules are updated.
   # Note: deploy-* jobs are NOT included here — they run after the gate and are
   # optional (conditional on AWS_DEPLOY_ROLE_ARN). Only service CI jobs are gated.
   ci:
@@ -1296,3 +1298,18 @@ jobs:
             sys.exit(1)
           print('All jobs passed or were skipped.')
           "
+
+  ci-expected:
+    name: CIExpected
+    runs-on: ubuntu-24.04
+    if: always()
+    needs: [ci]
+    steps:
+      - name: Mirror summary gate result for legacy branch protection
+        run: |
+          result='${{ needs.ci.result }}'
+          if [ "$result" != "success" ]; then
+            echo "Legacy CIExpected gate failed because ci result was: $result"
+            exit 1
+          fi
+          echo "Legacy CIExpected gate passed."
