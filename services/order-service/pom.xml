@@ -50,7 +50,7 @@
         <artifactId>jackson-annotations</artifactId>
         <version>3.1.1</version>
       </dependency>
-      <!-- GHSA-72hv-8253-57qq: legacy fasterxml jackson-core 2.x (from transitive deps e.g. redisson) -->
+      <!-- GHSA-72hv-8253-57qq: legacy fasterxml jackson-core 2.x (from transitive deps) -->
       <!-- jackson-annotations is upgraded to 2.21: SB4 BOM defaults to 2.20, but
            tools.jackson.databind:3.1.1 (Jackson 3.x) references JsonSerializeAs which was
            only added in jackson-annotations 2.21. jackson-core/databind stay at 2.18.6 for CVE fix. -->
@@ -197,12 +197,6 @@
     </dependency>
 
     <!-- ── Jackson extras — jackson-datatype-jsr310 merged into jackson-databind in Jackson 3 ── -->
-
-    <dependency>
-      <groupId>org.redisson</groupId>
-      <artifactId>redisson-spring-boot-starter</artifactId>
-      <version>4.0.0</version>
-    </dependency>
 
     <!-- ── GraphQL Federation subgraph ─────────────────────────────────────── -->
     <dependency>
