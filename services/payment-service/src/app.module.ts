@@ -32,7 +32,10 @@ const envSchema = z
     X_USER_ID_SIGNING_KEY: z.string().optional().default(''),
   })
   .superRefine((config, ctx) => {
-    if (config.NODE_ENV === 'production' && (!config.X_USER_ID_SIGNING_KEY || config.X_USER_ID_SIGNING_KEY.length < 32)) {
+    if (
+      config.NODE_ENV === 'production' &&
+      (!config.X_USER_ID_SIGNING_KEY || config.X_USER_ID_SIGNING_KEY.length < 32)
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['X_USER_ID_SIGNING_KEY'],
@@ -103,7 +106,11 @@ function otelMixin(): Record<string, string> {
               : undefined,
           // Inject OTel traceId + spanId into every log line (O-02)
           mixin: otelMixin,
-          redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-user-id-sig"]'],
+          redact: [
+            'req.headers.authorization',
+            'req.headers.cookie',
+            'req.headers["x-user-id-sig"]',
+          ],
           serializers: {
             req(req: { method: string; url: string }) {
               return { method: req.method, url: req.url };

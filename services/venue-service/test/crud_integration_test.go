@@ -57,7 +57,6 @@ func TestCRUD_ShouldSupportFullVenuePlanLifecycle(t *testing.T) {
 
 	const organizerID = "00000000-0000-0000-0000-000000000001"
 	const ticketID = "00000000-0000-0000-0000-000000000002"
-	const otherTicketID = "00000000-0000-0000-0000-000000000003"
 
 	// ── Step 1: create venue ─────────────────────────────────────────────────
 	v := &repository.Venue{

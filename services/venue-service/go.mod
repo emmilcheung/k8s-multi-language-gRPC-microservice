@@ -7,8 +7,9 @@ require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/confluentinc/confluent-kafka-go/v2 v2.13.3
 	github.com/golang-migrate/migrate/v4 v4.18.3
+	github.com/graph-gophers/dataloader/v7 v7.1.3
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.0
-	github.com/jackc/pgx/v5 v5.7.5
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/labstack/echo-contrib v0.50.1
 	github.com/labstack/echo/v4 v4.15.1
 	github.com/org/ticketing/libs/grpc-stubs/go v0.0.0
@@ -57,7 +58,6 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
-	github.com/graph-gophers/dataloader/v7 v7.1.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect

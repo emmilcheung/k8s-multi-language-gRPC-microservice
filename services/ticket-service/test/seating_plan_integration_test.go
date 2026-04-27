@@ -2,9 +2,7 @@ package integration_test
 
 import (
 "context"
-"encoding/json"
 "net"
-"net/http"
 "testing"
 "time"
 
@@ -79,11 +77,4 @@ Quantity:      1,
 
 require.Error(t, grpcErr)
 assert.Equal(t, codes.FailedPrecondition, status.Code(grpcErr))
-}
-
-// ── Local helpers ─────────────────────────────────────────────────────────────
-
-// decodeJSON decodes the response body as JSON into dst.
-func decodeJSON(resp *http.Response, dst interface{}) error {
-return json.NewDecoder(resp.Body).Decode(dst)
 }
