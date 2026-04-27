@@ -95,11 +95,15 @@ func TestRelayProcessClaimedEvent_ShouldAcknowledgePublishedEvent(t *testing.T) 
 			Type:       repository.OutboxEventTypeTicketCreated,
 			ClaimToken: "claim-1",
 			Payload: repository.TicketOutboxPayload{
-				ID:      "ticket-1",
-				Title:   "Concert",
-				Price:   "10.00",
-				UserID:  "seller-1",
-				Version: 1,
+				ID:         "ticket-1",
+				Title:      "Concert",
+				Price:      "10.00",
+				UserID:     "seller-1",
+				Quota:      50,
+				Reserved:   5,
+				Sold:       10,
+				MaxPerUser: 4,
+				Version:    1,
 			},
 		},
 	}
@@ -108,6 +112,10 @@ func TestRelayProcessClaimedEvent_ShouldAcknowledgePublishedEvent(t *testing.T) 
 	require.NoError(t, err)
 	require.Len(t, producer.created, 1)
 	assert.Equal(t, "ticket-1", producer.created[0].ID)
+	assert.Equal(t, 50, producer.created[0].Quota)
+	assert.Equal(t, 5, producer.created[0].Reserved)
+	assert.Equal(t, 10, producer.created[0].Sold)
+	assert.Equal(t, 4, producer.created[0].MaxPerUser)
 	assert.Empty(t, producer.updated)
 	require.Len(t, repo.acked, 1)
 	assert.Equal(t, "ticket-1", repo.acked[0].ticketID)

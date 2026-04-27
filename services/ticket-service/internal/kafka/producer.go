@@ -48,6 +48,10 @@ type TicketEventData struct {
 	UserID        string     `json:"userId"`
 	SeatingPlanID string     `json:"seatingPlanId,omitempty"`
 	TicketType    string     `json:"ticketType,omitempty"`
+	Quota         int        `json:"quota"`
+	Reserved      int        `json:"reserved"`
+	Sold          int        `json:"sold"`
+	MaxPerUser    int        `json:"maxPerUser"`
 	Version       int        `json:"version"`
 	Event         *EventData `json:"event,omitempty"` // WS8: nullable event metadata
 }

@@ -121,6 +121,10 @@ func (r *Relay) publish(ctx context.Context, event repository.TicketOutboxEvent)
 		UserID:        event.Payload.UserID,
 		SeatingPlanID: event.Payload.SeatingPlanID,
 		TicketType:    event.Payload.TicketType,
+		Quota:         event.Payload.Quota,
+		Reserved:      event.Payload.Reserved,
+		Sold:          event.Payload.Sold,
+		MaxPerUser:    event.Payload.MaxPerUser,
 		Version:       event.Payload.Version,
 	}
 	if event.Payload.Event != nil {
