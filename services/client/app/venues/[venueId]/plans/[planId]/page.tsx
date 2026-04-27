@@ -55,6 +55,11 @@ export default async function PlanDetailPage({ params }: Props) {
     notFound();
   }
 
+  // If plan is attached to a ticket, redirect to ticket-scoped management
+  if (plan.ticketId) {
+    redirect(`/tickets/${plan.ticketId}/plans/${plan.id}`);
+  }
+
   const sections = sectionsData?.sections ?? [];
 
   // Wrapper actions that bind the venue context (no ticketId for backward compat)

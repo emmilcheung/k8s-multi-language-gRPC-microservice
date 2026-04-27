@@ -168,6 +168,17 @@ export default async function VenueDetailPage({ params }: Props) {
                   <Badge className={cn("text-xs", planStatusColor[plan.status])}>
                     {plan.status}
                   </Badge>
+                  {plan.ticketId && (
+                    <Link
+                      href={`/tickets/${plan.ticketId}/plans/${plan.id}`}
+                      className={cn(
+                        buttonVariants({ variant: "ghost", size: "sm" }),
+                        "gap-1 text-xs"
+                      )}
+                    >
+                      Manage
+                    </Link>
+                  )}
                 </div>
               </div>
             ))}

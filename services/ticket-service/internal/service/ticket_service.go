@@ -42,12 +42,14 @@ type CreateTicketInput struct {
 
 // UpdateTicketInput is the validated input for updating a ticket.
 // SeatingPlanID is optional; if provided and non-empty, attempts to attach a seating plan to the ticket.
+// TicketType is optional; if provided, used as a fallback when venue-service returns empty assignment mode.
 type UpdateTicketInput struct {
 	ID            string
 	Title         string
 	Price         string
 	UserID        string // used for ownership check
 	SeatingPlanID string // optional; attach plan if non-empty
+	TicketType    string // optional; fallback if venue-service returns empty assignment mode
 }
 
 // ErrUnauthorized is returned when a user tries to modify a ticket they don't own.
@@ -224,8 +226,14 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 			case "manual":
 				ticketType = "SEATED_MANUAL"
 			default:
-				s.log.Warn("unknown assignment mode from venue-service", zap.String("mode", planResp.AssignmentMode))
-				ticketType = ""
+				// If venue-service returns empty/unknown assignment mode, fallback to caller-provided ticketType
+				if input.TicketType != "" && (input.TicketType == "SEATED_AUTO" || input.TicketType == "SEATED_MANUAL") {
+					ticketType = input.TicketType
+					s.log.Info("using fallback ticketType from request", zap.String("ticketType", ticketType), zap.String("planId", input.SeatingPlanID))
+				} else {
+					s.log.Warn("unknown assignment mode from venue-service", zap.String("mode", planResp.AssignmentMode))
+					ticketType = ""
+				}
 			}
 
 			ticket.SeatingPlanID = input.SeatingPlanID

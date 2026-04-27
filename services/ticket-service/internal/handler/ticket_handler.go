@@ -24,9 +24,9 @@ var decimalPriceRE = regexp.MustCompile(`^\d{1,15}(\.\d{1,4})?$`)
 
 // TicketHandler handles HTTP requests for ticket operations.
 type TicketHandler struct {
-	svc                    *service.TicketService
-	log                    *zap.Logger
-	signatureValidator     *security.UserIDSignatureValidator
+	svc                *service.TicketService
+	log                *zap.Logger
+	signatureValidator *security.UserIDSignatureValidator
 }
 
 // NewTicketHandler creates a new TicketHandler.
@@ -64,6 +64,7 @@ type updateTicketRequest struct {
 	Title         string `json:"title"`
 	Price         string `json:"price"`
 	SeatingPlanID string `json:"seatingPlanId,omitempty"`
+	TicketType    string `json:"ticketType,omitempty"`
 }
 
 // ticketResponse is the JSON response shape for a ticket.
@@ -332,6 +333,7 @@ func (h *TicketHandler) Update(c echo.Context) error {
 		Price:         normPrice,
 		UserID:        userID,
 		SeatingPlanID: req.SeatingPlanID,
+		TicketType:    req.TicketType,
 	})
 	if err != nil {
 		switch {

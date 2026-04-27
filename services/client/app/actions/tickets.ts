@@ -172,7 +172,14 @@ export async function createTicket(
   // Phase 3: If seating plan, create it with ticketId (no separate attach)
   if (ticketType.startsWith("SEATED") && venueId) {
     const planName = `${title.trim()} Seating Plan`;
-    const plan = await createSeatingPlanForTicket(ticket.id, venueId, planName, maxSeatsPerOrder);
+    const assignmentMode = ticketType === "SEATED_AUTO" ? "auto" : "manual";
+    const plan = await createSeatingPlanForTicket(
+      ticket.id,
+      venueId,
+      planName,
+      assignmentMode,
+      maxSeatsPerOrder,
+    );
 
     if (!plan) {
       return { error: "Failed to create seating plan for this ticket." };
@@ -185,7 +192,8 @@ export async function createTicket(
       body: JSON.stringify({ 
         title: ticket.title,
         price: ticket.price,
-        seatingPlanId: plan.id 
+        seatingPlanId: plan.id,
+        ticketType,
       }),
     });
 
@@ -196,6 +204,7 @@ export async function createTicket(
   }
 
   revalidatePath("/");
+  revalidatePath(`/tickets/${ticket.id}`);
   redirect(`/tickets/${ticket.id}`);
 }
 

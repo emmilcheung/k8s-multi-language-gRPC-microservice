@@ -319,6 +319,32 @@ func (*mockVenueClientTimeout) GetSeatingPlan(_ context.Context, _ *venuev1.GetS
 	return nil, fmt.Errorf("%w: deadline exceeded", service.ErrVenueServiceTimeout)
 }
 
+// mockVenueClientEmptyMode simulates venue-service returning empty assignment mode
+type mockVenueClientEmptyMode struct{}
+
+func (*mockVenueClientEmptyMode) ReserveHeldSeats(_ context.Context, _ *venuev1.ReserveHeldSeatsRequest, _ ...grpc.CallOption) (*venuev1.ReserveHeldSeatsResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientEmptyMode) AutoAssignAndReserve(_ context.Context, _ *venuev1.AutoAssignAndReserveRequest, _ ...grpc.CallOption) (*venuev1.AutoAssignAndReserveResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientEmptyMode) ReleaseSeatReservation(_ context.Context, _ *venuev1.ReleaseSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.ReleaseSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientEmptyMode) FinalizeSeatReservation(_ context.Context, _ *venuev1.FinalizeSeatReservationRequest, _ ...grpc.CallOption) (*venuev1.FinalizeSeatReservationResponse, error) {
+	return nil, nil
+}
+
+func (*mockVenueClientEmptyMode) GetSeatingPlan(_ context.Context, _ *venuev1.GetSeatingPlanRequest, _ ...grpc.CallOption) (*venuev1.GetSeatingPlanResponse, error) {
+	return &venuev1.GetSeatingPlanResponse{
+		PlanId:         "plan-empty",
+		AssignmentMode: "",
+	}, nil
+}
+
 func newSvc(repo repository.TicketRepository, pub service.EventPublisher) *service.TicketService {
 	// For tests, we provide a no-op venue client since most tests don't attach plans
 	return service.NewTicketService(repo, pub, zap.NewNop(), &mockVenueClient{})
@@ -679,4 +705,45 @@ func TestUpdateTicket_ShouldReturnTimeoutWhenVenueServiceTimesOut(t *testing.T) 
 
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, service.ErrVenueServiceTimeout))
+}
+
+func TestUpdateTicket_ShouldUseFallbackTicketTypeWhenVenueReturnsEmptyMode(t *testing.T) {
+	repo := newMockRepo()
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientEmptyMode{})
+
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "100.00", UserID: "user-1"})
+
+	ticket, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-empty",
+		TicketType:    "SEATED_AUTO",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "plan-empty", ticket.SeatingPlanID)
+	assert.Equal(t, "SEATED_AUTO", ticket.TicketType)
+	assert.Len(t, ticket.Outbox, 1)
+}
+
+func TestUpdateTicket_ShouldUseEmptyTicketTypeWhenVenueReturnsEmptyModeAndNoFallback(t *testing.T) {
+	repo := newMockRepo()
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientEmptyMode{})
+
+	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "100.00", UserID: "user-1"})
+
+	ticket, err := svc.UpdateTicket(context.Background(), service.UpdateTicketInput{
+		ID:            "t1",
+		Title:         "Concert",
+		Price:         "100.00",
+		UserID:        "user-1",
+		SeatingPlanID: "plan-empty",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "plan-empty", ticket.SeatingPlanID)
+	assert.Equal(t, "", ticket.TicketType)
+	assert.Len(t, ticket.Outbox, 1)
 }

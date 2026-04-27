@@ -916,6 +916,87 @@ test.describe("seating plan", () => {
     await expect(page.getByText(/\$29\.99/)).toBeVisible();
   });
 
+  test("organizer can create an auto-assigned seated ticket (Phase 3)", async ({ page }) => {
+    test.setTimeout(60_000);
+    const email = uniqueEmail("org-auto-seated-p3");
+    await signupAsOrganizer(page, email);
+    const venueName = `Auto-Assign Venue ${Date.now()}`;
+
+    // 1. Create a venue
+    await page.goto("/venues/new");
+    await page.getByLabel(/venue name/i).fill(venueName);
+    await page.getByLabel(/total capacity/i).fill("300");
+    await page.getByLabel(/timezone/i).fill("America/New_York");
+    await page.getByRole("button", { name: /create venue/i }).click();
+    await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
+    const venuePageUrl = page.url();
+
+    // Extract venue ID from URL for later assertions
+    const venueIdMatch = venuePageUrl.match(/venues\/([0-9a-f-]+)/);
+    expect(venueIdMatch).toBeTruthy();
+
+    // 2. Add a venue layout section (template)
+    await page.getByLabel(/section name/i).fill("Main Hall");
+    await page.locator('#vs-rows').fill("10");
+    await page.locator('#vs-cols').fill("20");
+    await page.getByRole("button", { name: /add section/i }).click();
+    await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
+    await expect(page.getByText("Main Hall")).toBeVisible();
+
+    // 3. Create an auto-assigned seated ticket
+    await page.goto("/tickets/new");
+
+    // Select auto-assigned ticket type
+    const autoAssignButton = page.getByRole("button", { name: /auto-assigned seating/i });
+    await autoAssignButton.waitFor({ state: "visible", timeout: 5000 });
+    await autoAssignButton.click();
+
+    // Fill in ticket details
+    const titleInput = page.locator("#title");
+    await titleInput.waitFor({ state: "visible", timeout: 5000 });
+
+    const ticketTitle = `Auto-Assigned Concert ${Date.now()}`;
+    await fillInputAndTriggerChange(page, "#title", ticketTitle);
+    await fillInputAndTriggerChange(page, "#price", "55.00");
+    await fillInputAndTriggerChange(page, "#startsAt", "2025-08-15T19:00");
+
+    // Select the venue we created
+    const venueCombobox = page.getByRole("combobox").first();
+    await venueCombobox.waitFor({ state: "visible", timeout: 5000 });
+    await venueCombobox.click();
+    await page.getByRole("option", { name: venueName }).click();
+
+    // Submit the form
+    const form = page.locator("form", { has: page.locator("#title") });
+    await form.waitFor({ state: "visible", timeout: 5000 });
+
+    const submitButton = form.getByRole("button", { name: /create ticket/i });
+    await submitButton.waitFor({ state: "visible", timeout: 5000 });
+    await submitButton.click();
+
+    // Wait for redirect to ticket detail page
+    try {
+      await page.waitForURL((url) => !url.pathname.endsWith("/new"), { timeout: 15000 });
+    } catch {
+      const alertContent = await page
+        .locator('[role="alert"]')
+        .first()
+        .textContent()
+        .catch(() => null);
+      throw new Error(`Auto-assigned ticket creation failed. Alert: ${alertContent}`);
+    }
+
+    const ticketUrl = page.url();
+    const ticketIdMatch = ticketUrl.match(/tickets\/([0-9a-f-]+)/);
+    expect(ticketIdMatch).toBeTruthy();
+
+    // 4. Verify the ticket was created with auto-assigned type
+    await expect(page.getByRole("heading", { name: ticketTitle })).toBeVisible();
+
+    // 5. Verify ticket detail page shows the auto-assigned type
+    await expect(page.getByText("Type: Auto-assigned Seating")).toBeVisible({ timeout: 5000 });
+  });
+
   test("GA ticket with default quota does not show quantity stepper", async ({ page }) => {
     const sellerEmail = uniqueEmail("seller-ga-qty");
     const buyerEmail = uniqueEmail("buyer-ga-qty");

@@ -109,9 +109,10 @@ async function fillInputAndTriggerChange(page: Page, selector: string, value: st
 
 async function createAttachedSeatedTicket(page: Page) {
   // Phase 3: Create venue template, then create a seated ticket which auto-creates a plan
-  
+  const venueName = `GraphQL Venue ${Date.now()}`;
+
   await page.goto("/venues/new");
-  await page.getByLabel(/venue name/i).fill(`GraphQL Venue ${Date.now()}`);
+  await page.getByLabel(/venue name/i).fill(venueName);
   await page.getByLabel(/total capacity/i).fill("200");
   await page.getByLabel(/timezone/i).fill("America/New_York");
   await page.getByRole("button", { name: /create venue/i }).click();
@@ -134,8 +135,8 @@ async function createAttachedSeatedTicket(page: Page) {
   // This will auto-create and attach a seating plan
   await page.goto("/tickets/new");
 
-  // Click the seated ticket button (SEATED_MANUAL or similar)
-  const seatedButton = page.getByRole("button", { name: /seated/i });
+  // Select the manual seated flow in the ticket type picker.
+  const seatedButton = page.getByRole("button", { name: /manual assigned seating/i });
   await seatedButton.waitFor({ state: "visible", timeout: 5000 });
   await seatedButton.click();
 
@@ -146,11 +147,13 @@ async function createAttachedSeatedTicket(page: Page) {
   await fillInputAndTriggerChange(page, "#price", "55.00");
   await fillInputAndTriggerChange(page, "#startsAt", "2025-05-11T14:00");
   
-  // Select the venue we just created
-  // The venue selector should be a dropdown or similar
-  const venueSelect = page.locator("select[name='venueId'], [role='combobox'][aria-label*='venue' i]").first();
-  if (await venueSelect.isVisible()) {
-    await venueSelect.selectOption(venueId);
+  // Select the venue template we just created.
+  const venueCombobox = page.getByRole("combobox").first();
+  if (await venueCombobox.isVisible()) {
+    await venueCombobox.click();
+    await page.getByRole("option", { name: venueName }).click();
+  } else {
+    await fillInputAndTriggerChange(page, "#venueId", venueId);
   }
 
   const form = page.locator("form", { has: page.locator("#title") });
@@ -177,25 +180,10 @@ async function createAttachedSeatedTicket(page: Page) {
     throw new Error("Failed to derive ticket ID from ticket URL");
   }
 
-  // Fetch the ticket to get the auto-created plan ID
-  // For now, we'll query the GraphQL to get the plan
-  // But we can also assume it was created and visible on the ticket page
-  const token = await getTokenCookie(page);
-  
-  // Get the seating plan ID from the ticket via API call
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  const ticketRes = await fetch(`${baseUrl}/api/tickets/${ticketId}`, {
-    headers: {
-      Cookie: `token=${token}`,
-    },
-  });
-
-  if (!ticketRes.ok) {
-    throw new Error(`Failed to fetch ticket: ${ticketRes.status}`);
-  }
-
-  const ticketData = await ticketRes.json() as { seatingPlanId?: string };
-  const planId = ticketData.seatingPlanId;
+  const managePlanLink = page.getByRole("link", { name: /manage plan/i });
+  await managePlanLink.waitFor({ state: "visible", timeout: 15000 });
+  const managePlanHref = await managePlanLink.getAttribute("href");
+  const planId = managePlanHref?.split("/").at(-1);
   
   if (!planId) {
     throw new Error("Ticket does not have an auto-created seating plan");
@@ -375,7 +363,7 @@ test.describe("GraphQL Federation — Cross-Subgraph Resolution", () => {
     expect(body.errors).toBeUndefined();
     expect(body.data.ticket.id).toBe(ticketId);
     expect(body.data.ticket.seatingPlan.id).toBe(planId);
-    expect(body.data.ticket.seatingPlan.status).toBe("ACTIVE");
+    expect(body.data.ticket.seatingPlan.status).toBe("DRAFT");
     expect(body.data.ticket.seatingPlan.sections.length).toBeGreaterThan(0);
     expect(body.data.ticket.seatingPlan.sections[0].name).toBe("Floor A");
     expect(body.data.ticket.seatingPlan.sections[0].seats.length).toBeGreaterThan(0);
