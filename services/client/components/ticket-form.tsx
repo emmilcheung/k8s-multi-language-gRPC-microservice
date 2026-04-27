@@ -37,8 +37,8 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import type { TicketState } from "@/app/actions/tickets";
-import type { SeatingPlan, Section } from "@/lib/types";
-import { fetchPlanSections } from "@/app/actions/venues";
+import { fetchMyVenues } from "@/app/actions/venues";
+import type { Venue } from "@/app/actions/venues";
 
 interface TicketFormProps {
   action: (_prev: TicketState, formData: FormData) => Promise<TicketState>;
@@ -47,7 +47,6 @@ interface TicketFormProps {
   defaultQuota?: number;
   defaultMaxPerUser?: number;
   defaultTicketType?: TicketType;
-  availablePlans?: SeatingPlan[];
   submitLabel?: string;
 }
 
@@ -59,7 +58,7 @@ interface FormState {
   price: string;
   quota?: number;
   maxPerUser?: number;
-  seatingPlanId?: string;
+  venueId?: string; // Phase 3: use venueId instead of seatingPlanId
   pricingMode?: "single" | "section" | "seat";
   sectionPrices?: Record<string, string>;
   totalCapacity?: number;
@@ -112,7 +111,6 @@ export function TicketForm({
   defaultQuota,
   defaultMaxPerUser,
   defaultTicketType,
-  availablePlans = [],
   submitLabel = "Create Ticket",
 }: TicketFormProps) {
   const [step, setStep] = useState<"type" | "details">(defaultTicketType ? "details" : "type");
@@ -126,21 +124,26 @@ export function TicketForm({
   });
   const [error, setError] = useState<string>("");
   const [pending, setPending] = useState(false);
-  const [planSections, setPlanSections] = useState<Section[]>([]);
-  const [sectionsLoading, setSectionsLoading] = useState(false);
+  const [venues, setVenues] = useState<Venue[]>([]);
+  const [venuesLoading, setVenuesLoading] = useState(false);
 
-  const selectedPlanId = formData.seatingPlanId;
-  const selectedPricingMode = formData.pricingMode;
+  // Phase 3: Load venues when component mounts (for seated ticket creation)
   useEffect(() => {
-    if (selectedPricingMode !== "section" || !selectedPlanId) return;
     let cancelled = false;
     Promise.resolve()
-      .then(() => { if (!cancelled) setSectionsLoading(true); })
-      .then(() => fetchPlanSections(selectedPlanId))
-      .then((sections) => { if (!cancelled) { setPlanSections(sections); setSectionsLoading(false); } })
-      .catch(() => { if (!cancelled) { setPlanSections([]); setSectionsLoading(false); } });
+      .then(() => { if (!cancelled) setVenuesLoading(true); })
+      .then(() => fetchMyVenues())
+      .then((v) => { if (!cancelled) { setVenues(v); setVenuesLoading(false); } })
+      .catch(() => { if (!cancelled) { setVenues([]); setVenuesLoading(false); } });
     return () => { cancelled = true; };
-  }, [selectedPricingMode, selectedPlanId]);
+  }, []);
+
+  const selectedVenueId = formData.venueId;
+  // Phase 3: Load plan sections when venueId or pricing mode changes
+  // (Currently not used for section pricing - simplified for Phase 3)
+  useEffect(() => {
+    // Cleanup code here if needed
+  }, [selectedVenueId]);
 
   const handleTypeSelect = (type: TicketType) => {
     setTicketType(type);
@@ -187,7 +190,8 @@ export function TicketForm({
         if (formData.quota) formDataObj.append("quota", String(formData.quota));
         if (formData.maxPerUser) formDataObj.append("maxPerUser", String(formData.maxPerUser));
       } else if (ticketType?.startsWith("SEATED")) {
-        if (formData.seatingPlanId) formDataObj.append("seatingPlanId", formData.seatingPlanId);
+        // Phase 3: use venueId instead of seatingPlanId
+        if (formData.venueId) formDataObj.append("venueId", formData.venueId);
         if (formData.pricingMode) formDataObj.append("pricingMode", formData.pricingMode);
         if (formData.maxPerUser) formDataObj.append("maxSeatsPerOrder", String(formData.maxPerUser));
         if (formData.pricingMode === "section" && formData.sectionPrices) {
@@ -377,21 +381,26 @@ export function TicketForm({
         <>
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Seating Plan
+              Venue Template
             </Label>
-            {availablePlans.length > 0 ? (
+            {venuesLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Loading venues…
+              </div>
+            ) : venues.length > 0 ? (
               <Select
-                value={formData.seatingPlanId ?? ""}
-                onValueChange={(val) => setFormData((prev) => ({ ...prev, seatingPlanId: val !== null ? val : undefined }))}
+                value={formData.venueId ?? ""}
+                onValueChange={(val) => setFormData((prev) => ({ ...prev, venueId: val !== null ? val : undefined }))}
               >
                 <SelectTrigger className="w-full h-10">
-                  <SelectValue placeholder="Select an active plan…" />
+                  <SelectValue placeholder="Select a venue…" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {availablePlans.map((plan) => (
-                      <SelectItem key={plan.id} value={plan.id}>
-                        {plan.name}
+                    {venues.map((venue) => (
+                      <SelectItem key={venue.id} value={venue.id}>
+                        {venue.name}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -402,21 +411,21 @@ export function TicketForm({
                 <div className="relative">
                   <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
                   <Input
-                    id="seatingPlanId"
-                    name="seatingPlanId"
+                    id="venueId"
+                    name="venueId"
                     type="text"
                     required
-                    placeholder="Paste seating plan ID"
-                    value={formData.seatingPlanId ?? ""}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, seatingPlanId: e.target.value }))}
+                    placeholder="Paste venue ID"
+                    value={formData.venueId ?? ""}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, venueId: e.target.value }))}
                     className="pl-9"
                   />
                 </div>
                 <Alert>
                   <AlertCircle />
                   <AlertDescription>
-                    No active plans found. Create and activate a plan in the{" "}
-                    <Link href="/venues" className="underline">Venue Manager</Link> first.
+                    No venues found. Create one in the{" "}
+                    <Link href="/venues/new" className="underline">Venue Manager</Link> first.
                   </AlertDescription>
                 </Alert>
               </>
@@ -473,59 +482,18 @@ export function TicketForm({
                   className="pl-9"
                 />
               </div>
-              <p className="text-xs text-muted-foreground">Price for all seats in this plan.</p>
+              <p className="text-xs text-muted-foreground">Price for all seats in this event.</p>
             </div>
           )}
 
           {/* Section pricing */}
           {formData.pricingMode === "section" && (
-            <div className="flex flex-col gap-3">
-              {sectionsLoading ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" />
-                  Loading sections…
-                </div>
-              ) : planSections.length === 0 ? (
-                <Alert>
-                  <AlertCircle />
-                  <AlertDescription>
-                    No sections found for this plan. Select a plan first, or switch to Single Price.
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  <p className="text-xs text-muted-foreground">Set a price for each section:</p>
-                  {planSections.map((section) => (
-                    <div key={section.id} className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-border">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{section.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {section.rowCount} × {section.columnCount} = {section.rowCount * section.columnCount} seats
-                        </p>
-                      </div>
-                      <div className="relative w-28 shrink-0">
-                        <DollarSign className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          required
-                          placeholder="0.00"
-                          value={formData.sectionPrices?.[section.id] ?? ""}
-                          onChange={(e) =>
-                            setFormData((prev) => ({
-                              ...prev,
-                              sectionPrices: { ...prev.sectionPrices, [section.id]: e.target.value },
-                            }))
-                          }
-                          className="pl-7 text-sm"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <Alert>
+              <AlertCircle />
+              <AlertDescription>
+                Section pricing will be configured after the plan is created. For now, use Single Price.
+              </AlertDescription>
+            </Alert>
           )}
 
           {/* Seat pricing info */}
@@ -533,7 +501,7 @@ export function TicketForm({
             <Alert>
               <AlertCircle />
               <AlertDescription>
-                Configure seat-level pricing in the Seating Plan editor.
+                Configure seat-level pricing in the Seating Plan editor after creation.
               </AlertDescription>
             </Alert>
           )}

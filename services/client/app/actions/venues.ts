@@ -263,6 +263,40 @@ export async function createSeatingPlan(
 }
 
 /**
+ * Creates a new seating plan for a ticket with a venue as template.
+ * Phase 3: ticket-first creation flow.
+ * POST /api/seating-plans — Kong → venue-service.
+ * 
+ * This creates the plan with ticketId already set (no separate attach step).
+ */
+export async function createSeatingPlanForTicket(
+  ticketId: string,
+  venueId: string,
+  planName: string,
+  maxSeatsPerOrder?: number
+): Promise<SeatingPlan | null> {
+  if (!ticketId || !venueId || !planName) return null;
+
+  const res = await fetch(`${base()}/api/seating-plans`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({
+      ticketId,
+      venueId,
+      name: planName,
+      holdTtlSec: 300,
+      maxSeatsPerOrder: maxSeatsPerOrder ?? 10,
+    }),
+  });
+
+  if (!res.ok) {
+    return null;
+  }
+
+  return res.json() as Promise<SeatingPlan>;
+}
+
+/**
  * Fetches sections for a seating plan.
  * GET /api/seating-plans/:planId — returns plan with sections array.
  * Used by ticket creation form for section pricing table.
@@ -295,10 +329,14 @@ export async function fetchPriceTiers(planId: string): Promise<PriceTier[]> {
 /**
  * Creates a price tier inside a seating plan.
  * POST /api/seating-plans/:planId/price-tiers — Kong → venue-service.
+ * 
+ * venueId can be empty string when called from ticket-context (plan is already ticket-owned).
+ * ticketId can be provided to redirect back to ticket plan page instead of venue plan page.
  */
 export async function createPriceTier(
   planId: string,
   venueId: string,
+  ticketId: string,
   _prev: PlanState,
   formData: FormData
 ): Promise<PlanState> {
@@ -321,8 +359,14 @@ export async function createPriceTier(
     return { error: body?.error ?? "Failed to create price tier." };
   }
 
-  revalidatePath(`/venues/${venueId}/plans/${planId}`);
-  redirect(`/venues/${venueId}/plans/${planId}`);
+  // Redirect to ticket plan page if ticketId provided, otherwise to venue plan page
+  if (ticketId) {
+    revalidatePath(`/tickets/${ticketId}/plans/${planId}`);
+    redirect(`/tickets/${ticketId}/plans/${planId}`);
+  } else {
+    revalidatePath(`/venues/${venueId}/plans/${planId}`);
+    redirect(`/venues/${venueId}/plans/${planId}`);
+  }
 }
 
 /**
@@ -403,10 +447,14 @@ export async function saveLayout(
 /**
  * Deactivates an active seating plan, stopping new purchases.
  * POST /api/seating-plans/:planId/deactivate — Kong → venue-service.
+ * 
+ * venueId can be empty string when called from ticket-context.
+ * ticketId can be provided to redirect back to ticket plan page instead of venue plan page.
  */
 export async function deactivatePlan(
   planId: string,
   venueId: string,
+  ticketId: string,
   prev: PlanState,
   formData: FormData
 ): Promise<PlanState> {
@@ -426,8 +474,14 @@ export async function deactivatePlan(
     return { error: body?.error ?? "Failed to deactivate plan." };
   }
 
-  revalidatePath(`/venues/${venueId}/plans/${planId}`);
-  redirect(`/venues/${venueId}/plans/${planId}`);
+  // Redirect to ticket plan page if ticketId provided, otherwise to venue plan page
+  if (ticketId) {
+    revalidatePath(`/tickets/${ticketId}/plans/${planId}`);
+    redirect(`/tickets/${ticketId}/plans/${planId}`);
+  } else {
+    revalidatePath(`/venues/${venueId}/plans/${planId}`);
+    redirect(`/venues/${venueId}/plans/${planId}`);
+  }
 }
 
 /**
@@ -437,10 +491,14 @@ export async function deactivatePlan(
  * Pre-conditions (enforced by the service):
  *   - Plan must be in "draft" status.
  *   - Plan must have at least one section.
+ * 
+ * venueId can be empty string when called from ticket-context.
+ * ticketId can be provided to redirect back to ticket plan page instead of venue plan page.
  */
 export async function activatePlan(
   planId: string,
   venueId: string,
+  ticketId: string,
   prev: PlanState,
   formData: FormData
 ): Promise<PlanState> {
@@ -460,8 +518,14 @@ export async function activatePlan(
     return { error: body?.error ?? "Failed to activate plan." };
   }
 
-  revalidatePath(`/venues/${venueId}/plans/${planId}`);
-  redirect(`/venues/${venueId}/plans/${planId}`);
+  // Redirect to ticket plan page if ticketId provided, otherwise to venue plan page
+  if (ticketId) {
+    revalidatePath(`/tickets/${ticketId}/plans/${planId}`);
+    redirect(`/tickets/${ticketId}/plans/${planId}`);
+  } else {
+    revalidatePath(`/venues/${venueId}/plans/${planId}`);
+    redirect(`/venues/${venueId}/plans/${planId}`);
+  }
 }
 
 /**

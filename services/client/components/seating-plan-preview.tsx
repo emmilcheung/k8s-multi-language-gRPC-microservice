@@ -83,7 +83,7 @@ export function SeatingPlanPreview({ plan, priceTiers = [] }: SeatingPlanPreview
 
       {/* Link to plan management page */}
       <Link
-        href={`/venues/${plan.venueId}/plans/${plan.id}`}
+        href={plan.ticketId ? `/tickets/${plan.ticketId}/plans/${plan.id}` : `/venues/${plan.venueId}/plans/${plan.id}`}
         className="flex items-center gap-1.5 text-xs text-primary hover:underline self-start"
       >
         <ExternalLink className="w-3.5 h-3.5" />

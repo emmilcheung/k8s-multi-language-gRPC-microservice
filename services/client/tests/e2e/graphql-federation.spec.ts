@@ -107,19 +107,51 @@ async function fillInputAndTriggerChange(page: Page, selector: string, value: st
   }, value);
 }
 
-async function createTicket(page: Page, title: string, price: string) {
+async function createAttachedSeatedTicket(page: Page) {
+  // Phase 3: Create venue template, then create a seated ticket which auto-creates a plan
+  
+  await page.goto("/venues/new");
+  await page.getByLabel(/venue name/i).fill(`GraphQL Venue ${Date.now()}`);
+  await page.getByLabel(/total capacity/i).fill("200");
+  await page.getByLabel(/timezone/i).fill("America/New_York");
+  await page.getByRole("button", { name: /create venue/i }).click();
+  await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
+
+  const venueUrl = page.url();
+  const venueId = venueUrl.split("/").at(-1);
+  if (!venueId) {
+    throw new Error("Failed to derive venue ID from URL");
+  }
+
+  await page.getByLabel(/section name/i).fill("Floor A");
+  await page.locator("#vs-rows").fill("5");
+  await page.locator("#vs-cols").fill("10");
+  await page.getByRole("button", { name: /add section/i }).click();
+  await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
+  await expect(page.getByText("Floor A")).toBeVisible();
+
+  // Now create a seated ticket with this venue
+  // This will auto-create and attach a seating plan
   await page.goto("/tickets/new");
 
-  const gaButton = page.getByRole("button", { name: /general admission/i });
-  await gaButton.waitFor({ state: "visible", timeout: 5000 });
-  await gaButton.click();
+  // Click the seated ticket button (SEATED_MANUAL or similar)
+  const seatedButton = page.getByRole("button", { name: /seated/i });
+  await seatedButton.waitFor({ state: "visible", timeout: 5000 });
+  await seatedButton.click();
 
   const titleInput = page.locator("#title");
   await titleInput.waitFor({ state: "visible", timeout: 5000 });
 
-  await fillInputAndTriggerChange(page, "#title", title);
-  await fillInputAndTriggerChange(page, "#price", price);
+  await fillInputAndTriggerChange(page, "#title", `GraphQL Seated ${Date.now()}`);
+  await fillInputAndTriggerChange(page, "#price", "55.00");
   await fillInputAndTriggerChange(page, "#startsAt", "2025-05-11T14:00");
+  
+  // Select the venue we just created
+  // The venue selector should be a dropdown or similar
+  const venueSelect = page.locator("select[name='venueId'], [role='combobox'][aria-label*='venue' i]").first();
+  if (await venueSelect.isVisible()) {
+    await venueSelect.selectOption(venueId);
+  }
 
   const form = page.locator("form", { has: page.locator("#title") });
   await form.waitFor({ state: "visible", timeout: 5000 });
@@ -132,57 +164,42 @@ async function createTicket(page: Page, title: string, price: string) {
     await page.waitForURL((url) => !url.pathname.endsWith("/new"), { timeout: 15000 });
   } catch {
     const alertContent = await page
-      .locator('[role="alert"]:not([id="__next-route-announcer__"])')
+      .locator('[role="alert"]')
       .first()
       .textContent()
       .catch(() => null);
-    throw new Error(`Ticket creation failed. Alert: ${alertContent}`);
+    throw new Error(`Seated ticket creation failed. Alert: ${alertContent}`);
   }
 
-  return page.url();
-}
-
-async function createAttachedSeatedTicket(page: Page) {
-  await page.goto("/venues/new");
-  await page.getByLabel(/venue name/i).fill(`GraphQL Venue ${Date.now()}`);
-  await page.getByLabel(/total capacity/i).fill("200");
-  await page.getByLabel(/timezone/i).fill("America/New_York");
-  await page.getByRole("button", { name: /create venue/i }).click();
-  await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
-
-  await page.getByLabel(/section name/i).fill("Floor A");
-  await page.locator("#vs-rows").fill("5");
-  await page.locator("#vs-cols").fill("10");
-  await page.getByRole("button", { name: /add section/i }).click();
-  await page.waitForURL(/\/venues\/[0-9a-f-]+$/);
-  await expect(page.getByText("Floor A")).toBeVisible();
-
-  await page.getByRole("link", { name: /new plan/i }).click();
-  await page.waitForURL(/\/venues\/[0-9a-f-]+\/plans\/new$/);
-  await page.getByLabel(/plan name/i).fill("Federation Seating Plan");
-  await page.getByRole("button", { name: /create seating plan/i }).click();
-  await page.waitForURL(/\/venues\/[0-9a-f-]+\/plans\/[0-9a-f-]+$/);
-  await expect(page.getByText("Floor A")).toBeVisible();
-
-  const planId = page.url().split("/").at(-1);
-  if (!planId) {
-    throw new Error("Failed to derive seating plan ID from plan URL");
-  }
-
-  await page.getByRole("button", { name: /activate/i }).click();
-  await expect(page.getByText(/active/i).first()).toBeVisible({ timeout: 10000 });
-
-  const ticketUrl = await createTicket(page, `GraphQL Seated ${Date.now()}`, "55.00");
+  const ticketUrl = page.url();
   const ticketId = ticketUrl.split("/").at(-1);
   if (!ticketId) {
     throw new Error("Failed to derive ticket ID from ticket URL");
   }
 
-  await expect(page.getByText("Seating Plan").first()).toBeVisible();
-  await expect(page.locator("#planId")).toBeVisible();
-  await page.locator("#planId").selectOption({ index: 1 });
-  await page.getByRole("button", { name: /attach seating plan/i }).click();
-  await expect(page.getByText(/attached plan/i)).toBeVisible({ timeout: 10000 });
+  // Fetch the ticket to get the auto-created plan ID
+  // For now, we'll query the GraphQL to get the plan
+  // But we can also assume it was created and visible on the ticket page
+  const token = await getTokenCookie(page);
+  
+  // Get the seating plan ID from the ticket via API call
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const ticketRes = await fetch(`${baseUrl}/api/tickets/${ticketId}`, {
+    headers: {
+      Cookie: `token=${token}`,
+    },
+  });
+
+  if (!ticketRes.ok) {
+    throw new Error(`Failed to fetch ticket: ${ticketRes.status}`);
+  }
+
+  const ticketData = await ticketRes.json() as { seatingPlanId?: string };
+  const planId = ticketData.seatingPlanId;
+  
+  if (!planId) {
+    throw new Error("Ticket does not have an auto-created seating plan");
+  }
 
   return { planId, ticketId };
 }

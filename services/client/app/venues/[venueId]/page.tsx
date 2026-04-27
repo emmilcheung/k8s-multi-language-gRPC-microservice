@@ -12,12 +12,10 @@ import {
   ArrowLeft,
   Building2,
   Globe,
-  Plus,
   MapPin,
   Pencil,
   Users,
   Layers,
-  ChevronRight,
 } from "lucide-react";
 import type { SeatingPlan } from "@/lib/types";
 
@@ -134,63 +132,28 @@ export default async function VenueDetailPage({ params }: Props) {
         sections={sectionsWithActions}
       />
 
-      {/* Seating Plans */}
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-4">
+      {/* Seating Plans — Read-only template preview */}
+      {plans.length > 0 && (
+        <div className="flex flex-col gap-4">
           <div>
             <h2 className="text-xl font-semibold">Seating Plans</h2>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Each plan is a per-event seat inventory, auto-provisioned from the venue layout above.
+              Plans created for tickets using this venue as a template. Plans are managed in ticket context.
             </p>
           </div>
-          <Link
-            href={`/venues/${venueId}/plans/new`}
-            className={cn(
-              buttonVariants({ size: "sm" }),
-              "gap-2 bg-primary hover:bg-primary/90 text-primary-foreground glow-violet shrink-0"
-            )}
-          >
-            <Plus className="w-3.5 h-3.5" />
-            New Plan
-          </Link>
-        </div>
 
-        {plans.length === 0 ? (
-          <div className="glass rounded-2xl p-10 flex flex-col items-center gap-4 text-center">
-            <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 ring-1 ring-primary/20">
-              <Layers className="w-6 h-6 text-primary" />
-            </div>
-            <div>
-              <p className="font-semibold">No seating plans</p>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Create a seating plan for this venue.
-              </p>
-            </div>
-            <Link
-              href={`/venues/${venueId}/plans/new`}
-              className={cn(
-                buttonVariants(),
-                "gap-2 bg-primary hover:bg-primary/90 text-primary-foreground mt-1"
-              )}
-            >
-              <Plus className="w-4 h-4" />
-              Create Plan
-            </Link>
-          </div>
-        ) : (
           <div className="flex flex-col gap-3">
             {plans.map((plan) => (
-              <Link
+              <div
                 key={plan.id}
-                href={`/venues/${venueId}/plans/${plan.id}`}
-                className="glass rounded-2xl p-5 flex items-center gap-4 hover:bg-white/5 transition-colors group"
+                className="glass rounded-2xl p-5 flex items-center gap-4"
               >
                 <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 ring-1 ring-primary/20 shrink-0">
                   <Layers className="w-5 h-5 text-primary" />
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium group-hover:text-primary transition-colors truncate">
+                  <p className="font-medium truncate">
                     {plan.name}
                   </p>
                   <p className="text-xs text-muted-foreground mt-0.5">
@@ -205,13 +168,12 @@ export default async function VenueDetailPage({ params }: Props) {
                   <Badge className={cn("text-xs", planStatusColor[plan.status])}>
                     {plan.status}
                   </Badge>
-                  <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                 </div>
-              </Link>
+              </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

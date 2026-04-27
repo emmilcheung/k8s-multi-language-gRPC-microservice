@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { base, authHeaders } from "@/lib/server-utils";
 import type { Ticket } from "@/lib/types";
+import { createSeatingPlanForTicket } from "./venues";
 
 // ─── Pagination ───────────────────────────────────────────────────────────────
 
@@ -66,6 +67,13 @@ function parseOptionalPositiveInt(raw: string | null): number | undefined {
 
 // ─── Mutations ────────────────────────────────────────────────────────────────
 
+/**
+ * Phase 3: ticket-first seating plan creation.
+ * When creating a seated ticket, this action:
+ * 1. Creates the ticket in ticket-service
+ * 2. If seated and venueId is provided, creates a seating plan in venue-service with ticketId
+ * 3. Updates the ticket with the new seatingPlanId
+ */
 export async function createTicket(
   _prev: TicketState,
   formData: FormData
@@ -74,14 +82,14 @@ export async function createTicket(
   const priceRaw = (formData.get("price") as string)?.trim();
   const priceNum = parseFloat(priceRaw);
   const ticketType = (formData.get("ticketType") as string | null) ?? "";
-  const seatingPlanId = (formData.get("seatingPlanId") as string | null) ?? "";
   const pricingMode = (formData.get("pricingMode") as string | null) ?? "single";
 
   // GA-specific
   const quota = parseOptionalPositiveInt(formData.get("quota") as string | null);
   const maxPerUser = parseOptionalPositiveInt(formData.get("maxPerUser") as string | null);
 
-  // Seated-specific
+  // Seated-specific (Phase 3: venueId instead of seatingPlanId)
+  const venueId = (formData.get("venueId") as string | null) ?? "";
   const maxSeatsPerOrder = parseOptionalPositiveInt(formData.get("maxSeatsPerOrder") as string | null);
 
   if (!title?.trim()) return { error: "Title is required." };
@@ -117,13 +125,13 @@ export async function createTicket(
     }
   }
 
-  // Validation for Seated
+  // Validation for Seated (Phase 3: now requires venueId, not seatingPlanId)
   if (ticketType.startsWith("SEATED")) {
-    if (!seatingPlanId) return { error: "Seating plan ID is required." };
-    if (!UUID_RE.test(seatingPlanId)) return { error: "Seating plan ID must be a valid UUID." };
+    if (!venueId) return { error: "Venue is required for seated tickets." };
+    if (!UUID_RE.test(venueId)) return { error: "Venue ID must be a valid UUID." };
   }
 
-  // Create the base ticket
+  // Create the base ticket (without seatingPlanId initially)
   // Seat pricing: send "0" as placeholder — actual price comes from per-seat plan configuration.
   const effectivePrice = pricingMode === "seat" ? "0" : priceRaw;
   const reqBody: Record<string, unknown> = { title: title.trim(), price: effectivePrice };
@@ -161,30 +169,29 @@ export async function createTicket(
 
   const ticket = await res.json();
 
-  // WS3: If seating plan, attach it now
-  if (ticketType.startsWith("SEATED") && seatingPlanId) {
-    const attachRes = await fetch(`${base()}/api/tickets/${ticket.id}/seating-plan`, {
-      method: "PUT",
-      headers: await authHeaders(),
-      body: JSON.stringify({ seatingPlanId }),
-    });
+  // Phase 3: If seating plan, create it with ticketId (no separate attach)
+  if (ticketType.startsWith("SEATED") && venueId) {
+    const planName = `${title.trim()} Seating Plan`;
+    const plan = await createSeatingPlanForTicket(ticket.id, venueId, planName, maxSeatsPerOrder);
 
-    if (!attachRes.ok) {
-      const errBody = await attachRes.json().catch(() => ({}));
-      // Non-fatal: ticket was created but plan attachment failed
-      console.warn("[createTicket] seating plan attachment failed:", errBody?.error);
-      // Continue to redirect anyway
+    if (!plan) {
+      return { error: "Failed to create seating plan for this ticket." };
     }
 
-    // Also attach ticket to plan in venue-service
-    const planAttachRes = await fetch(`${base()}/api/seating-plans/${seatingPlanId}/attach-ticket`, {
-      method: "POST",
+    // Update ticket with the new seatingPlanId
+    const updateRes = await fetch(`${base()}/api/tickets/${ticket.id}`, {
+      method: "PUT",
       headers: await authHeaders(),
-      body: JSON.stringify({ ticketId: ticket.id }),
+      body: JSON.stringify({ 
+        title: ticket.title,
+        price: ticket.price,
+        seatingPlanId: plan.id 
+      }),
     });
 
-    if (!planAttachRes.ok) {
-      console.warn("[createTicket] venue-service attach failed, continuing...");
+    if (!updateRes.ok) {
+      const errBody = await updateRes.json().catch(() => ({}));
+      return { error: errBody?.error?.message ?? "Failed to attach seating plan to ticket." };
     }
   }
 
@@ -233,11 +240,14 @@ export async function updateTicket(
   redirect(`/tickets/${ticketId}`);
 }
 
-// ─── Seating plan attach / detach (CP-14) ────────────────────────────────────
+// ─── Seating plan attach / detach (deprecated in Phase 3) ────────────────────
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
+ * DEPRECATED: Use createTicket with venueId instead (Phase 3).
+ * Kept for backward compatibility during migration.
+ * 
  * Attaches a seating plan to a ticket.
  * Calls PATCH /api/tickets/:ticketId/seating-plan via Kong → ticket-service.
  */
@@ -293,6 +303,9 @@ export async function attachSeatingPlan(
 }
 
 /**
+ * DEPRECATED: Use seat management on ticket detail instead (Phase 3).
+ * Kept for backward compatibility during migration.
+ * 
  * Detaches the seating plan from a ticket.
  * Calls DELETE /api/tickets/:ticketId/seating-plan via Kong → ticket-service.
  */

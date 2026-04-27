@@ -13,10 +13,9 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TicketForm } from "@/components/ticket-form";
 import { PurchaseButton } from "@/components/purchase-button";
-import { AttachSeatingPlanForm } from "@/components/attach-seating-plan-form";
 import { SeatingPlanPreview } from "@/components/seating-plan-preview";
 import { updateTicket } from "@/app/actions/tickets";
-import { fetchAllMyPlans, fetchPriceTiers } from "@/app/actions/venues";
+import { fetchPriceTiers } from "@/app/actions/venues";
 import { Separator } from "@/components/ui/separator";
 import { Progress, ProgressLabel } from "@/components/ui/progress";
 import {
@@ -86,10 +85,6 @@ export default async function TicketDetailPage({ params }: Props) {
   const isReserved = !isSeated && (Boolean(ticket.orderId) || (ticket.reserved != null && ticket.reserved > 0));
   const updateAction = updateTicket.bind(null, ticketId);
 
-  // Fetch the organizer's plans server-side (only needed for the owner panel).
-  // On failure (e.g. venue-service down) we degrade gracefully to an empty list.
-  const availablePlans = isOwner ? await fetchAllMyPlans().catch(() => []) : [];
-
   // When a plan is already attached, fetch its full details (sections included)
   // so the organizer can see a read-only preview of what is attached.
   let attachedPlan: SeatingPlan | null = null;
@@ -101,7 +96,7 @@ export default async function TicketDetailPage({ params }: Props) {
         fetchPriceTiers(ticket.seatingPlanId),
       ]);
     } catch {
-      // Non-fatal — preview is hidden, attach form still functional.
+      // Non-fatal — preview is hidden, plan details can't be shown.
     }
   }
 
@@ -266,18 +261,7 @@ export default async function TicketDetailPage({ params }: Props) {
                   </p>
                 </div>
               )}
-              {/* Seating plan management panel (CP-14) */}
-              <AttachSeatingPlanForm
-                ticketId={ticketId}
-                currentPlanId={ticket.seatingPlanId ?? null}
-                currentPlanName={attachedPlan?.name ?? null}
-                hasActiveOrders={
-                  (ticket.reserved != null && ticket.reserved > 0) ||
-                  (ticket.sold != null && ticket.sold > 0)
-                }
-                availablePlans={availablePlans}
-              />
-              {/* Read-only preview of the attached seating plan */}
+              {/* Read-only preview of the attached seating plan (Phase 3) */}
               {attachedPlan && (
                 <SeatingPlanPreview plan={attachedPlan} priceTiers={attachedPlanTiers} />
               )}

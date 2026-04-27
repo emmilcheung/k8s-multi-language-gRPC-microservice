@@ -7,6 +7,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
 import { activatePlan, deactivatePlan, createPriceTier, fetchPriceTiers } from "@/app/actions/venues";
+import type { PlanState } from "@/app/actions/venues";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { SeatingPlanCanvas } from "@/components/seating-plan-canvas";
@@ -56,12 +57,18 @@ export default async function PlanDetailPage({ params }: Props) {
 
   const sections = sectionsData?.sections ?? [];
 
-  // Bind planId + venueId into the createPriceTier Server Action.
-  const addTierAction = createPriceTier.bind(null, planId, venueId);
-  // Bind planId + venueId into the activatePlan Server Action.
-  const activatePlanAction = activatePlan.bind(null, planId, venueId);
-  // Bind planId + venueId into the deactivatePlan Server Action.
-  const deactivatePlanAction = deactivatePlan.bind(null, planId, venueId);
+  // Wrapper actions that bind the venue context (no ticketId for backward compat)
+  const addTierAction = async (_prev: PlanState, formData: FormData) => {
+    return createPriceTier(planId, venueId, "", _prev, formData);
+  };
+
+  const activatePlanAction = async (_prev: PlanState, formData: FormData) => {
+    return activatePlan(planId, venueId, "", _prev, formData);
+  };
+
+  const deactivatePlanAction = async (_prev: PlanState, formData: FormData) => {
+    return deactivatePlan(planId, venueId, "", _prev, formData);
+  };
 
   const isDraft = plan.status === "draft";
   const isActive = plan.status === "active";
