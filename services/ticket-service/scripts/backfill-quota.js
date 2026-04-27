@@ -5,7 +5,7 @@
 // Safe to re-run: the $exists filter only touches documents that are missing
 // the quota field, so already-migrated documents are unchanged.
 
-const db = connection.getDB("tickets_db"); // adjust database name if needed
+const db = connection.getDB("tickets_db");
 const result = db.tickets.updateMany(
   { quota: { $exists: false } },
   {
