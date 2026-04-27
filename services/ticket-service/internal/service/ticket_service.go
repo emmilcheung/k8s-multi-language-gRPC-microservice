@@ -41,24 +41,13 @@ type CreateTicketInput struct {
 }
 
 // UpdateTicketInput is the validated input for updating a ticket.
+// SeatingPlanID is optional; if provided and non-empty, attempts to attach a seating plan to the ticket.
 type UpdateTicketInput struct {
-	ID     string
-	Title  string
-	Price  string
-	UserID string // used for ownership check
-}
-
-// AttachSeatingPlanInput is the validated input for attaching a seating plan to a ticket.
-type AttachSeatingPlanInput struct {
-	TicketID string
-	PlanID   string
-	UserID   string // must own the ticket
-}
-
-// DetachSeatingPlanInput is the validated input for detaching a seating plan from a ticket.
-type DetachSeatingPlanInput struct {
-	TicketID string
-	UserID   string // must own the ticket
+	ID            string
+	Title         string
+	Price         string
+	UserID        string // used for ownership check
+	SeatingPlanID string // optional; attach plan if non-empty
 }
 
 // ErrUnauthorized is returned when a user tries to modify a ticket they don't own.
@@ -174,7 +163,14 @@ func (s *TicketService) ListTickets(ctx context.Context, p repository.Pagination
 	return tickets, nil
 }
 
-// UpdateTicket updates a ticket's title and price, enforcing ownership and reservation checks.
+// UpdateTicket updates a ticket's title and price, and optionally attaches a seating plan.
+// Enforces ownership and reservation checks.
+//
+// Seating plan logic:
+//   - if a new non-empty different seatingPlanId is provided and current ticket has none,
+//     calls venueServiceClient.GetSeatingPlan and sets TicketType
+//   - if current ticket already has a different non-empty seatingPlanId, returns ErrSeatingPlanAlreadyAttached
+//   - if same id is resent, treats as idempotent (no-op)
 func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInput) (*repository.Ticket, error) {
 	ticket, err := s.repo.FindByID(ctx, input.ID)
 	if err != nil {
@@ -193,6 +189,50 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 
 	ticket.Title = input.Title
 	ticket.Price = input.Price
+
+	// Handle seating plan attachment if provided
+	if input.SeatingPlanID != "" {
+		// Check if trying to replace an existing different plan
+		if ticket.SeatingPlanID != "" && ticket.SeatingPlanID != input.SeatingPlanID {
+			return nil, repository.ErrSeatingPlanAlreadyAttached
+		}
+
+		// If same plan ID is being reattached, treat as idempotent (no-op on plan)
+		if ticket.SeatingPlanID != input.SeatingPlanID {
+			// Fetch the seating plan from venue-service to get assignmentMode
+			planResp, err := s.venueServiceClient.GetSeatingPlan(ctx, &venuev1.GetSeatingPlanRequest{
+				PlanId: input.SeatingPlanID,
+			})
+			if err != nil {
+				s.log.Error("failed to fetch seating plan from venue-service", zap.Error(err), zap.String("planId", input.SeatingPlanID))
+				// Preserve the classified errors from the resilient venue client
+				if errors.Is(err, ErrVenueServiceTimeout) {
+					return nil, ErrVenueServiceTimeout
+				}
+				if errors.Is(err, ErrVenueServiceUnavailable) {
+					return nil, ErrVenueServiceUnavailable
+				}
+				// Fallback for any other error (shouldn't happen with resilient client, but be defensive)
+				return nil, fmt.Errorf("venue-service lookup failed: %w", err)
+			}
+
+			// Determine ticketType based on assignmentMode
+			var ticketType string
+			switch planResp.AssignmentMode {
+			case "auto":
+				ticketType = "SEATED_AUTO"
+			case "manual":
+				ticketType = "SEATED_MANUAL"
+			default:
+				s.log.Warn("unknown assignment mode from venue-service", zap.String("mode", planResp.AssignmentMode))
+				ticketType = ""
+			}
+
+			ticket.SeatingPlanID = input.SeatingPlanID
+			ticket.TicketType = ticketType
+		}
+	}
+
 	ticket.PendingOutbox = []repository.TicketOutboxEvent{
 		repository.NewTicketOutboxEvent(repository.OutboxEventTypeTicketUpdated, buildOutboxPayload(ticket)),
 	}
@@ -203,123 +243,6 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 	ticket.PendingOutbox = nil
 
 	s.log.Info("ticket updated", zap.String("ticketId", ticket.ID), zap.String("userId", ticket.UserID))
-
-	return ticket, nil
-}
-
-// AttachSeatingPlan links a venue-service seating plan UUID to the ticket.
-// After attachment the ticket is "seated": the GA quota reservation path (ReserveQuota gRPC)
-// will refuse to reserve seats for it, directing callers to the venue-service path instead.
-//
-// WS3: Fetches the seating plan's assignmentMode from venue-service and denormalizes it
-// as ticketType ("SEATED_MANUAL" or "SEATED_AUTO") on the ticket.
-//
-// Validations performed here:
-//   - ticketID and planID must be non-empty (format validated by the HTTP handler)
-//   - ownership enforced in the repository layer (ErrOwnership → ErrUnauthorized)
-//   - plan-already-attached detected atomically in the repository layer
-func (s *TicketService) AttachSeatingPlan(ctx context.Context, input AttachSeatingPlanInput) (*repository.Ticket, error) {
-	existing, err := s.repo.FindByID(ctx, input.TicketID)
-	if err != nil {
-		return nil, fmt.Errorf("find ticket for attach: %w", err)
-	}
-
-	// WS3: Fetch the seating plan from venue-service to get assignmentMode
-	planResp, err := s.venueServiceClient.GetSeatingPlan(ctx, &venuev1.GetSeatingPlanRequest{
-		PlanId: input.PlanID,
-	})
-	if err != nil {
-		s.log.Error("failed to fetch seating plan from venue-service", zap.Error(err), zap.String("planId", input.PlanID))
-		return nil, fmt.Errorf("fetch seating plan: %w", err)
-	}
-
-	// Determine ticketType based on assignmentMode
-	var ticketType string
-	switch planResp.AssignmentMode {
-	case "auto":
-		ticketType = "SEATED_AUTO"
-	case "manual":
-		ticketType = "SEATED_MANUAL"
-	default:
-		s.log.Warn("unknown assignment mode from venue-service", zap.String("mode", planResp.AssignmentMode))
-		ticketType = ""
-	}
-	outboxEvent := repository.NewTicketOutboxEvent(
-		repository.OutboxEventTypeTicketUpdated,
-		buildOutboxPayload(&repository.Ticket{
-			ID:            existing.ID,
-			Title:         existing.Title,
-			Price:         existing.Price,
-			UserID:        existing.UserID,
-			SeatingPlanID: input.PlanID,
-			TicketType:    ticketType,
-			Version:       existing.Version + 1,
-			Event:         existing.Event,
-		}),
-	)
-
-	if err := s.repo.AttachSeatingPlan(ctx, input.TicketID, input.PlanID, input.UserID, ticketType, &outboxEvent); err != nil {
-		switch {
-		case errors.Is(err, repository.ErrOwnership):
-			return nil, ErrUnauthorized
-		default:
-			return nil, fmt.Errorf("attach seating plan: %w", err)
-		}
-	}
-
-	ticket, err := s.repo.FindByID(ctx, input.TicketID)
-	if err != nil {
-		return nil, fmt.Errorf("fetch ticket after attach: %w", err)
-	}
-
-	s.log.Info("seating plan attached",
-		zap.String("ticketId", ticket.ID),
-		zap.String("seatingPlanId", ticket.SeatingPlanID),
-		zap.String("ticketType", ticket.TicketType),
-		zap.String("userId", input.UserID),
-	)
-
-	return ticket, nil
-}
-
-// DetachSeatingPlan removes the seating plan association from a ticket, reverting it to a GA
-// ticket. The caller must own the ticket.
-func (s *TicketService) DetachSeatingPlan(ctx context.Context, input DetachSeatingPlanInput) (*repository.Ticket, error) {
-	existing, err := s.repo.FindByID(ctx, input.TicketID)
-	if err != nil {
-		return nil, fmt.Errorf("find ticket for detach: %w", err)
-	}
-
-	outboxEvent := repository.NewTicketOutboxEvent(
-		repository.OutboxEventTypeTicketUpdated,
-		buildOutboxPayload(&repository.Ticket{
-			ID:         existing.ID,
-			Title:      existing.Title,
-			Price:      existing.Price,
-			UserID:     existing.UserID,
-			Version:    existing.Version + 1,
-			Event:      existing.Event,
-			TicketType: "",
-		}),
-	)
-	if err := s.repo.DetachSeatingPlan(ctx, input.TicketID, input.UserID, &outboxEvent); err != nil {
-		switch {
-		case errors.Is(err, repository.ErrOwnership):
-			return nil, ErrUnauthorized
-		default:
-			return nil, fmt.Errorf("detach seating plan: %w", err)
-		}
-	}
-
-	ticket, err := s.repo.FindByID(ctx, input.TicketID)
-	if err != nil {
-		return nil, fmt.Errorf("fetch ticket after detach: %w", err)
-	}
-
-	s.log.Info("seating plan detached",
-		zap.String("ticketId", ticket.ID),
-		zap.String("userId", input.UserID),
-	)
 
 	return ticket, nil
 }

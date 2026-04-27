@@ -230,9 +230,9 @@ var ErrSeatedTicket = errors.New("ticket is seated — use venue-service reserva
 // that already has one. Callers should detach first.
 var ErrSeatingPlanAlreadyAttached = errors.New("ticket already has an attached seating plan")
 
-// ErrOwnership is returned by AttachSeatingPlan / DetachSeatingPlan when the caller
-// does not own the ticket. Distinct from service.ErrUnauthorized so that repository
-// callers can check it without importing the service package.
+// ErrOwnership is returned when the caller does not own the ticket.
+// Distinct from service.ErrUnauthorized so that repository callers can check it
+// without importing the service package.
 var ErrOwnership = errors.New("caller does not own this ticket")
 
 // PaginationParams controls cursor-based pagination for FindAll.
@@ -291,18 +291,6 @@ type TicketRepository interface {
 
 	Ping(ctx context.Context) error
 	Close(ctx context.Context) error
-
-	// --- Seating plan attachment (CP-13) ---
-
-	// AttachSeatingPlan atomically sets seatingPlanId and ticketType on a ticket in a
-	// single MongoDB update. The caller must own the ticket. Returns ErrTicketNotFound
-	// if the ticket does not exist, ErrOwnership if the user doesn't own it, and
-	// ErrSeatingPlanAlreadyAttached if a plan is already attached.
-	AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string, outbox *TicketOutboxEvent) error
-
-	// DetachSeatingPlan clears both seatingPlanId and ticketType from a ticket. The
-	// caller must own the ticket. Idempotent: if no plan is attached this is a no-op.
-	DetachSeatingPlan(ctx context.Context, ticketID, userID string, outbox *TicketOutboxEvent) error
 }
 
 // MongoTicketRepository implements TicketRepository against MongoDB.
@@ -686,13 +674,15 @@ func (r *MongoTicketRepository) Update(ctx context.Context, t *Ticket) error {
 
 	filter := bson.M{"_id": t.ID, "version": previousVersion}
 	update := bson.M{"$set": bson.M{
-		"title":      t.Title,
-		"price":      t.Price,
-		"orderId":    t.OrderID,
-		"quota":      t.Quota,
-		"maxPerUser": t.MaxPerUser,
-		"version":    t.Version,
-		"updatedAt":  t.UpdatedAt,
+		"title":         t.Title,
+		"price":         t.Price,
+		"orderId":       t.OrderID,
+		"seatingPlanId": t.SeatingPlanID,
+		"ticket_type":   t.TicketType,
+		"quota":         t.Quota,
+		"maxPerUser":    t.MaxPerUser,
+		"version":       t.Version,
+		"updatedAt":     t.UpdatedAt,
 	}}
 	if len(t.PendingOutbox) > 0 {
 		update["$push"] = bson.M{"outbox": bson.M{"$each": t.PendingOutbox}}
@@ -1131,106 +1121,6 @@ func (r *MongoTicketRepository) SweepExpiredReservations(ctx context.Context) (i
 		count++
 	}
 	return count, nil
-}
-
-// ─── Seating plan attachment methods (CP-13) ──────────────────────────────────
-
-// AttachSeatingPlan atomically sets seatingPlanId and ticketType on a ticket in a
-// single MongoDB update. The caller must own the ticket. Returns ErrTicketNotFound
-// if the ticket does not exist, ErrOwnership if the user doesn't own it, and
-// ErrSeatingPlanAlreadyAttached if a plan is already set.
-//
-// Uses a conditional filter ($and) so the update is atomic: the seatingPlanId field
-// must be absent or empty, ensuring two concurrent callers cannot both attach. Both
-// seatingPlanId and ticketType are set in the same $set to avoid a separate Update call.
-func (r *MongoTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string, outbox *TicketOutboxEvent) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	now := time.Now().UTC()
-
-	// Only match tickets owned by the caller AND without a seating plan attached.
-	filter := bson.M{
-		"_id":    ticketID,
-		"userId": userID,
-		"$or": bson.A{
-			bson.M{"seatingPlanId": bson.M{"$exists": false}},
-			bson.M{"seatingPlanId": ""},
-		},
-	}
-	update := bson.M{
-		"$set": bson.M{
-			"seatingPlanId": planID,
-			"ticket_type":   ticketType,
-			"updatedAt":     now,
-		},
-		"$inc": bson.M{"version": 1},
-	}
-	if outbox != nil {
-		update["$push"] = bson.M{"outbox": outbox}
-	}
-
-	result, err := r.collection.UpdateOne(ctx, filter, update)
-	if err != nil {
-		return fmt.Errorf("attach seating plan to ticket %s: %w", ticketID, err)
-	}
-	if result.MatchedCount == 0 {
-		// Distinguish the three failure cases by reading the current state.
-		var t Ticket
-		findErr := r.collection.FindOne(ctx, bson.M{"_id": ticketID}).Decode(&t)
-		if errors.Is(findErr, mongo.ErrNoDocuments) {
-			return ErrTicketNotFound
-		}
-		if findErr != nil {
-			return fmt.Errorf("attach seating plan: lookup ticket: %w", findErr)
-		}
-		if t.UserID != userID {
-			return ErrOwnership
-		}
-		// Ticket exists and is owned by caller — the filter failed because a plan is already set.
-		return ErrSeatingPlanAlreadyAttached
-	}
-	return nil
-}
-
-// DetachSeatingPlan clears both seatingPlanId and ticketType from a ticket atomically.
-// The caller must own the ticket. Idempotent: if no plan is attached the update is a no-op.
-func (r *MongoTicketRepository) DetachSeatingPlan(ctx context.Context, ticketID, userID string, outbox *TicketOutboxEvent) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	now := time.Now().UTC()
-
-	filter := bson.M{"_id": ticketID, "userId": userID}
-	update := bson.M{
-		// Clear both seatingPlanId and ticket_type in the same operation so the
-		// document is never left in a state where ticketType implies seated but
-		// no seatingPlanId exists.
-		"$unset": bson.M{"seatingPlanId": "", "ticket_type": ""},
-		"$set":   bson.M{"updatedAt": now},
-		"$inc":   bson.M{"version": 1},
-	}
-	if outbox != nil {
-		update["$push"] = bson.M{"outbox": outbox}
-	}
-
-	result, err := r.collection.UpdateOne(ctx, filter, update)
-	if err != nil {
-		return fmt.Errorf("detach seating plan from ticket %s: %w", ticketID, err)
-	}
-	if result.MatchedCount == 0 {
-		// Distinguish not-found from ownership failure.
-		var t Ticket
-		findErr := r.collection.FindOne(ctx, bson.M{"_id": ticketID}).Decode(&t)
-		if errors.Is(findErr, mongo.ErrNoDocuments) {
-			return ErrTicketNotFound
-		}
-		if findErr != nil {
-			return fmt.Errorf("detach seating plan: lookup ticket: %w", findErr)
-		}
-		return ErrOwnership
-	}
-	return nil
 }
 
 // ClaimPendingOutboxEvents claims up to limit pending outbox events for relay.

@@ -198,33 +198,3 @@ func (r *CachingTicketRepository) FinalizeReservation(ctx context.Context, reser
 	}
 	return nil
 }
-
-// ─── Seating plan attachment passthrough (CP-13) ──────────────────────────────
-// Both operations mutate the ticket document, so the individual ticket cache and
-// the list cache are invalidated after a successful write.
-
-func (r *CachingTicketRepository) AttachSeatingPlan(ctx context.Context, ticketID, planID, userID, ticketType string, outbox *TicketOutboxEvent) error {
-	if err := r.inner.AttachSeatingPlan(ctx, ticketID, planID, userID, ticketType, outbox); err != nil {
-		return err
-	}
-	if err := r.cache.InvalidateTicket(ctx, ticketID); err != nil {
-		r.log.Warn("failed to invalidate ticket cache after AttachSeatingPlan", zap.String("ticketId", ticketID), zap.Error(err))
-	}
-	if err := r.cache.InvalidateList(ctx); err != nil {
-		r.log.Warn("failed to invalidate ticket list cache after AttachSeatingPlan", zap.Error(err))
-	}
-	return nil
-}
-
-func (r *CachingTicketRepository) DetachSeatingPlan(ctx context.Context, ticketID, userID string, outbox *TicketOutboxEvent) error {
-	if err := r.inner.DetachSeatingPlan(ctx, ticketID, userID, outbox); err != nil {
-		return err
-	}
-	if err := r.cache.InvalidateTicket(ctx, ticketID); err != nil {
-		r.log.Warn("failed to invalidate ticket cache after DetachSeatingPlan", zap.String("ticketId", ticketID), zap.Error(err))
-	}
-	if err := r.cache.InvalidateList(ctx); err != nil {
-		r.log.Warn("failed to invalidate ticket list cache after DetachSeatingPlan", zap.Error(err))
-	}
-	return nil
-}

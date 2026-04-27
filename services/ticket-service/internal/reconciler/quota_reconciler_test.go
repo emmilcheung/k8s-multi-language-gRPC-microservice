@@ -76,12 +76,6 @@ func (s *stubTicketRepo) FinalizeReservation(_ context.Context, _, _ string) err
 }
 func (s *stubTicketRepo) Ping(_ context.Context) error  { return nil }
 func (s *stubTicketRepo) Close(_ context.Context) error { return nil }
-func (s *stubTicketRepo) AttachSeatingPlan(_ context.Context, _, _, _, _ string, _ *repository.TicketOutboxEvent) error {
-	panic("stubTicketRepo.AttachSeatingPlan not implemented")
-}
-func (s *stubTicketRepo) DetachSeatingPlan(_ context.Context, _, _ string, _ *repository.TicketOutboxEvent) error {
-	panic("stubTicketRepo.DetachSeatingPlan not implemented")
-}
 
 // stubSweeper records that SweepExpiredReservations was called and returns a
 // configurable count/error.

@@ -191,9 +191,6 @@ func main() {
 	v1.GET("", ticketHandler.List)
 	v1.GET("/:id", ticketHandler.GetByID)
 	v1.PUT("/:id", ticketHandler.Update)
-	// CP-13: seated ticket catalog — attach/detach a venue-service seating plan
-	v1.PUT("/:id/seating-plan", ticketHandler.AttachSeatingPlan)
-	v1.DELETE("/:id/seating-plan", ticketHandler.DetachSeatingPlan)
 
 	// GraphQL federation subgraph endpoint.
 	// A per-request DataLoader middleware is wrapped around the handler so that
