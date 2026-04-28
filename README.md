@@ -91,8 +91,10 @@ View the architecture diagrams directly in this README.
 
 **Service-to-service:**
 
-- **Synchronous:** gRPC — order-service calls ticket-service `ValidateTicketAvailability`
-  before creating an order (5 s deadline).
+- **Synchronous:** gRPC — order-service orchestrates a multi-step saga: `ReserveQuota` +
+  `ReserveHeldSeats`/`AutoAssignAndReserve` on create, `FinalizeReservation` +
+  `FinalizeSeatReservation` on payment, `ReleaseReservation` + `ReleaseSeatReservation`
+  on expiry (5 s deadline per call).
 - **Asynchronous:** Kafka — all cross-service event fan-out (order created/cancelled,
   ticket created/updated, payment captured, expiration complete).
 
@@ -107,21 +109,24 @@ View the architecture diagrams directly in this README.
 | **order-service** | Java 21 | Spring Boot 4 | 8080 | PostgreSQL 16 | Order lifecycle · gRPC client · transactional outbox |
 | **payment-service** | TypeScript / Node.js 24 | NestJS 10 | 3000 | PostgreSQL 16 | Payment creation · Stripe (stubbed Phase 1) · Kafka |
 | **expiration-service** | Go 1.23+ | — (worker) | 8080 (health) | Redis | Delayed job queue · publishes expiration events |
-| **venue-service** | Go 1.23+ | Echo v4 | 3003 / **50052** gRPC | PostgreSQL 16 | Venue management · seat inventory · quota reservation · Kafka consumer |
-| **client** | TypeScript | Next.js 15 | 4000 | — | App Router SSR frontend · Server Actions · shadcn/ui |
+| **user-service** | TypeScript / Node.js 24 | NestJS 10 | 3004 | PostgreSQL 16 | Profile · preferences · billing address · GraphQL subgraph |
+| **venue-service** | Go 1.23+ | Echo v4 | 3003 / **50052** gRPC | PostgreSQL 16 + Redis | Venue · seating plans · seat holds (Redis hot path) · SSE live updates · Kafka consumer |
+| **client** | TypeScript | Next.js 16 | 4000 | — | App Router SSR frontend · Server Actions · shadcn/ui |
+| **apollo-router** | — | Apollo Router v2.1 | 4000 | — | GraphQL Federation v2 supergraph gateway (6 subgraphs) |
 | **kong-gateway** | — | Kong 3.9 | 8000 / 8443 | — (DB-less) | JWT auth · routing · rate-limiting · CSRF fix |
 
 ### Kafka event topology
 
 ```
-tickets.ticket.created        ← ticket-service produces
-tickets.ticket.updated        ← ticket-service produces
-orders.order.created          ← order-service produces (outbox)
-orders.order.cancelled        ← order-service produces (outbox)
-payments.payment.captured     ← payment-service produces
+tickets.ticket.created               ← ticket-service produces
+tickets.ticket.updated               ← ticket-service produces
+orders.order.created                  ← order-service produces (outbox)
+orders.order.cancelled                ← order-service produces (outbox)
+orders.order.completed                ← order-service produces (outbox)
+payments.payment.succeeded            ← payment-service produces
 expiration.order.expiration_complete  ← expiration-service produces
-venue.seat.reserved           ← venue-service produces
-venue.seat.released           ← venue-service produces
+venue.seat.reserved                   ← venue-service produces
+venue.seat.released                   ← venue-service produces
 ```
 
 Every topic has a corresponding `.dlq` (dead letter queue) for failed consumer messages.
@@ -132,25 +137,28 @@ Defined in `proto/tickets/v1/tickets.proto` (proto3).
 
 ```protobuf
 service TicketService {
-  rpc GetTicket                  (GetTicketRequest)                   returns (TicketResponse);
-  rpc ValidateTicketAvailability (ValidateTicketAvailabilityRequest)  returns (ValidateTicketAvailabilityResponse);
+  rpc GetTicket                  (GetTicketRequest)              returns (GetTicketResponse);
+  rpc ValidateTicketAvailability (ValidateTicketRequest)         returns (ValidateTicketResponse);
+  rpc ReserveQuota               (ReserveQuotaRequest)           returns (ReserveQuotaResponse);
+  rpc ReleaseReservation         (ReleaseReservationRequest)     returns (ReleaseReservationResponse);
+  rpc FinalizeReservation        (FinalizeReservationRequest)    returns (FinalizeReservationResponse);
 }
 ```
-
-Generated stubs live in `libs/grpc-stubs/go/` (Go — ticket-service server side).
-Java (order-service) generates stubs at Maven build time via the `protobuf-maven-plugin`.
 
 Defined in `proto/venue/v1/venue.proto` (proto3).
 
 ```protobuf
 service VenueService {
-  rpc GetVenue          (GetVenueRequest)          returns (VenueResponse);
-  rpc ReserveSeat       (ReserveSeatRequest)        returns (ReserveSeatResponse);
-  rpc ReleaseSeat       (ReleaseSeatRequest)        returns (ReleaseSeatResponse);
+  rpc ReserveHeldSeats       (ReserveHeldSeatsRequest)       returns (ReserveHeldSeatsResponse);
+  rpc AutoAssignAndReserve   (AutoAssignAndReserveRequest)   returns (AutoAssignAndReserveResponse);
+  rpc ReleaseSeatReservation (ReleaseSeatReservationRequest) returns (ReleaseSeatReservationResponse);
+  rpc FinalizeSeatReservation(FinalizeSeatReservationRequest)returns (FinalizeSeatReservationResponse);
+  rpc GetSeatingPlan         (GetSeatingPlanRequest)         returns (GetSeatingPlanResponse);
 }
 ```
 
-Generated stubs live in `libs/grpc-stubs/go/` (Go — venue-service server side).
+Generated stubs live in `libs/grpc-stubs/go/` (Go — ticket-service and venue-service server side).
+Java (order-service) generates stubs at Maven build time via the `protobuf-maven-plugin`.
 
 ---
 
@@ -184,15 +192,18 @@ Generated stubs live in `libs/grpc-stubs/go/` (Go — venue-service server side)
 │   ├── order-service/          Java · Spring Boot · PostgreSQL · gRPC client
 │   ├── payment-service/        TypeScript · NestJS · PostgreSQL
 │   ├── expiration-service/     Go worker · Redis · Kafka
-│   ├── venue-service/          Go · Echo · PostgreSQL · gRPC server · Kafka consumer
-│   ├── client/                 Next.js 15 App Router
+│   ├── user-service/           TypeScript · NestJS · PostgreSQL · profile/prefs/billing
+│   ├── venue-service/          Go · Echo · PostgreSQL + Redis · gRPC server · Kafka consumer
+│   ├── client/                 Next.js 16 App Router
+│   ├── apollo-router/          Apollo Router v2.1 — GraphQL Federation supergraph
 │   └── kong-gateway/
 │       ├── config/kong.base.yml    declarative Kong config (template)
 │       ├── values/minikube.yml     per-env variable overrides
 │       └── scripts/build.sh        renders kong.yml from template + env values
 │
 ├── proto/
-│   └── tickets/v1/tickets.proto   gRPC contract (source of truth)
+│   ├── tickets/v1/tickets.proto   gRPC contract — ticket quota lifecycle
+│   └── venue/v1/venue.proto       gRPC contract — seat reservation lifecycle
 │
 ├── libs/
 │   └── grpc-stubs/go/             generated Go stubs (committed; regenerate with buf generate)
@@ -211,7 +222,8 @@ Generated stubs live in `libs/grpc-stubs/go/` (Go — venue-service server side)
 │       ├── modules/{vpc,eks,rds,elasticache,msk,kong}/
 │       └── environments/{dev,staging,prod}/
 │
-├── proto/                          .proto source files
+├── packages/
+│   └── ticketing-mcp-server/       MCP server for agentic ticketing workflows
 ├── buf.yaml                        buf lint + breaking-change config
 ├── buf.gen.yaml                    code generation config (buf generate)
 ├── docker-compose.yml              all services + infra for local dev (no K8s)

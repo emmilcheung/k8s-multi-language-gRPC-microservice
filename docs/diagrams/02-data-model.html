@@ -3,55 +3,64 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Data Model — per-service ownership</title>
-  <style>
-    :root { color-scheme: light; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-      margin: 0;
-      padding: 24px;
-      background: #F7F8FA;
-      color: #232F3E;
-    }
-    header {
-      max-width: 1400px;
-      margin: 0 auto 16px auto;
-    }
-    header h1 { margin: 0 0 4px 0; font-size: 20px; }
-    header p { margin: 0; color: #556070; font-size: 13px; }
-    .card {
-      background: #fff;
-      border: 1px solid #E5E7EB;
-      border-radius: 12px;
-      padding: 24px;
-      max-width: 1400px;
-      margin: 0 auto;
-      overflow-x: auto;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-    }
-    .nav {
-      max-width: 1400px;
-      margin: 0 auto 12px auto;
-      font-size: 13px;
-    }
-    .nav a { color: #1A73E8; text-decoration: none; margin-right: 12px; }
-    .nav a:hover { text-decoration: underline; }
-  </style>
+  <title>Data Model — Ticketing Platform</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="nav">
-    <a href="index.html">← Index</a>
-    <a href="01-aws-infrastructure.svg">AWS Infra (SVG)</a>
-    <a href="02-data-model.html">Data Model</a>
-    <a href="03-c4-container.html">C4 Container</a>
-    <a href="04-data-flow-sequence.html">Data Flow</a>
-  </div>
-  <header>
-    <h1>Data Model — per-service ownership</h1>
-    <p>Rendered client-side via Mermaid 11. Source: <code>02-data-model.mermaid</code></p>
-  </header>
-  <div class="card">
-    <pre class="mermaid">
+<div class="page">
+
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <a class="sidebar-back" href="index.html">← All diagrams</a>
+      <div class="sidebar-brand-title">Ticketing Platform</div>
+      <div class="sidebar-brand-sub">Architecture Diagrams</div>
+    </div>
+    <div class="sidebar-nav">
+      <div class="sidebar-nav-label">Diagrams</div>
+
+      <a class="sidebar-item" href="01-aws-infrastructure.html">
+        <span class="sidebar-dot" style="background:#FF9900;"></span>
+        <span class="sidebar-item-label">
+          AWS Infrastructure
+          <span class="sidebar-item-sub">Graphviz · SVG</span>
+        </span>
+      </a>
+
+      <a class="sidebar-item active" href="02-data-model.html">
+        <span class="sidebar-dot" style="background:#2563EB;"></span>
+        <span class="sidebar-item-label">
+          Data Model
+          <span class="sidebar-item-sub">Mermaid · ER</span>
+        </span>
+      </a>
+
+      <a class="sidebar-item" href="03-c4-container.html">
+        <span class="sidebar-dot" style="background:#8B5CF6;"></span>
+        <span class="sidebar-item-label">
+          C4 Container
+          <span class="sidebar-item-sub">Mermaid · Flowchart</span>
+        </span>
+      </a>
+
+      <a class="sidebar-item" href="04-data-flow-sequence.html">
+        <span class="sidebar-dot" style="background:#10B981;"></span>
+        <span class="sidebar-item-label">
+          Data Flow / Saga
+          <span class="sidebar-item-sub">Mermaid · Sequence</span>
+        </span>
+      </a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="main-header">
+      <h1>Data Model — per-service ownership</h1>
+      <p>Dotted lines mark <em>logical</em> cross-service references — no enforced foreign keys.
+        Each service owns exactly one datastore. Source: <code>02-data-model.mermaid</code></p>
+    </div>
+    <div class="diagram-wrapper">
+      <div class="diagram-card">
+        <pre class="mermaid">
 %%{init: {'theme':'base','themeVariables':{'primaryColor':'#FF9900','primaryBorderColor':'#232F3E','primaryTextColor':'#232F3E','lineColor':'#232F3E','secondaryColor':'#EAF2FB','tertiaryColor':'#F7F8FA'}}}%%
 erDiagram
     %% ------------------------------------------------------------
@@ -72,23 +81,27 @@ erDiagram
     ORDERS ||..|| PAYMENTS : "order_id (logical, 1:1)"
     ORDERS ||--o{ ORDER_OUTBOX : "transactional outbox"
     ORDERS ||..o{ TICKETS : "ticket_id (logical, via gRPC)"
-    ORDERS ||..o{ RESERVATIONS : "reservation_id (logical)"
+    ORDERS ||..o{ SEAT_RESERVATIONS : "reservation_id (logical)"
 
-    %% ticket_db (DocumentDB — owned by ticket-service)
+    %% ticket_db (MongoDB — owned by ticket-service)
     TICKETS ||--|{ RESERVATIONS : "has quota"
-    TICKETS }o..|| VENUES : "venue_id (logical, via gRPC)"
+    TICKETS ||..o| SEATING_PLANS : "seating_plan_id (logical, via gRPC)"
 
-    %% venue_db (DocumentDB — owned by venue-service)
+    %% venue_db (RDS PostgreSQL — owned by venue-service)
+    VENUES ||--|{ VENUE_SECTIONS : "layout template"
     VENUES ||--|{ SEATING_PLANS : "has"
     SEATING_PLANS ||--|{ SECTIONS : "grouped by"
+    SEATING_PLANS ||--o{ PRICE_TIERS : "pricing levels"
     SECTIONS ||--|{ SEATS : "contains"
-    SEATING_PLANS ||--o{ SEAT_RESERVATIONS : "temporarily holds"
+    SEATING_PLANS ||--o{ SEAT_RESERVATIONS : "reservation ledger"
+    SEAT_RESERVATIONS ||--|{ SEAT_RESERVATION_ITEMS : "line items"
+    ORGANIZER_SETTINGS ||..|| VENUES : "organizer_id (logical)"
 
     %% payment_db (RDS PostgreSQL — owned by payment-service)
     PAYMENTS ||--o{ PAYMENT_RECORDS : "audit trail"
     PAYMENTS ||--o{ PAYMENT_WEBHOOKS : "Stripe events"
 
-    %% redis (ElastiCache — owned by expiration-service + others for TTL)
+    %% redis (ElastiCache — owned by expiration-service + venue-service for holds)
     RESERVATIONS ||..o{ EXPIRATION_TIMERS : "scheduled (Redis)"
 
     %% =====================  ENTITIES  ============================
@@ -157,24 +170,23 @@ erDiagram
     }
 
     TICKETS {
-        string id PK "ticket_db · ticket-service"
+        string id PK "ticket_db (MongoDB) · ticket-service"
         string title
-        text description
         decimal price
         int quota
         int reserved
         int sold
         int max_per_user
         string seating_plan_id "logical FK → SEATING_PLANS"
+        string ticket_type "GA|SEATED_MANUAL|SEATED_AUTO"
+        jsonb event "title, startsAt, endsAt, venue metadata"
         int version "optimistic lock"
-        timestamptz event_starts_at
-        timestamptz event_ends_at
         timestamptz created_at
         timestamptz updated_at
     }
 
     RESERVATIONS {
-        string id PK "ticket_db"
+        string id PK "ticket_db (MongoDB)"
         string ticket_id FK
         string user_id "logical FK → USERS"
         int quantity
@@ -184,43 +196,108 @@ erDiagram
     }
 
     VENUES {
-        string id PK "venue_db · venue-service"
-        string name
-        string address
-        string city
-        string country
+        uuid id PK "venue_db (PostgreSQL) · venue-service"
+        uuid organizer_id
+        text name
         int capacity
-        string location_coordinates
+        text timezone
+        text address
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    VENUE_SECTIONS {
+        uuid id PK "venue_db · reusable layout template"
+        uuid venue_id FK
+        text name
+        text type "seated|ga"
+        int row_count
+        int column_count
+        jsonb position_json
+        int display_order
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    ORGANIZER_SETTINGS {
+        uuid organizer_id PK "venue_db · per-organizer config"
+        int hold_ttl_sec "default 600"
+        timestamptz created_at
+        timestamptz updated_at
     }
 
     SEATING_PLANS {
-        string id PK
-        string venue_id FK
-        string ticket_id "logical FK → TICKETS"
-        string assignment_mode "manual|auto"
-        string status
+        uuid id PK "venue_db"
+        uuid venue_id FK
+        uuid ticket_id "required at creation (ticket-first)"
+        uuid organizer_id
+        text name
+        text status "draft|active|inactive"
+        int max_seats_per_order "default 10"
+        text assignment_mode "manual|auto"
+        text pricing_mode "single|section|seat"
+        jsonb layout_json "canvas editor state"
+        int version "optimistic lock"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    PRICE_TIERS {
+        uuid id PK "venue_db"
+        uuid plan_id FK
+        text name
+        decimal price "e.g. 75.00"
+        timestamptz created_at
     }
 
     SECTIONS {
-        string id PK
-        string plan_id FK
-        string name
-        decimal base_price
+        uuid id PK "venue_db · event-scoped (cloned from venue_sections)"
+        uuid plan_id FK
+        text name
+        text type "seated|ga"
+        int row_count
+        int column_count
+        uuid price_tier_id FK "optional"
+        timestamptz created_at
+        timestamptz updated_at
     }
 
     SEATS {
-        string id PK
-        string section_id FK
-        string label
-        string status "AVAILABLE|HELD|SOLD"
+        uuid id PK "venue_db"
+        uuid section_id FK
+        uuid plan_id FK
+        uuid price_tier_id FK "optional per-seat override"
+        text seat_label "e.g. R1S3"
+        text row_label "e.g. R1"
+        int column_number
+        text status "AVAILABLE|HELD|RESERVED|SOLD|BLOCKED"
+        uuid held_by "user holding this seat"
+        timestamptz held_until
+        jsonb attributes
+        int version "optimistic lock"
+        timestamptz created_at
+        timestamptz updated_at
     }
 
     SEAT_RESERVATIONS {
-        string id PK "= reservation_id"
-        string plan_id FK
-        string user_id
-        string seat_ids "array"
+        uuid id PK "venue_db · durable reservation ledger"
+        uuid plan_id FK
+        uuid ticket_id "logical FK → TICKETS"
+        uuid order_id "set after order creation"
+        uuid user_id
+        uuid section_id
+        text status "RESERVED|RELEASED|SOLD|EXPIRED"
         timestamptz expires_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    SEAT_RESERVATION_ITEMS {
+        uuid reservation_id FK "venue_db · one row per seat"
+        uuid seat_id FK
+        uuid section_id FK
+        decimal price "snapshot at reservation time"
+        text seat_label
     }
 
     PAYMENTS {
@@ -258,19 +335,22 @@ erDiagram
         string reservation_id
         timestamptz fires_at
     }
-
-    </pre>
+        </pre>
+      </div>
+    </div>
   </div>
-  <script type="module">
-    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-    mermaid.initialize({
-      startOnLoad: true,
-      theme: "base",
-      securityLevel: "loose",
-      er: { useMaxWidth: true },
-      sequence: { useMaxWidth: true, actorMargin: 60, messageAlign: "center" },
-      flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" }
-    });
-  </script>
+
+</div>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    securityLevel: "loose",
+    er: { useMaxWidth: true },
+    sequence: { useMaxWidth: true, actorMargin: 60, messageAlign: "center" },
+    flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" }
+  });
+</script>
 </body>
 </html>

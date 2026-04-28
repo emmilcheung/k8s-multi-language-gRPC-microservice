@@ -3,55 +3,64 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Data Flow — reservation + payment saga (sequence)</title>
-  <style>
-    :root { color-scheme: light; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-      margin: 0;
-      padding: 24px;
-      background: #F7F8FA;
-      color: #232F3E;
-    }
-    header {
-      max-width: 1400px;
-      margin: 0 auto 16px auto;
-    }
-    header h1 { margin: 0 0 4px 0; font-size: 20px; }
-    header p { margin: 0; color: #556070; font-size: 13px; }
-    .card {
-      background: #fff;
-      border: 1px solid #E5E7EB;
-      border-radius: 12px;
-      padding: 24px;
-      max-width: 1400px;
-      margin: 0 auto;
-      overflow-x: auto;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-    }
-    .nav {
-      max-width: 1400px;
-      margin: 0 auto 12px auto;
-      font-size: 13px;
-    }
-    .nav a { color: #1A73E8; text-decoration: none; margin-right: 12px; }
-    .nav a:hover { text-decoration: underline; }
-  </style>
+  <title>Data Flow / Saga — Ticketing Platform</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="nav">
-    <a href="index.html">← Index</a>
-    <a href="01-aws-infrastructure.svg">AWS Infra (SVG)</a>
-    <a href="02-data-model.html">Data Model</a>
-    <a href="03-c4-container.html">C4 Container</a>
-    <a href="04-data-flow-sequence.html">Data Flow</a>
-  </div>
-  <header>
-    <h1>Data Flow — reservation + payment saga (sequence)</h1>
-    <p>Rendered client-side via Mermaid 11. Source: <code>04-data-flow-sequence.mermaid</code></p>
-  </header>
-  <div class="card">
-    <pre class="mermaid">
+<div class="page">
+
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <a class="sidebar-back" href="index.html">← All diagrams</a>
+      <div class="sidebar-brand-title">Ticketing Platform</div>
+      <div class="sidebar-brand-sub">Architecture Diagrams</div>
+    </div>
+    <div class="sidebar-nav">
+      <div class="sidebar-nav-label">Diagrams</div>
+
+      <a class="sidebar-item" href="01-aws-infrastructure.html">
+        <span class="sidebar-dot" style="background:#FF9900;"></span>
+        <span class="sidebar-item-label">
+          AWS Infrastructure
+          <span class="sidebar-item-sub">Graphviz · SVG</span>
+        </span>
+      </a>
+
+      <a class="sidebar-item" href="02-data-model.html">
+        <span class="sidebar-dot" style="background:#2563EB;"></span>
+        <span class="sidebar-item-label">
+          Data Model
+          <span class="sidebar-item-sub">Mermaid · ER</span>
+        </span>
+      </a>
+
+      <a class="sidebar-item" href="03-c4-container.html">
+        <span class="sidebar-dot" style="background:#8B5CF6;"></span>
+        <span class="sidebar-item-label">
+          C4 Container
+          <span class="sidebar-item-sub">Mermaid · Flowchart</span>
+        </span>
+      </a>
+
+      <a class="sidebar-item active" href="04-data-flow-sequence.html">
+        <span class="sidebar-dot" style="background:#10B981;"></span>
+        <span class="sidebar-item-label">
+          Data Flow / Saga
+          <span class="sidebar-item-sub">Mermaid · Sequence</span>
+        </span>
+      </a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="main-header">
+      <h1>Data Flow — reservation + payment saga</h1>
+      <p>Full 5-phase flow: reserve → outbox fan-out → payment → finalize → expire/compensate.
+        CloudEvents on MSK, transactional outbox, DLQ policy. Source: <code>04-data-flow-sequence.mermaid</code></p>
+    </div>
+    <div class="diagram-wrapper">
+      <div class="diagram-card">
+        <pre class="mermaid">
 %%{init: {'theme':'base','themeVariables':{'primaryColor':'#FF9900','primaryBorderColor':'#232F3E','primaryTextColor':'#232F3E','lineColor':'#232F3E','actorBkg':'#FF9900','actorBorder':'#232F3E','actorTextColor':'#232F3E','noteBkgColor':'#FDF6E3','noteTextColor':'#232F3E','noteBorderColor':'#232F3E','fontFamily':'Helvetica, Arial, sans-serif'}}}%%
 sequenceDiagram
     autonumber
@@ -107,7 +116,7 @@ sequenceDiagram
     PS->>ST: create + confirm PaymentIntent (amount, currency)
     ST-->>PS: status=succeeded (or requires_action)
     PS->>PS: UPDATE payments SET status=SUCCEEDED AND INSERT payment_records
-    PS->>MQ: publish payments.payment.succeeded
+    PS->>MQ: publish payments.payment.succeeded (CloudEvents)
     ST-->>K: webhook payment_intent.succeeded (async, idempotent)
     K->>PS: POST /payments/webhook
     end
@@ -145,19 +154,22 @@ sequenceDiagram
     end
 
     Note over MQ: Any consumer failure retries with exponential back-off (max 3), <br/> then routes to topic.dlq — audited, never silently dropped.
-
-    </pre>
+        </pre>
+      </div>
+    </div>
   </div>
-  <script type="module">
-    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-    mermaid.initialize({
-      startOnLoad: true,
-      theme: "base",
-      securityLevel: "loose",
-      er: { useMaxWidth: true },
-      sequence: { useMaxWidth: true, actorMargin: 60, messageAlign: "center" },
-      flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" }
-    });
-  </script>
+
+</div>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    securityLevel: "loose",
+    er: { useMaxWidth: true },
+    sequence: { useMaxWidth: true, actorMargin: 60, messageAlign: "center" },
+    flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" }
+  });
+</script>
 </body>
 </html>

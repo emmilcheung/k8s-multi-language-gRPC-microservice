@@ -159,8 +159,8 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
       <a class="tile" href="03-c4-container.html">
         <span class="badge b-mer">Mermaid · C4</span>
         <h2>3 · C4 Container Diagram</h2>
-        <p>All 9 services grouped by domain (Identity · Catalog · Transaction),
-          showing REST, gRPC and Kafka protocols.</p>
+        <p>All 10 services grouped by domain (Identity · Catalog · Transaction),
+          showing REST, gRPC, GraphQL Federation and Kafka protocols.</p>
       </a>
       <a class="tile" href="04-data-flow-sequence.html">
         <span class="badge b-mer">Mermaid · Sequence</span>

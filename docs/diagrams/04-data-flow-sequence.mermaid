@@ -53,7 +53,7 @@ sequenceDiagram
     PS->>ST: create + confirm PaymentIntent (amount, currency)
     ST-->>PS: status=succeeded (or requires_action)
     PS->>PS: UPDATE payments SET status=SUCCEEDED AND INSERT payment_records
-    PS->>MQ: publish payments.payment.succeeded
+    PS->>MQ: publish payments.payment.succeeded (CloudEvents)
     ST-->>K: webhook payment_intent.succeeded (async, idempotent)
     K->>PS: POST /payments/webhook
     end

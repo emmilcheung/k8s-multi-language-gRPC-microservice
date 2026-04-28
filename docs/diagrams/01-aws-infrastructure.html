@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AWS Infrastructure — Ticketing Platform</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="page">
+
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <a class="sidebar-back" href="index.html">← All diagrams</a>
+      <div class="sidebar-brand-title">Ticketing Platform</div>
+      <div class="sidebar-brand-sub">Architecture Diagrams</div>
+    </div>
+    <div class="sidebar-nav">
+      <div class="sidebar-nav-label">Diagrams</div>
+
+      <a class="sidebar-item active" href="01-aws-infrastructure.html">
+        <span class="sidebar-dot" style="background:#FF9900;"></span>
+        <span class="sidebar-item-label">
+          AWS Infrastructure
+          <span class="sidebar-item-sub">Graphviz · SVG</span>
+        </span>
+      </a>
+
+      <a class="sidebar-item" href="02-data-model.html">
+        <span class="sidebar-dot" style="background:#2563EB;"></span>
+        <span class="sidebar-item-label">
+          Data Model
+          <span class="sidebar-item-sub">Mermaid · ER</span>
+        </span>
+      </a>
+
+      <a class="sidebar-item" href="03-c4-container.html">
+        <span class="sidebar-dot" style="background:#8B5CF6;"></span>
+        <span class="sidebar-item-label">
+          C4 Container
+          <span class="sidebar-item-sub">Mermaid · Flowchart</span>
+        </span>
+      </a>
+
+      <a class="sidebar-item" href="04-data-flow-sequence.html">
+        <span class="sidebar-dot" style="background:#10B981;"></span>
+        <span class="sidebar-item-label">
+          Data Flow / Saga
+          <span class="sidebar-item-sub">Mermaid · Sequence</span>
+        </span>
+      </a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="main-header">
+      <h1>AWS Infrastructure</h1>
+      <p>Reference production architecture — EKS, MSK, RDS Multi-AZ, ElastiCache, Kong gateway, IRSA, CloudWatch observability.
+        Source: <code>01-aws-infrastructure.py</code> (Graphviz)</p>
+    </div>
+    <div class="diagram-wrapper">
+      <div class="diagram-card">
+        <img src="01-aws-infrastructure.svg" alt="AWS Infrastructure diagram" style="max-width:100%;height:auto;display:block;" />
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
