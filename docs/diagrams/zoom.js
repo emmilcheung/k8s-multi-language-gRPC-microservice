@@ -75,7 +75,6 @@
   function attachZoom(el) {
     target = el;
     target.style.transformOrigin = '0 0';
-    target.style.willChange      = 'transform';
     target.style.display         = 'block';
     applyTransform();
     attachEvents();
