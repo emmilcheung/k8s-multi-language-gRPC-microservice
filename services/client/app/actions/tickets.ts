@@ -7,6 +7,8 @@ import { base, authHeaders } from "@/lib/server-utils";
 import type { AvailabilitySnapshot, SeatingPlan, Ticket } from "@/lib/types";
 import { createSeatingPlanForTicket } from "./venues";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 // ─── Pagination ───────────────────────────────────────────────────────────────
 
 export interface TicketPage {
@@ -392,93 +394,3 @@ export async function replaceInactivePlan(
   redirect(`/tickets/${ticketId}/plans/${replacementPlan.id}`);
 }
 
-// ─── Seating plan attach / detach (deprecated in Phase 3) ────────────────────
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-/**
- * DEPRECATED: Use createTicket with venueId instead (Phase 3).
- * Kept for backward compatibility during migration.
- * 
- * Attaches a seating plan to a ticket.
- * Calls PATCH /api/tickets/:ticketId/seating-plan via Kong → ticket-service.
- */
-export async function attachSeatingPlan(
-  ticketId: string,
-  _prev: TicketState,
-  formData: FormData
-): Promise<TicketState> {
-  const planId = (formData.get("planId") as string | null)?.trim() ?? "";
-
-  if (!planId) return { error: "Seating plan ID is required." };
-  if (!UUID_RE.test(planId)) return { error: "Seating plan ID must be a valid UUID." };
-
-  // 1. Verify the seating plan exists and belongs to the caller before linking it.
-  const planRes = await fetch(`${base()}/api/seating-plans/${planId}`, {
-    method: "GET",
-    headers: await authHeaders(),
-  });
-  if (!planRes.ok) {
-    return { error: "Seating plan not found or you do not have access to it." };
-  }
-  const plan = await planRes.json();
-
-  // 2. Tell ticket-service about the plan (sets seatingPlanId on the ticket).
-  const res = await fetch(`${base()}/api/tickets/${ticketId}/seating-plan`, {
-    method: "PUT",
-    headers: await authHeaders(),
-    body: JSON.stringify({ seatingPlanId: planId }),
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error?.message ?? "Failed to attach seating plan." };
-  }
-
-  // 3. Tell venue-service about the ticket (sets ticketId on the plan).
-  //    This is required so the activate button becomes visible on the plan page.
-  const attachRes = await fetch(`${base()}/api/seating-plans/${planId}/attach-ticket`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({ ticketId, expectedVersion: plan.version ?? 0 }),
-  });
-
-  if (!attachRes.ok) {
-    // Non-fatal: ticket-service link succeeded. Log but don't block the redirect.
-    // The organizer can still activate via the plan page after refreshing.
-    const body = await attachRes.json().catch(() => ({}));
-    console.warn("[attachSeatingPlan] venue-service attach-ticket failed:", body?.error);
-  }
-
-  revalidatePath(`/tickets/${ticketId}`);
-  redirect(`/tickets/${ticketId}`);
-}
-
-/**
- * DEPRECATED: Use seat management on ticket detail instead (Phase 3).
- * Kept for backward compatibility during migration.
- * 
- * Detaches the seating plan from a ticket.
- * Calls DELETE /api/tickets/:ticketId/seating-plan via Kong → ticket-service.
- */
-export async function detachSeatingPlan(
-  ticketId: string,
-  prev: TicketState,
-  formData: FormData
-): Promise<TicketState> {
-  void prev;
-  void formData;
-
-  const res = await fetch(`${base()}/api/tickets/${ticketId}/seating-plan`, {
-    method: "DELETE",
-    headers: await authHeaders(),
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error?.message ?? "Failed to detach seating plan." };
-  }
-
-  revalidatePath(`/tickets/${ticketId}`);
-  redirect(`/tickets/${ticketId}`);
-}

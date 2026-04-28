@@ -167,7 +167,6 @@ export interface SeatingPlan {
   organizerId: string;
   name: string;
   status: "draft" | "active" | "inactive";
-  holdTtlSec: number;
   maxSeatsPerOrder: number;
   /** Seller's choice of seat assignment mode: "manual" or "auto" */
   assignmentMode?: "manual" | "auto";

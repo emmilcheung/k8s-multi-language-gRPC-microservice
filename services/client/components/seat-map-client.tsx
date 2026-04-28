@@ -718,10 +718,6 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
             <p className="text-xs text-muted-foreground uppercase tracking-wider">Plan details</p>
             <div className="flex flex-col gap-1 text-xs">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Hold time</span>
-                <span>{plan.holdTtlSec}s</span>
-              </div>
-              <div className="flex justify-between">
                 <span className="text-muted-foreground">Max per order</span>
                 <span>{plan.maxSeatsPerOrder}</span>
               </div>

@@ -129,7 +129,6 @@ describe("ticket server actions", () => {
       venueId: "11111111-1111-1111-1111-111111111111",
       name: "Concert Seating Plan",
       assignmentMode: "manual",
-      holdTtlSec: 300,
       maxSeatsPerOrder: 10,
     });
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
@@ -176,7 +175,6 @@ describe("ticket server actions", () => {
       venueId: "11111111-1111-1111-1111-111111111111",
       name: "Concert Seating Plan",
       assignmentMode: "manual",
-      holdTtlSec: 300,
       maxSeatsPerOrder: 10,
     });
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
@@ -216,7 +214,6 @@ describe("ticket server actions", () => {
       venueId: "11111111-1111-1111-1111-111111111111",
       name: "Concert Seating Plan",
       assignmentMode: "auto",
-      holdTtlSec: 300,
       maxSeatsPerOrder: 10,
     });
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
@@ -376,7 +373,6 @@ describe("ticket server actions", () => {
       venueId: "11111111-1111-1111-1111-111111111111",
       name: "Main Floor Replacement",
       assignmentMode: "manual",
-      holdTtlSec: 300,
       maxSeatsPerOrder: 6,
       pricingMode: "section",
     });

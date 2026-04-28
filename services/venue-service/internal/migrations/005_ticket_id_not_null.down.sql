@@ -1,6 +1,6 @@
--- Down migration for 005: Revert ticket_id to nullable
+-- Down migration for 005: no-op
 --
--- Restores the schema to allow nullable ticket_id for downgrade scenarios.
-
-ALTER TABLE seating_plans
-ALTER COLUMN ticket_id DROP NOT NULL;
+-- The up migration only deactivates orphaned plans (a data-only change) and does
+-- not alter the schema, so there is nothing to revert structurally.
+-- Re-activating plans is intentionally not automated — an operator can manually
+-- reactivate specific plans if needed after a rollback.

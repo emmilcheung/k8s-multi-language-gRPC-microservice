@@ -237,19 +237,17 @@ export async function createSeatingPlan(
 ): Promise<PlanState> {
   const venueId = (formData.get("venueId") as string)?.trim();
   const name = (formData.get("name") as string)?.trim();
-  const holdTtlRaw = (formData.get("holdTtlSec") as string)?.trim();
   const maxSeatsRaw = (formData.get("maxSeatsPerOrder") as string)?.trim();
 
   if (!venueId) return { error: "Venue ID is required." };
   if (!name) return { error: "Plan name is required." };
 
-  const holdTtlSec = holdTtlRaw ? parseInt(holdTtlRaw, 10) : 300;
   const maxSeatsPerOrder = maxSeatsRaw ? parseInt(maxSeatsRaw, 10) : 10;
 
   const res = await fetch(`${base()}/api/seating-plans`, {
     method: "POST",
     headers: await authHeaders(),
-    body: JSON.stringify({ venueId, name, holdTtlSec, maxSeatsPerOrder }),
+    body: JSON.stringify({ venueId, name, maxSeatsPerOrder }),
   });
 
   if (!res.ok) {
@@ -287,7 +285,6 @@ export async function createSeatingPlanForTicket(
       venueId,
       name: planName,
       assignmentMode,
-      holdTtlSec: 300,
       maxSeatsPerOrder: maxSeatsPerOrder ?? 10,
       ...(pricingMode ? { pricingMode } : {}),
     }),

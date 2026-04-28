@@ -67,9 +67,6 @@ export function PlanForm({
           </div>
         </div>
 
-        {/* Hold TTL — kept as a hidden field; configurable via organizer settings */}
-        <input type="hidden" name="holdTtlSec" value="300" />
-
         {/* Max seats per order */}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="maxSeatsPerOrder" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
