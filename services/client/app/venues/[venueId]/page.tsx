@@ -157,7 +157,7 @@ export default async function VenueDetailPage({ params }: Props) {
                     {plan.name}
                   </p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Hold TTL: {plan.holdTtlSec}s · Max {plan.maxSeatsPerOrder} seats/order
+                    Max {plan.maxSeatsPerOrder} seats/order
                     {plan.ticketId && (
                       <> · Attached to ticket</>
                     )}

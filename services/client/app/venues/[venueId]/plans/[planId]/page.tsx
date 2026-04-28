@@ -20,7 +20,6 @@ import {
   Layers,
   MapPin,
   Users,
-  ChevronRight,
   Grid3X3,
 } from "lucide-react";
 import type { SeatingPlan, Section, PriceTier } from "@/lib/types";
@@ -109,10 +108,6 @@ export default async function PlanDetailPage({ params }: Props) {
           <span className="flex items-center gap-1.5">
             <Users className="w-3.5 h-3.5" />
             Max {plan.maxSeatsPerOrder} seats per order
-          </span>
-          <span className="flex items-center gap-1.5">
-            <ChevronRight className="w-3.5 h-3.5" />
-            Hold TTL: {plan.holdTtlSec}s
           </span>
           {plan.ticketId && (
             <Link
