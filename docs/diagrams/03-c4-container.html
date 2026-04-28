@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>C4 Container — Ticketing Platform</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="zoom.js"></script>
 </head>
 <body>
 <div class="page">
@@ -59,6 +60,12 @@
         Source: <code>03-c4-container.mermaid</code></p>
     </div>
     <div class="diagram-wrapper">
+      <div class="zoom-bar">
+        <button class="zoom-btn" id="zoom-out"   title="Zoom out (−)">&#x2212;</button>
+        <span class="zoom-level" id="zoom-level">100%</span>
+        <button class="zoom-btn" id="zoom-in"    title="Zoom in (+)">+</button>
+        <button class="zoom-btn zoom-btn-reset" id="zoom-reset" title="Reset (0)">&#x21BA;</button>
+      </div>
       <div class="diagram-card">
         <pre class="mermaid">
 %%{init: {'theme':'base','themeVariables':{'primaryColor':'#FF9900','primaryBorderColor':'#232F3E','primaryTextColor':'#232F3E','lineColor':'#232F3E','secondaryColor':'#EAF2FB','tertiaryColor':'#F7F8FA','fontFamily':'Helvetica, Arial, sans-serif'}}}%%

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Data Flow / Saga — Ticketing Platform</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="zoom.js"></script>
 </head>
 <body>
 <div class="page">
@@ -59,6 +60,12 @@
         CloudEvents on MSK, transactional outbox, DLQ policy. Source: <code>04-data-flow-sequence.mermaid</code></p>
     </div>
     <div class="diagram-wrapper">
+      <div class="zoom-bar">
+        <button class="zoom-btn" id="zoom-out"   title="Zoom out (−)">&#x2212;</button>
+        <span class="zoom-level" id="zoom-level">100%</span>
+        <button class="zoom-btn" id="zoom-in"    title="Zoom in (+)">+</button>
+        <button class="zoom-btn zoom-btn-reset" id="zoom-reset" title="Reset (0)">&#x21BA;</button>
+      </div>
       <div class="diagram-card">
         <pre class="mermaid">
 %%{init: {'theme':'base','themeVariables':{'primaryColor':'#FF9900','primaryBorderColor':'#232F3E','primaryTextColor':'#232F3E','lineColor':'#232F3E','actorBkg':'#FF9900','actorBorder':'#232F3E','actorTextColor':'#232F3E','noteBkgColor':'#FDF6E3','noteTextColor':'#232F3E','noteBorderColor':'#232F3E','fontFamily':'Helvetica, Arial, sans-serif'}}}%%

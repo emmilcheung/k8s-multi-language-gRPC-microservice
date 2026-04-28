@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AWS Infrastructure — Ticketing Platform</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="zoom.js"></script>
 </head>
 <body>
 <div class="page">
@@ -59,6 +60,12 @@
         Source: <code>01-aws-infrastructure.py</code> (Graphviz)</p>
     </div>
     <div class="diagram-wrapper">
+      <div class="zoom-bar">
+        <button class="zoom-btn" id="zoom-out"   title="Zoom out (−)">&#x2212;</button>
+        <span class="zoom-level" id="zoom-level">100%</span>
+        <button class="zoom-btn" id="zoom-in"    title="Zoom in (+)">+</button>
+        <button class="zoom-btn zoom-btn-reset" id="zoom-reset" title="Reset (0)">&#x21BA;</button>
+      </div>
       <div class="diagram-card">
         <img src="01-aws-infrastructure.svg" alt="AWS Infrastructure diagram" style="max-width:100%;height:auto;display:block;" />
       </div>
@@ -66,5 +73,6 @@
   </div>
 
 </div>
+<script src="zoom.js"></script>
 </body>
 </html>
