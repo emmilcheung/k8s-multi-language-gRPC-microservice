@@ -307,13 +307,63 @@ code {
 .diagram-wrapper {
   flex: 1;
   padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
 }
 
 .diagram-card {
+  flex: 1;
   background: #FFFFFF;
   border: 1px solid #E5E7EB;
   border-radius: 12px;
   padding: 28px;
-  overflow-x: auto;
+  overflow: hidden;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  cursor: grab;
+  min-height: 400px;
+  position: relative;
+}
+
+.diagram-card:active { cursor: grabbing; }
+
+/* ----------------------------------------------------------------
+   ZOOM CONTROLS
+   ---------------------------------------------------------------- */
+
+.zoom-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.zoom-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #E5E7EB;
+  border-radius: 6px;
+  background: #FFFFFF;
+  color: #374151;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, border-color 0.1s;
+  user-select: none;
+}
+
+.zoom-btn:hover  { background: #F3F4F6; border-color: #D1D5DB; }
+.zoom-btn:active { background: #E5E7EB; }
+
+.zoom-btn-reset { font-size: 13px; margin-left: 4px; }
+
+.zoom-level {
+  min-width: 42px;
+  text-align: center;
+  font-size: 12px;
+  color: #6B7280;
+  font-variant-numeric: tabular-nums;
 }
