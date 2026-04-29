@@ -11,7 +11,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication, ServiceUnavailableException, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Logger, LoggerModule } from 'nestjs-pino';
 import { z } from 'zod';
@@ -287,6 +287,26 @@ describe('POST /api/payments returns 400 given invalid body', () => {
     });
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /api/payments returns 503 when order lookup is unavailable', () => {
+  beforeAll(cleanPayments);
+
+  it('should surface the order lookup failure without charging', async () => {
+    mockOrderServiceClient.getOrderSnapshot.mockRejectedValueOnce(
+      new ServiceUnavailableException({
+        error: { code: 'ORDER_LOOKUP_FAILED', message: 'Unable to verify order details' },
+      }),
+    );
+
+    const res = await request.post('/api/payments').set('X-User-Id', 'user-outage').send({
+      orderId: '6e65651c-0424-475c-b491-82bc26e7818a',
+      token: 'pm_test_ok',
+    });
+
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('ORDER_LOOKUP_FAILED');
   });
 });
 

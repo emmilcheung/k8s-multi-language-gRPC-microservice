@@ -28,6 +28,8 @@ spec:
               containerPort: {{ .Values.otelCollector.service.httpPort }}
             - name: metrics
               containerPort: {{ .Values.otelCollector.service.metricsPort }}
+            - name: prom-export
+              containerPort: {{ .Values.otelCollector.service.prometheusExporterPort }}
           command:
             - "/otelcol-contrib"
             - "--config=/etc/otelcol-contrib/otel-collector.yaml"

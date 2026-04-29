@@ -25,6 +25,7 @@ otelCollector:
     grpcPort: 4317
     httpPort: 4318
     metricsPort: 8888
+    prometheusExporterPort: 8889
   resources:
     requests:
       cpu: 50m
@@ -55,6 +56,8 @@ otelCollector:
         endpoint: http://{{ include "observability.fullname" . }}-jaeger:4317
         tls:
           insecure: true
+      prometheus:
+        endpoint: 0.0.0.0:{{ .Values.otelCollector.service.prometheusExporterPort }}
       debug:
         verbosity: basic
 
@@ -68,6 +71,10 @@ otelCollector:
           receivers: [otlp]
           processors: [batch]
           exporters: [otlp/jaeger, debug]
+        metrics:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [prometheus]
 
 prometheus:
   image:
@@ -83,10 +90,90 @@ prometheus:
     limits:
       cpu: 200m
       memory: 256Mi
+  ruleFiles:
+    platform-alerts.yml: |-
+      groups:
+        - name: platform-health
+          rules:
+            - alert: CriticalServiceDown
+              expr: min_over_time(up{job=~"kong|auth-service|ticket-service|order-service|payment-service|user-service|venue-service|expiration-service|apollo-router"}[2m]) < 1
+              for: 2m
+              labels:
+                severity: critical
+                category: availability
+              annotations:
+                summary: "Critical service is down"
+                description: "Prometheus has observed {{ $labels.job }} as down for at least 2 minutes. Check target health, pod readiness, and recent startup or deployment failures first."
+                first_step: "Open the Prometheus targets view, then inspect the affected service health endpoint and pod logs."
+
+            - alert: OtelCollectorDown
+              expr: min_over_time(up{job="otel-collector"}[2m]) < 1
+              for: 2m
+              labels:
+                severity: critical
+                category: observability
+              annotations:
+                summary: "OTel Collector is down"
+                description: "The collector has been unreachable for at least 2 minutes. New traces will stop flowing to Jaeger until the collector recovers."
+                first_step: "Check the otel-collector pod, then verify the OTLP receiver ports and mounted collector config."
+
+        - name: http-red
+          rules:
+            - alert: HighHttp5xxRate
+              expr: |
+                (
+                  sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (service)
+                  /
+                  clamp_min(sum(rate(http_requests_total[5m])) by (service), 0.001)
+                ) > 0.05
+                and
+                sum(rate(http_requests_total[5m])) by (service) > 0.2
+              for: 10m
+              labels:
+                severity: warning
+                category: reliability
+              annotations:
+                summary: "High 5xx rate"
+                description: "{{ $labels.service }} has sustained a 5xx ratio above 5% for 10 minutes. Check top error routes, recent dependency failures, and trace samples for the affected service."
+                first_step: "Open the Services RED dashboard and inspect the Top Error Routes panel for {{ $labels.service }}."
+
+            - alert: HighRequestLatencyP95
+              expr: |
+                histogram_quantile(
+                  0.95,
+                  sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service)
+                ) > 1
+                and
+                sum(rate(http_requests_total[5m])) by (service) > 0.2
+              for: 10m
+              labels:
+                severity: warning
+                category: latency
+              annotations:
+                summary: "High p95 request latency"
+                description: "{{ $labels.service }} has sustained p95 latency above 1 second for 10 minutes. Check recent dependency latency, event loop saturation, goroutines, and trace waterfalls."
+                first_step: "Open the platform overview p95 panel, then pivot to the service RED dashboard for {{ $labels.service }}."
+    async-path-alerts.yml: |-
+      # Async-path alerting is intentionally left as a tracked gap for now.
+      #
+      # The current repo exposes HTTP RED metrics and target health, but does not yet
+      # expose stable Prometheus metrics for:
+      # - payment outbox backlog age or unpublished row count
+      # - payment outbox publish failure totals
+      # - DLQ publish totals by service/topic
+      # - consumer retry exhaustion counts by service/topic
+      # - Kafka consumer lag by service/topic
+      #
+      # Keep this file mounted so the chart wiring is already in place, then
+      # replace the empty rule set once the metrics land.
+      groups: []
   config: |-
     global:
       scrape_interval: 15s
       evaluation_interval: 15s
+
+    rule_files:
+      - /etc/prometheus/rules/*.yml
 
     scrape_configs:
       - job_name: prometheus
@@ -96,6 +183,10 @@ prometheus:
       - job_name: otel-collector
         static_configs:
           - targets: [{{ include "observability.fullname" . }}-otel-collector:8888]
+
+      - job_name: apollo-router
+        static_configs:
+          - targets: [{{ include "observability.fullname" . }}-otel-collector:{{ .Values.otelCollector.service.prometheusExporterPort }}]
 
       - job_name: kong
         metrics_path: /metrics
@@ -121,6 +212,11 @@ prometheus:
         metrics_path: /metrics
         static_configs:
           - targets: [{{ .Release.Name }}-payment-service:3002]
+
+      - job_name: user-service
+        metrics_path: /metrics
+        static_configs:
+          - targets: [{{ .Release.Name }}-user-service:3004]
 
       - job_name: venue-service
         metrics_path: /metrics

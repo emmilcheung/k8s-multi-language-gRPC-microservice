@@ -20,3 +20,6 @@ spec:
     - name: metrics
       port: {{ .Values.otelCollector.service.metricsPort }}
       targetPort: {{ .Values.otelCollector.service.metricsPort }}
+    - name: prom-export
+      port: {{ .Values.otelCollector.service.prometheusExporterPort }}
+      targetPort: {{ .Values.otelCollector.service.prometheusExporterPort }}

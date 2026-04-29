@@ -9,6 +9,139 @@
 
 ---
 
+## Session: 2026-04-30 — ops(observability): rehearse CriticalServiceDown alert ✅ COMPLETE
+
+**Branch:** `feat/observability-release-gate`
+
+### What was done
+
+Finished the last remaining release-gate step for the pre-production observability plan.
+
+1. Created a dedicated branch, `feat/observability-release-gate`, from the current working tree so the final validation work is isolated from `main`.
+2. Performed a controlled local outage by stopping `user-service`, which is one of the critical scrape targets covered by the repo-managed `CriticalServiceDown` rule.
+3. Verified Prometheus transitioned the target to `up=0` and fired `CriticalServiceDown` for `job="user-service"`.
+4. Restored `user-service` with Docker Compose and verified Prometheus returned the target to `health: up` and cleared the alert.
+
+### Verification
+
+- `curl http://localhost:9090/api/v1/query?query=up{job="user-service"}` before outage returned `1` ✅
+- `curl http://localhost:9090/api/v1/query?query=ALERTS{alertname="CriticalServiceDown"}` before outage returned no active alert ✅
+- `docker compose stop user-service` triggered a real local scrape failure ✅
+- Prometheus query for `ALERTS{alertname="CriticalServiceDown",alertstate="firing",job="user-service"}` returned a firing alert with `severity="critical"` ✅
+- Prometheus query for `up{job="user-service"}` during outage returned `0` ✅
+- `docker compose up -d user-service` restored the service ✅
+- Post-recovery Prometheus queries showed `up{job="user-service"} == 1` and no remaining `CriticalServiceDown` alert for `user-service` ✅
+
+### Outcome
+
+The final release gate is now closed: the repository does not just define alert rules, it has a verified local rehearsal showing that a real critical scrape outage produces the expected repo-managed alert and clears again after recovery.
+
+---
+
+## Session: 2026-04-30 — feat(observability): wire alerts, telemetry coverage, and payment lookup resilience ✅ COMPLETE
+
+**Branch:** `main`
+
+### What was done
+
+Implemented the critical pre-production observability and reliability backlog, excluding deployment/CD work.
+
+1. **Alerting and Prometheus rule wiring**
+- Added repo-managed Prometheus rule loading for the local stack and Helm chart.
+- Added core platform alerts for service-down, 5xx, and latency conditions plus an async-path placeholder rule file that explicitly documents missing backlog and DLQ instrumentation.
+- Updated the local observability README with the alert response loop and initial operator workflow.
+
+2. **Apollo Router and user-service telemetry coverage**
+- Added an OTel Collector metrics pipeline with a Prometheus exporter so Apollo Router OTLP metrics become queryable in Prometheus.
+- Added user-service RED metrics via a Nest Prometheus module and middleware pattern aligned with the existing platform metric names.
+- Updated Prometheus scrape configuration in local and Helm values to include Apollo Router and user-service.
+- Repaired and extended the Grafana dashboards so platform and RED views now include Apollo Router request rate, error rate, and p95 latency panels.
+
+3. **Payment-service synchronous dependency hardening**
+- Hardened `OrderServiceClient` with timeout-aware retry, exponential backoff with jitter, an in-process circuit breaker, and Prometheus metrics for failures, retries, and breaker-open state.
+- Added focused unit coverage for retry and breaker behavior and added a degraded-path integration assertion that returns 503 when order lookup is unavailable.
+- Documented the new resilience configuration in the payment-service README and example env file.
+
+4. **Operator-first dashboards and investigation workflow**
+- Extended the local Grafana dashboards with payment-path panels for create success/failure rate, lookup failures, retries, and circuit-breaker state, while keeping Apollo Router panels aligned to the collector-exported metric names.
+- Updated the local observability README with a fixed first-response workflow: targets first, then RED, then dependency-specific panels, then Jaeger, then logs.
+- Updated the synthetic observability report to use the corrected Grafana port, verify both provisioned dashboards, sample payment and router Prometheus signals, capture refreshed screenshots, and assert async propagation from Kafka publish/process trace evidence.
+- Refreshed `observability/local/docs/observability-report.json` and `observability/local/docs/observability-report.md` from a passing end-to-end run.
+
+### Verification
+
+- `docker compose -f observability/local/docker-compose.observability.yml config --services` ✅
+- `helm template observability ./infra/helm/charts/observability` ✅
+- `node -e "JSON.parse(require('fs').readFileSync('observability/local/grafana/dashboards/platform-overview.json','utf8'))"` ✅
+- `node -e "JSON.parse(require('fs').readFileSync('observability/local/grafana/dashboards/services-red.json','utf8'))"` ✅
+- `pnpm tsc --noEmit` in `services/user-service` ✅
+- `curl -i http://localhost:3004/metrics` after rebuilding `services/user-service` ✅
+- `curl http://localhost:9090/api/v1/targets` showed `apollo-router` and `user-service` scrape targets `up` ✅
+- `curl -u admin:admin http://localhost:3005/api/search` confirmed Grafana dashboard provisioning on the corrected host port ✅
+- `curl http://localhost:9090/api/v1/query?query=sum(rate(apollo_router_operations_total[5m]))` returned router traffic ✅
+- `curl http://localhost:9090/api/v1/query?query=histogram_quantile(0.95,sum(apollo_router_query_planning_total_duration_bucket) by (le))` returned router planning latency ✅
+- `pnpm test:observability-report` in `services/client` ✅
+- `pnpm lint && pnpm tsc --noEmit` in `services/client` ✅
+- `pnpm vitest run src/modules/payments/order-service.client.spec.ts` in `services/payment-service` ✅
+- `pnpm vitest run --config vitest.integration.config.ts test/payments.integration.spec.ts --testNamePattern "order lookup is unavailable"` in `services/payment-service` ✅
+- `pnpm tsc --noEmit` in `services/payment-service` ✅
+- `pnpm build` in `services/payment-service` ✅
+
+### Outcome
+
+- The repository now has active alert evaluation, broader edge and service telemetry coverage, repaired operator dashboards, and a hardened synchronous payment lookup path.
+- Follow-up fixes discovered during live validation are now included too: the local Grafana host port no longer collides with `user-service`, `user-service` exposes `/metrics` via an explicit controller, the Apollo Router dashboard queries now match the actual exported metric names, and the synthetic observability report now proves dashboard availability, payment-path metrics, router metrics, and Kafka async trace continuity from a passing golden flow.
+
+---
+
+## Session: 2026-04-30 — docs(interview): add backend interview knowledge graph and pressure-question bank ✅ COMPLETE
+
+**Branch:** `main`
+
+### What was done
+
+Created a living interview-prep document that turns the purchase-flow architecture into a reusable knowledge graph plus question bank for senior backend interviews.
+
+1. **`docs/interview.md`** — added a durable interview-prep document.
+It includes a Mermaid knowledge graph, core invariants, senior-level pressure questions, direct repository evidence, and a discovery backlog for later expansion.
+
+2. Expanded the same document with a dedicated payment-system deep-dive layer:
+It now includes a second Mermaid graph focused on charge initiation, webhook races, outbox semantics, payment-domain gaps, and a concrete hardening path toward more payment-company-grade capabilities such as refunds, reconciliation, processed-event ledgers, and richer lifecycle modeling.
+
+3. **`AGENTS.md`** — added the new document to the documentation index so it can be loaded on demand in future sessions.
+
+4. No application code changes were made in this session.
+
+### Outcome
+
+The repository now contains a persistent interview-prep knowledge base that can be incrementally extended as new questions, failure modes, and design trade-offs are discovered.
+
+---
+
+## Session: 2026-04-30 — docs(reliability): add pre-production observability and resilience backlog ✅ COMPLETE
+
+**Branch:** `main`
+
+### What was done
+
+Created a concrete pre-production readiness backlog focused only on the critical non-deployment gaps that should be closed before real deployment.
+
+1. **`docs/superpowers/plans/2026-04-30-preprod-reliability-observability.md`** — added a dated implementation plan covering four workstreams:
+  - active alerting and Prometheus rule groups
+  - Apollo Router and user-service telemetry coverage
+  - payment-service order lookup resilience hardening
+  - operator-first dashboards and investigation workflow
+
+2. Explicitly scoped out AWS environment preparation, deploy automation, and other CD concerns so the plan stays actionable even while client infrastructure is not ready.
+
+3. No application code changes were made in this session.
+
+### Outcome
+
+The repository now contains a concrete backlog for the critical observability and reliability work that should be completed before the platform is treated as deployment-ready.
+
+---
+
 ## Session: 2026-04-23 — docs(graphql-federation): document order-service Spring GraphQL deviation ✅ COMPLETE
 
 **Branch:** `feature/graphql-federation`

@@ -41,6 +41,7 @@ services:
       - --web.enable-lifecycle
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus:/etc/prometheus/rules:ro
       - prometheus_data:/prometheus
     ports:
       - "9090:9090"
@@ -67,7 +68,7 @@ services:
       jaeger:
         condition: service_started
     ports:
-      - "3004:3000"
+      - "3005:3000"
     mem_limit: 256m
     networks:
       - microservices-net
