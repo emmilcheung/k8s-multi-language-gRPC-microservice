@@ -72,11 +72,11 @@ View the architecture diagrams directly in this README.
 
 ![AWS infrastructure diagram](docs/diagrams/01-aws-infrastructure.svg)
 
-![Data model diagram](docs/diagrams/02-data-model.png)
+![Data model diagram](docs/diagrams/02-data-model.svg)
 
-![C4 container diagram](docs/diagrams/03-c4-container.png)
+![C4 container diagram](docs/diagrams/03-c4-container.svg)
 
-![Data flow sequence diagram](docs/diagrams/04-data-flow-sequence.png)
+![Data flow sequence diagram](docs/diagrams/04-data-flow-sequence.svg)
 
 > Open `docs/diagrams/index.html` for a browser-based diagram landing page.
 
