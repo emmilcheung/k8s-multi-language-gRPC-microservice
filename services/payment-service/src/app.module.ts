@@ -20,6 +20,14 @@ const envSchema = z
     DB_POOL_MAX: z.coerce.number().int().positive().default(20),
     ORDER_SERVICE_URL: z.string().url(),
     ORDER_SERVICE_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
+    ORDER_SERVICE_RETRY_ATTEMPTS: z.coerce.number().int().min(0).max(5).default(2),
+    ORDER_SERVICE_RETRY_BASE_DELAY_MS: z.coerce.number().int().min(0).default(100),
+    ORDER_SERVICE_CIRCUIT_BREAKER_FAILURE_THRESHOLD: z.coerce.number().int().positive().default(3),
+    ORDER_SERVICE_CIRCUIT_BREAKER_RESET_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(30_000),
     STRIPE_SECRET_KEY: z.string(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),
     KAFKA_BROKERS: z.string(),

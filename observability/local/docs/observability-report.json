@@ -1,47 +1,44 @@
 {
-  "generatedAt": "2026-04-07T11:33:49.728Z",
+  "generatedAt": "2026-04-29T19:57:10.851Z",
   "order": {
-    "id": "eef65270-86c9-476d-9388-afc15abf668f",
-    "traceId": "11111111111111111111111169d4eb84",
+    "id": "9af8a175-d4d6-456b-96db-46ad79b0aed0",
+    "traceId": "11111111111111111111111169f2627a",
     "finalStatus": "complete",
     "services": [
       "order-service",
-      "payment-service",
-      "ticket-service",
-      "expiration-service"
+      "ticket-service"
     ],
     "operations": [
+      "INSERT orders_db.order_tickets",
       "INSERT orders_db.orders",
       "INSERT orders_db.outbox",
       "OrderRepository.save",
       "OrderTicketRepository.findById",
+      "OrderTicketRepository.save",
       "OutboxRepository.save",
       "POST /api/orders",
       "SELECT orders_db.order_tickets",
       "SELECT orders_db.orders",
       "Session.find com.ticketing.orders.entity.OrderTicket",
       "Session.merge com.ticketing.orders.entity.Order",
+      "Session.merge com.ticketing.orders.entity.OrderTicket",
       "Session.persist com.ticketing.orders.entity.OutboxMessage",
       "Transaction.commit",
       "acme.tickets.v1.TicketService/ReserveQuota",
-      "kafka consume orders.order.created",
-      "kafka publish orders.order.created",
-      "kafka publish orders.order.created.dlq",
-      "orders.order.created publish",
-      "process orders.order.created",
-      "send orders.order.created.dlq"
+      "orders_db"
     ]
   },
   "payment": {
-    "id": "380cc137-4e18-4ff8-b249-4b2db1843a1d",
-    "traceId": "22222222222222222222222269d4eb84",
+    "id": "d12c3fe4-de1a-402b-a7ef-dabe332fbde3",
+    "traceId": "22222222222222222222222269f2627a",
     "status": "completed",
     "services": [
       "payment-service",
-      "order-service",
-      "ticket-service"
+      "order-service"
     ],
     "operations": [
+      "GET",
+      "GET /api/orders/{id}",
       "INSERT orders_db.outbox",
       "OrderRepository.findByIdWithTicket",
       "OrderRepository.save",
@@ -58,16 +55,11 @@
       "Transaction.commit",
       "UPDATE orders_db.orders",
       "charge",
-      "kafka consume orders.order.completed",
-      "kafka consume payments.payment.captured",
-      "kafka publish orders.order.completed",
       "kafka publish payments.payment.captured",
       "middleware - <anonymous>",
       "middleware - jsonParser",
       "middleware - patched",
       "middleware - urlencodedParser",
-      "orders.order.completed publish",
-      "orders_db",
       "payments.payment.captured process",
       "pg-pool.connect",
       "pg.query:BEGIN payments_db",
@@ -80,6 +72,11 @@
     ]
   },
   "prometheusTargets": [
+    {
+      "job": "apollo-router",
+      "health": "up",
+      "scrapeUrl": "http://otel-collector:8889/metrics"
+    },
     {
       "job": "auth-service",
       "health": "up",
@@ -121,9 +118,103 @@
       "scrapeUrl": "http://ticket-service:3001/metrics"
     },
     {
+      "job": "user-service",
+      "health": "up",
+      "scrapeUrl": "http://user-service:3004/metrics"
+    },
+    {
       "job": "venue-service",
       "health": "up",
       "scrapeUrl": "http://venue-service:3003/metrics"
     }
+  ],
+  "criticalTargets": [
+    {
+      "job": "apollo-router",
+      "health": "up",
+      "scrapeUrl": "http://otel-collector:8889/metrics"
+    },
+    {
+      "job": "payment-service",
+      "health": "up",
+      "scrapeUrl": "http://payment-service:3002/metrics"
+    },
+    {
+      "job": "user-service",
+      "health": "up",
+      "scrapeUrl": "http://user-service:3004/metrics"
+    }
+  ],
+  "grafanaDashboards": [
+    {
+      "uid": "local-platform-overview",
+      "title": "Local Platform Overview",
+      "url": "/d/local-platform-overview/local-platform-overview"
+    },
+    {
+      "uid": "services-red",
+      "title": "Services — RED Metrics",
+      "url": "/d/services-red/services-e28094-red-metrics"
+    }
+  ],
+  "prometheusSignals": [
+    {
+      "key": "paymentCreateSuccessRate",
+      "title": "Payment Create Success Rate",
+      "unit": "reqps",
+      "query": "sum(rate(http_requests_total{service=\"payment-service\",route=\"/api/payments\",status_code=~\"2..\"}[5m])) or vector(0)",
+      "value": 0.014034989228145769
+    },
+    {
+      "key": "paymentCreateFailureRate",
+      "title": "Payment Create Failure Rate",
+      "unit": "percent",
+      "query": "sum(rate(http_requests_total{service=\"payment-service\",route=\"/api/payments\",status_code=~\"4..|5..\"}[5m])) / clamp_min(sum(rate(http_requests_total{service=\"payment-service\",route=\"/api/payments\"}[5m])), 0.001) * 100 or vector(0)",
+      "value": 0
+    },
+    {
+      "key": "paymentLookupFailures5m",
+      "title": "Payment Lookup Failures (5m)",
+      "unit": "count",
+      "query": "sum(increase(payment_order_lookup_failures_total[5m])) or vector(0)",
+      "value": 0
+    },
+    {
+      "key": "paymentLookupRetries15m",
+      "title": "Payment Lookup Retries (15m)",
+      "unit": "count",
+      "query": "sum(increase(payment_order_lookup_retries_total[15m])) or vector(0)",
+      "value": 0
+    },
+    {
+      "key": "paymentLookupBreakerOpen",
+      "title": "Payment Lookup Circuit Breaker",
+      "unit": "state",
+      "query": "payment_order_lookup_circuit_breaker_open or vector(0)",
+      "value": 0
+    },
+    {
+      "key": "routerOperationsTotal",
+      "title": "Apollo Router Operations Total",
+      "unit": "count",
+      "query": "sum(apollo_router_operations_total) or vector(0)",
+      "value": 3
+    },
+    {
+      "key": "routerQueryPlanningP95",
+      "title": "Apollo Router Query Planning p95",
+      "unit": "seconds",
+      "query": "histogram_quantile(0.95, sum(apollo_router_query_planning_total_duration_bucket) by (le)) or vector(0)",
+      "value": 0.0009499999999999999
+    }
+  ],
+  "asyncPropagationVerified": true,
+  "asyncPropagationEvidence": [
+    "kafka publish payments.payment.captured",
+    "payments.payment.captured process",
+    "send payments.payment.captured"
+  ],
+  "knownGaps": [
+    "No stable Prometheus metrics yet for outbox backlog, DLQ volume, consumer retry exhaustion, or Kafka lag."
   ]
 }

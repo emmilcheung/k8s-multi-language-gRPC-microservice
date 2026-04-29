@@ -121,6 +121,10 @@ Prometheus metrics endpoint (RED method: request rate, error rate, duration).
 | `DB_POOL_MAX` | No | PostgreSQL pool max connections (default: `20`) |
 | `ORDER_SERVICE_URL` | Yes | Base URL for order-service used to verify order ownership and amount |
 | `ORDER_SERVICE_TIMEOUT_MS` | No | Order lookup timeout in milliseconds (default: `5000`) |
+| `ORDER_SERVICE_RETRY_ATTEMPTS` | No | Number of retry attempts for transient order lookup failures (default: `2`) |
+| `ORDER_SERVICE_RETRY_BASE_DELAY_MS` | No | Base backoff delay in milliseconds for order lookup retries (default: `100`) |
+| `ORDER_SERVICE_CIRCUIT_BREAKER_FAILURE_THRESHOLD` | No | Consecutive failed lookups before the local circuit breaker opens (default: `3`) |
+| `ORDER_SERVICE_CIRCUIT_BREAKER_RESET_TIMEOUT_MS` | No | Cooldown in milliseconds before the order lookup breaker allows traffic again (default: `30000`) |
 | `STRIPE_SECRET_KEY` | Yes | Stripe secret key. Set to `test_mock` to skip real Stripe calls in tests. In mock mode, sending token `pm_mock_declined` forces a deterministic failed payment for E2E and QA scenarios. |
 | `STRIPE_WEBHOOK_SECRET` | Conditionally required | Required in production for webhook signature verification. |
 | `KAFKA_BROKERS` | Yes | Comma-separated Kafka broker addresses (e.g. `localhost:9092`) |

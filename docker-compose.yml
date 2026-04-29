@@ -515,6 +515,7 @@ services:
       APOLLO_ROUTER_LISTEN_ADDRESS: "0.0.0.0:4001"
       APOLLO_SANDBOX_ENABLED: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: apollo-router
     ports:
       - "4001:4001"
     mem_limit: 256m

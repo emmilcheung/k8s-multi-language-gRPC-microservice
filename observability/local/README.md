@@ -11,7 +11,7 @@ endpoints directly.
 | --- | --- | --- |
 | OTel Collector | OTLP ingest + exporter boundary | `http://localhost:4318` / `grpc://localhost:4317` |
 | Prometheus | Metrics scraping and query UI | `http://localhost:9090` |
-| Grafana | Metrics dashboards | `http://localhost:3004` |
+| Grafana | Metrics dashboards | `http://localhost:3005` |
 | Jaeger | Trace search and span waterfall UI | `http://localhost:16686` |
 
 ## Start
@@ -26,9 +26,50 @@ alongside the existing application services.
 ## Verify connectivity
 
 1. Open `http://localhost:9090/targets` and confirm all application jobs are `UP`.
-2. Open `http://localhost:3004` and sign in with `admin` / `admin`.
-3. Open the `Local Platform Overview` dashboard under the `Local Observability` folder.
-4. Open `http://localhost:16686/search` and confirm Jaeger is reachable.
+2. Open `http://localhost:9090/alerts` and confirm the platform rule groups load successfully.
+3. Open `http://localhost:3005` and sign in with `admin` / `admin`.
+4. Open the `Local Platform Overview` and `Services — RED Metrics` dashboards under the `Local Observability` folder.
+5. Open `http://localhost:16686/search` and confirm Jaeger is reachable.
+
+## First-response workflow
+
+Use the same operator sequence every time so investigation starts with the highest-signal surfaces.
+
+1. Check target health first in Prometheus `/targets` and resolve any `DOWN` job before reading deeper graphs.
+2. Check request rate, error rate, and latency in Grafana starting with `Local Platform Overview`, then pivot to `Services — RED Metrics`.
+3. Check dependency-specific panels next:
+  - `Payment Create Success Rate` / `Payment Create Failure Rate`
+  - `Payment Lookup Failures (5m)` / `Payment Lookup Breaker`
+  - `Apollo Router Request Rate` / `Apollo Router Query Planning p95`
+4. Check Jaeger traces after narrowing the problem surface to confirm whether the break is ingress, a synchronous dependency hop, or async propagation.
+5. Check service logs only after the target, RED, and trace views tell you which service and time window matter.
+
+## Alert rules
+
+Prometheus now evaluates repo-managed rule files from `observability/local/prometheus/`.
+
+Current rule coverage:
+
+- `platform-alerts.yml` for critical service-down detection, OTel Collector availability, sustained 5xx rate, and sustained p95 latency.
+- `async-path-alerts.yml` is mounted but intentionally empty today because the repo does not yet expose stable Prometheus metrics for outbox backlog, DLQ volume, retry exhaustion, or Kafka lag.
+
+Use the Prometheus Alerts page first, then pivot into Grafana or Jaeger:
+
+1. If `CriticalServiceDown` fires, verify the failing target in `/targets`, then check the service health endpoint and container status.
+2. If `HighHttp5xxRate` fires, open the `Services RED` dashboard and inspect `Top Error Routes` for the affected service.
+3. If `HighRequestLatencyP95` fires, start with the p95 latency panels, then inspect event loop lag, goroutines, and Jaeger trace waterfalls.
+4. If `OtelCollectorDown` fires, expect trace gaps in Jaeger until the collector is healthy again.
+
+## Known async blind spots
+
+The dashboards can now answer ingress and synchronous dependency questions, but they still do not expose stable Prometheus signals for:
+
+- outbox backlog age or unpublished-row count
+- DLQ publish totals
+- consumer retry exhaustion totals
+- Kafka consumer lag
+
+Until those metrics exist, use the generated order and payment traces in Jaeger to determine whether async propagation continued across Kafka or stopped after the originating HTTP request.
 
 ## Trace a real request path
 
@@ -88,6 +129,9 @@ collector is available again.
 
 - Logs remain stdout-first in this phase. Trace IDs in structured logs should
   match the trace IDs visible in Jaeger.
+- Prometheus alert rules are now part of the local stack, but notification routing
+  is still out of scope in this environment. Use the Prometheus Alerts UI as the
+  evaluation surface until a notifier is introduced.
 - Grafana currently visualizes metrics only. Trace exploration stays in Jaeger.
 - The local OTel Collector is trace-focused. Prometheus continues scraping
   service metrics directly, and the Java agent disables OTEL log and metric

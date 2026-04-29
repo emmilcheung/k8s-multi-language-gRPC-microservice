@@ -1,0 +1,14 @@
+# Async-path alerting is intentionally left as a tracked gap for now.
+#
+# The current repo exposes HTTP RED metrics and target health, but does not yet
+# expose stable Prometheus metrics for:
+# - payment outbox backlog age or unpublished row count
+# - payment outbox publish failure totals
+# - DLQ publish totals by service/topic
+# - consumer retry exhaustion counts by service/topic
+# - Kafka consumer lag by service/topic
+#
+# Until those metrics are instrumented, adding alert expressions here would be
+# misleading. Keep this file mounted so Prometheus wiring is already in place,
+# then replace the empty rule set once the metrics land.
+groups: []
