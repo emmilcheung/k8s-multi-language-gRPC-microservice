@@ -127,6 +127,11 @@ collector is available again.
 
 ## Notes
 
+- If Jaeger shows Apollo Router traces under `unknown_service:router`, the local
+  Compose service is missing an explicit OTEL resource name. Set
+  `OTEL_SERVICE_NAME=apollo-router` on the `apollo-router` service in
+  `docker-compose.yml` and restart that container. Historical Jaeger entries
+  under `unknown_service:router` will remain until they age out.
 - Logs remain stdout-first in this phase. Trace IDs in structured logs should
   match the trace IDs visible in Jaeger.
 - Prometheus alert rules are now part of the local stack, but notification routing
