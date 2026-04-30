@@ -68,7 +68,11 @@ Each architectural decision was chosen to mirror a real-world challenge:
 
 ### Architecture diagrams
 
-View the architecture diagrams directly in this README.
+For the best viewing experience, open the deployed static site and see the same diagrams rendered in full size:
+
+https://emmilcheung.github.io/k8s-multi-language-gRPC-microservice/
+
+The embedded SVGs below are the local thumbnails from `docs/diagrams/`, but the GitHub Pages site is the recommended way to inspect the diagrams in greater detail.
 
 ![AWS infrastructure diagram](docs/diagrams/01-aws-infrastructure.svg)
 
