@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Auth &amp; Credentials — Ticketing Platform</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="zoom.js"></script>
+</head>
+<body>
+<div class="page">
+
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <a class="sidebar-back" href="index.html">← All diagrams</a>
+      <div class="sidebar-brand-title">Ticketing Platform</div>
+      <div class="sidebar-brand-sub">Architecture Diagrams</div>
+    </div>
+    <div class="sidebar-nav">
+      <div class="sidebar-nav-label">Diagrams</div>
+
+      <a class="sidebar-item" href="01-aws-infrastructure.html">
+        <span class="sidebar-dot" style="background:#FF9900;"></span>
+        <span class="sidebar-item-label">
+          AWS Infrastructure
+          <span class="sidebar-item-sub">Graphviz · SVG</span>
+        </span>
+      </a>
+
+      <a class="sidebar-item" href="02-data-model.html">
+        <span class="sidebar-dot" style="background:#2563EB;"></span>
+        <span class="sidebar-item-label">
+          Data Model
+          <span class="sidebar-item-sub">Mermaid · ER</span>
+        </span>
+      </a>
+
+      <a class="sidebar-item" href="03-c4-container.html">
+        <span class="sidebar-dot" style="background:#8B5CF6;"></span>
+        <span class="sidebar-item-label">
+          C4 Container
+          <span class="sidebar-item-sub">Mermaid · Flowchart</span>
+        </span>
+      </a>
+
+      <a class="sidebar-item" href="04-data-flow-sequence.html">
+        <span class="sidebar-dot" style="background:#10B981;"></span>
+        <span class="sidebar-item-label">
+          Data Flow / Saga
+          <span class="sidebar-item-sub">Mermaid · Sequence</span>
+        </span>
+      </a>
+
+      <a class="sidebar-item active" href="05-auth-flows.html">
+        <span class="sidebar-dot" style="background:#EF4444;"></span>
+        <span class="sidebar-item-label">
+          Auth &amp; Credentials
+          <span class="sidebar-item-sub">Mermaid · Sequence</span>
+        </span>
+      </a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="main-header">
+      <h1>Auth &amp; Credentials — login, OAuth2, MCP, refresh tokens</h1>
+      <p>Six flows showing how identity moves through the system: browser login (cookie), refresh rotation, OAuth2 Authorization Code + PKCE for agents,
+        MCP tool calls with Bearer JWT, internal gRPC trust, and Stripe webhook signatures.
+        Source: <code>05-auth-flows.mermaid</code></p>
+    </div>
+    <div class="diagram-wrapper">
+      <div class="zoom-bar">
+        <button class="zoom-btn" id="zoom-out"   title="Zoom out (−)">&#x2212;</button>
+        <span class="zoom-level" id="zoom-level">100%</span>
+        <button class="zoom-btn" id="zoom-in"    title="Zoom in (+)">+</button>
+        <button class="zoom-btn zoom-btn-reset" id="zoom-reset" title="Reset (0)">&#x21BA;</button>
+      </div>
+      <div class="diagram-card">
+        <pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#FF9900','primaryBorderColor':'#232F3E','primaryTextColor':'#232F3E','lineColor':'#232F3E','actorBkg':'#FF9900','actorBorder':'#232F3E','actorTextColor':'#232F3E','noteBkgColor':'#FDF6E3','noteTextColor':'#232F3E','noteBorderColor':'#232F3E','fontFamily':'Helvetica, Arial, sans-serif'}}}%%
+sequenceDiagram
+    autonumber
+    actor U as Customer (browser)
+    actor DEV as Developer (terminal)
+    participant CLI as Claude / MCP client
+    participant MCP as ticketing-mcp-server (local)
+    participant KC as OS Keychain
+    participant FE as client (Next.js SSR)
+    participant K as kong-gateway
+    participant AS as auth-service (NestJS)
+    participant RD as Redis (auth-service)
+    participant DS as downstream services<br/>(order/ticket/venue/payment)
+    participant ST as Stripe
+
+    %% ----------- FLOW A: Browser login (cookie + refresh) ----------
+    rect rgb(250,243,219)
+    Note over U,AS: Flow A — Browser login · email+password → JWT cookie + refresh token
+    U->>FE: GET /signin (SSR page)
+    U->>FE: POST credentials (Server Action)
+    FE->>K: POST /auth/login (no JWT required)
+    K->>AS: forward (rate-limited)
+    AS->>AS: bcrypt verify · sign RS256 JWT (15m, sub, email, jti, iss=auth-service)
+    AS->>RD: SET refresh:&lt;jti&gt; {userId, family} TTL 7d
+    AS-->>K: Set-Cookie: access_token (HttpOnly, Secure, SameSite=Lax, 15m)<br/>Set-Cookie: refresh_token (HttpOnly, /auth/refresh, 7d)
+    K-->>FE: cookies forwarded
+    FE-->>U: 302 / (logged in)
+    end
+
+    %% ----------- FLOW B: Refresh token rotation -------------------
+    rect rgb(234,242,251)
+    Note over U,AS: Flow B — Refresh rotation · access token expired, refresh still valid
+    U->>K: any request → 401 (JWT expired)
+    FE->>K: POST /auth/refresh (refresh_token cookie)
+    K->>AS: forward
+    AS->>RD: GET refresh:&lt;jti&gt; · validate family · DEL old jti
+    AS->>AS: issue new JWT + new refresh (rotated jti, same family)
+    AS->>RD: SET refresh:&lt;new_jti&gt; TTL 7d
+    AS-->>FE: new cookies
+    Note right of AS: Reuse of revoked refresh token → revoke entire family<br/>(token theft detection)
+    end
+
+    %% ----------- FLOW C: OAuth2 Auth Code + PKCE (MCP) ------------
+    rect rgb(245,238,245)
+    Note over DEV,AS: Flow C — Agent onboarding · OAuth2 Authorization Code + PKCE (RFC 7636)
+    DEV->>CLI: claude /mcp authorize ticketing
+    CLI->>MCP: spawn local MCP server (stdio)
+    MCP->>MCP: generate code_verifier · S256(code_verifier) → code_challenge<br/>start loopback listener http://127.0.0.1:19836/callback
+    MCP->>DEV: print authorize URL (browser opens)
+    DEV->>U: paste / auto-open in browser
+    U->>K: GET /oauth/authorize?client_id=ticketing-mcp&amp;code_challenge=...&amp;scope=orders:create+...
+    K->>AS: forward (JWT cookie validated — user must be logged in)
+    alt first-party (ticketing-mcp)
+      AS->>AS: auto-approve
+    else dynamic / third-party client
+      AS->>RD: store PendingConsent (TTL 10m) → request_id
+      AS-->>U: 302 /oauth/consent?request_id=...
+      U->>FE: render scope card · click Allow
+      FE->>K: POST /oauth/consent/&lt;id&gt; (JWT cookie)
+      K->>AS: forward · resolve consent
+    end
+    AS->>RD: SET oauth:code:&lt;code&gt; {clientId, userId, scope, code_challenge} TTL 600s
+    AS-->>U: 302 http://127.0.0.1:19836/callback?code=&lt;code&gt;
+    U-->>MCP: browser hits loopback listener
+    MCP->>K: POST /oauth/token (code, code_verifier, client_id)
+    K->>AS: forward (no JWT — public endpoint)
+    AS->>RD: GET + DEL oauth:code:&lt;code&gt; · verify S256(code_verifier)==stored challenge
+    AS->>RD: SET refresh:&lt;jti&gt; + oauth:session-scope:&lt;sid&gt; {scope, clientId} TTL 24h
+    AS-->>MCP: { access_token (15m, +scope+client_id claims), refresh_token, expires_in, scope }
+    MCP->>KC: store tokens in OS keychain (never on disk)
+    end
+
+    %% ----------- FLOW D: Authenticated MCP tool call --------------
+    rect rgb(231,242,222)
+    Note over CLI,DS: Flow D — MCP tool call · Bearer JWT, scope enforced at gateway
+    DEV->>CLI: "create order for ticket X"
+    CLI->>MCP: invoke tool createOrder
+    MCP->>KC: read access_token
+    alt access_token expired
+      MCP->>K: POST /oauth/token (grant_type=refresh_token)
+      K->>AS: forward · rotate · return new tokens
+      AS-->>MCP: new { access_token, refresh_token }
+      MCP->>KC: update keychain
+    end
+    MCP->>K: POST /orders<br/>Authorization: Bearer &lt;jwt&gt;
+    K->>K: jwt plugin · verify RS256 via JWKS (kid match) · check exp/iss
+    K->>K: jwt-scope.lua · require "orders:create" in token.scope
+    K->>K: jwt-sub.lua · inject X-User-Id, X-User-Email, X-Client-Id
+    K->>DS: forward (mesh-internal, plain HTTP)
+    DS-->>K: 201 Created
+    K-->>MCP: 201
+    MCP-->>CLI: tool result
+    end
+
+    %% ----------- FLOW E: Internal service-to-service -------------
+    rect rgb(253,238,238)
+    Note over DS,DS: Flow E — Internal gRPC · no JWT, mesh-internal trust boundary
+    DS->>DS: order-service → ticket-service gRPC ReserveQuota<br/>(metadata: x-correlation-id, x-user-id propagated)
+    Note right of DS: Inside VPC + EKS NetworkPolicy ·<br/>SecurityGroups restrict pod-to-pod ·<br/>no Internet ingress to gRPC ports
+    end
+
+    %% ----------- FLOW F: Stripe webhook (no JWT) ------------------
+    rect rgb(240,240,253)
+    Note over ST,DS: Flow F — Stripe webhook · signed payload, signature header replaces JWT
+    ST->>K: POST /payments/webhook<br/>Stripe-Signature: t=...,v1=HMAC_SHA256(body, secret)
+    K->>K: route bypasses jwt plugin (allowlist) · forward
+    K->>DS: payment-service receives raw body
+    DS->>DS: verify HMAC · idempotency on stripe_event_id · UPSERT payment_webhooks
+    DS-->>K: 200 OK (must respond &lt;5s)
+    end
+
+    Note over K: Token security · access JWT 15m · refresh 7d (browser) / 24h (MCP)<br/>RS256 keypair rotated quarterly · JWKS at /.well-known/jwks.json<br/>All 4xx/5xx auth failures audited to CloudWatch · brute-force throttled per IP+user
+        </pre>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    securityLevel: "loose",
+    er: { useMaxWidth: true },
+    sequence: { useMaxWidth: true, actorMargin: 60, messageAlign: "center" },
+    flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" }
+  });
+</script>
+</body>
+</html>

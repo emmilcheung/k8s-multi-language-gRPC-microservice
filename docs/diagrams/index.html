@@ -19,7 +19,7 @@
   <div class="hero">
     <div class="hero-text">
       <h1>Architecture Diagrams</h1>
-      <p>10 microservices · Production-grade distributed system · 4 diagrams</p>
+      <p>10 microservices · Production-grade distributed system · 5 diagrams</p>
     </div>
     <div class="tech-badges">
       <span class="tech-badge badge-gray">Go 1.23</span>
@@ -65,6 +65,13 @@
         <div class="tile-title">Data Flow / Saga</div>
         <div class="tile-desc">Full 5-phase reservation → payment → finalize / expire flow with CloudEvents on MSK, transactional outbox, and DLQ.</div>
         <span class="tile-tech badge-green">Mermaid · Sequence</span>
+      </a>
+
+      <a class="diagram-tile" href="05-auth-flows.html" style="border-left-color: #EF4444;">
+        <div class="tile-num">05</div>
+        <div class="tile-title">Auth &amp; Credentials</div>
+        <div class="tile-desc">Browser login, refresh-token rotation, OAuth2 + PKCE for agents, MCP Bearer tokens, internal gRPC trust, and Stripe webhook signatures.</div>
+        <span class="tile-tech badge-rose">Mermaid · Sequence</span>
       </a>
 
     </div>
