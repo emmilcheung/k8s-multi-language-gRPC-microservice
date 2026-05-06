@@ -1,8 +1,6 @@
 # ticket-service — Agent Guidelines
 
-> **Source of truth:** [`/AGENTS.md`](../../AGENTS.md) at the monorepo root.
-> These notes extend and specialise the root guidelines for this service.
-> When anything here conflicts with the root, the **root wins**.
+> Service-specific notes; defers to root [`/AGENTS.md`](../../AGENTS.md) on conflict.
 
 ---
 
@@ -84,8 +82,6 @@ test/                   ← integration tests (Testcontainers)
 
 ## gRPC — Ticket gRPC Server
 
-> Full API design guide: [`docs/03-api-design.md`](../../docs/03-api-design.md)
-
 - Proto source of truth: [`/proto/tickets/v1/`](../../proto/tickets/v1/).
 - Generated stubs land in [`/libs/grpc-stubs/go/`](../../libs/grpc-stubs/go/) — regenerate with `make proto` at repo root; **do not hand-edit generated files**.
 - Implement the generated `TicketServiceServer` interface in `internal/grpc/`.
@@ -96,8 +92,6 @@ test/                   ← integration tests (Testcontainers)
 ---
 
 ## Kafka — Producer Rules
-
-> Full messaging guide: [`docs/04-asynchronous-messaging.md`](../../docs/04-asynchronous-messaging.md)
 
 - Topic produced to: `tickets.ticket.created`, `tickets.ticket.updated`.
 - Partition key = `ticketId` (preserves per-ticket ordering).
@@ -110,8 +104,6 @@ test/                   ← integration tests (Testcontainers)
 
 ## Database Rules
 
-> Full data guide: [`docs/05-data-conventions.md`](../../docs/05-data-conventions.md)
-
 - **Parameterised queries only.** Use `pgx` named parameters or `?` placeholders — never string-interpolate user data into SQL.
 - **Migrations** are managed by `golang-migrate` (or equivalent). Migration files are append-only and immutable after merge to `main`.
 - **UUID primary keys** (`google/uuid` package). No serial integers in the public API.
@@ -123,9 +115,7 @@ test/                   ← integration tests (Testcontainers)
 
 ## Security
 
-> Full security guide: [`docs/06-security.md`](../../docs/06-security.md)
-
-- This service **never validates JWTs itself.** Kong strips and validates the token; trusted headers `X-User-Id` and `X-User-Roles` arrive on the request. Read them from the Echo context via middleware.
+- This service follows the consuming-service auth pattern — see [`/docs/06-security.md`](../../docs/06-security.md#consuming-service-pattern). Read `X-User-Id` / `X-User-Roles` from the Echo context via middleware.
 - **Ownership check before any write:** confirm the caller's `X-User-Id` matches the ticket's `userId` before allowing updates.
 - **Validate all input** using `go-playground/validator` or equivalent. Reject unknown fields.
 - **No user-controlled data in log fields** without sanitisation. Strip newlines to prevent log injection.
@@ -134,8 +124,6 @@ test/                   ← integration tests (Testcontainers)
 ---
 
 ## Observability
-
-> Full observability guide: [`docs/08-observability.md`](../../docs/08-observability.md)
 
 - Structured JSON logging via `go.uber.org/zap`. Every log entry must carry `traceId`, `spanId`, `service=ticket-service`.
 - `tracing.go` bootstraps the OTel SDK — call it before starting Echo and gRPC listeners.
@@ -147,8 +135,6 @@ test/                   ← integration tests (Testcontainers)
 ---
 
 ## Testing
-
-> Full testing guide: [`docs/13-testing.md`](../../docs/13-testing.md)
 
 - **Unit tests** (`*_test.go` in `internal/`): mock DB and Kafka with interfaces. Use `testify/mock` or simple interface stubs.
 - **Integration tests** (`test/` directory): spin up PostgreSQL, Redis, Kafka and (optionally) a mock gRPC server via `testcontainers-go`. Clean up all created records in `t.Cleanup`.

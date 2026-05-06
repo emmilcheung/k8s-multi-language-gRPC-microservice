@@ -1,8 +1,6 @@
 # order-service — Agent Guidelines
 
-> **Source of truth:** [`/AGENTS.md`](../../AGENTS.md) at the monorepo root.
-> These notes extend and specialise the root guidelines for this service.
-> When anything here conflicts with the root, the **root wins**.
+> Service-specific notes; defers to root [`/AGENTS.md`](../../AGENTS.md) on conflict.
 
 ---
 
@@ -88,8 +86,6 @@ src/
 
 ## gRPC — Client Rules (calls ticket-service)
 
-> Full API design guide: [`docs/03-api-design.md`](../../docs/03-api-design.md)
-
 - Generated stubs are in [`/libs/grpc-stubs/`](../../libs/grpc-stubs/) — **never hand-edit them**; regenerate with `make proto` at repo root.
 - The gRPC client bean is configured in `config/`, injected into `grpc/` wrappers.
 - **Always set explicit deadlines** on every stub call: 5 s for reads, 10 s for writes.
@@ -102,8 +98,6 @@ src/
 ---
 
 ## Kafka — Consumer & Producer Rules
-
-> Full messaging guide: [`docs/04-asynchronous-messaging.md`](../../docs/04-asynchronous-messaging.md)
 
 ### Consumer
 
@@ -125,8 +119,6 @@ src/
 
 ## Database — JPA / Flyway Rules
 
-> Full data guide: [`docs/05-data-conventions.md`](../../docs/05-data-conventions.md)
-
 - **Flyway migrations are append-only.** Files in `db/migration/` are immutable once merged to `main`. Use `V<N>__<description>.sql` naming.
 - **Never alter the schema manually** or via Hibernate `hbm2ddl.auto=create/update` in production — set `validate` or `none`.
 - **UUID primary keys** (`@GeneratedValue(strategy = GenerationType.UUID)` or custom generator).
@@ -140,9 +132,7 @@ src/
 
 ## Security
 
-> Full security guide: [`docs/06-security.md`](../../docs/06-security.md)
-
-- This service **never validates JWTs.** Kong validates upstream; `X-User-Id` and `X-User-Roles` are trusted forwarded headers read by a `HandlerInterceptor` or filter.
+- This service follows the consuming-service auth pattern — see [`/docs/06-security.md`](../../docs/06-security.md#consuming-service-pattern). Read `X-User-Id` / `X-User-Roles` from the request via a `HandlerInterceptor` or filter.
 - **Ownership check before any write:** confirm `X-User-Id` owns the order before allowing cancellations or updates.
 - Bean Validation rejects unknown/malformed fields; `FAIL_ON_UNKNOWN_PROPERTIES = true` in Jackson config.
 - **JPQL/HQL parameterised queries only.** Never interpolate user input into query strings.
@@ -153,8 +143,6 @@ src/
 
 ## Observability
 
-> Full observability guide: [`docs/08-observability.md`](../../docs/08-observability.md)
-
 - Structured JSON logging via `logstash-logback-encoder`. Every log entry must carry `traceId`, `spanId`, `service=order-service`.
 - OpenTelemetry Java agent auto-instruments Spring Boot, JDBC, Kafka, and gRPC. Include the agent JAR in the Docker `CMD` or via `JAVA_TOOL_OPTIONS=-javaagent:/otel-agent.jar`.
 - Prometheus metrics exposed at `/actuator/prometheus`.
@@ -164,8 +152,6 @@ src/
 ---
 
 ## Testing
-
-> Full testing guide: [`docs/13-testing.md`](../../docs/13-testing.md)
 
 - **Unit tests** (JUnit 5): use `@ExtendWith(MockitoExtension.class)`, mock repositories and gRPC stub. No spring context required for pure unit tests.
 - **Integration tests** (`@SpringBootTest` + Testcontainers): spin up real PostgreSQL and Kafka using `@Container` fields. Use `@Transactional` or manual cleanup in `@AfterEach`.

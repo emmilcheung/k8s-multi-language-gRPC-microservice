@@ -1,8 +1,6 @@
 # expiration-service — Agent Guidelines
 
-> **Source of truth:** [`/AGENTS.md`](../../AGENTS.md) at the monorepo root.
-> These notes extend and specialise the root guidelines for this service.
-> When anything here conflicts with the root, the **root wins**.
+> Service-specific notes; defers to root [`/AGENTS.md`](../../AGENTS.md) on conflict.
 
 ---
 
@@ -90,8 +88,6 @@ Same general Go conventions as the Go services — see [ticket-service AGENTS.md
 
 ## Kafka — Producer Rules
 
-> Full messaging guide: [`docs/04-asynchronous-messaging.md`](../../docs/04-asynchronous-messaging.md)
-
 - Topic produced: `expiration.order.expired`.
 - Partition key = `orderId`.
 - Producer config: `acks=all`, `enable.idempotence=true`.
@@ -101,8 +97,6 @@ Same general Go conventions as the Go services — see [ticket-service AGENTS.md
 ---
 
 ## Redis Rules
-
-> Full data guide: [`docs/05-data-conventions.md#redis-conventions`](../../docs/05-data-conventions.md)
 
 - asynq manages its own key namespace in Redis — do not manually mutate asynq keys.
 - Additional cache keys follow: `expiration-service:<entity>:<id>`.
@@ -114,8 +108,6 @@ Same general Go conventions as the Go services — see [ticket-service AGENTS.md
 
 ## Security
 
-> Full security guide: [`docs/06-security.md`](../../docs/06-security.md)
-
 - This service has **no public HTTP API** (health/metrics only). It is not reachable via Kong.
 - Any trigger input (e.g. order ID from an internal Kafka consumer) must be **validated** (UUID format check) before being used in Redis key construction or Kafka payloads.
 - **No user-controlled data in log fields** without sanitisation.
@@ -123,8 +115,6 @@ Same general Go conventions as the Go services — see [ticket-service AGENTS.md
 ---
 
 ## Observability
-
-> Full observability guide: [`docs/08-observability.md`](../../docs/08-observability.md)
 
 - Structured JSON logging via `go.uber.org/zap`. Every log entry must carry `traceId`, `spanId`, `service=expiration-service`.
 - `tracing.go` bootstraps the OTel SDK — call before starting Echo and the asynq server.
@@ -135,8 +125,6 @@ Same general Go conventions as the Go services — see [ticket-service AGENTS.md
 ---
 
 ## Testing
-
-> Full testing guide: [`docs/13-testing.md`](../../docs/13-testing.md)
 
 - **Unit tests** (`worker_test.go`, etc.): mock the Kafka producer and Redis client via interfaces. Test that the worker correctly calls the producer with the right payload on a trigger.
 - **Integration tests** (`test/`): use Testcontainers for a real Redis instance. Use `miniredis` for lightweight unit-level Redis testing.

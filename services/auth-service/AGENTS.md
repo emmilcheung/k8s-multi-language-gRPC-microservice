@@ -1,8 +1,6 @@
 # auth-service — Agent Guidelines
 
-> **Source of truth:** [`/AGENTS.md`](../../AGENTS.md) at the monorepo root.
-> These notes extend and specialise the root guidelines for this service.
-> When anything here conflicts with the root, the **root wins**.
+> Service-specific notes; defers to root [`/AGENTS.md`](../../AGENTS.md) on conflict.
 
 ---
 
@@ -84,8 +82,6 @@ test/                     ← integration tests (Vitest + Testcontainers)
 
 ## Security — Auth-Specific Rules
 
-> Full security guidelines: [`docs/06-security.md`](../../docs/06-security.md)
-
 - **Password hashing:** `argon2` (argon2id variant). Never bcrypt, never MD5/SHA-* alone.
 - **JWT signing:** RS256 asymmetric keys. Private key is injected via env var `JWT_PRIVATE_KEY` (PEM, base64). Public key exposed at `GET /v1/auth/.well-known/jwks.json` (JWKS endpoint).
 - **Refresh tokens:** stored as short-lived Redis keys (`auth-service:refresh:<tokenHash>`). On sign-out, delete the key. Never store raw tokens — store a hash.
@@ -97,8 +93,6 @@ test/                     ← integration tests (Vitest + Testcontainers)
 ---
 
 ## Database — Drizzle ORM Rules
-
-> Full data conventions: [`docs/05-data-conventions.md`](../../docs/05-data-conventions.md)
 
 - **Migration files are append-only.** Once merged to `main`, a migration file is immutable. Use `drizzle-kit generate` for new migrations; never hand-edit a generated file.
 - **Schema lives in `src/database/schema.ts`** (or per-entity files imported there). Keep it as the single source of truth — do not define tables elsewhere.
@@ -120,8 +114,6 @@ test/                     ← integration tests (Vitest + Testcontainers)
 
 ## Observability
 
-> Full observability guide: [`docs/08-observability.md`](../../docs/08-observability.md)
-
 - Structured JSON logging via `nestjs-pino`. Every log line must include `traceId` and `spanId` automatically (pino-http injects from the active OTel span).
 - `tracing.ts` **must be imported as the first statement in `main.ts`** before any NestJS import — otherwise auto-instrumentation patches may not apply.
 - Prometheus metrics exposed at `GET /metrics` via `@willsoto/nestjs-prometheus`.
@@ -131,8 +123,6 @@ test/                     ← integration tests (Vitest + Testcontainers)
 ---
 
 ## Testing
-
-> Full testing guide: [`docs/13-testing.md`](../../docs/13-testing.md)
 
 - **Unit tests** (`*.spec.ts`): pure business logic, no I/O. Mock DB repositories and Redis using Vitest `vi.fn()` / `vi.mock()`.
 - **Integration tests** (`test/*.integration.spec.ts`): use Testcontainers to spin up real PostgreSQL and Redis instances. Each test suite rolls back or wipes its own data.

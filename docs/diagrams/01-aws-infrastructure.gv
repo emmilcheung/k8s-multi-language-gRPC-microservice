@@ -37,7 +37,7 @@ digraph aws_infra {
 					color="#232F3E" fontname=Helvetica label="ticketing namespace (9 services)" style="rounded,dashed"
 					client [label=<<b>client</b><br/><font point-size='9'>Next.js 15 (SSR) • TS</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
 					auth [label=<<b>auth-service</b><br/><font point-size='9'>NestJS 10 • Node 24</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
-					user [label=<<b>user-service</b><br/><font point-size='9'>NestJS 10 • Node 24</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
+					user_svc [label=<<b>user-service</b><br/><font point-size='9'>NestJS 10 • Node 24</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
 					ticket [label=<<b>ticket-service</b><br/><font point-size='9'>Go 1.23 • Echo v4 • gRPC</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
 					venue [label=<<b>venue-service</b><br/><font point-size='9'>Go 1.23 • Echo v4 • gRPC</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
 					order [label=<<b>order-service</b><br/><font point-size='9'>Java 21 • Spring Boot 4</font>> color="#232F3E" fillcolor="#FF9900" fontcolor="#232F3E" fontname=Helvetica fontsize=11 penwidth=1.5 shape=box style="filled,rounded"]
@@ -78,7 +78,7 @@ digraph aws_infra {
 	acm -> alb [label=TLS arrowhead=none style=dotted]
 	kong -> client [label=SSR]
 	kong -> auth
-	kong -> user
+	kong -> user_svc
 	kong -> ticket [label=REST]
 	kong -> venue [label=REST]
 	kong -> order
@@ -89,7 +89,7 @@ digraph aws_infra {
 	nat -> stripe [label="HTTPS out"]
 	stripe -> kong [label=webhook style=dashed]
 	auth -> rds_auth
-	user -> rds_user
+	user_svc -> rds_user
 	order -> rds_order
 	payment -> rds_payment
 	ticket -> docdb

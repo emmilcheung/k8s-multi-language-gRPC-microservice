@@ -1,8 +1,6 @@
 # venue-service — Agent Guidelines
 
-> **Source of truth:** [`/AGENTS.md`](../../AGENTS.md) at the monorepo root.
-> These notes extend and specialise the root guidelines for this service.
-> When anything here conflicts with the root, the **root wins**.
+> Service-specific notes; defers to root [`/AGENTS.md`](../../AGENTS.md) on conflict.
 
 ---
 

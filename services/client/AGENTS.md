@@ -1,8 +1,6 @@
 # client — Agent Guidelines
 
-> **Source of truth:** [`/AGENTS.md`](../../AGENTS.md) at the monorepo root.
-> These notes extend and specialise the root guidelines for this service.
-> When anything here conflicts with the root, the **root wins**.
+> Service-specific notes; defers to root [`/AGENTS.md`](../../AGENTS.md) on conflict.
 
 ---
 
@@ -96,8 +94,6 @@ playwright.config.ts        ← E2E test configuration (base URL: http://localho
 
 ## Security — Frontend Rules
 
-> Full security guide: [`docs/06-security.md`](../../docs/06-security.md)
-
 - **CSRF protection:** Server Actions are protected by Next.js's origin header check. Do not disable or bypass this check. For server-side `fetch` calls that proxy user data, include the forwarded `Cookie` or `Authorization` header (from the incoming request), never embed credentials as literals in code.
 - **All mutations go to Kong** — never call a backend service directly from the browser, bypassing the gateway.
 - **No secrets in client-side code** or `NEXT_PUBLIC_` env vars. Only non-sensitive config (public API base URL, analytics IDs) belongs in `NEXT_PUBLIC_`.
@@ -109,8 +105,6 @@ playwright.config.ts        ← E2E test configuration (base URL: http://localho
 
 ## Observability
 
-> Full observability guide: [`docs/08-observability.md`](../../docs/08-observability.md)
-
 - `instrumentation.ts` bootstraps the OTel SDK via `@vercel/otel`. This file runs on the server before any application module — do not move OTel initialisation elsewhere.
 - W3C `traceparent` header is forwarded on `fetch` calls to Kong to propagate traces across services.
 - No client-side tracing by default — add only if explicitly required.
@@ -118,8 +112,6 @@ playwright.config.ts        ← E2E test configuration (base URL: http://localho
 ---
 
 ## Testing
-
-> Full testing guide: [`docs/13-testing.md`](../../docs/13-testing.md)
 
 - **Unit tests** (`__tests__/`): test pure functions in `lib/`, component rendering with React Testing Library, and Server Action logic (mocked). Use `vitest` + `@testing-library/react`.
 - **E2E tests** (`tests/`): Playwright tests covering critical user journeys (auth, ticket browsing, order + payment flow). These run against a live stack — ensure Docker Compose is up and the dev server is running on port 4000.

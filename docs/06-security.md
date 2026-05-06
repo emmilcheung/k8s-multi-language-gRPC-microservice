@@ -9,6 +9,13 @@
 - Internal gRPC calls propagate identity via **gRPC metadata** headers (same header names as above).
 - JWTs: short-lived access tokens (15 min), long-lived refresh tokens stored server-side (Redis) and rotatable. RS256 signing — public keys distributed to Kong via JWKS endpoint.
 
+### Consuming Service Pattern
+
+- Downstream services **never validate JWTs themselves** — Kong is the single point of token verification.
+- Services trust `X-User-Id` and `X-User-Roles` only because these headers can only arrive on traffic that has already passed the gateway; enforce this with a NetworkPolicy that rejects direct ingress bypassing Kong.
+- Strip any inbound copies of these headers at the gateway so clients cannot forge identity.
+- Never log raw tokens, refresh tokens, or session identifiers — redact at the logger level.
+
 ### Authorisation (in the Service)
 
 - Authorisation is service-level responsibility — Kong does not enforce business-level permissions.

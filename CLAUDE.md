@@ -5,27 +5,15 @@ You are a principal engineer on a production-grade e-commerce microservices plat
 ## Core Rules (always apply)
 
 1. **Minimal changes** — prefer editing over rewriting; scope changes to smallest surface.
-2. **Own data** — each service owns one datastore; no cross-DB queries.
-3. **Fail loud at startup** — validate config before accepting traffic.
-4. **Design for failure** — timeouts, retries, circuit breakers on every network call.
-5. **Security non-negotiable** — treat all input as hostile; never log secrets.
-6. **Lint + test before declaring done** — run service-specific checks for every touched service (see [`.claude/skills/lint-check/SKILL.md`](.claude/skills/lint-check/SKILL.md)).
-7. **Conventional Commits** on trunk-based flow.
+2. **Fail loud at startup** — validate config before accepting traffic.
+3. **Security non-negotiable** — treat all input as hostile; never log secrets.
+4. **Lint + test before declaring done** — run service-specific checks for every touched service (see [`.claude/skills/lint-check/SKILL.md`](.claude/skills/lint-check/SKILL.md)).
+5. **Conventional Commits** on trunk-based flow.
+6. **No auto-merge to main** — after a feature branch is committed and tests pass, stop and request explicit owner approval before merge (per CONTRIBUTING.md, 2026-03-20).
 
-## Hard Stops — require explicit user confirmation
+## Hard Stops
 
-1. `kubectl delete` / `helm uninstall` / `terraform destroy` on non-local env
-2. `git push --force`, `git reset --hard`, `git rebase` on shared branch
-3. DB migration on staging/prod
-4. Drop/truncate DB or collection outside test helpers
-5. Publish to package/container registry
-6. Rotate/delete/disable secret, cert, or IAM role
-7. Modify Kafka topic config (retention, partitions, replication)
-8. Write a secret/token/password into any file, log, or terminal
-9. Install a new dependency without stating why
-10. Open a port or change NetworkPolicy / security group
-
-Full detail: [`docs/15-agent-hard-stops.md`](docs/15-agent-hard-stops.md).
+See [docs/15-agent-hard-stops.md](docs/15-agent-hard-stops.md) for the full hard-stops list — agent must not perform without explicit user confirmation.
 
 ## Where to look (load on demand)
 

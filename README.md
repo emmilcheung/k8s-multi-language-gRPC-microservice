@@ -240,47 +240,7 @@ Java (order-service) generates stubs at Maven build time via the `protobuf-maven
 
 ## 6. Code Style & Conventions
 
-These are enforced by `AGENTS.md` (loaded by the AI agent each session).
-The most important ones:
-
-### All languages
-
-- **Fail loudly at startup.** Every service validates its config at boot and refuses to
-  start with missing env vars. No silent defaults for required values.
-- **Structured JSON logs only.** `nestjs-pino` (Node.js), `zap` (Go), `logstash-logback-encoder` (Java).
-  No `console.log`, `fmt.Printf`, or `log.Println` in application code.
-- **Every service owns exactly one datastore.** No cross-service DB queries.
-- **Every network call has an explicit timeout.** No infinite defaults.
-- **Errors are never swallowed.** `catch {}` and `_ = err` are prohibited.
-
-### TypeScript / NestJS (auth-service, payment-service)
-
-- Controllers are thin — all business logic lives in service classes.
-- DTOs use `class-validator`; `ValidationPipe` with `whitelist: true, forbidNonWhitelisted: true` globally.
-- `@nestjs/config` for env access — never `process.env` directly in business logic.
-- Test runner: **Vitest** (not Jest).
-- Package manager: **pnpm**.
-
-### Go (ticket-service, expiration-service, venue-service)
-
-- Layout: `cmd/`, `internal/handler/`, `internal/service/`, `internal/repository/`.
-- `context.Context` is the first argument on every I/O function.
-- Errors always wrapped: `fmt.Errorf("operation: %w", err)`.
-- Logger: `zap` — injected as a dependency, never used as a global.
-
-### Java (order-service)
-
-- Spring Boot 4 + Spring Data JPA + Flyway.
-- Transactional outbox pattern for all Kafka publishes — never produce inside a DB transaction directly.
-- Spring State Machine enforces valid `Order` status transitions.
-- JSON logging via `logstash-logback-encoder`.
-
-### Git
-
-- **Conventional Commits:** `feat(service): …`, `fix(infra): …`, `chore(…): …`
-- **Trunk-based development:** short-lived feature branches, squash-merged.
-- **Never auto-merge to `main`** — owner must explicitly approve.
-- Branch naming: `feat/<desc>`, `fix/<desc>`, `chore/<desc>`, `ops/<desc>`
+Engineering standards live in [`AGENTS.md`](AGENTS.md), which indexes the standards in [`docs/01-*.md` through `docs/14-*.md`](docs/). Agents load these on demand; humans should browse the index to find what they need.
 
 ---
 

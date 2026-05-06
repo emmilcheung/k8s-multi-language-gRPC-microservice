@@ -1,8 +1,6 @@
 # payment-service — Agent Guidelines
 
-> **Source of truth:** [`/AGENTS.md`](../../AGENTS.md) at the monorepo root.
-> These notes extend and specialise the root guidelines for this service.
-> When anything here conflicts with the root, the **root wins**.
+> Service-specific notes; defers to root [`/AGENTS.md`](../../AGENTS.md) on conflict.
 
 ---
 
@@ -91,8 +89,6 @@ Same base conventions as all NestJS services — see [auth-service AGENTS.md](..
 
 ## Kafka — Consumer & Producer Rules
 
-> Full messaging guide: [`docs/04-asynchronous-messaging.md`](../../docs/04-asynchronous-messaging.md)
-
 ### Consumer
 
 - Consumes: `orders.order.created` (and `orders.order.cancelled` for refund flows if applicable).
@@ -126,8 +122,6 @@ Same base conventions as all NestJS services — see [auth-service AGENTS.md](..
 
 ## Database — Drizzle ORM Rules
 
-> Full data guide: [`docs/05-data-conventions.md`](../../docs/05-data-conventions.md)
-
 - Migration files are **append-only and immutable** after merge to `main`.
 - Schema defined in `src/database/schema.ts` — single source of truth.
 - **Never `SELECT *`** — name columns explicitly in Drizzle queries.
@@ -140,9 +134,7 @@ Same base conventions as all NestJS services — see [auth-service AGENTS.md](..
 
 ## Security
 
-> Full security guide: [`docs/06-security.md`](../../docs/06-security.md)
-
-- This service **never validates JWTs.** Kong validates the token upstream; `X-User-Id` and `X-User-Roles` are trusted forwarded headers.
+- This service follows the consuming-service auth pattern — see [`/docs/06-security.md`](../../docs/06-security.md#consuming-service-pattern).
 - **Ownership check:** verify the `X-User-Id` matches the order's `userId` before initiating a payment.
 - Stripe webhook endpoint must **not** be routed through Kong's JWT plugin — it must use Stripe signature verification instead.
 - **Input validation** on all DTOs: use `class-validator` with `forbidNonWhitelisted: true`.
@@ -153,8 +145,6 @@ Same base conventions as all NestJS services — see [auth-service AGENTS.md](..
 
 ## Observability
 
-> Full observability guide: [`docs/08-observability.md`](../../docs/08-observability.md)
-
 - `tracing.ts` **must be the first import** in `main.ts` before any NestJS module.
 - Structured JSON logs via `nestjs-pino`; every log line includes `traceId`, `spanId`, `service=payment-service`.
 - Prometheus at `GET /metrics`.
@@ -164,8 +154,6 @@ Same base conventions as all NestJS services — see [auth-service AGENTS.md](..
 ---
 
 ## Testing
-
-> Full testing guide: [`docs/13-testing.md`](../../docs/13-testing.md)
 
 - **Unit tests** (`*.spec.ts`): mock Stripe SDK, Kafka producer, and DB repository. Use `vi.fn()` / `vi.mock()`.
 - **Integration tests** (`test/`): Testcontainers for real PostgreSQL + Kafka. Use a Stripe test mode key (injected via env) — never a live key in tests.

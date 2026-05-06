@@ -145,9 +145,9 @@ Closes #99
 3. **Verify tests pass locally**:
    ```bash
    # For Node.js services
-   npm test
-   npm run test:integration
-   npm run build
+   pnpm test
+   pnpm run test:integration
+   pnpm run build
 
    # For Go services
    go test ./...
@@ -186,12 +186,12 @@ Closes #99
 
    ## Testing
    How were these changes tested?
-   - Unit tests: `npm test` / `go test ./...`
-   - Integration tests: `npm run test:integration` / `go test ./test/...`
+   - Unit tests: `pnpm test` / `go test ./...`
+   - Integration tests: `pnpm run test:integration` / `go test ./test/...`
    - Manual testing: describe any manual steps
 
    ## Checklist
-   - [ ] Code follows the project style guide (AGENTS.md §16)
+   - [ ] Code follows the project style guide ([`docs/01-guiding-principles.md`](docs/01-guiding-principles.md))
    - [ ] Tests added/updated and all passing
    - [ ] Documentation updated (README, comments, CONTRIBUTING)
    - [ ] Commit messages follow Conventional Commits
