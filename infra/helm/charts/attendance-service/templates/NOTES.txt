@@ -1,0 +1,12 @@
+attendance-service deployed successfully.
+
+  Release:   {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Image:     {{ include "attendance-service.image" . }}
+
+Endpoints (in-cluster):
+  HTTP  http://{{ include "attendance-service.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+Health checks:
+  Liveness:  GET /healthz/live
+  Readiness: GET /healthz/ready

@@ -148,6 +148,27 @@ services:
     networks:
       - microservices-net
 
+  # ── PostgreSQL: attendance-service ──────────────────────────────────────────
+  postgres-attendance:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: attendance_db
+      POSTGRES_USER: attendance_user
+      POSTGRES_PASSWORD: attendance_pass
+    ports:
+      - "5437:5432"
+    volumes:
+      - postgres_attendance_data:/var/lib/postgresql/data
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U attendance_user -d attendance_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - microservices-net
+
   # ── Kafka (KRaft mode — no ZooKeeper) ──────────────────────────────────────
   kafka:
     image: confluentinc/cp-kafka:7.7.1
@@ -498,6 +519,43 @@ services:
     networks:
       - microservices-net
 
+  # ── attendance-service: Go / Echo ───────────────────────────────────────────
+  attendance-service:
+    build:
+      context: .
+      dockerfile: services/attendance-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_ENV: development
+      HTTP_PORT: 3007
+      DATABASE_URL: postgresql://attendance_user:attendance_pass@postgres-attendance:5432/attendance_db?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      QR_SIGNING_KEY: "${QR_SIGNING_KEY}"
+      TICKET_SERVICE_URL: ticket-service:50051
+      X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: attendance-service
+    depends_on:
+      postgres-attendance:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      ticket-service:
+        condition: service_healthy
+    ports:
+      - "3007:3007"
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3007/healthz/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - microservices-net
+
   # ── apollo-router (GraphQL Federation gateway) ──────────────────────────────
   apollo-router:
     image: ghcr.io/apollographql/router:v2.1.1
@@ -508,9 +566,7 @@ services:
       - --supergraph
       - /dist/config/supergraph.graphql
     volumes:
-      - ./services/apollo-router/router.yaml:/dist/config/router.yaml
-      - ./services/apollo-router/supergraph.graphql:/dist/config/supergraph.graphql
-      - ./services/apollo-router/scripts:/dist/scripts
+      - ./services/apollo-router:/dist/config
     environment:
       APOLLO_ROUTER_LISTEN_ADDRESS: "0.0.0.0:4001"
       APOLLO_SANDBOX_ENABLED: "true"
@@ -564,6 +620,7 @@ volumes:
   postgres_payments_data:
   postgres_venue_data:
   postgres_users_data:
+  postgres_attendance_data:
   mongodb_data:
   redis_data:
   kafka_data:

@@ -1,0 +1,42 @@
+{{- if .Values.networkPolicy.enabled }}
+# NetworkPolicy for attendance-service
+# Ingress: Kong proxy pods only
+# Egress:  PostgreSQL (5432), Kafka (9092), ticket-service gRPC (50051), DNS (53)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "attendance-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "attendance-service.selectorLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "attendance-service.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kong
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.port }}
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - ports:
+        - protocol: TCP
+          port: 5432
+    - ports:
+        - protocol: TCP
+          port: 9092
+    - ports:
+        - protocol: TCP
+          port: 50051
+{{- end }}
