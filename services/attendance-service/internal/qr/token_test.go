@@ -1,6 +1,8 @@
 package qr_test
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -111,6 +113,39 @@ func TestGenerate_DifferentKeysProduceDifferentTokens(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotEqual(t, token1, token2)
+}
+
+// TestGenerate_ClaimNamesMatchSpec asserts the exact JSON key names in the
+// serialized payload match the approved WS2 token claim shape.
+func TestGenerate_ClaimNamesMatchSpec(t *testing.T) {
+	g := qr.NewGenerator(testKey)
+	claims := makeClaims(5 * time.Minute)
+	claims.V = 1
+
+	token, err := g.Generate(claims)
+	require.NoError(t, err)
+
+	parts := splitToken(token)
+	require.Len(t, parts, 2)
+
+	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	require.NoError(t, err)
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(payload, &raw))
+
+	assert.Contains(t, raw, "v", "expected key 'v'")
+	assert.Contains(t, raw, "credentialId", "expected key 'credentialId'")
+	assert.Contains(t, raw, "ticketId", "expected key 'ticketId'")
+	assert.Contains(t, raw, "eventId", "expected key 'eventId'")
+	assert.Contains(t, raw, "tokenVersion", "expected key 'tokenVersion'")
+	assert.Contains(t, raw, "iat", "expected key 'iat'")
+	assert.Contains(t, raw, "exp", "expected key 'exp'")
+
+	assert.NotContains(t, raw, "cid", "old key 'cid' must not appear")
+	assert.NotContains(t, raw, "tid", "old key 'tid' must not appear")
+	assert.NotContains(t, raw, "eid", "old key 'eid' must not appear")
+	assert.NotContains(t, raw, "ver", "old key 'ver' must not appear")
 }
 
 func splitToken(token string) []string {

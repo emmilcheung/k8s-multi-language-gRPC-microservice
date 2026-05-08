@@ -16,6 +16,7 @@ func validEnv(t *testing.T) {
 	t.Setenv("KAFKA_BROKERS", "localhost:9092")
 	t.Setenv("HTTP_PORT", "3007")
 	t.Setenv("QR_SIGNING_KEY", "supersecretkey_that_is_long_enough_here")
+	t.Setenv("TICKET_SERVICE_URL", "ticket-service:50051")
 }
 
 func TestLoad_MissingDatabaseURL(t *testing.T) {
@@ -110,6 +111,7 @@ func TestLoad_Success(t *testing.T) {
 	assert.Equal(t, "postgresql://user:pass@localhost:5432/attendance_db", cfg.DatabaseURL)
 	assert.Equal(t, []string{"localhost:9092"}, cfg.KafkaBrokers)
 	assert.NotEmpty(t, cfg.QRSigningKey)
+	assert.Equal(t, "ticket-service:50051", cfg.TicketServiceURL)
 }
 
 func TestLoad_MultipleErrors(t *testing.T) {
@@ -117,6 +119,7 @@ func TestLoad_MultipleErrors(t *testing.T) {
 	os.Unsetenv("DATABASE_URL")
 	os.Unsetenv("KAFKA_BROKERS")
 	os.Unsetenv("QR_SIGNING_KEY")
+	os.Unsetenv("TICKET_SERVICE_URL")
 	t.Setenv("HTTP_PORT", "3007")
 
 	_, err := config.Load()
@@ -125,4 +128,5 @@ func TestLoad_MultipleErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "DATABASE_URL")
 	assert.Contains(t, err.Error(), "KAFKA_BROKERS")
 	assert.Contains(t, err.Error(), "QR_SIGNING_KEY")
+	assert.Contains(t, err.Error(), "TICKET_SERVICE_URL")
 }

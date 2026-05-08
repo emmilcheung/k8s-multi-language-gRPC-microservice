@@ -3,6 +3,7 @@ package test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +18,44 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
+
+type stubScanService struct {
+	outcome *service.ScanOutcome
+	err     error
+}
+
+func (s *stubScanService) Validate(
+	_ context.Context,
+	_, _, _, _ string,
+	_ *string,
+) (*service.ScanOutcome, error) {
+	if s.outcome != nil {
+		return s.outcome, s.err
+	}
+	return &service.ScanOutcome{Result: service.ScanResultValid}, s.err
+}
+
+func (s *stubScanService) CheckIn(
+	_ context.Context,
+	_, _, _, _ string,
+	_ *string,
+) (*service.ScanOutcome, error) {
+	if s.outcome != nil {
+		return s.outcome, s.err
+	}
+	return &service.ScanOutcome{Result: service.ScanResultValid}, s.err
+}
+
+func (s *stubScanService) CheckInByBuyer(
+	_ context.Context,
+	_, _, _, _ string,
+	_ *string,
+) (*service.ScanOutcome, error) {
+	if s.outcome != nil {
+		return s.outcome, s.err
+	}
+	return &service.ScanOutcome{Result: service.ScanResultValid}, s.err
+}
 
 // assertErrorEnvelope checks that the response body matches the canonical error shape:
 //
@@ -72,6 +111,7 @@ func TestJSONError_Shape_NotFound(t *testing.T) {
 	c := e.NewContext(req, rec)
 	c.SetParamNames("ticketId")
 	c.SetParamValues("t1")
+	c.Set(middleware.ContextKeyUserID, "buyer-1")
 
 	err := h.GetTicket(c)
 	require.NoError(t, err)
@@ -79,28 +119,63 @@ func TestJSONError_Shape_NotFound(t *testing.T) {
 	assertErrorEnvelope(t, rec.Body.Bytes(), "NOT_FOUND")
 }
 
-// TestScanHandler_ValidateToken_ReturnsNestedErrorEnvelope verifies that
-// ScanHandler.ValidateToken returns the canonical nested error envelope
-// {"error":{"code":"...","message":"..."}} as required by docs/03-api-design.md.
-func TestScanHandler_ValidateToken_ReturnsNestedErrorEnvelope(t *testing.T) {
-	e := echo.New()
-	h := handler.NewScanHandler(zap.NewNop())
+func TestGetTicket_NonOwner_ReturnsForbidden(t *testing.T) {
+	ownerID := "buyer-owner"
+	svc := service.NewAttendanceService(
+		&stubCredentialRepo{credential: &repository.AdmissionCredential{
+			ID:          "cred-1",
+			TicketID:    "t1",
+			OrderID:     "o1",
+			BuyerUserID: &ownerID,
+		}},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+	)
+	h := handler.NewAttendanceHandler(svc, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/attendance/scan/validate", nil)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/attendance/tickets/t1", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("ticketId")
+	c.SetParamValues("t1")
+	c.Set(middleware.ContextKeyUserID, "buyer-other")
+
+	err := h.GetTicket(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assertErrorEnvelope(t, rec.Body.Bytes(), "FORBIDDEN")
+}
+
+// TestScanHandler_ValidateToken_RequiresScannerIdentity verifies 401 envelope shape.
+func TestScanHandler_ValidateToken_RequiresScannerIdentity(t *testing.T) {
+	e := echo.New()
+	h := handler.NewScanHandler(
+		&stubScanService{},
+		service.NewAttendanceService(&stubCredentialRepo{}, &stubPolicyRepo{}, &stubScanRepo{}),
+		zap.NewNop(),
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/attendance/scan/validate",
+		strings.NewReader(`{"token":"abc","eventId":"event-1","deviceId":"scanner-1"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
 	err := h.ValidateToken(c)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusNotImplemented, rec.Code)
-	assertErrorEnvelope(t, rec.Body.Bytes(), "NOT_IMPLEMENTED")
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assertErrorEnvelope(t, rec.Body.Bytes(), "MISSING_USER_ID")
 }
 
-// TestScanHandler_CheckIn_ReturnsNestedErrorEnvelope verifies that
-// ScanHandler.CheckIn returns the canonical nested error envelope.
+// TestScanHandler_CheckIn_ReturnsNestedErrorEnvelope verifies INVALID_BODY envelope.
 func TestScanHandler_CheckIn_ReturnsNestedErrorEnvelope(t *testing.T) {
 	e := echo.New()
-	h := handler.NewScanHandler(zap.NewNop())
+	h := handler.NewScanHandler(
+		&stubScanService{},
+		service.NewAttendanceService(&stubCredentialRepo{}, &stubPolicyRepo{}, &stubScanRepo{}),
+		zap.NewNop(),
+	)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/attendance/scan/check-in", nil)
 	rec := httptest.NewRecorder()
@@ -108,8 +183,8 @@ func TestScanHandler_CheckIn_ReturnsNestedErrorEnvelope(t *testing.T) {
 
 	err := h.CheckIn(c)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusNotImplemented, rec.Code)
-	assertErrorEnvelope(t, rec.Body.Bytes(), "NOT_IMPLEMENTED")
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assertErrorEnvelope(t, rec.Body.Bytes(), "INVALID_BODY")
 }
 
 // TestKongAuth_Unauthorized_MatchesAPIDesign verifies that the auth middleware
@@ -209,4 +284,191 @@ func (c *capturePolicyRepo) FindByEventID(_ context.Context, _ string) (*reposit
 func (c *capturePolicyRepo) Upsert(_ context.Context, policy *repository.AttendancePolicy) error {
 	c.upserted = policy
 	return nil
+}
+
+type stubTicketOwnerLookup struct {
+	ownerID string
+	err     error
+}
+
+func (s *stubTicketOwnerLookup) LookupTicketOwner(_ context.Context, _ string) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.ownerID, nil
+}
+
+func TestGetEventSettings_NonOwner_ReturnsForbidden(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+		&stubTicketOwnerLookup{ownerID: "owner-uuid-1"},
+	)
+	h := handler.NewAttendanceHandler(svc, zap.NewNop())
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/attendance/events/event-1/settings", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("eventId")
+	c.SetParamValues("event-1")
+	c.Set(middleware.ContextKeyUserID, "other-user")
+
+	err := h.GetEventSettings(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assertErrorEnvelope(t, rec.Body.Bytes(), "FORBIDDEN")
+}
+
+func TestPatchEventSettings_UnknownEvent_ReturnsNotFound(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+		&stubTicketOwnerLookup{err: repository.ErrNotFound},
+	)
+	h := handler.NewAttendanceHandler(svc, zap.NewNop())
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPatch, "/api/attendance/events/event-404/settings",
+		strings.NewReader(`{"requireQrForEntry":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("eventId")
+	c.SetParamValues("event-404")
+	c.Set(middleware.ContextKeyUserID, "organizer-uuid")
+
+	err := h.PatchEventSettings(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assertErrorEnvelope(t, rec.Body.Bytes(), "NOT_FOUND")
+}
+
+func TestPatchEventSettings_MalformedPayload_ReturnsBadRequest(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+		&stubTicketOwnerLookup{ownerID: "organizer-uuid"},
+	)
+	h := handler.NewAttendanceHandler(svc, zap.NewNop())
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPatch, "/api/attendance/events/event-1/settings", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("eventId")
+	c.SetParamValues("event-1")
+	c.Set(middleware.ContextKeyUserID, "organizer-uuid")
+
+	err := h.PatchEventSettings(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assertErrorEnvelope(t, rec.Body.Bytes(), "INVALID_BODY")
+}
+
+func TestPatchEventSettings_OwnerCanUpdatePolicy(t *testing.T) {
+	captured := &capturePolicyRepo{}
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		captured,
+		&stubScanRepo{},
+		&stubTicketOwnerLookup{ownerID: "organizer-uuid"},
+	)
+	h := handler.NewAttendanceHandler(svc, zap.NewNop())
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPatch, "/api/attendance/events/event-1/settings",
+		strings.NewReader(`{"requireQrForEntry":false,"allowManualOverride":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("eventId")
+	c.SetParamValues("event-1")
+	c.Set(middleware.ContextKeyUserID, "organizer-uuid")
+
+	err := h.PatchEventSettings(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, captured.upserted)
+	assert.Equal(t, "organizer-uuid", captured.upserted.OrganizerID)
+	assert.False(t, captured.upserted.RequireQRForEntry)
+	assert.True(t, captured.upserted.AllowManualOverride)
+}
+
+func TestGetEventSettings_UnknownEvent_ReturnsNotFound(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+		&stubTicketOwnerLookup{err: repository.ErrNotFound},
+	)
+	h := handler.NewAttendanceHandler(svc, zap.NewNop())
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/attendance/events/event-missing/settings", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("eventId")
+	c.SetParamValues("event-missing")
+	c.Set(middleware.ContextKeyUserID, "organizer-uuid")
+
+	err := h.GetEventSettings(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assertErrorEnvelope(t, rec.Body.Bytes(), "NOT_FOUND")
+}
+
+func TestGetEventSettings_OwnerWithNoPolicy_ReturnsDefaults(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{err: repository.ErrNotFound},
+		&stubScanRepo{},
+		&stubTicketOwnerLookup{ownerID: "organizer-uuid"},
+	)
+	h := handler.NewAttendanceHandler(svc, zap.NewNop())
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/attendance/events/event-1/settings", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("eventId")
+	c.SetParamValues("event-1")
+	c.Set(middleware.ContextKeyUserID, "organizer-uuid")
+
+	err := h.GetEventSettings(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	assert.Equal(t, true, body["requireQrForEntry"])
+	assert.Equal(t, false, body["allowManualOverride"])
+}
+
+func TestPatchEventSettings_OwnershipLookupFailure_ReturnsInternalError(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+		&stubTicketOwnerLookup{err: errors.New("ticket-service unavailable")},
+	)
+	h := handler.NewAttendanceHandler(svc, zap.NewNop())
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPatch, "/api/attendance/events/event-1/settings",
+		strings.NewReader(`{"requireQrForEntry":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("eventId")
+	c.SetParamValues("event-1")
+	c.Set(middleware.ContextKeyUserID, "organizer-uuid")
+
+	err := h.PatchEventSettings(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assertErrorEnvelope(t, rec.Body.Bytes(), "INTERNAL_ERROR")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -67,6 +68,19 @@ func (h *fakeHandler) OnOrderCompleted(_ context.Context, _ OrderCompletedData) 
 	return nil
 }
 
+type validatingFakeHandler struct {
+	calls int
+}
+
+func (h *validatingFakeHandler) OnOrderCompleted(_ context.Context, data OrderCompletedData) error {
+	h.calls++
+	if data.OrderID == "" || data.TicketID == "" {
+		return fmt.Errorf("issuance: malformed event: orderId and ticketId are required (orderID=%q ticketID=%q)",
+			data.OrderID, data.TicketID)
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -75,11 +89,16 @@ func (h *fakeHandler) OnOrderCompleted(_ context.Context, _ OrderCompletedData) 
 // returns a confluent.Message ready for the consumer loop.
 func buildMessage(t *testing.T) *confluent.Message {
 	t.Helper()
-	data, err := json.Marshal(OrderCompletedData{
+	return buildMessageWithData(t, OrderCompletedData{
 		OrderID:  "order-1",
 		UserID:   "user-1",
 		TicketID: "ticket-1",
 	})
+}
+
+func buildMessageWithData(t *testing.T, data any) *confluent.Message {
+	t.Helper()
+	payload, err := json.Marshal(data)
 	require.NoError(t, err)
 	envelope, err := json.Marshal(CloudEvent{
 		SpecVersion:     "1.0",
@@ -88,7 +107,7 @@ func buildMessage(t *testing.T) *confluent.Message {
 		ID:              "test-id",
 		Time:            time.Now(),
 		DataContentType: "application/json",
-		Data:            data,
+		Data:            payload,
 	})
 	require.NoError(t, err)
 	topic := TopicOrderCompleted
@@ -96,6 +115,30 @@ func buildMessage(t *testing.T) *confluent.Message {
 		TopicPartition: confluent.TopicPartition{Topic: &topic},
 		Value:          envelope,
 	}
+}
+
+func buildMalformedEnvelopeMessage(t *testing.T) *confluent.Message {
+	t.Helper()
+	topic := TopicOrderCompleted
+	return &confluent.Message{
+		TopicPartition: confluent.TopicPartition{Topic: &topic},
+		Value:          []byte(`{"specversion":"1.0","type":"orders.order.completed",`),
+	}
+}
+
+func buildInvalidDataPayloadMessage(t *testing.T) *confluent.Message {
+	t.Helper()
+	return buildMessageWithData(t, json.RawMessage(`"not-an-object"`))
+}
+
+func buildIncompleteDataMessage(t *testing.T) *confluent.Message {
+	t.Helper()
+	return buildMessageWithData(t, map[string]any{
+		"userId":   "user-1",
+		"ticketId": "ticket-1",
+		"quantity": 1,
+		"version":  1,
+	})
 }
 
 func newConsumer(t *testing.T, h OrderEventHandler, p dlqPublisher) *OrderConsumer {
@@ -177,6 +220,67 @@ func TestLoop_CommitsOffset_WhenProcessingFailsButDLQSucceeds(t *testing.T) {
 
 	assert.Equal(t, 1, pub.published, "DLQ must be published once")
 	assert.Equal(t, 1, reader.committed, "offset must be committed after successful DLQ forward")
+}
+
+// ---------------------------------------------------------------------------
+// Issue 1f: malformed envelope JSON is rejected, routed to DLQ, and committed
+// ---------------------------------------------------------------------------
+
+func TestLoop_CommitsOffset_WhenEnvelopeJSONIsMalformed(t *testing.T) {
+	reader := &fakeReader{messages: []*confluent.Message{buildMalformedEnvelopeMessage(t)}}
+	pub := &fakePublisher{}
+	h := &fakeHandler{}
+
+	c := newConsumer(t, h, pub)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	c.loop(ctx, reader)
+
+	assert.Equal(t, 1, pub.published, "malformed envelope must be published to DLQ once")
+	assert.Equal(t, 1, reader.committed, "offset must be committed after DLQ forward")
+	assert.Equal(t, 0, h.calls, "handler must not be called for malformed envelope JSON")
+}
+
+// ---------------------------------------------------------------------------
+// Issue 1f: invalid data payload JSON is rejected, routed to DLQ, and committed
+// ---------------------------------------------------------------------------
+
+func TestLoop_CommitsOffset_WhenDataJSONIsInvalid(t *testing.T) {
+	reader := &fakeReader{messages: []*confluent.Message{buildInvalidDataPayloadMessage(t)}}
+	pub := &fakePublisher{}
+	h := &fakeHandler{}
+
+	c := newConsumer(t, h, pub)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	c.loop(ctx, reader)
+
+	assert.Equal(t, 1, pub.published, "malformed data must be published to DLQ once")
+	assert.Equal(t, 1, reader.committed, "offset must be committed after DLQ forward")
+	assert.Equal(t, 0, h.calls, "handler must not be called for malformed data JSON")
+}
+
+// ---------------------------------------------------------------------------
+// Issue 1g: syntactically valid data missing required identifiers is rejected,
+// routed to DLQ, and committed
+// ---------------------------------------------------------------------------
+
+func TestLoop_CommitsOffset_WhenDataIsIncompleteButValidJSON(t *testing.T) {
+	reader := &fakeReader{messages: []*confluent.Message{buildIncompleteDataMessage(t)}}
+	pub := &fakePublisher{}
+	h := &validatingFakeHandler{}
+
+	c := newConsumer(t, h, pub)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	c.loop(ctx, reader)
+
+	assert.Equal(t, 1, pub.published, "incomplete payload must be published to DLQ once")
+	assert.Equal(t, 1, reader.committed, "offset must be committed after DLQ forward")
+	assert.Equal(t, 1, h.calls, "handler must be called for syntactically valid data")
 }
 
 // ---------------------------------------------------------------------------

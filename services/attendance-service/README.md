@@ -8,7 +8,7 @@ Admission boundary service for the QR-based attendance system. Manages event att
 - Validates QR tokens and records scan events at check-in (WS2)
 - Provides buyer admission pass queries via GraphQL and REST
 - Provides organizer attendance policy management and summary reporting
-- Exposes scanner endpoints for QR validation and check-in (WS2)
+- Exposes scanner endpoints for check-in by QR token or buyer identity fallback (WS2)
 
 ## Stack
 
@@ -39,11 +39,17 @@ query {
 | GET | `/api/attendance/events/:eventId/settings` | Organizer: get policy |
 | PATCH | `/api/attendance/events/:eventId/settings` | Organizer: update policy |
 | GET | `/api/attendance/events/:eventId/summary` | Organizer: scan summary |
+| GET | `/api/attendance/events/:eventId/checkins` | Organizer: list checked-in attendees |
 | POST | `/api/attendance/scan/validate` | Scanner: validate token (WS2) |
 | POST | `/api/attendance/scan/check-in` | Scanner: record check-in (WS2) |
+| POST | `/api/attendance/scan/check-in-user` | Scanner: fallback check-in by buyer user ID |
 | GET | `/healthz/live` | Liveness probe |
 | GET | `/healthz/ready` | Readiness probe (Postgres + Kafka) |
 | GET | `/metrics` | Prometheus metrics |
+
+For this release, `eventId` is derived from ticket metadata and uses the ticket UUID as the event identifier until a separate event aggregate ID is introduced.
+
+Email delivery is intentionally out of scope in this service. The follow-on shape is a separate `notification-service` that consumes `attendance.qr.issued` and sends buyer emails with hosted admission links.
 
 ## Configuration
 

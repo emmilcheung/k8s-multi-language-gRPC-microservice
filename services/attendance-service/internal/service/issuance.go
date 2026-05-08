@@ -9,12 +9,15 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/acme/attendance-service/internal/kafka"
 	"github.com/acme/attendance-service/internal/qr"
 	"github.com/acme/attendance-service/internal/repository"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -60,7 +63,6 @@ type QRIssuedEventData struct {
 // organizer policy UI exists.  Policy enforcement lives in the scanner/check-in flow.
 type IssuanceService struct {
 	credRepo repository.CredentialRepository
-	pub      EventPublisher
 	qrGen    *qr.Generator
 	tokenTTL time.Duration
 	log      *zap.Logger
@@ -71,7 +73,6 @@ type IssuanceService struct {
 // use 0 to apply the default (1 year).
 func NewIssuanceService(
 	credRepo repository.CredentialRepository,
-	pub EventPublisher,
 	qrGen *qr.Generator,
 	tokenTTL time.Duration,
 	log *zap.Logger,
@@ -82,7 +83,6 @@ func NewIssuanceService(
 	}
 	return &IssuanceService{
 		credRepo: credRepo,
-		pub:      pub,
 		qrGen:    qrGen,
 		tokenTTL: ttl,
 		log:      log,
@@ -91,15 +91,56 @@ func NewIssuanceService(
 
 // OnOrderCompleted implements kafka.OrderEventHandler.
 func (s *IssuanceService) OnOrderCompleted(ctx context.Context, data kafka.OrderCompletedData) error {
+	start := time.Now()
+	ctx, span := otel.Tracer("attendance-service.issuance").Start(ctx, "attendance.issuance.order_completed")
+	defer func() {
+		observeIssuance(len(admissionUnits(data)), time.Since(start).Seconds())
+		span.End()
+	}()
+
 	if data.OrderID == "" || data.TicketID == "" {
 		return fmt.Errorf("issuance: malformed event: orderId and ticketId are required (orderID=%q ticketID=%q)",
 			data.OrderID, data.TicketID)
+	}
+	if strings.TrimSpace(data.UserID) == "" {
+		return fmt.Errorf("issuance: malformed event: userId is required (orderID=%q ticketID=%q)",
+			data.OrderID, data.TicketID)
+	}
+	normalizedSeatIDs := make([]string, len(data.SeatIDs))
+	for i, seatID := range data.SeatIDs {
+		normalizedSeatID := strings.TrimSpace(seatID)
+		if normalizedSeatID == "" {
+			return fmt.Errorf("issuance: malformed event: seated orders require non-blank seatIds (orderID=%q ticketID=%q)",
+				data.OrderID, data.TicketID)
+		}
+		normalizedSeatIDs[i] = normalizedSeatID
+	}
+	if len(normalizedSeatIDs) > 1 {
+		seen := make(map[string]struct{}, len(normalizedSeatIDs))
+		for _, seatID := range normalizedSeatIDs {
+			if _, ok := seen[seatID]; ok {
+				return fmt.Errorf("issuance: malformed event: duplicate seatIds (orderID=%q ticketID=%q seatID=%q)",
+					data.OrderID, data.TicketID, seatID)
+			}
+			seen[seatID] = struct{}{}
+		}
+	}
+	if len(data.SeatIDs) == 0 && data.Quantity < 1 {
+		return fmt.Errorf("issuance: malformed event: GA orders require quantity >= 1 when seatIds are empty (orderID=%q ticketID=%q quantity=%d)",
+			data.OrderID, data.TicketID, data.Quantity)
 	}
 
 	// eventId derivation: see struct-level NOTE above.
 	eventID := data.TicketID
 
+	data.SeatIDs = normalizedSeatIDs
 	units := admissionUnits(data)
+	span.SetAttributes(
+		attribute.String("attendance.order_id", data.OrderID),
+		attribute.String("attendance.ticket_id", data.TicketID),
+		attribute.String("attendance.event_id", eventID),
+		attribute.Int("attendance.units", len(units)),
+	)
 	for _, unit := range units {
 		if err := s.issueOne(ctx, data, eventID, unit); err != nil {
 			return fmt.Errorf("issuance: issue unit %q for order %q: %w",
@@ -117,7 +158,7 @@ type admissionUnit struct {
 
 // admissionUnits returns the set of admission slots for the given order event.
 // Seated orders (SeatIDs non-empty) produce one unit per seat.
-// GA orders produce one unit per Quantity (minimum 1).
+// GA orders produce one unit per Quantity; non-positive quantities yield no units.
 func admissionUnits(data kafka.OrderCompletedData) []admissionUnit {
 	if len(data.SeatIDs) > 0 {
 		units := make([]admissionUnit, len(data.SeatIDs))
@@ -131,7 +172,7 @@ func admissionUnits(data kafka.OrderCompletedData) []admissionUnit {
 
 	qty := data.Quantity
 	if qty < 1 {
-		qty = 1
+		return nil
 	}
 	units := make([]admissionUnit, qty)
 	for i := range units {
@@ -142,33 +183,32 @@ func admissionUnits(data kafka.OrderCompletedData) []admissionUnit {
 	return units
 }
 
-// issueOne issues a single credential for one admission unit.  It is idempotent:
-// if a credential with the same issuance_key already exists it logs and returns nil.
+// issueOne issues a single credential for one admission unit.
+//
+// State machine:
+//   - credential not found             → create + durable outbox row in one transaction
+//   - credential exists, not published → leave relay responsibility to the outbox path
+//   - credential exists, published     → skip (idempotent duplicate)
 func (s *IssuanceService) issueOne(
 	ctx context.Context,
 	data kafka.OrderCompletedData,
 	eventID string,
 	unit admissionUnit,
 ) error {
-	// Check for existing credential (pre-insert idempotency check for clean log output).
+	// Check for existing credential.
 	existing, err := s.credRepo.FindByIssuanceKey(ctx, unit.issuanceKey)
 	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return fmt.Errorf("check existing credential: %w", err)
 	}
+
 	if existing != nil {
-		s.log.Info("issuance: credential already exists for issuance key, skipping (idempotent)",
-			zap.String("issuanceKey", unit.issuanceKey),
-			zap.String("credentialId", existing.ID),
-		)
-		return nil
+		return s.logDuplicateCredential(unit.issuanceKey, existing)
 	}
 
-	// Generate high-entropy, non-guessable credential and token IDs.
 	credentialID := uuid.New().String()
 	tokenID := uuid.New().String()
 	now := time.Now().UTC()
 
-	// Sign QR token. The token carries only credential metadata (no PII).
 	claims := qr.Claims{
 		V:            1,
 		CredentialID: credentialID,
@@ -183,34 +223,42 @@ func (s *IssuanceService) issueOne(
 		return fmt.Errorf("generate qr token: %w", err)
 	}
 
-	// Persist credential metadata.  The token string itself is NOT stored;
-	// only the token_id UUID is kept for audit / revocation lookups.
 	cred := &repository.AdmissionCredential{
 		ID:           credentialID,
 		TicketID:     data.TicketID,
 		OrderID:      data.OrderID,
+		BuyerUserID:  &data.UserID,
 		EventID:      eventID,
 		TokenVersion: 1,
 		TokenID:      tokenID,
+		QRToken:      &token,
 		IssuanceKey:  unit.issuanceKey,
 		Status:       repository.CredentialStatusIssued,
 		IssuedAt:     now,
 	}
-	if err := s.credRepo.Create(ctx, cred); err != nil {
-		return fmt.Errorf("store credential: %w", err)
+	payload, err := buildIssuanceEventPayload(cred, token)
+	if err != nil {
+		return fmt.Errorf("build issuance event payload: %w", err)
+	}
+	outbox := &repository.OutboxRow{
+		ID:           credentialID,
+		Topic:        kafka.TopicAttendanceQRIssued,
+		Payload:      payload,
+		TraceHeaders: json.RawMessage(`{}`),
+		PartitionKey: credentialID,
+	}
+	if err := s.credRepo.CreateWithOutbox(ctx, cred, outbox); err != nil {
+		if errors.Is(err, repository.ErrDuplicate) {
+			existing, findErr := s.credRepo.FindByIssuanceKey(ctx, unit.issuanceKey)
+			if findErr != nil {
+				return fmt.Errorf("re-read existing credential after duplicate create: %w", findErr)
+			}
+			return s.logDuplicateCredential(unit.issuanceKey, existing)
+		}
+		return fmt.Errorf("store credential with outbox: %w", err)
 	}
 
-	// Publish attendance.qr.issued CloudEvent.
-	// A publish failure is logged but does NOT roll back the credential record —
-	// the credential is persisted and the event can be re-emitted by a replay job.
-	if pubErr := s.publishIssuanceEvent(credentialID, data.TicketID, eventID, data.OrderID, now, token); pubErr != nil {
-		s.log.Error("issuance: failed to publish attendance.qr.issued event (credential persisted)",
-			zap.String("credentialId", credentialID),
-			zap.Error(pubErr),
-		)
-	}
-
-	s.log.Info("issuance: credential issued",
+	s.log.Info("issuance: credential issued and queued for relay",
 		zap.String("credentialId", credentialID),
 		zap.String("orderId", data.OrderID),
 		zap.String("ticketId", data.TicketID),
@@ -219,39 +267,51 @@ func (s *IssuanceService) issueOne(
 	return nil
 }
 
-// publishIssuanceEvent builds and emits a CloudEvent for attendance.qr.issued.
-// The partition key is the credentialId for deterministic per-credential routing.
-func (s *IssuanceService) publishIssuanceEvent(
-	credentialID, ticketID, eventID, orderID string,
-	issuedAt time.Time,
-	qrToken string,
-) error {
+func (s *IssuanceService) logDuplicateCredential(issuanceKey string, existing *repository.AdmissionCredential) error {
+	if existing == nil {
+		return fmt.Errorf("duplicate credential lookup returned no row for issuance key %q", issuanceKey)
+	}
+	if existing.IssuanceEventPublishedAt != nil {
+		s.log.Info("issuance: credential already published, skipping (idempotent duplicate)",
+			zap.String("issuanceKey", issuanceKey),
+			zap.String("credentialId", existing.ID),
+		)
+		return nil
+	}
+	s.log.Info("issuance: credential already queued in outbox, waiting for relay",
+		zap.String("issuanceKey", issuanceKey),
+		zap.String("credentialId", existing.ID),
+	)
+	return nil
+}
+
+func buildIssuanceEventPayload(cred *repository.AdmissionCredential, qrToken string) ([]byte, error) {
 	eventData := QRIssuedEventData{
-		CredentialID: credentialID,
-		TicketID:     ticketID,
-		EventID:      eventID,
-		OrderID:      orderID,
-		IssuedAt:     issuedAt,
+		CredentialID: cred.ID,
+		TicketID:     cred.TicketID,
+		EventID:      cred.EventID,
+		OrderID:      cred.OrderID,
+		IssuedAt:     cred.IssuedAt,
 		QRToken:      qrToken,
 	}
 	dataBytes, err := json.Marshal(eventData)
 	if err != nil {
-		return fmt.Errorf("marshal issuance event data: %w", err)
+		return nil, fmt.Errorf("marshal issuance event data: %w", err)
 	}
 
 	envelope := kafka.CloudEvent{
 		SpecVersion:     "1.0",
 		Type:            kafka.TopicAttendanceQRIssued,
 		Source:          "attendance-service",
-		ID:              uuid.New().String(),
-		Time:            issuedAt,
+		ID:              cred.ID,
+		Time:            cred.IssuedAt,
 		DataContentType: "application/json",
 		Data:            dataBytes,
 	}
 	envelopeBytes, err := json.Marshal(envelope)
 	if err != nil {
-		return fmt.Errorf("marshal cloud event envelope: %w", err)
+		return nil, fmt.Errorf("marshal cloud event envelope: %w", err)
 	}
 
-	return s.pub.Publish(kafka.TopicAttendanceQRIssued, []byte(credentialID), envelopeBytes)
+	return envelopeBytes, nil
 }

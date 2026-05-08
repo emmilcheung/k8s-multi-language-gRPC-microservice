@@ -6,6 +6,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev &
 
 WORKDIR /app
 
+# Copy the local replace dependency first so `go mod download` can resolve it.
+# go.mod contains: replace github.com/org/ticketing/libs/grpc-stubs/go => ../../libs/grpc-stubs/go
+# From WORKDIR /app/services/attendance-service, ../../libs/grpc-stubs/go = /app/libs/grpc-stubs/go
+COPY libs/grpc-stubs/go /app/libs/grpc-stubs/go
+
 # Copy dependency manifests for layer caching.
 COPY services/attendance-service/go.mod services/attendance-service/go.sum /app/services/attendance-service/
 

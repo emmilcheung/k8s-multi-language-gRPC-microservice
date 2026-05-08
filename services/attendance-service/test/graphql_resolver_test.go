@@ -177,9 +177,9 @@ func TestEntityResolver_FindAdmissionPassByID_ReturnsNil_WhenNotFound(t *testing
 
 // spyCredentialRepo records which lookup method was called and with what key.
 type spyCredentialRepo struct {
-	credential           *repository.AdmissionCredential
-	err                  error
-	lastFindByIDKey      string
+	credential            *repository.AdmissionCredential
+	err                   error
+	lastFindByIDKey       string
 	lastFindByTicketIDKey string
 }
 
@@ -193,6 +193,10 @@ func (s *spyCredentialRepo) FindByTicketID(_ context.Context, ticketID string) (
 	return s.credential, s.err
 }
 
+func (s *spyCredentialRepo) FindByTicketAndBuyer(_ context.Context, _, _ string) (*repository.AdmissionCredential, error) {
+	return s.credential, s.err
+}
+
 func (s *spyCredentialRepo) FindByTicketAndOrder(_ context.Context, _, _ string) (*repository.AdmissionCredential, error) {
 	return s.credential, s.err
 }
@@ -201,10 +205,31 @@ func (s *spyCredentialRepo) FindByIssuanceKey(_ context.Context, _ string) (*rep
 	return s.credential, s.err
 }
 
+func (s *spyCredentialRepo) CreateWithOutbox(_ context.Context, _ *repository.AdmissionCredential, _ *repository.OutboxRow) error {
+	return s.err
+}
+
 func (s *spyCredentialRepo) Create(_ context.Context, _ *repository.AdmissionCredential) error {
 	return s.err
 }
 
+func (s *spyCredentialRepo) ConsumeIssued(
+	_ context.Context,
+	_ string,
+	_ time.Time,
+	_, _ string,
+) (*repository.AdmissionCredential, bool, error) {
+	return s.credential, false, s.err
+}
+
 func (s *spyCredentialRepo) UpdateStatus(_ context.Context, _ string, _ repository.CredentialStatus) error {
 	return s.err
+}
+
+func (s *spyCredentialRepo) MarkEventPublished(_ context.Context, _ string, _ time.Time) error {
+	return s.err
+}
+
+func (s *spyCredentialRepo) ListCheckedInByEventID(_ context.Context, _ string, _ int) ([]*repository.AdmissionCredential, error) {
+	return []*repository.AdmissionCredential{}, s.err
 }

@@ -15,6 +15,7 @@ import (
 // stubCredentialRepo is a test double for CredentialRepository.
 type stubCredentialRepo struct {
 	credential *repository.AdmissionCredential
+	checkedIn  []*repository.AdmissionCredential
 	err        error
 }
 
@@ -26,6 +27,10 @@ func (s *stubCredentialRepo) FindByTicketID(_ context.Context, _ string) (*repos
 	return s.credential, s.err
 }
 
+func (s *stubCredentialRepo) FindByTicketAndBuyer(_ context.Context, _, _ string) (*repository.AdmissionCredential, error) {
+	return s.credential, s.err
+}
+
 func (s *stubCredentialRepo) FindByTicketAndOrder(_ context.Context, _, _ string) (*repository.AdmissionCredential, error) {
 	return s.credential, s.err
 }
@@ -34,12 +39,36 @@ func (s *stubCredentialRepo) FindByIssuanceKey(_ context.Context, _ string) (*re
 	return s.credential, s.err
 }
 
+func (s *stubCredentialRepo) CreateWithOutbox(_ context.Context, _ *repository.AdmissionCredential, _ *repository.OutboxRow) error {
+	return s.err
+}
+
 func (s *stubCredentialRepo) Create(_ context.Context, _ *repository.AdmissionCredential) error {
 	return s.err
 }
 
+func (s *stubCredentialRepo) ConsumeIssued(
+	_ context.Context,
+	_ string,
+	_ time.Time,
+	_, _ string,
+) (*repository.AdmissionCredential, bool, error) {
+	return s.credential, false, s.err
+}
+
 func (s *stubCredentialRepo) UpdateStatus(_ context.Context, _ string, _ repository.CredentialStatus) error {
 	return s.err
+}
+
+func (s *stubCredentialRepo) MarkEventPublished(_ context.Context, _ string, _ time.Time) error {
+	return s.err
+}
+
+func (s *stubCredentialRepo) ListCheckedInByEventID(_ context.Context, _ string, _ int) ([]*repository.AdmissionCredential, error) {
+	if s.checkedIn != nil {
+		return s.checkedIn, s.err
+	}
+	return []*repository.AdmissionCredential{}, s.err
 }
 
 // stubPolicyRepo is a test double for PolicyRepository.
@@ -60,6 +89,18 @@ func (s *stubPolicyRepo) Upsert(_ context.Context, _ *repository.AttendancePolic
 type stubScanRepo struct {
 	summary *repository.AttendanceSummary
 	err     error
+}
+
+type stubTicketOwnerLookupSvc struct {
+	ownerID string
+	err     error
+}
+
+func (s *stubTicketOwnerLookupSvc) LookupTicketOwner(_ context.Context, _ string) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.ownerID, nil
 }
 
 func (s *stubScanRepo) Create(_ context.Context, _ *repository.ScanEvent) error {
@@ -110,6 +151,45 @@ func TestGetAdmissionPass_ReturnsNotFound_WhenMissing(t *testing.T) {
 	_, err := svc.GetAdmissionPass(context.Background(), "ticket-x", nil)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, repository.ErrNotFound))
+}
+
+func TestGetAdmissionPassForBuyer_ReturnsCredential_WhenOwnedByCaller(t *testing.T) {
+	buyerID := "buyer-1"
+	cred := &repository.AdmissionCredential{
+		ID:          "cred-1",
+		TicketID:    "ticket-1",
+		OrderID:     "order-1",
+		BuyerUserID: &buyerID,
+		Status:      repository.CredentialStatusIssued,
+	}
+	svc := service.NewAttendanceService(
+		&stubCredentialRepo{credential: cred},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+	)
+	got, err := svc.GetAdmissionPassForBuyer(context.Background(), "ticket-1", nil, buyerID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "cred-1", got.ID)
+}
+
+func TestGetAdmissionPassForBuyer_ReturnsForbidden_WhenCredentialBelongsToDifferentBuyer(t *testing.T) {
+	ownerID := "buyer-1"
+	cred := &repository.AdmissionCredential{
+		ID:          "cred-1",
+		TicketID:    "ticket-1",
+		OrderID:     "order-1",
+		BuyerUserID: &ownerID,
+		Status:      repository.CredentialStatusIssued,
+	}
+	svc := service.NewAttendanceService(
+		&stubCredentialRepo{credential: cred},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+	)
+	_, err := svc.GetAdmissionPassForBuyer(context.Background(), "ticket-1", nil, "other-buyer")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, service.ErrForbidden))
 }
 
 // TestGetAttendancePolicy_ReturnsPolicy_WhenFound tests policy retrieval.
@@ -178,4 +258,64 @@ func TestGetAttendanceSummary_WS1_TotalCheckedInEqualsTotalAdmitted(t *testing.T
 	require.NoError(t, err)
 	assert.Equal(t, got.TotalAdmitted, got.TotalCheckedIn,
 		"WS1: TotalCheckedIn must equal TotalAdmitted until WS2 adds a dedicated check-in event")
+}
+
+func TestListCheckedIn_ReturnsUsedCredentials(t *testing.T) {
+	buyerID := "buyer-1"
+	usedAt := time.Now().UTC()
+	svc := service.NewAttendanceService(
+		&stubCredentialRepo{checkedIn: []*repository.AdmissionCredential{
+			{
+				ID:          "cred-1",
+				TicketID:    "event-1",
+				EventID:     "event-1",
+				BuyerUserID: &buyerID,
+				Status:      repository.CredentialStatusUsed,
+				UsedAt:      &usedAt,
+			},
+		}},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+	)
+
+	rows, err := svc.ListCheckedIn(context.Background(), "event-1", 20)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "cred-1", rows[0].ID)
+	assert.Equal(t, repository.CredentialStatusUsed, rows[0].Status)
+}
+
+func TestEnsureOrganizerOwnsEvent_OwnerMatch_ReturnsNil(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-1"},
+	)
+	err := svc.EnsureOrganizerOwnsEvent(context.Background(), "ticket-1", "organizer-1")
+	require.NoError(t, err)
+}
+
+func TestEnsureOrganizerOwnsEvent_OwnerMismatch_ReturnsForbidden(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-1"},
+	)
+	err := svc.EnsureOrganizerOwnsEvent(context.Background(), "ticket-1", "other-user")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, service.ErrForbidden))
+}
+
+func TestEnsureOrganizerOwnsEvent_LookupNotFound_PropagatesNotFound(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{err: repository.ErrNotFound},
+	)
+	err := svc.EnsureOrganizerOwnsEvent(context.Background(), "ticket-missing", "organizer-1")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, repository.ErrNotFound))
 }

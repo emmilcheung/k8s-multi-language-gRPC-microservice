@@ -25,6 +25,7 @@ type Config struct {
 	KafkaSASLPassword     string
 	KafkaSSLCALocation    string
 	QRSigningKey          string
+	TicketServiceURL      string
 	UserIDSigningKey      string
 	OTELEndpoint          string // optional; schema-validated if present
 }
@@ -84,6 +85,11 @@ func Load() (*Config, error) {
 		errs = append(errs, fmt.Sprintf("QR_SIGNING_KEY must be at least %d characters, got %d", minSigningKeyLength, len(qrSigningKey)))
 	}
 
+	ticketServiceURL := strings.TrimSpace(os.Getenv("TICKET_SERVICE_URL"))
+	if ticketServiceURL == "" {
+		errs = append(errs, "TICKET_SERVICE_URL is required")
+	}
+
 	userIDSigningKey := getEnv("X_USER_ID_SIGNING_KEY", "")
 
 	otelEndpoint := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
@@ -109,6 +115,7 @@ func Load() (*Config, error) {
 		KafkaSASLPassword:     kafkaSASLPassword,
 		KafkaSSLCALocation:    kafkaSSLCALocation,
 		QRSigningKey:          qrSigningKey,
+		TicketServiceURL:      ticketServiceURL,
 		UserIDSigningKey:      userIDSigningKey,
 		OTELEndpoint:          otelEndpoint,
 	}, nil

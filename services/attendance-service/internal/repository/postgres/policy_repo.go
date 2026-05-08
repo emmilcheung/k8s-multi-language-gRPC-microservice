@@ -52,7 +52,7 @@ func (r *PolicyRepo) Upsert(ctx context.Context, policy *repository.AttendancePo
 		INSERT INTO event_attendance_policies
 		    (id, event_id, ticket_id, organizer_id, require_qr_for_entry, allow_manual_override)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (event_id, ticket_id)
+		ON CONFLICT (id)
 		    DO UPDATE SET
 		        require_qr_for_entry  = EXCLUDED.require_qr_for_entry,
 		        allow_manual_override = EXCLUDED.allow_manual_override,

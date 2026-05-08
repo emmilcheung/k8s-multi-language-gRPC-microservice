@@ -28,10 +28,10 @@ type Claims struct {
 	// V is the token format version (always 1 for this schema).
 	// Increment if the claims structure changes incompatibly.
 	V            int       `json:"v"`
-	CredentialID string    `json:"cid"`
-	TicketID     string    `json:"tid"`
-	EventID      string    `json:"eid"`
-	TokenVersion int       `json:"ver"`
+	CredentialID string    `json:"credentialId"`
+	TicketID     string    `json:"ticketId"`
+	EventID      string    `json:"eventId"`
+	TokenVersion int       `json:"tokenVersion"`
 	IssuedAt     time.Time `json:"iat"`
 	ExpiresAt    time.Time `json:"exp"`
 }

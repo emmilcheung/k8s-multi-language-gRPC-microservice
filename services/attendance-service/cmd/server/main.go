@@ -22,12 +22,15 @@ import (
 	"github.com/acme/attendance-service/internal/service"
 	"github.com/acme/attendance-service/internal/tracing"
 	"github.com/acme/attendance-service/pkg/logger"
+	ticketsv1 "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
@@ -90,15 +93,30 @@ func main() {
 	policyRepo := pgrepo.NewPolicyRepo(pool)
 	scanRepo := pgrepo.NewScanRepo(pool)
 
+	// Internal gRPC client: ticket-service (WS3 organizer ownership checks).
+	ticketConn, err := grpc.NewClient(
+		cfg.TicketServiceURL,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		log.Fatal("failed to connect to ticket-service", zap.Error(err))
+	}
+	defer ticketConn.Close() //nolint:errcheck
+	ticketLookup := service.NewGRPCTicketOwnerLookup(ticketsv1.NewTicketServiceClient(ticketConn), 0)
+
 	// Service
-	svc := service.NewAttendanceService(credRepo, policyRepo, scanRepo)
+	svc := service.NewAttendanceServiceWithTicketLookup(credRepo, policyRepo, scanRepo, ticketLookup)
 
 	// QR token generator
 	qrGen := qr.NewGenerator(cfg.QRSigningKey)
+	scanSvc := service.NewScanService(credRepo, scanRepo, qrGen, log)
 
 	// IssuanceService: implements kafka.OrderEventHandler and issues admission
 	// credentials for each completed order event (WS2).
-	issuanceSvc := service.NewIssuanceService(credRepo, producer, qrGen, 0, log)
+	issuanceSvc := service.NewIssuanceService(credRepo, qrGen, 0, log)
+	// WS2 keeps a single process-local outbox relay per deployment; row claiming
+	// across multiple instances is intentionally out of scope for this pass.
+	outboxRelay := service.NewOutboxRelay(credRepo, producer, log)
 
 	// Kafka consumer
 	consumer, err := appkafka.NewOrderConsumer(
@@ -112,6 +130,7 @@ func main() {
 	consumerCtx, consumerCancel := context.WithCancel(context.Background())
 	defer consumerCancel()
 	go consumer.Start(consumerCtx)
+	go outboxRelay.Run(consumerCtx, 2*time.Second, 100)
 
 	// Echo setup
 	e := echo.New()
@@ -126,7 +145,7 @@ func main() {
 	// Handlers
 	healthHandler := handler.NewHealthHandler(dbChecker, kafkaChecker, log)
 	attendanceHandler := handler.NewAttendanceHandler(svc, log)
-	scanHandler := handler.NewScanHandler(log)
+	scanHandler := handler.NewScanHandler(scanSvc, svc, log)
 
 	// Health routes (no auth)
 	e.GET("/healthz/live", healthHandler.Live)
@@ -159,11 +178,13 @@ func main() {
 	organizer.GET("/events/:eventId/settings", attendanceHandler.GetEventSettings)
 	organizer.PATCH("/events/:eventId/settings", attendanceHandler.PatchEventSettings)
 	organizer.GET("/events/:eventId/summary", attendanceHandler.GetEventSummary)
+	organizer.GET("/events/:eventId/checkins", attendanceHandler.GetEventCheckIns)
 
-	// Scanner REST routes (auth handled by device token in WS2)
-	scanner := e.Group("/api/attendance/scan", middleware.KongAuth(false))
+	// Scanner REST routes (authenticated scanner identity via Kong headers)
+	scanner := e.Group("/api/attendance/scan", middleware.KongAuth(true))
 	scanner.POST("/validate", scanHandler.ValidateToken)
 	scanner.POST("/check-in", scanHandler.CheckIn)
+	scanner.POST("/check-in-user", scanHandler.CheckInByBuyer)
 
 	// Graceful shutdown
 	serverAddr := fmt.Sprintf(":%d", cfg.Port)
