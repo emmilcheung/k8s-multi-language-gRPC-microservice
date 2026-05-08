@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { TicketPage } from "@/app/actions/tickets";
-import type { Ticket } from "@/lib/types";
+import type { Order, Ticket } from "@/lib/types";
 
 // ── Next.js shims ──────────────────────────────────────────────────────────────
 
@@ -53,8 +53,23 @@ vi.mock("@/app/actions/tickets", () => ({
 }));
 
 const serverApiMock = vi.fn<() => Promise<Ticket>>();
+const getAttendanceSettingsMock = vi.fn();
+const getAttendanceSummaryMock = vi.fn();
+const getAttendanceCheckInsMock = vi.fn();
+const lookupUserMock = vi.fn();
+const getAdmissionPassMock = vi.fn();
 vi.mock("@/lib/api", () => ({
   serverApi: (...args: unknown[]) => serverApiMock(...args as Parameters<typeof serverApiMock>),
+  getAttendanceSettings: (...args: unknown[]) =>
+    getAttendanceSettingsMock(...args as Parameters<typeof getAttendanceSettingsMock>),
+  getAttendanceSummary: (...args: unknown[]) =>
+    getAttendanceSummaryMock(...args as Parameters<typeof getAttendanceSummaryMock>),
+  getAttendanceCheckIns: (...args: unknown[]) =>
+    getAttendanceCheckInsMock(...args as Parameters<typeof getAttendanceCheckInsMock>),
+  lookupUser: (...args: unknown[]) =>
+    lookupUserMock(...args as Parameters<typeof lookupUserMock>),
+  getAdmissionPass: (...args: unknown[]) =>
+    getAdmissionPassMock(...args as Parameters<typeof getAdmissionPassMock>),
   ApiError: class ApiError extends Error {
     constructor(public status: number, message: string) { super(message); }
   },
@@ -103,6 +118,23 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     price: "49.99",
     userId: "owner-uuid",
     orderId: null,
+    version: 1,
+    ...overrides,
+  };
+}
+
+function makeOrder(overrides: Partial<Order> = {}): Order {
+  return {
+    id: "order-uuid-1",
+    userId: "buyer-uuid",
+    status: "complete",
+    expiresAt: "2026-12-01T20:00:00Z",
+    ticket: {
+      id: "ticket-uuid-1",
+      title: "Concert Night",
+      price: "49.99",
+    },
+    quantity: 1,
     version: 1,
     ...overrides,
   };
@@ -182,6 +214,7 @@ describe("HomePage", () => {
 describe("TicketDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    serverApiMock.mockReset();
     // Default: no auth cookie
     cookieStoreMock.get.mockReturnValue(undefined);
   });
@@ -230,6 +263,22 @@ describe("TicketDetailPage", () => {
     expect(screen.queryByTestId("purchase-button")).not.toBeInTheDocument();
   });
 
+  it("shows an attendance settings link for owners", async () => {
+    const ticket = makeTicket({ userId: "owner-uuid" });
+    serverApiMock.mockResolvedValue(ticket);
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+
+    const { default: TicketDetailPage } = await import(
+      "@/app/tickets/[ticketId]/page"
+    );
+    render(await TicketDetailPage({ params }));
+
+    expect(screen.getByRole("link", { name: /attendance settings/i })).toHaveAttribute(
+      "href",
+      "/tickets/ticket-uuid-1/attendance"
+    );
+  });
+
   it("shows 'cannot be edited' message when owner views reserved ticket", async () => {
     const ticket = makeTicket({ userId: "owner-uuid", orderId: "order-1" });
     serverApiMock.mockResolvedValue(ticket);
@@ -244,9 +293,34 @@ describe("TicketDetailPage", () => {
     expect(screen.getByText(/cannot be edited/i)).toBeInTheDocument();
   });
 
+  it("keeps attendance navigation visible for owners on reserved tickets", async () => {
+    const ticket = makeTicket({ userId: "owner-uuid", orderId: "order-1" });
+    serverApiMock
+      .mockResolvedValueOnce(ticket)
+      .mockResolvedValueOnce({ requireQrForEntry: true });
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+
+    const { default: TicketDetailPage } = await import(
+      "@/app/tickets/[ticketId]/page"
+    );
+    render(await TicketDetailPage({ params }));
+
+    expect(screen.getByRole("link", { name: /attendance settings/i })).toHaveAttribute(
+      "href",
+      "/tickets/ticket-uuid-1/attendance"
+    );
+    expect(screen.getByRole("link", { name: /open scanner console/i })).toHaveAttribute(
+      "href",
+      "/scan?eventId=ticket-uuid-1"
+    );
+  });
+
   it("shows PurchaseButton for a signed-in buyer on an available ticket", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    serverApiMock.mockResolvedValue(ticket);
+    serverApiMock
+      .mockResolvedValueOnce(ticket)
+      .mockResolvedValueOnce([makeOrder()])
+      .mockResolvedValueOnce({ id: "cred-1" });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
 
     const { default: TicketDetailPage } = await import(
@@ -258,6 +332,21 @@ describe("TicketDetailPage", () => {
     expect(
       screen.getByTestId("purchase-button").getAttribute("data-ticket-id")
     ).toBe("ticket-uuid-1");
+    expect(screen.queryByRole("link", { name: /view admission pass/i })).not.toBeInTheDocument();
+  });
+
+  it("does not show admission pass link when buyer has no completed order", async () => {
+    const ticket = makeTicket({ userId: "owner-uuid" });
+    serverApiMock.mockResolvedValueOnce(ticket).mockResolvedValueOnce([]);
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+
+    const { default: TicketDetailPage } = await import(
+      "@/app/tickets/[ticketId]/page"
+    );
+    render(await TicketDetailPage({ params }));
+
+    expect(screen.getByTestId("purchase-button")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /view admission pass/i })).not.toBeInTheDocument();
   });
 
   it("shows 'Sign in to Purchase' link for an unauthenticated buyer", async () => {
@@ -305,5 +394,132 @@ describe("TicketDetailPage", () => {
     // Actually: token is truthy → PurchaseButton should render (not sign-in link)
     // because the `token` variable itself is truthy even if decode fails.
     expect(screen.getByTestId("purchase-button")).toBeInTheDocument();
+  });
+
+  it("shows scanner entry point only for owner when attendance policy requires QR", async () => {
+    const ticket = makeTicket({ userId: "owner-uuid" });
+    serverApiMock
+      .mockResolvedValueOnce(ticket)
+      .mockResolvedValueOnce({ requireQrForEntry: true });
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+
+    const { default: TicketDetailPage } = await import(
+      "@/app/tickets/[ticketId]/page"
+    );
+    render(await TicketDetailPage({ params }));
+
+    expect(screen.getByRole("link", { name: /open scanner console/i })).toHaveAttribute(
+      "href",
+      "/scan?eventId=ticket-uuid-1"
+    );
+  });
+
+  it("hides scanner entry point when attendance policy does not require QR", async () => {
+    const ticket = makeTicket({ userId: "owner-uuid" });
+    serverApiMock
+      .mockResolvedValueOnce(ticket)
+      .mockResolvedValueOnce({ requireQrForEntry: false });
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+
+    const { default: TicketDetailPage } = await import(
+      "@/app/tickets/[ticketId]/page"
+    );
+    render(await TicketDetailPage({ params }));
+
+    expect(screen.queryByRole("link", { name: /open scanner console/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("AttendanceSettingsPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAttendanceSettingsMock.mockReset();
+    getAttendanceSummaryMock.mockReset();
+    getAttendanceCheckInsMock.mockReset();
+    lookupUserMock.mockReset();
+    getAdmissionPassMock.mockReset();
+    getAttendanceCheckInsMock.mockResolvedValue({ eventId: "ticket-uuid-1", items: [] });
+    lookupUserMock.mockResolvedValue({ user: { id: "buyer-uuid", email: "buyer@example.com" } });
+  });
+
+  it("renders the policy form with settings and summary", async () => {
+    serverApiMock.mockResolvedValue(makeTicket({ userId: "owner-uuid" }));
+    getAttendanceSettingsMock.mockResolvedValue({
+      eventId: "ticket-uuid-1",
+      requireQrForEntry: true,
+      allowManualOverride: false,
+    });
+    getAttendanceSummaryMock.mockResolvedValue({
+      eventId: "ticket-uuid-1",
+      totalAdmitted: 7,
+      totalDenied: 2,
+      totalCheckedIn: 7,
+    });
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+
+    const { default: AttendanceSettingsPage } = await import(
+      "@/app/tickets/[ticketId]/attendance/page"
+    );
+    render(await AttendanceSettingsPage({ params: Promise.resolve({ ticketId: "ticket-uuid-1" }) }));
+
+    expect(screen.getByRole("heading", { level: 1, name: /attendance settings/i })).toBeInTheDocument();
+    expect(screen.getByText(/7 admitted/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 denied/i)).toBeInTheDocument();
+  });
+
+  it("locks attendance requirement controls after tickets are sold", async () => {
+    serverApiMock.mockResolvedValue(makeTicket({ userId: "owner-uuid", sold: 1 }));
+    getAttendanceSettingsMock.mockResolvedValue({
+      eventId: "ticket-uuid-1",
+      requireQrForEntry: true,
+      allowManualOverride: false,
+    });
+    getAttendanceSummaryMock.mockResolvedValue({
+      eventId: "ticket-uuid-1",
+      totalAdmitted: 0,
+      totalDenied: 0,
+      totalCheckedIn: 0,
+    });
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+
+    const { default: AttendanceSettingsPage } = await import(
+      "@/app/tickets/[ticketId]/attendance/page"
+    );
+    render(await AttendanceSettingsPage({ params: Promise.resolve({ ticketId: "ticket-uuid-1" }) }));
+
+    expect(screen.getByLabelText(/require qr for entry/i)).toBeDisabled();
+    expect(screen.getByRole("button", { name: /save settings/i })).toBeDisabled();
+  });
+});
+
+describe("AdmissionPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAdmissionPassMock.mockResolvedValue({
+      id: "cred-1",
+      ticketId: "ticket-uuid-1",
+      orderId: "order-1",
+      eventId: "ticket-uuid-1",
+      status: "USED",
+      issuedAt: new Date().toISOString(),
+      qrToken: "signed-token",
+    });
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+  });
+
+  it("shows non-admittable copy for used credentials", async () => {
+    const { default: AdmissionPage } = await import(
+      "@/app/tickets/[ticketId]/admission/page"
+    );
+
+    render(await AdmissionPage({
+      params: Promise.resolve({ ticketId: "ticket-uuid-1" }),
+      searchParams: Promise.resolve({ orderId: "order-1" }),
+    }));
+
+    expect(screen.getByRole("heading", { name: /your admission pass/i })).toBeInTheDocument();
+    expect(screen.getByText(/already been used for entry/i)).toBeInTheDocument();
+    expect(screen.queryByText(/qr token payload/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/signed-token/i)).not.toBeInTheDocument();
   });
 });

@@ -71,6 +71,30 @@ const signalQueries = [
     unit: 'seconds',
     query: 'histogram_quantile(0.95, sum(apollo_router_query_planning_total_duration_bucket) by (le)) or vector(0)',
   },
+  {
+    key: 'attendanceScanValidations',
+    title: 'Attendance Scan Validations',
+    unit: 'count',
+    query: 'sum(increase(attendance_scan_validations_total[15m])) or vector(0)',
+  },
+  {
+    key: 'attendanceScanCheckins',
+    title: 'Attendance Scan Check-ins',
+    unit: 'count',
+    query: 'sum(increase(attendance_scan_checkins_total[15m])) or vector(0)',
+  },
+  {
+    key: 'attendanceIssuanceCount',
+    title: 'Attendance Issuance Count',
+    unit: 'count',
+    query: 'sum(increase(attendance_issuance_total[15m])) or vector(0)',
+  },
+  {
+    key: 'attendanceIssuanceLatencyP95',
+    title: 'Attendance Issuance Latency p95',
+    unit: 'seconds',
+    query: 'histogram_quantile(0.95, sum(rate(attendance_issuance_latency_seconds_bucket[15m])) by (le)) or vector(0)',
+  },
 ];
 
 function uniqueSuffix() {

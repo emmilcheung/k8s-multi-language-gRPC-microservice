@@ -56,6 +56,8 @@ interface TicketFormProps {
    defaultEventImageUrl?: string;
    defaultVenueName?: string;
    defaultVenueAddress?: string;
+   defaultRequireQrForEntry?: boolean;
+   attendanceLocked?: boolean;
   submitLabel?: string;
 }
 
@@ -78,6 +80,7 @@ interface FormState {
   eventImageUrl: string;
   venueName: string;
   venueAddress: string;
+  requireQrForEntry: boolean;
 }
 
 const initialFormState: FormState = {
@@ -90,6 +93,7 @@ const initialFormState: FormState = {
   eventImageUrl: "",
   venueName: "",
   venueAddress: "",
+  requireQrForEntry: true,
 };
 
 const TICKET_TYPES: { value: TicketType; label: string; description: string; icon: React.ReactNode }[] = [
@@ -129,6 +133,8 @@ export function TicketForm({
   defaultEventImageUrl = "",
   defaultVenueName = "",
   defaultVenueAddress = "",
+  defaultRequireQrForEntry = true,
+  attendanceLocked = false,
   submitLabel = "Create Ticket",
 }: TicketFormProps) {
   const [step, setStep] = useState<"type" | "details">(defaultTicketType ? "details" : "type");
@@ -148,6 +154,7 @@ export function TicketForm({
     eventImageUrl: defaultEventImageUrl,
     venueName: defaultVenueName,
     venueAddress: defaultVenueAddress,
+    requireQrForEntry: defaultRequireQrForEntry,
   });
   const [error, setError] = useState<string>("");
   const [pending, setPending] = useState(false);
@@ -240,6 +247,7 @@ export function TicketForm({
       formDataObj.append("title", title);
       formDataObj.append("price", price);
       formDataObj.append("ticketType", ticketType || "");
+      formDataObj.append("requireQrForEntry", String(formData.requireQrForEntry));
 
       if (ticketType === "GA") {
         if (formData.quota) formDataObj.append("quota", String(formData.quota));
@@ -719,6 +727,29 @@ export function TicketForm({
             </div>
           </div>
         </div>
+
+        <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/20 px-3 py-2">
+          <Label htmlFor="requireQrForEntry" className="text-sm font-medium">
+            Require QR admission
+          </Label>
+          <input
+            id="requireQrForEntry"
+            type="checkbox"
+            checked={formData.requireQrForEntry}
+            disabled={attendanceLocked}
+            onChange={(e) =>
+              setFormData((prev) => ({
+                ...prev,
+                requireQrForEntry: e.target.checked,
+              }))
+            }
+          />
+        </div>
+        {attendanceLocked && (
+          <p className="text-xs text-muted-foreground">
+            Attendance requirement is locked because at least one ticket has already been sold.
+          </p>
+        )}
       </div>
 
       {/* Buttons */}

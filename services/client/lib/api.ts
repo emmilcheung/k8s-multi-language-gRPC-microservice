@@ -5,6 +5,15 @@
 
 import { cookies } from "next/headers";
 import { traceHeaders } from "@/lib/tracing";
+import type {
+  AdmissionPass,
+  AttendanceCheckInList,
+  AttendanceSettings,
+  AttendanceSummary,
+  ScannerRequest,
+  ScannerResponse,
+  UserLookupResponse,
+} from "@/lib/types";
 
 // Paths whose responses are safe to cache via ISR (non-user-specific, read-only).
 // All other paths use cache:"no-store" to prevent stale user-specific data.
@@ -124,4 +133,42 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
   }
+}
+
+export async function getAttendanceSettings(eventId: string): Promise<AttendanceSettings> {
+  return serverApi<AttendanceSettings>(`/api/attendance/events/${eventId}/settings`);
+}
+
+export async function getAttendanceSummary(eventId: string): Promise<AttendanceSummary> {
+  return serverApi<AttendanceSummary>(`/api/attendance/events/${eventId}/summary`);
+}
+
+export async function getAttendanceCheckIns(eventId: string): Promise<AttendanceCheckInList> {
+  return serverApi<AttendanceCheckInList>(`/api/attendance/events/${eventId}/checkins`);
+}
+
+export async function lookupUser(input: { email?: string; id?: string }): Promise<UserLookupResponse> {
+  const query = new URLSearchParams();
+  if (input.email) query.set("email", input.email);
+  if (input.id) query.set("id", input.id);
+  return serverApi<UserLookupResponse>(`/api/users/lookup?${query.toString()}`);
+}
+
+export async function getAdmissionPass(ticketId: string, orderId?: string): Promise<AdmissionPass> {
+  const qs = orderId ? `?orderId=${encodeURIComponent(orderId)}` : "";
+  return serverApi<AdmissionPass>(`/api/attendance/tickets/${ticketId}${qs}`);
+}
+
+export async function scanValidate(input: ScannerRequest): Promise<ScannerResponse> {
+  return serverApi<ScannerResponse>("/api/attendance/scan/validate", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function scanCheckIn(input: ScannerRequest): Promise<ScannerResponse> {
+  return serverApi<ScannerResponse>("/api/attendance/scan/check-in", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }

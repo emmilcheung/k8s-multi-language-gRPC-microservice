@@ -33,11 +33,37 @@ describe("TicketForm", () => {
     await user.type(titleInput, "Jazz Night");
     await user.clear(priceInput);
     await user.type(priceInput, "25.50");
+    await user.click(screen.getByLabelText(/require qr admission/i));
     await user.click(screen.getByRole("button", { name: /update ticket/i }));
 
     await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
     const [, formData] = action.mock.calls[0] as [TicketState, FormData];
     expect(formData.get("title")).toBe("Jazz Night");
     expect(formData.get("price")).toBe("25.5");
+    expect(formData.get("requireQrForEntry")).toBe("false");
+  });
+
+  it("locks attendance requirement toggle when attendance changes are disabled", async () => {
+    const action = vi.fn(async (prev: TicketState, formData: FormData): Promise<TicketState> => {
+      void prev;
+      void formData;
+      return {};
+    });
+
+    render(
+      <TicketForm
+        action={action}
+        defaultTitle="Sold Event"
+        defaultPrice={30}
+        defaultTicketType="GA"
+        defaultRequireQrForEntry
+        attendanceLocked
+        submitLabel="Update Ticket"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/require qr admission/i)).toBeDisabled();
+    });
   });
 });

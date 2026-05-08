@@ -248,11 +248,10 @@ test(
       timeout: 10_000,
     });
 
-    // Extract the token the server returned — it is displayed verbatim inside
-    // the <code> element rendered by QRPassCard.  This is the token the scanner
-    // will submit; capturing it from the DOM proves the page actually rendered
-    // a real value from the attendance-service, not a mock.
-    const qrToken = await page.locator("code").first().textContent({
+    // Extract the token bound to the rendered QR image. The value is not shown
+    // as visible text in the UI, but remains available for deterministic scanner
+    // E2E input.
+    const qrToken = await page.getByAltText("Admission QR code").getAttribute("data-qr-token", {
       timeout: 5_000,
     });
     expect(qrToken).toBeTruthy();
@@ -265,28 +264,99 @@ test(
     // ────────────────────────────────────────────────────────────────────────
     await signin(page, organizerEmail);
 
-    await page.goto("/scan");
+    await page.goto(`/scan?eventId=${ticketId}`);
     await expect(
       page.getByRole("heading", { name: /scanner console/i })
     ).toBeVisible({ timeout: 10_000 });
 
-    // Toggle to check-in mode (mode toggle button uses a hyphen; submit uses a space)
-    await page.getByRole("button", { name: "Check-in", exact: true }).click();
-
-    // Populate scanner form with the token extracted from the buyer's admission page
+    // Open fallback manual entry and populate token extracted from buyer admission page
+    await page.getByRole("button", { name: /enter token manually/i }).click();
     await page.locator("#scanner-token").fill(qrToken!);
-    await page.locator("#scanner-event").fill(ticketId);
-    await page.locator("#scanner-device").fill("e2e-device-001");
 
     // First scan — must be accepted
-    await page.getByRole("button", { name: "Check In", exact: true }).click();
-    await expect(page.getByText(/result:.*valid/i)).toBeVisible({
+    await page.getByRole("button", { name: /check in attendee/i }).click();
+    await expect(page.getByText(/checked in/i)).toBeVisible({
       timeout: 15_000,
     });
 
     // Second scan — one-time-use enforcement must reject it
-    await page.getByRole("button", { name: "Check In", exact: true }).click();
-    await expect(page.getByText(/result:.*already_used/i)).toBeVisible({
+    await page.getByRole("button", { name: /check in attendee/i }).click();
+    await expect(page.getByText(/already checked in/i)).toBeVisible({
+      timeout: 15_000,
+    });
+  }
+);
+
+test(
+  "attendance fallback: organizer checks in purchased attendee by buyer email",
+  async ({ page }) => {
+    await installStripeMock(page);
+
+    const organizerEmail = uniqueEmail("att-org");
+    const buyerEmail = uniqueEmail("att-buyer");
+
+    await signup(page, organizerEmail);
+
+    await page.goto("/tickets/new");
+    await page
+      .getByRole("button", { name: /general admission/i })
+      .waitFor({ state: "visible", timeout: 5_000 });
+    await page.getByRole("button", { name: /general admission/i }).click();
+
+    await page.locator("#title").waitFor({ state: "visible", timeout: 5_000 });
+    await fillInput(page, "#title", `Attendance E2E Email ${Date.now()}`);
+    await fillInput(page, "#price", "10.00");
+    await fillInput(page, "#startsAt", "2026-12-01T18:00");
+    await fillInput(page, "#quota", "1");
+    await fillInput(page, "#maxPerUser", "1");
+
+    await page
+      .locator("form", { has: page.locator("#title") })
+      .getByRole("button", { name: /create ticket/i })
+      .click();
+    await page.waitForURL((url) => !url.pathname.endsWith("/new"), {
+      timeout: 15_000,
+    });
+    const ticketId = page.url().split("/tickets/")[1]!.split("/")[0]!;
+
+    await signout(page);
+    await signup(page, buyerEmail);
+
+    await page.goto(`/tickets/${ticketId}`, { waitUntil: "commit" });
+    await page
+      .getByRole("button", { name: /purchase ticket/i })
+      .waitFor({ state: "visible", timeout: 30_000 });
+    await page.getByRole("button", { name: /purchase ticket/i }).click();
+    await page.waitForURL(/\/orders\/.+/, { timeout: 15_000 });
+
+    const orderId = page.url().split("/orders/")[1]!.split("?")[0]!;
+    const submitPaymentDone = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/submit-payment") &&
+        r.request().method() === "POST",
+      { timeout: 60_000 }
+    );
+    await page.getByRole("button", { name: /pay now/i }).click();
+    await submitPaymentDone;
+    await waitForOrderComplete(page, orderId);
+
+    await signout(page);
+    await signin(page, organizerEmail);
+    await page.goto(`/scan?eventId=${ticketId}`);
+    await expect(
+      page.getByRole("heading", { name: /scanner console/i })
+    ).toBeVisible({ timeout: 10_000 });
+
+    await page.getByLabel(/buyer email/i).fill(buyerEmail);
+    await expect(async () => {
+      await page.getByRole("button", { name: /check in by email/i }).click();
+      await expect(page.getByText(/checked in/i)).toBeVisible({
+        timeout: 5_000,
+      });
+    }).toPass({ timeout: 30_000, intervals: [2000, 3000, 5000] });
+
+    await page.getByRole("button", { name: /check in by email/i }).click();
+    await expect(page.getByText(/already checked in/i)).toBeVisible({
       timeout: 15_000,
     });
   }
