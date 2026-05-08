@@ -27,6 +27,7 @@ Handles user identity for the platform. Issues short-lived RS256 JWTs stored in 
 | `GET` | `/api/users/sessions` | List active refresh-token-backed sessions for the current user |
 | `DELETE` | `/api/users/sessions/:sessionId` | Revoke a specific session |
 | `GET` | `/api/users/currentuser` | Returns user from `X-User-Id` header |
+| `GET` | `/api/users/lookup?email=<email>\|id=<id>` | Lookup a user by email or id (authenticated internal use) |
 | `GET` | `/.well-known/jwks.json` | Public key for Kong JWT plugin |
 | `GET` | `/healthz/live` | Liveness probe |
 | `GET` | `/healthz/ready` | Readiness probe (checks DB) |

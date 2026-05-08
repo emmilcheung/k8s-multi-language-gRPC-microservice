@@ -5,11 +5,13 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   ParseUUIDPipe,
   Res,
   Req,
   HttpCode,
   HttpStatus,
+  BadRequestException,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -220,6 +222,46 @@ export class AuthController {
       },
       'Auth audit event',
     );
+  }
+
+  // GET /api/users/lookup?email=<email>|id=<uuid>
+  // Returns user identity for authenticated internal tooling (scanner fallback).
+  @Get('api/users/lookup')
+  @HttpCode(HttpStatus.OK)
+  async lookupUser(
+    @Req() req: Request,
+    @Query('email') email?: string,
+    @Query('id') id?: string,
+  ) {
+    await this.requireAuthenticatedUser(req);
+
+    const normalizedEmail = email?.trim().toLowerCase() ?? '';
+    const normalizedID = id?.trim() ?? '';
+    if (
+      (normalizedEmail === '' && normalizedID === '') ||
+      (normalizedEmail !== '' && normalizedID !== '')
+    ) {
+      throw new BadRequestException({
+        error: {
+          code: 'INVALID_QUERY',
+          message: 'Provide exactly one of email or id',
+        },
+      });
+    }
+
+    const user =
+      normalizedEmail !== ''
+        ? await this.authService.lookupUserByEmail(normalizedEmail)
+        : await this.authService.lookupUserByID(normalizedID);
+    if (!user) {
+      throw new NotFoundException({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'User not found',
+        },
+      });
+    }
+    return { user };
   }
 
   // GET /api/users/currentuser

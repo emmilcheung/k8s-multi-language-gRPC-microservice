@@ -235,6 +235,22 @@ export class AuthService {
     });
   }
 
+  async lookupUserByEmail(email: string): Promise<CurrentUser | null> {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) return null;
+    const user = await this.usersRepo.findByEmail(normalizedEmail);
+    if (!user) return null;
+    return { id: user.id, email: user.email };
+  }
+
+  async lookupUserByID(id: string): Promise<CurrentUser | null> {
+    const normalizedID = id.trim();
+    if (!normalizedID) return null;
+    const user = await this.usersRepo.findById(normalizedID);
+    if (!user) return null;
+    return { id: user.id, email: user.email };
+  }
+
   /**
    * Issue an access token for an OAuth2 client with specific scopes.
    * Adds `scope` and `client_id` claims to the standard JWT payload.
