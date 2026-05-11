@@ -771,7 +771,7 @@ services:
       # Scanner endpoints use tighter rate limits than catalog paths.
       - name: attendance-scan
         paths:
-          - ~/api/attendance/scan/(validate|check-in)$
+          - ~/api/attendance/scan/(validate|check-in|check-in-user)$
         methods: [POST]
         strip_path: false
         plugins:
