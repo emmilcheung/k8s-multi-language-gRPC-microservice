@@ -106,32 +106,6 @@ func TestPolicyEnforcement_ManualOverrideEnabled_Succeeds(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
-// TestPolicyEnforcement_PolicyBlockRecordsAuditEvent verifies that a POLICY_BLOCK
-// scan event is recorded by the service layer when the policy blocks check-in.
-func TestPolicyEnforcement_PolicyBlockRecordsAuditEvent(t *testing.T) {
-	policy := &repository.AttendancePolicy{
-		EventID:             "event-1",
-		RequireQRForEntry:   true,
-		AllowManualOverride: false,
-	}
-	policyRepo := &stubPolicyRepo{policy: policy}
-
-	// Use a scan svc that tracks whether POLICY_BLOCK was recorded.
-	trackingSvc := &policyEnforcingScanSvc{}
-	h, e := setupScanHandlerWithPolicy(policyRepo, trackingSvc)
-
-	rec := httptest.NewRecorder()
-	c := makeCheckInByBuyerCtx(e, rec)
-
-	err := h.CheckInByBuyer(c)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-	assertErrorEnvelope(t, rec.Body.Bytes(), "POLICY_BLOCK")
-
-	assert.True(t, trackingSvc.policyBlockRecorded,
-		"a POLICY_BLOCK scan_event must be recorded when policy blocks check-in")
-}
-
 // fixedPolicyBlockScanSvc is a ScanService stub whose CheckInByBuyer always
 // returns ErrPolicyBlock, simulating policy enforcement at the service layer.
 type fixedPolicyBlockScanSvc struct{}
@@ -161,37 +135,3 @@ func (s *fixedPolicyBlockScanSvc) CheckInByBuyer(
 	return &service.ScanOutcome{Result: service.ScanResultRevoked}, service.ErrPolicyBlock
 }
 
-// policyEnforcingScanSvc is a ScanService stub that enforces policy inline and
-// records whether it emitted a POLICY_BLOCK event (for audit verification).
-type policyEnforcingScanSvc struct {
-	policyBlockRecorded bool
-}
-
-func (s *policyEnforcingScanSvc) Validate(
-	_ context.Context,
-	_, _, _, _ string,
-	_ *string,
-) (*service.ScanOutcome, error) {
-	panic("not called in policy enforcement tests")
-}
-
-func (s *policyEnforcingScanSvc) CheckIn(
-	_ context.Context,
-	_, _, _, _ string,
-	_ *string,
-) (*service.ScanOutcome, error) {
-	panic("not called in policy enforcement tests")
-}
-
-func (s *policyEnforcingScanSvc) CheckInByBuyer(
-	_ context.Context,
-	_, _, _, _ string,
-	_ *string,
-	policy *repository.AttendancePolicy,
-) (*service.ScanOutcome, error) {
-	if policy == nil || !policy.AllowManualOverride {
-		s.policyBlockRecorded = true
-		return &service.ScanOutcome{Result: service.ScanResultRevoked}, service.ErrPolicyBlock
-	}
-	return &service.ScanOutcome{Result: service.ScanResultValid}, nil
-}

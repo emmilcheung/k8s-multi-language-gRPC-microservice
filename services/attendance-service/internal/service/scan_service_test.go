@@ -193,6 +193,46 @@ func TestValidate_RecordsValidatedResult(t *testing.T) {
 		"validate-mode scan must record VALIDATED, not ADMITTED")
 }
 
+// TestScanService_CheckInByBuyer_PolicyBlock_RecordsAuditEvent verifies that
+// the real scanService records a ScanResultPolicyBlock scan event when
+// CheckInByBuyer is called with a nil policy (no policy row exists).
+// This exercises the actual service path, not a stub.
+func TestScanService_CheckInByBuyer_PolicyBlock_RecordsAuditEvent(t *testing.T) {
+	scans := &scanRepoDouble{}
+	gen := qr.NewGenerator("test-signing-key-that-is-at-least-32-characters")
+	svc := NewScanService(&scanCredRepoDouble{}, scans, gen, zap.NewNop())
+
+	_, err := svc.CheckInByBuyer(context.Background(), "event-1", "buyer-1", "scanner-1", "device-1", nil, nil)
+	require.ErrorIs(t, err, ErrPolicyBlock)
+
+	require.Len(t, scans.events, 1, "expected exactly one scan_event to be recorded on policy block")
+	assert.Equal(t, repository.ScanResultPolicyBlock, scans.events[0].Result,
+		"scan_event result must be ScanResultPolicyBlock when policy blocks manual check-in")
+	assert.Equal(t, repository.ScanModeManual, scans.events[0].Mode,
+		"scan_event mode must be ScanModeManual for CheckInByBuyer policy blocks")
+}
+
+// TestScanService_CheckInByBuyer_ManualOverrideFalse_RecordsAuditEvent verifies
+// that an explicit policy row with AllowManualOverride=false also records
+// ScanResultPolicyBlock.
+func TestScanService_CheckInByBuyer_ManualOverrideFalse_RecordsAuditEvent(t *testing.T) {
+	scans := &scanRepoDouble{}
+	gen := qr.NewGenerator("test-signing-key-that-is-at-least-32-characters")
+	svc := NewScanService(&scanCredRepoDouble{}, scans, gen, zap.NewNop())
+
+	policy := &repository.AttendancePolicy{
+		EventID:             "event-1",
+		RequireQRForEntry:   true,
+		AllowManualOverride: false,
+	}
+	_, err := svc.CheckInByBuyer(context.Background(), "event-1", "buyer-1", "scanner-1", "device-1", nil, policy)
+	require.ErrorIs(t, err, ErrPolicyBlock)
+
+	require.Len(t, scans.events, 1, "expected exactly one scan_event to be recorded on policy block")
+	assert.Equal(t, repository.ScanResultPolicyBlock, scans.events[0].Result,
+		"scan_event result must be ScanResultPolicyBlock when AllowManualOverride is false")
+}
+
 func TestScanService_CheckInByBuyer_ConsumesIssuedCredential(t *testing.T) {
 	buyerID := "buyer-1"
 	cred := &repository.AdmissionCredential{
