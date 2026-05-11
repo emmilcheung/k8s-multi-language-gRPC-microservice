@@ -124,7 +124,7 @@ func main() {
 	issuanceSvc := service.NewIssuanceService(credRepo, qrGen, 0, log)
 	// WS2 keeps a single process-local outbox relay per deployment; row claiming
 	// across multiple instances is intentionally out of scope for this pass.
-	outboxRelay := service.NewOutboxRelay(credRepo, producer, log)
+	outboxRelay := service.NewOutboxRelay(pool, credRepo, producer, log)
 
 	// Kafka consumer
 	consumer, err := appkafka.NewOrderConsumer(

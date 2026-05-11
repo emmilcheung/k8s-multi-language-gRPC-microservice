@@ -375,6 +375,57 @@ func (r *CredentialRepo) ListUnpublished(ctx context.Context, limit int) ([]*rep
 	return outboxRows, nil
 }
 
+// ListUnpublishedTx selects up to limit unpublished outbox rows inside tx using
+// FOR UPDATE SKIP LOCKED so that concurrent relay replicas each claim disjoint
+// sets of rows.  The caller must commit or roll back tx.
+func (r *CredentialRepo) ListUnpublishedTx(ctx context.Context, tx pgx.Tx, limit int) ([]*repository.OutboxRow, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	const q = `
+		SELECT id, topic, payload, trace_headers, partition_key, published, created_at
+		FROM outbox
+		WHERE published = false
+		ORDER BY created_at ASC
+		LIMIT $1
+		FOR UPDATE SKIP LOCKED`
+	rows, err := tx.Query(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("credential_repo: list unpublished tx: %w", err)
+	}
+	defer rows.Close()
+
+	var outboxRows []*repository.OutboxRow
+	for rows.Next() {
+		var row repository.OutboxRow
+		if err := rows.Scan(
+			&row.ID, &row.Topic, &row.Payload, &row.TraceHeaders,
+			&row.PartitionKey, &row.Published, &row.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("credential_repo: scan unpublished tx outbox: %w", err)
+		}
+		outboxRows = append(outboxRows, &row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("credential_repo: iterate unpublished tx outbox: %w", err)
+	}
+	return outboxRows, nil
+}
+
+// MarkPublishedTx marks a single outbox row as published inside an existing
+// transaction.  The caller owns the commit/rollback lifecycle.
+func (r *CredentialRepo) MarkPublishedTx(ctx context.Context, tx pgx.Tx, id string, publishedAt time.Time) error {
+	const q = `UPDATE outbox SET published = true, published_at = $2 WHERE id = $1 AND published = false`
+	ct, err := tx.Exec(ctx, q, id, publishedAt)
+	if err != nil {
+		return fmt.Errorf("credential_repo: mark published tx: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}
+
 // MarkPublished marks the outbox row as published and records the publish time on the credential.
 func (r *CredentialRepo) MarkPublished(ctx context.Context, id string, publishedAt time.Time) error {
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})

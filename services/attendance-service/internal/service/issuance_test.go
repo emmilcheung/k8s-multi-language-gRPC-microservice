@@ -10,6 +10,8 @@ import (
 	"github.com/acme/attendance-service/internal/kafka"
 	"github.com/acme/attendance-service/internal/qr"
 	"github.com/acme/attendance-service/internal/repository"
+	"github.com/jackc/pgx/v5"
+	pgxpgconn "github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -93,6 +95,18 @@ func (r *credRepoDouble) MarkPublished(_ context.Context, id string, publishedAt
 	return repository.ErrNotFound
 }
 
+// ListUnpublishedTx satisfies repository.OutboxRepository; the test double
+// ignores tx and delegates to the in-memory store.
+func (r *credRepoDouble) ListUnpublishedTx(_ context.Context, _ pgx.Tx, limit int) ([]*repository.OutboxRow, error) {
+	return r.ListUnpublished(context.Background(), limit)
+}
+
+// MarkPublishedTx satisfies repository.OutboxRepository; the test double
+// ignores tx and delegates to the in-memory store.
+func (r *credRepoDouble) MarkPublishedTx(_ context.Context, _ pgx.Tx, id string, publishedAt time.Time) error {
+	return r.MarkPublished(context.Background(), id, publishedAt)
+}
+
 func (r *credRepoDouble) FindByID(_ context.Context, _ string) (*repository.AdmissionCredential, error) {
 	return nil, repository.ErrNotFound
 }
@@ -149,6 +163,34 @@ func (p *pubDouble) Publish(topic string, key, value []byte) error {
 	p.published = append(p.published, publishedMsg{topic: topic, key: key, value: value})
 	return p.err
 }
+
+// noopTxBeginner satisfies TxBeginner for unit tests.  It returns a noopTx
+// whose Commit/Rollback are no-ops; credRepoDouble ignores the tx argument so
+// the unit tests exercise publish + mark-published logic without a real DB.
+type noopTxBeginner struct{}
+
+func (noopTxBeginner) Begin(_ context.Context) (pgx.Tx, error) { return noopTx{}, nil }
+
+// noopTx is a pgx.Tx stub where every method is a no-op.
+type noopTx struct{}
+
+func (noopTx) Begin(_ context.Context) (pgx.Tx, error)           { return noopTx{}, nil }
+func (noopTx) Commit(_ context.Context) error                     { return nil }
+func (noopTx) Rollback(_ context.Context) error                   { return nil }
+func (noopTx) Exec(_ context.Context, _ string, _ ...any) (pgxpgconn.CommandTag, error) {
+	return pgxpgconn.CommandTag{}, nil
+}
+func (noopTx) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return nil, nil }
+func (noopTx) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row        { return nil }
+func (noopTx) CopyFrom(_ context.Context, _ pgx.Identifier, _ []string, _ pgx.CopyFromSource) (int64, error) {
+	return 0, nil
+}
+func (noopTx) SendBatch(_ context.Context, _ *pgx.Batch) pgx.BatchResults { return nil }
+func (noopTx) LargeObjects() pgx.LargeObjects                             { return pgx.LargeObjects{} }
+func (noopTx) Prepare(_ context.Context, _, _ string) (*pgxpgconn.StatementDescription, error) {
+	return nil, nil
+}
+func (noopTx) Conn() *pgx.Conn { return nil }
 
 func newTestIssuanceService(t *testing.T, repo *credRepoDouble) *IssuanceService {
 	t.Helper()
@@ -387,7 +429,7 @@ func TestOutboxRelay_RunOnce_PublishesAndMarksPublished(t *testing.T) {
 	}
 	repo.outboxByID["bb61f2f3-8299-4d9f-b4b8-0532c4ff4bba"] = mustOutboxRow(t, repo.byIssuanceKey["order-relay:unit:0"])
 	pub := &pubDouble{}
-	relay := NewOutboxRelay(repo, pub, zap.NewNop())
+	relay := NewOutboxRelay(noopTxBeginner{}, repo, pub, zap.NewNop())
 
 	err := relay.RunOnce(context.Background(), 10)
 	require.NoError(t, err)
@@ -412,7 +454,7 @@ func TestOutboxRelay_RunOnce_PublishFailure_LeavesRowUnpublished(t *testing.T) {
 	}
 	repo.outboxByID["fd9b4127-74b7-4977-904c-0cb654ff0c0a"] = mustOutboxRow(t, repo.byIssuanceKey["order-relay-fail:unit:0"])
 	pub := &pubDouble{err: errors.New("broker unavailable")}
-	relay := NewOutboxRelay(repo, pub, zap.NewNop())
+	relay := NewOutboxRelay(noopTxBeginner{}, repo, pub, zap.NewNop())
 
 	err := relay.RunOnce(context.Background(), 10)
 	require.Error(t, err)
@@ -436,7 +478,7 @@ func TestOutboxRelay_RunOnce_MarkPublishedFailure_RetriesSamePayloadAndID(t *tes
 	}
 	repo.outboxByID["8177ecbc-ecf0-4d93-bd48-19065e0ad6aa"] = mustOutboxRow(t, repo.byIssuanceKey["order-relay-retry:unit:0"])
 	pub := &pubDouble{}
-	relay := NewOutboxRelay(repo, pub, zap.NewNop())
+	relay := NewOutboxRelay(noopTxBeginner{}, repo, pub, zap.NewNop())
 
 	repo.markPublishedErr = errors.New("db timeout")
 	err := relay.RunOnce(context.Background(), 10)

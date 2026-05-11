@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // ErrNotFound is returned by repositories when a record does not exist.
@@ -154,6 +156,13 @@ type CredentialRepository interface {
 type OutboxRepository interface {
 	ListUnpublished(ctx context.Context, limit int) ([]*OutboxRow, error)
 	MarkPublished(ctx context.Context, id string, publishedAt time.Time) error
+	// ListUnpublishedTx selects up to limit unpublished outbox rows inside tx
+	// using FOR UPDATE SKIP LOCKED so that concurrent relay replicas each claim
+	// disjoint sets of rows.  The caller must commit or roll back tx.
+	ListUnpublishedTx(ctx context.Context, tx pgx.Tx, limit int) ([]*OutboxRow, error)
+	// MarkPublishedTx marks a single outbox row as published inside an existing
+	// transaction.  The caller owns the commit/rollback lifecycle.
+	MarkPublishedTx(ctx context.Context, tx pgx.Tx, id string, publishedAt time.Time) error
 }
 
 // PolicyRepository manages event attendance policies.
