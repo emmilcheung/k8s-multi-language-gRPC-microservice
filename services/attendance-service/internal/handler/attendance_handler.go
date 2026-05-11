@@ -177,6 +177,21 @@ func (h *AttendanceHandler) GetEventSummary(c echo.Context) error {
 	if eventID == "" {
 		return jsonError(c, http.StatusBadRequest, "INVALID_PARAM", "eventId is required")
 	}
+	organizerID := middleware.RequireUserID(c)
+	if organizerID == "" {
+		return jsonError(c, http.StatusUnauthorized, "MISSING_USER_ID", "organizer identity required")
+	}
+	if err := h.svc.EnsureOrganizerOwnsEvent(c.Request().Context(), eventID, organizerID); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
+			return jsonError(c, http.StatusNotFound, "NOT_FOUND", "event not found")
+		case errors.Is(err, service.ErrForbidden):
+			return jsonError(c, http.StatusForbidden, "FORBIDDEN", "organizer is not allowed for this event")
+		default:
+			h.log.Error("GetEventSummary: ownership check error", zap.Error(err), zap.String("eventId", eventID))
+			return jsonError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+		}
+	}
 
 	summary, err := h.svc.GetAttendanceSummary(c.Request().Context(), eventID)
 	if err != nil {
