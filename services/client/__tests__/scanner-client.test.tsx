@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ScannerClient } from "@/components/scanner-client";
 
@@ -16,6 +16,25 @@ vi.mock("@/app/actions/attendance", async () => {
 });
 
 describe("ScannerClient", () => {
+  beforeEach(() => {
+    // Clear sessionStorage between tests so device IDs don't bleed over.
+    sessionStorage.clear();
+  });
+
+  it("generates a stable per-session deviceId prefixed with the gate label", async () => {
+    render(<ScannerClient eventId="event-1" />);
+
+    // deviceId should be visible (even if small/de-emphasized)
+    const idEl = screen.getByTestId("scanner-device-id");
+    expect(idEl.textContent).toMatch(/^gate-GATE-[0-9a-f-]{36}$/);
+
+    // Second render in the same sessionStorage scope reuses the same id
+    cleanup();
+    render(<ScannerClient eventId="event-1" />);
+    const idEl2 = screen.getByTestId("scanner-device-id");
+    expect(idEl2.textContent).toBe(idEl.textContent);
+  });
+
   it("uses check-in only flow and shows checked-in copy on success", async () => {
     scanCheckInMock.mockResolvedValue({ result: "valid", status: "USED" });
     const user = userEvent.setup();
@@ -30,11 +49,13 @@ describe("ScannerClient", () => {
     await user.click(screen.getByRole("button", { name: /check in attendee/i }));
 
     await waitFor(() => expect(scanCheckInMock).toHaveBeenCalledTimes(1));
-    expect(scanCheckInMock).toHaveBeenCalledWith({
-      token: "token",
-      eventId: "event-1",
-      deviceId: "scanner-web-local",
-    });
+    expect(scanCheckInMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: "token",
+        eventId: "event-1",
+        deviceId: expect.stringMatching(/^gate-GATE-[0-9a-f-]{36}$/),
+      })
+    );
     expect(screen.getByText(/checked in/i)).toBeInTheDocument();
   });
 
@@ -47,10 +68,12 @@ describe("ScannerClient", () => {
     await user.click(screen.getByRole("button", { name: /check in by email/i }));
 
     await waitFor(() => expect(scanCheckInByEmailMock).toHaveBeenCalledTimes(1));
-    expect(scanCheckInByEmailMock).toHaveBeenCalledWith({
-      eventId: "event-1",
-      email: "buyer@example.com",
-      deviceId: "scanner-web-local",
-    });
+    expect(scanCheckInByEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: "event-1",
+        email: "buyer@example.com",
+        deviceId: expect.stringMatching(/^gate-GATE-[0-9a-f-]{36}$/),
+      })
+    );
   });
 });

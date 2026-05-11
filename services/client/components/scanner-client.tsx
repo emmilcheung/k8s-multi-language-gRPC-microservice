@@ -57,7 +57,18 @@ export function ScannerClient({ eventId }: ScannerClientProps) {
   const [manualEntryEnabled, setManualEntryEnabled] = useState(false);
   const [token, setToken] = useState("");
   const [buyerEmail, setBuyerEmail] = useState("");
-  const [deviceId] = useState("scanner-web-local");
+  const [gateLabel, setGateLabel] = useState<string>(() => {
+    if (typeof window === "undefined") return "GATE";
+    return window.sessionStorage.getItem("scanner.gateLabel") ?? "GATE";
+  });
+  const [deviceId, setDeviceId] = useState<string>(() => {
+    if (typeof window === "undefined") return "scanner-web-local";
+    const existing = window.sessionStorage.getItem("scanner.deviceId");
+    if (existing) return existing;
+    const fresh = `gate-${window.sessionStorage.getItem("scanner.gateLabel") ?? "GATE"}-${crypto.randomUUID()}`;
+    window.sessionStorage.setItem("scanner.deviceId", fresh);
+    return fresh;
+  });
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [result, setResult] = useState<ScannerResponse | null>(null);
@@ -210,6 +221,23 @@ export function ScannerClient({ eventId }: ScannerClientProps) {
 
   return (
     <div className="bg-card border border-border rounded-lg p-6 flex flex-col gap-4">
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="gate-label">Gate label</Label>
+        <Input
+          id="gate-label"
+          value={gateLabel}
+          onChange={(e) => {
+            const next = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "") || "GATE";
+            setGateLabel(next);
+            const fresh = `gate-${next}-${crypto.randomUUID()}`;
+            setDeviceId(fresh);
+            window.sessionStorage.setItem("scanner.gateLabel", next);
+            window.sessionStorage.setItem("scanner.deviceId", fresh);
+          }}
+          placeholder="e.g. MAIN, NORTH, VIP"
+        />
+        <span data-testid="scanner-device-id" className="text-xs text-muted-foreground font-mono">{deviceId}</span>
+      </div>
       <div className="rounded border border-border bg-muted/20 p-3 flex flex-col gap-3">
         <p className="text-sm">Use your device camera to scan the attendee QR code.</p>
         <div className="flex flex-wrap gap-2">
