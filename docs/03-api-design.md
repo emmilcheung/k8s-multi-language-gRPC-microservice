@@ -1,11 +1,26 @@
 # API Design
 
-## External APIs (REST via Kong API Gateway)
+## External APIs (via Kong API Gateway)
 
 - All external traffic enters through Kong — never expose a service pod directly.
-- Use **REST + JSON** for public/client-facing APIs.
-- **GraphQL** (via Apollo Federation v2) is an approved alternative for flexible client queries. See `docs/superpowers/specs/2026-04-20-graphql-federation-design.md` for architecture details. REST remains the default for new endpoints.
-- Versioning in the path prefix: `/v1/orders`, `/v2/tickets`. Never break an existing version.
+- **REST + JSON** and **GraphQL** are both first-class external API styles on this platform. They serve different consumers and may coexist for the same domain when the split is explicit and documented.
+- Use **GraphQL** (via Apollo Federation v2) for app-facing clients that need composed, cross-service data or a product-oriented schema. See `docs/superpowers/specs/2026-04-20-graphql-federation-design.md` for architecture details.
+- Use **REST + JSON** for third-party integrations, MCP/agent tooling, webhook/provider callbacks, and command-style operational endpoints where a stable coarse-grained contract is the main requirement.
+- REST surfaces intended for external integrations must be documented in OpenAPI (repo-level or service-level, depending on ownership).
+- It is valid for a service to expose both GraphQL and REST. Do not duplicate the same capability blindly: choose a canonical surface per consumer and document that choice in the relevant README, spec, or implementation plan.
+- REST versioning uses the path prefix: `/v1/orders`, `/v2/tickets`. Never break an existing version.
+
+### Protocol Selection
+
+- Prefer **GraphQL** when the caller is an app UI that benefits from schema composition across services, selective field fetching, or a single request for a multi-entity screen.
+- Prefer **REST** when the endpoint is integration-facing, automation-friendly, or operationally command-like: webhooks, scanner/check-in APIs, batch jobs, exports, uploads, callbacks, or MCP tools.
+- If a workflow has both needs, split by consumer rather than forcing one protocol to fit all parties.
+
+### GraphQL Evolution
+
+- GraphQL schema changes should be additive where possible: add fields, add types, and deprecate before removal.
+- Federated ownership stays with the owning service; do not centralize business logic in the gateway.
+- GraphQL still goes through Kong for authentication, rate limiting, and tracing propagation.
 
 ### HTTP Semantics
 

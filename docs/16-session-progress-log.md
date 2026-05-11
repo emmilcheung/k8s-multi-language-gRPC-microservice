@@ -9,6 +9,41 @@
 
 ---
 
+## Session: 2026-05-07 — docs(qr-attendance): register repo-grounded superpowers plan ✅ COMPLETE
+
+**Branch:** `main`
+
+### What was done
+
+Registered a new superpowers-compatible implementation plan for QR-code attendance that is grounded in the current microservices repo instead of the earlier generic enterprise assumptions, then updated the API standard to reflect the repository's GraphQL-plus-REST model.
+
+1. **`docs/superpowers/plans/2026-05-07-qr-attendance.md`** — added a continuation-friendly execution plan in the same style as the existing superpowers plans.
+   The plan is explicitly scoped to the current platform and distinguishes:
+   - net-new `attendance-service`
+   - targeted modifications to `client`, `kong-gateway`, Helm, and only minimal existing backend surfaces
+   - deferred email delivery because the repo does not currently contain a notification/email service
+
+2. Enriched the same attendance plan with explicit implementation recommendations and a required test plan so future agent sessions do not skip the service-boundary, protocol-split, security, or regression requirements.
+
+3. **`docs/03-api-design.md`** — updated the API standard so REST and GraphQL are both documented as first-class external API styles with different target consumers:
+   - GraphQL for app-facing composed client flows
+   - REST + OpenAPI for third-party integrations, MCP/agent tooling, and command-style operational endpoints
+
+4. The plan is intentionally structured for follow-up agent sessions:
+   - goal / out-of-scope / architecture / tech stack
+   - explicit file map
+   - checkbox workstreams
+   - recommended execution order
+   - release gate
+
+5. No application code was changed in this session.
+
+### Outcome
+
+The repository now contains a superpowers-compatible QR attendance plan plus an updated API standard, so future agentic implementation work can follow the intended GraphQL/REST split, test strategy, and service-boundary decisions without re-deriving them from chat history.
+
+---
+
 ## Session: 2026-04-30 — ops(observability): rehearse CriticalServiceDown alert ✅ COMPLETE
 
 **Branch:** `feat/observability-release-gate`
