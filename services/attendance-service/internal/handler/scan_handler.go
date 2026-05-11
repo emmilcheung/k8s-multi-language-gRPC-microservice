@@ -146,6 +146,17 @@ func (h *ScanHandler) CheckInByBuyer(c echo.Context) error {
 		return jsonError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 	}
 
+	// Fetch the event attendance policy before delegating to the scan service.
+	// A nil policy (no row) is passed as-is; the service defaults to blocked.
+	policy, perr := h.auth.GetAttendancePolicy(c.Request().Context(), req.EventID)
+	if perr != nil && !errors.Is(perr, repository.ErrNotFound) {
+		h.log.Error("ScanHandler.CheckInByBuyer: policy fetch error", zap.Error(perr))
+		return jsonError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+	}
+	if errors.Is(perr, repository.ErrNotFound) {
+		policy = nil // explicit: no row → service will default to blocked
+	}
+
 	outcome, err := h.svc.CheckInByBuyer(
 		c.Request().Context(),
 		req.EventID,
@@ -153,8 +164,12 @@ func (h *ScanHandler) CheckInByBuyer(c echo.Context) error {
 		scannerUserID,
 		req.DeviceID,
 		req.GateID,
+		policy,
 	)
 	if err != nil {
+		if errors.Is(err, service.ErrPolicyBlock) {
+			return jsonError(c, http.StatusForbidden, "POLICY_BLOCK", "manual override disabled by organizer policy")
+		}
 		if errors.Is(err, service.ErrForbidden) {
 			return jsonError(c, http.StatusForbidden, "FORBIDDEN", "scanner is not allowed")
 		}

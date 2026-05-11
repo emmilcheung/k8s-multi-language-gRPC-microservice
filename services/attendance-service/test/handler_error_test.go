@@ -50,6 +50,7 @@ func (s *stubScanService) CheckInByBuyer(
 	_ context.Context,
 	_, _, _, _ string,
 	_ *string,
+	_ *repository.AttendancePolicy,
 ) (*service.ScanOutcome, error) {
 	if s.outcome != nil {
 		return s.outcome, s.err

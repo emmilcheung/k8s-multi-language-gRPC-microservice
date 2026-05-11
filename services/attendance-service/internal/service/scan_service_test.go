@@ -207,7 +207,8 @@ func TestScanService_CheckInByBuyer_ConsumesIssuedCredential(t *testing.T) {
 	gen := qr.NewGenerator("test-signing-key-that-is-at-least-32-characters")
 	svc := NewScanService(&scanCredRepoDouble{buyerCred: cred}, scans, gen, zap.NewNop())
 
-	outcome, err := svc.CheckInByBuyer(context.Background(), "event-1", buyerID, "scanner-1", "device-1", nil)
+	outcome, err := svc.CheckInByBuyer(context.Background(), "event-1", buyerID, "scanner-1", "device-1", nil,
+		&repository.AttendancePolicy{AllowManualOverride: true})
 	require.NoError(t, err)
 	assert.Equal(t, ScanResultValid, outcome.Result)
 	assert.Equal(t, repository.CredentialStatusUsed, cred.Status)

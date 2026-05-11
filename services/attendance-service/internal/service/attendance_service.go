@@ -12,6 +12,10 @@ import (
 // ErrForbidden indicates the caller is authenticated but not authorized.
 var ErrForbidden = errors.New("attendance service: forbidden")
 
+// ErrPolicyBlock indicates the request was blocked by the event's attendance policy.
+// Returned by CheckInByBuyer when allow_manual_override is false (or no policy row exists).
+var ErrPolicyBlock = errors.New("attendance service: blocked by policy")
+
 // AttendanceService is the core business logic boundary for the attendance domain.
 type AttendanceService interface {
 	// GetAdmissionPass returns the active credential for a ticket (optionally filtered by order).

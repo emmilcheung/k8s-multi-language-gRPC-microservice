@@ -38,7 +38,10 @@ type ScanOutcome struct {
 type ScanService interface {
 	Validate(ctx context.Context, token, eventID, scannerUserID, deviceID string, gateID *string) (*ScanOutcome, error)
 	CheckIn(ctx context.Context, token, eventID, scannerUserID, deviceID string, gateID *string) (*ScanOutcome, error)
-	CheckInByBuyer(ctx context.Context, eventID, buyerUserID, scannerUserID, deviceID string, gateID *string) (*ScanOutcome, error)
+	// CheckInByBuyer checks in an attendee by buyer user ID (manual fallback).
+	// policy is the event's attendance policy; nil means no row exists and defaults to blocked.
+	// Returns ErrPolicyBlock when allow_manual_override is false or policy is nil.
+	CheckInByBuyer(ctx context.Context, eventID, buyerUserID, scannerUserID, deviceID string, gateID *string, policy *repository.AttendancePolicy) (*ScanOutcome, error)
 }
 
 type scanService struct {
@@ -88,10 +91,26 @@ func (s *scanService) CheckInByBuyer(
 	ctx context.Context,
 	eventID, buyerUserID, scannerUserID, deviceID string,
 	gateID *string,
+	policy *repository.AttendancePolicy,
 ) (*ScanOutcome, error) {
 	ctx, span := s.tracer.Start(ctx, "attendance.scan.checkin_by_buyer")
 	defer span.End()
 	traceID := trace.SpanContextFromContext(ctx).TraceID().String()
+
+	// Enforce event attendance policy before doing any ticket lookup.
+	// Default when no policy row exists: allow_manual_override = false → blocked.
+	if policy == nil || !policy.AllowManualOverride {
+		_ = s.recordManualScan(ctx, "", eventID, scannerUserID, deviceID, gateID, repository.ScanResultPolicyBlock)
+		s.log.Info("attendance scan result",
+			zap.String("result", string(ScanResultRevoked)),
+			zap.String("reason", "policy_block"),
+			zap.String("eventId", eventID),
+			zap.String("scannerUserId", scannerUserID),
+			zap.String("deviceId", deviceID),
+			zap.String("traceId", traceID),
+		)
+		return &ScanOutcome{Result: ScanResultRevoked, EventID: eventID}, ErrPolicyBlock
+	}
 
 	cred, err := s.credRepo.FindByTicketAndBuyer(ctx, eventID, buyerUserID)
 	if err != nil {
