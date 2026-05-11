@@ -48,6 +48,11 @@ func (r *OutboxRelay) Run(ctx context.Context, interval time.Duration, batchSize
 }
 
 func (r *OutboxRelay) RunOnce(ctx context.Context, batchSize int) error {
+	// At-least-once semantics: rows are claimed inside a transaction with
+	// FOR UPDATE SKIP LOCKED (via ListUnpublishedTx). If Publish succeeds for
+	// rows 1..N-1 but fails for row N, the deferred Rollback unmarks all prior
+	// MarkPublishedTx calls, so rows 1..N-1 will be re-published on the next
+	// RunOnce call. Downstream consumers MUST be idempotent on credential_id.
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("relay: begin tx: %w", err)

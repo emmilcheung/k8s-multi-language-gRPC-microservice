@@ -143,7 +143,7 @@ func (s *scanService) CheckInByBuyer(
 			Status:       cred.Status,
 		}
 		observeScanByMode(true, outcome.Result)
-		_ = s.recordManualScan(ctx, cred.ID, cred.EventID, scannerUserID, deviceID, gateID, repository.ScanResultPolicyBlock)
+		_ = s.recordManualScan(ctx, cred.ID, cred.EventID, scannerUserID, deviceID, gateID, repository.ScanResultDenied)
 		return outcome, nil
 	case repository.CredentialStatusUsed:
 		outcome := &ScanOutcome{
@@ -277,7 +277,7 @@ func (s *scanService) evaluate(
 			Status:       cred.Status,
 		}
 		observeScanByMode(consume, outcome.Result)
-		_ = s.recordScan(ctx, claims, scannerUserID, deviceID, gateID, token, repository.ScanResultPolicyBlock)
+		_ = s.recordScan(ctx, claims, scannerUserID, deviceID, gateID, token, repository.ScanResultDenied)
 		s.log.Info("attendance scan result",
 			zap.String("result", string(outcome.Result)),
 			zap.String("credentialId", outcome.CredentialID),
