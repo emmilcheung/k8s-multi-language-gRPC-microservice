@@ -215,10 +215,13 @@ func TestPatchEventSettings_FirstCreate_SetsOrganizerID(t *testing.T) {
 	const userID = "organizer-uuid-123"
 
 	captured := &capturePolicyRepo{}
-	svc := service.NewAttendanceService(
+	// Provide a stub lookup that confirms this organizer owns the event; without it
+	// EnsureOrganizerOwnsEvent now fails closed (ErrForbidden) per the R4 fix.
+	svc := service.NewAttendanceServiceWithTicketLookup(
 		&stubCredentialRepo{},
 		captured,
 		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: userID},
 	)
 	h := handler.NewAttendanceHandler(svc, nil)
 

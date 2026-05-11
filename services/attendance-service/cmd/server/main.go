@@ -94,15 +94,24 @@ func main() {
 	scanRepo := pgrepo.NewScanRepo(pool)
 
 	// Internal gRPC client: ticket-service (WS3 organizer ownership checks).
-	ticketConn, err := grpc.NewClient(
+	// Use a blocking dial so that a misconfigured or unreachable TICKET_SERVICE_URL
+	// causes an immediate startup failure rather than silently bypassing authorization.
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ticketConn, err := grpc.DialContext( //nolint:staticcheck
+		dialCtx,
 		cfg.TicketServiceURL,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(), //nolint:staticcheck
 	)
+	dialCancel()
 	if err != nil {
-		log.Fatal("failed to connect to ticket-service", zap.Error(err))
+		log.Fatal("failed to connect to ticket-service", zap.String("url", cfg.TicketServiceURL), zap.Error(err))
 	}
 	defer ticketConn.Close() //nolint:errcheck
 	ticketLookup := service.NewGRPCTicketOwnerLookup(ticketsv1.NewTicketServiceClient(ticketConn), 0)
+	if ticketLookup == nil {
+		log.Fatal("ticket lookup is nil after construction; refusing to start with authorization bypass")
+	}
 
 	// Service
 	svc := service.NewAttendanceServiceWithTicketLookup(credRepo, policyRepo, scanRepo, ticketLookup)

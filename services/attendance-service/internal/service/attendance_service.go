@@ -130,9 +130,9 @@ func (s *attendanceService) EnsureOrganizerOwnsEvent(ctx context.Context, eventI
 	if organizerID == "" {
 		return ErrForbidden
 	}
-	// Keep non-lookup unit tests stable; production wiring always provides this.
 	if s.ticketLookup == nil {
-		return nil
+		// Fail closed: if ticket ownership cannot be resolved, the caller is not authorized.
+		return ErrForbidden
 	}
 	ownerID, err := s.ticketLookup.LookupTicketOwner(ctx, eventID)
 	if err != nil {
