@@ -38,9 +38,25 @@ func TestEnsureOrganizerOwnsEvent_OwnershipMatchSucceeds(t *testing.T) {
 	}
 }
 
+func TestEnsureOrganizerOwnsEvent_LookupErrorPropagates(t *testing.T) {
+	sentinel := errors.New("upstream failure")
+	svc := NewAttendanceServiceWithTicketLookup(nil, nil, nil, errOwnerLookup{err: sentinel})
+	err := svc.EnsureOrganizerOwnsEvent(context.Background(), "ticket-1", "organizer-1")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected upstream error to propagate, got %v", err)
+	}
+}
+
 // stubOwnerLookup is a test double for TicketOwnerLookup.
 type stubOwnerLookup struct{ ownerID string }
 
 func (s stubOwnerLookup) LookupTicketOwner(_ context.Context, _ string) (string, error) {
 	return s.ownerID, nil
+}
+
+// errOwnerLookup always returns an error from LookupTicketOwner.
+type errOwnerLookup struct{ err error }
+
+func (s errOwnerLookup) LookupTicketOwner(_ context.Context, _ string) (string, error) {
+	return "", s.err
 }
