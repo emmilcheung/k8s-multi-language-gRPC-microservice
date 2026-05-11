@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const minSigningKeyLength = 32
@@ -28,6 +29,7 @@ type Config struct {
 	TicketServiceURL      string
 	UserIDSigningKey      string
 	OTELEndpoint          string // optional; schema-validated if present
+	QRTokenTTL            time.Duration // configurable via QR_TOKEN_TTL; 0 means use service default (48h)
 }
 
 // Load reads configuration from environment variables and validates all required fields.
@@ -99,6 +101,16 @@ func Load() (*Config, error) {
 		}
 	}
 
+	var qrTokenTTL time.Duration
+	if raw := strings.TrimSpace(os.Getenv("QR_TOKEN_TTL")); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			errs = append(errs, fmt.Sprintf("QR_TOKEN_TTL must be a positive duration (e.g. \"48h\"), got %q", raw))
+		} else {
+			qrTokenTTL = d
+		}
+	}
+
 	if len(errs) > 0 {
 		return nil, errors.New(strings.Join(errs, "; "))
 	}
@@ -118,6 +130,7 @@ func Load() (*Config, error) {
 		TicketServiceURL:      ticketServiceURL,
 		UserIDSigningKey:      userIDSigningKey,
 		OTELEndpoint:          otelEndpoint,
+		QRTokenTTL:            qrTokenTTL,
 	}, nil
 }
 

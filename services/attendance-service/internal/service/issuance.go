@@ -70,7 +70,7 @@ type IssuanceService struct {
 
 // NewIssuanceService creates an IssuanceService.
 // tokenTTL controls how far in the future the QR token ExpiresAt is set;
-// use 0 to apply the default (1 year).
+// use 0 to apply the default (48h; configurable via QR_TOKEN_TTL env var).
 func NewIssuanceService(
 	credRepo repository.CredentialRepository,
 	qrGen *qr.Generator,
@@ -79,7 +79,8 @@ func NewIssuanceService(
 ) *IssuanceService {
 	ttl := tokenTTL
 	if ttl <= 0 {
-		ttl = 365 * 24 * time.Hour
+		// 48h: event window + ~24h grace; tighten to event.endsAt+grace in a follow-up.
+		ttl = 48 * time.Hour
 	}
 	return &IssuanceService{
 		credRepo: credRepo,

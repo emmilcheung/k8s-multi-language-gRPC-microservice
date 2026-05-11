@@ -121,7 +121,7 @@ func main() {
 
 	// IssuanceService: implements kafka.OrderEventHandler and issues admission
 	// credentials for each completed order event (WS2).
-	issuanceSvc := service.NewIssuanceService(credRepo, qrGen, 0, log)
+	issuanceSvc := service.NewIssuanceService(credRepo, qrGen, cfg.QRTokenTTL, log)
 	// WS2 keeps a single process-local outbox relay per deployment; row claiming
 	// across multiple instances is intentionally out of scope for this pass.
 	outboxRelay := service.NewOutboxRelay(pool, credRepo, producer, log)

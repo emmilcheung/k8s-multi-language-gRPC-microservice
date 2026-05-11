@@ -501,6 +501,16 @@ func TestOutboxRelay_RunOnce_MarkPublishedFailure_RetriesSamePayloadAndID(t *tes
 	assert.NotNil(t, repo.byIssuanceKey["order-relay-retry:unit:0"].IssuanceEventPublishedAt)
 }
 
+func TestNewIssuanceService_DefaultTTLIs48Hours(t *testing.T) {
+	// Pass 0 as tokenTTL to trigger the "use default" branch.
+	svc := NewIssuanceService(nil, nil, 0, zap.NewNop())
+	got := svc.tokenTTL
+	want := 48 * time.Hour
+	if got != want {
+		t.Fatalf("default tokenTTL = %s, want %s", got, want)
+	}
+}
+
 func mustOutboxRow(t *testing.T, cred *repository.AdmissionCredential) *repository.OutboxRow {
 	t.Helper()
 	payload, err := buildIssuanceEventPayload(cred, "token-for-"+cred.ID)
