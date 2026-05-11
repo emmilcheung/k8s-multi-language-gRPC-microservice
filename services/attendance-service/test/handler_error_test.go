@@ -289,24 +289,12 @@ func (c *capturePolicyRepo) Upsert(_ context.Context, policy *repository.Attenda
 	return nil
 }
 
-type stubTicketOwnerLookup struct {
-	ownerID string
-	err     error
-}
-
-func (s *stubTicketOwnerLookup) LookupTicketOwner(_ context.Context, _ string) (string, error) {
-	if s.err != nil {
-		return "", s.err
-	}
-	return s.ownerID, nil
-}
-
 func TestGetEventSettings_NonOwner_ReturnsForbidden(t *testing.T) {
 	svc := service.NewAttendanceServiceWithTicketLookup(
 		&stubCredentialRepo{},
 		&stubPolicyRepo{},
 		&stubScanRepo{},
-		&stubTicketOwnerLookup{ownerID: "owner-uuid-1"},
+		&stubTicketOwnerLookupSvc{ownerID: "owner-uuid-1"},
 	)
 	h := handler.NewAttendanceHandler(svc, zap.NewNop())
 
@@ -329,7 +317,7 @@ func TestPatchEventSettings_UnknownEvent_ReturnsNotFound(t *testing.T) {
 		&stubCredentialRepo{},
 		&stubPolicyRepo{},
 		&stubScanRepo{},
-		&stubTicketOwnerLookup{err: repository.ErrNotFound},
+		&stubTicketOwnerLookupSvc{err: repository.ErrNotFound},
 	)
 	h := handler.NewAttendanceHandler(svc, zap.NewNop())
 
@@ -354,7 +342,7 @@ func TestPatchEventSettings_MalformedPayload_ReturnsBadRequest(t *testing.T) {
 		&stubCredentialRepo{},
 		&stubPolicyRepo{},
 		&stubScanRepo{},
-		&stubTicketOwnerLookup{ownerID: "organizer-uuid"},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-uuid"},
 	)
 	h := handler.NewAttendanceHandler(svc, zap.NewNop())
 
@@ -379,7 +367,7 @@ func TestPatchEventSettings_OwnerCanUpdatePolicy(t *testing.T) {
 		&stubCredentialRepo{},
 		captured,
 		&stubScanRepo{},
-		&stubTicketOwnerLookup{ownerID: "organizer-uuid"},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-uuid"},
 	)
 	h := handler.NewAttendanceHandler(svc, zap.NewNop())
 
@@ -407,7 +395,7 @@ func TestGetEventSettings_UnknownEvent_ReturnsNotFound(t *testing.T) {
 		&stubCredentialRepo{},
 		&stubPolicyRepo{},
 		&stubScanRepo{},
-		&stubTicketOwnerLookup{err: repository.ErrNotFound},
+		&stubTicketOwnerLookupSvc{err: repository.ErrNotFound},
 	)
 	h := handler.NewAttendanceHandler(svc, zap.NewNop())
 
@@ -430,7 +418,7 @@ func TestGetEventSettings_OwnerWithNoPolicy_ReturnsDefaults(t *testing.T) {
 		&stubCredentialRepo{},
 		&stubPolicyRepo{err: repository.ErrNotFound},
 		&stubScanRepo{},
-		&stubTicketOwnerLookup{ownerID: "organizer-uuid"},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-uuid"},
 	)
 	h := handler.NewAttendanceHandler(svc, zap.NewNop())
 
@@ -456,7 +444,7 @@ func TestPatchEventSettings_OwnershipLookupFailure_ReturnsInternalError(t *testi
 		&stubCredentialRepo{},
 		&stubPolicyRepo{},
 		&stubScanRepo{},
-		&stubTicketOwnerLookup{err: errors.New("ticket-service unavailable")},
+		&stubTicketOwnerLookupSvc{err: errors.New("ticket-service unavailable")},
 	)
 	h := handler.NewAttendanceHandler(svc, zap.NewNop())
 

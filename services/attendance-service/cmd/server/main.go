@@ -97,6 +97,8 @@ func main() {
 	// Use a blocking dial so that a misconfigured or unreachable TICKET_SERVICE_URL
 	// causes an immediate startup failure rather than silently bypassing authorization.
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// grpc.DialContext+WithBlock are deprecated since gRPC-go v1.56 but grpc.NewClient
+	// removed blocking-dial support entirely; blocking at startup is required to fail loud.
 	ticketConn, err := grpc.DialContext( //nolint:staticcheck
 		dialCtx,
 		cfg.TicketServiceURL,
@@ -109,9 +111,6 @@ func main() {
 	}
 	defer ticketConn.Close() //nolint:errcheck
 	ticketLookup := service.NewGRPCTicketOwnerLookup(ticketsv1.NewTicketServiceClient(ticketConn), 0)
-	if ticketLookup == nil {
-		log.Fatal("ticket lookup is nil after construction; refusing to start with authorization bypass")
-	}
 
 	// Service
 	svc := service.NewAttendanceServiceWithTicketLookup(credRepo, policyRepo, scanRepo, ticketLookup)
