@@ -267,7 +267,8 @@ export type ScannerResultClass =
   | "revoked"
   | "invalid_signature"
   | "wrong_event"
-  | "not_found";
+  | "not_found"
+  | "policy_block";
 
 export interface ScannerRequest {
   token: string;

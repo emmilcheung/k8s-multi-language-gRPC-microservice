@@ -26,6 +26,7 @@ const (
 	ScanResultInvalidSignature ScanResultClass = "invalid_signature"
 	ScanResultWrongEvent       ScanResultClass = "wrong_event"
 	ScanResultNotFound         ScanResultClass = "not_found"
+	ScanResultPolicyBlock      ScanResultClass = "policy_block"
 )
 
 type ScanOutcome struct {
@@ -102,14 +103,14 @@ func (s *scanService) CheckInByBuyer(
 	if policy == nil || !policy.AllowManualOverride {
 		_ = s.recordManualScan(ctx, "", eventID, scannerUserID, deviceID, gateID, repository.ScanResultPolicyBlock)
 		s.log.Info("attendance scan result",
-			zap.String("result", string(ScanResultRevoked)),
+			zap.String("result", string(ScanResultPolicyBlock)),
 			zap.String("reason", "policy_block"),
 			zap.String("eventId", eventID),
 			zap.String("scannerUserId", scannerUserID),
 			zap.String("deviceId", deviceID),
 			zap.String("traceId", traceID),
 		)
-		return &ScanOutcome{Result: ScanResultRevoked, EventID: eventID}, ErrPolicyBlock
+		return &ScanOutcome{Result: ScanResultPolicyBlock, EventID: eventID}, ErrPolicyBlock
 	}
 
 	cred, err := s.credRepo.FindByTicketAndBuyer(ctx, eventID, buyerUserID)

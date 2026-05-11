@@ -44,6 +44,8 @@ function resultMessage(result: ScannerResponse["result"]): string {
       return "No admission credential found for this attendee.";
     case "revoked":
       return "This credential is revoked or expired.";
+    case "policy_block":
+      return "Manual check-in is disabled by organizer policy.";
     case "wrong_event":
       return "This credential belongs to a different event.";
     case "invalid_signature":
@@ -227,13 +229,16 @@ export function ScannerClient({ eventId }: ScannerClientProps) {
           id="gate-label"
           value={gateLabel}
           onChange={(e) => {
-            const next = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "") || "GATE";
-            setGateLabel(next);
-            const fresh = `gate-${next}-${crypto.randomUUID()}`;
-            setDeviceId(fresh);
-            window.sessionStorage.setItem("scanner.gateLabel", next);
-            window.sessionStorage.setItem("scanner.deviceId", fresh);
-          }}
+              const next = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "") || "GATE";
+              setGateLabel(next);
+              window.sessionStorage.setItem("scanner.gateLabel", next);
+            }}
+            onBlur={(e) => {
+              const label = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "") || "GATE";
+              const fresh = `gate-${label}-${crypto.randomUUID()}`;
+              setDeviceId(fresh);
+              window.sessionStorage.setItem("scanner.deviceId", fresh);
+            }}
           placeholder="e.g. MAIN, NORTH, VIP"
         />
         <span data-testid="scanner-device-id" className="text-xs text-muted-foreground font-mono">{deviceId}</span>

@@ -509,3 +509,48 @@ func TestGetEventSummary_OkWhenOwner(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
+
+func TestGetEventCheckIns_ForbiddenWhenNotOwner(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-A"},
+	)
+	h := handler.NewAttendanceHandler(svc, zap.NewNop())
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/attendance/events/event-1/checkins", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("eventId")
+	c.SetParamValues("event-1")
+	c.Set(middleware.ContextKeyUserID, "other-user-B") // not the owner
+
+	err := h.GetEventCheckIns(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assertErrorEnvelope(t, rec.Body.Bytes(), "FORBIDDEN")
+}
+
+func TestGetEventCheckIns_OkWhenOwner(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-A"},
+	)
+	h := handler.NewAttendanceHandler(svc, zap.NewNop())
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/attendance/events/event-1/checkins", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("eventId")
+	c.SetParamValues("event-1")
+	c.Set(middleware.ContextKeyUserID, "organizer-A")
+
+	err := h.GetEventCheckIns(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
