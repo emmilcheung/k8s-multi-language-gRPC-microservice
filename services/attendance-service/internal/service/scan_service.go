@@ -296,7 +296,7 @@ func (s *scanService) evaluate(
 			Status:       cred.Status,
 		}
 		observeScanByMode(consume, outcome.Result)
-		_ = s.recordScan(ctx, claims, scannerUserID, deviceID, gateID, token, repository.ScanResultAdmitted)
+		_ = s.recordScan(ctx, claims, scannerUserID, deviceID, gateID, token, repository.ScanResultValidated)
 		s.log.Info("attendance scan result",
 			zap.String("result", string(outcome.Result)),
 			zap.String("credentialId", outcome.CredentialID),

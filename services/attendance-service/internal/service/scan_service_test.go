@@ -171,6 +171,28 @@ func TestScanService_Validate_WrongEventRejected(t *testing.T) {
 	assert.Equal(t, ScanResultWrongEvent, outcome.Result)
 }
 
+func TestValidate_RecordsValidatedResult(t *testing.T) {
+	cred := &repository.AdmissionCredential{
+		ID:           "cred-1",
+		EventID:      "event-1",
+		TokenVersion: 1,
+		Status:       repository.CredentialStatusIssued,
+	}
+	scans := &scanRepoDouble{}
+	svc := newScanSvc(t, cred, scans)
+
+	outcome, err := svc.Validate(context.Background(), signedToken(t, "cred-1", "event-1", 1), "event-1", "scanner-1", "device-1", nil)
+	require.NoError(t, err)
+	assert.Equal(t, ScanResultValid, outcome.Result)
+
+	// Exactly one scan event must be recorded.
+	require.Len(t, scans.events, 1, "expected exactly one scan_event to be recorded")
+	// The recorded result must be VALIDATED, not ADMITTED, so validate-mode scans
+	// do not inflate total_admitted / total_checked_in in GetEventSummary.
+	assert.Equal(t, repository.ScanResultValidated, scans.events[0].Result,
+		"validate-mode scan must record VALIDATED, not ADMITTED")
+}
+
 func TestScanService_CheckInByBuyer_ConsumesIssuedCredential(t *testing.T) {
 	buyerID := "buyer-1"
 	cred := &repository.AdmissionCredential{

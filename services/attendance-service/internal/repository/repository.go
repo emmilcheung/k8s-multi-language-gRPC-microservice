@@ -43,6 +43,7 @@ const (
 	ScanResultAlreadyUsed  ScanResult = "ALREADY_USED"
 	ScanResultInvalidToken ScanResult = "INVALID_TOKEN"
 	ScanResultPolicyBlock  ScanResult = "POLICY_BLOCK"
+	ScanResultValidated    ScanResult = "VALIDATED"
 )
 
 // AdmissionCredential is the domain object for an issued admission credential.
