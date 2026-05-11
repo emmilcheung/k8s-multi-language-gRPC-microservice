@@ -554,3 +554,103 @@ func TestGetEventCheckIns_OkWhenOwner(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
+
+// TestScanHandler_ValidateToken_BlockedWhenQRNotRequired verifies that
+// ValidateToken returns POLICY_BLOCK when require_qr_for_entry is false.
+func TestScanHandler_ValidateToken_BlockedWhenQRNotRequired(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{policy: &repository.AttendancePolicy{RequireQRForEntry: false}},
+		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-A"},
+	)
+	h := handler.NewScanHandler(&stubScanService{}, svc, zap.NewNop())
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/attendance/scan/validate",
+		strings.NewReader(`{"token":"tok","eventId":"event-1","deviceId":"scanner-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(middleware.ContextKeyUserID, "organizer-A")
+
+	err := h.ValidateToken(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assertErrorEnvelope(t, rec.Body.Bytes(), "POLICY_BLOCK")
+}
+
+// TestScanHandler_ValidateToken_BlockedWhenNoPolicy verifies that ValidateToken
+// returns POLICY_BLOCK when no policy row exists (fail-closed default).
+func TestScanHandler_ValidateToken_BlockedWhenNoPolicy(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{err: repository.ErrNotFound},
+		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-A"},
+	)
+	h := handler.NewScanHandler(&stubScanService{}, svc, zap.NewNop())
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/attendance/scan/validate",
+		strings.NewReader(`{"token":"tok","eventId":"event-1","deviceId":"scanner-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(middleware.ContextKeyUserID, "organizer-A")
+
+	err := h.ValidateToken(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assertErrorEnvelope(t, rec.Body.Bytes(), "POLICY_BLOCK")
+}
+
+// TestScanHandler_CheckIn_BlockedWhenQRNotRequired verifies that
+// CheckIn returns POLICY_BLOCK when require_qr_for_entry is false.
+func TestScanHandler_CheckIn_BlockedWhenQRNotRequired(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{policy: &repository.AttendancePolicy{RequireQRForEntry: false}},
+		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-A"},
+	)
+	h := handler.NewScanHandler(&stubScanService{}, svc, zap.NewNop())
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/attendance/scan/check-in",
+		strings.NewReader(`{"token":"tok","eventId":"event-1","deviceId":"scanner-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(middleware.ContextKeyUserID, "organizer-A")
+
+	err := h.CheckIn(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assertErrorEnvelope(t, rec.Body.Bytes(), "POLICY_BLOCK")
+}
+
+// TestScanHandler_CheckIn_BlockedWhenNoPolicy verifies that CheckIn returns
+// POLICY_BLOCK when no policy row exists (fail-closed default).
+func TestScanHandler_CheckIn_BlockedWhenNoPolicy(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{err: repository.ErrNotFound},
+		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-A"},
+	)
+	h := handler.NewScanHandler(&stubScanService{}, svc, zap.NewNop())
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/attendance/scan/check-in",
+		strings.NewReader(`{"token":"tok","eventId":"event-1","deviceId":"scanner-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(middleware.ContextKeyUserID, "organizer-A")
+
+	err := h.CheckIn(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assertErrorEnvelope(t, rec.Body.Bytes(), "POLICY_BLOCK")
+}

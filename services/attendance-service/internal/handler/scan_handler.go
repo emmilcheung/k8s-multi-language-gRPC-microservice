@@ -55,6 +55,21 @@ func (h *ScanHandler) ValidateToken(c echo.Context) error {
 		return jsonError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 	}
 
+	// Enforce require_qr_for_entry: QR scanning is only available when the
+	// organizer has explicitly enabled QR-based admission for the event.
+	// Default when no policy row exists: require_qr_for_entry = false → blocked.
+	validatePolicy, pErr := h.auth.GetAttendancePolicy(c.Request().Context(), req.EventID)
+	if pErr != nil && !errors.Is(pErr, repository.ErrNotFound) {
+		h.log.Error("ScanHandler.ValidateToken: policy fetch error", zap.Error(pErr))
+		return jsonError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+	}
+	if errors.Is(pErr, repository.ErrNotFound) {
+		validatePolicy = nil
+	}
+	if validatePolicy == nil || !validatePolicy.RequireQRForEntry {
+		return jsonError(c, http.StatusForbidden, "POLICY_BLOCK", "QR admission is not enabled for this event")
+	}
+
 	outcome, err := h.svc.Validate(c.Request().Context(), req.Token, req.EventID, scannerUserID, req.DeviceID, req.GateID)
 	if err != nil {
 		h.log.Error("ScanHandler.ValidateToken: service error", zap.Error(err))
@@ -97,6 +112,21 @@ func (h *ScanHandler) CheckIn(c echo.Context) error {
 		}
 		h.log.Error("ScanHandler.CheckIn: authorization error", zap.Error(err))
 		return jsonError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+	}
+
+	// Enforce require_qr_for_entry: QR scanning is only available when the
+	// organizer has explicitly enabled QR-based admission for the event.
+	// Default when no policy row exists: require_qr_for_entry = false → blocked.
+	checkInPolicy, pErr := h.auth.GetAttendancePolicy(c.Request().Context(), req.EventID)
+	if pErr != nil && !errors.Is(pErr, repository.ErrNotFound) {
+		h.log.Error("ScanHandler.CheckIn: policy fetch error", zap.Error(pErr))
+		return jsonError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+	}
+	if errors.Is(pErr, repository.ErrNotFound) {
+		checkInPolicy = nil
+	}
+	if checkInPolicy == nil || !checkInPolicy.RequireQRForEntry {
+		return jsonError(c, http.StatusForbidden, "POLICY_BLOCK", "QR admission is not enabled for this event")
 	}
 
 	outcome, err := h.svc.CheckIn(c.Request().Context(), req.Token, req.EventID, scannerUserID, req.DeviceID, req.GateID)
