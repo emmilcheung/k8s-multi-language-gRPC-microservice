@@ -176,6 +176,27 @@ venue-service:
   autoscaling:
     enabled: false
 
+attendance-service:
+  replicaCount: 1
+  image:
+    repository: attendance-service
+    tag: latest
+  env:
+    APP_ENV: development
+    HTTP_PORT: "3007"
+    LOG_LEVEL: info
+    TICKET_SERVICE_URL: "ticketing-ticket-service.ticketing.svc.cluster.local:50051"
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+  autoscaling:
+    enabled: false
+
 user-service:
   replicaCount: 1
   image:
@@ -327,6 +348,24 @@ postgres-venue:
     username: "venue_user"
     password: "venue-local-secret"
     database: "venue_db"
+  primary:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  metrics:
+    enabled: false
+
+postgres-attendance:
+  auth:
+    existingSecret: ""
+    postgresPassword: "attendance-local-secret"
+    username: "attendance_user"
+    password: "attendance-local-secret"
+    database: "attendance_db"
   primary:
     resources:
       requests:

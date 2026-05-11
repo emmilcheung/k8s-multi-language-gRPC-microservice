@@ -21,7 +21,8 @@
 #
 # First-time setup:
 #   cp infra/local/secrets.env.example infra/local/secrets.env
-#   # Fill in RSA_PRIVATE_KEY and STRIPE_SECRET_KEY in secrets.env
+#   # Fill in RSA_PRIVATE_KEY, KONG_RSA_PUBLIC_KEY, X_USER_ID_SIGNING_KEY,
+#   # STRIPE_SECRET_KEY, QR_SIGNING_KEY in secrets.env
 #   # Then run this script from the repo root.
 #
 # After the script completes:
@@ -78,11 +79,12 @@ _read_secret() {
 
 RSA_PRIVATE_KEY="$(_read_secret RSA_PRIVATE_KEY)"
 STRIPE_SECRET_KEY="$(_read_secret STRIPE_SECRET_KEY)"
+QR_SIGNING_KEY="$(_read_secret QR_SIGNING_KEY)"
 KONG_RSA_PUBLIC_KEY="$(_read_secret KONG_RSA_PUBLIC_KEY)"
 X_USER_ID_SIGNING_KEY="$(_read_secret X_USER_ID_SIGNING_KEY)"
 
 # Validate required secrets are present and non-empty
-for var in RSA_PRIVATE_KEY STRIPE_SECRET_KEY KONG_RSA_PUBLIC_KEY X_USER_ID_SIGNING_KEY; do
+for var in RSA_PRIVATE_KEY STRIPE_SECRET_KEY QR_SIGNING_KEY KONG_RSA_PUBLIC_KEY X_USER_ID_SIGNING_KEY; do
   val="${!var}"
   if [[ -z "${val}" || "${val}" == "REPLACE_ME"* ]]; then
     error "${var} is not set in infra/local/secrets.env. Please fill in the real value."
@@ -122,6 +124,17 @@ docker build \
   "${REPO_ROOT}"
 minikube image load order-service:latest
 info "  Loaded order-service:latest"
+
+# attendance-service must be built from repo root — its Dockerfile resolves
+# a local replace dependency at ../../libs/grpc-stubs/go.
+info "  Building attendance-service (build context: repo root)..."
+docker build \
+  --file "${REPO_ROOT}/services/attendance-service/Dockerfile" \
+  --tag attendance-service:latest \
+  --quiet \
+  "${REPO_ROOT}"
+minikube image load attendance-service:latest
+info "  Loaded attendance-service:latest"
 
 # Build and load remaining services (parallel-safe: sequential for simplicity)
 # Using a space-separated "name:dir" list to avoid Bash 4 associative arrays
@@ -173,6 +186,7 @@ PG_AUTH_HOST="ticketing-postgres-auth"
 PG_ORDERS_HOST="ticketing-postgres-orders"
 PG_PAYMENTS_HOST="ticketing-postgres-payments"
 PG_VENUE_HOST="ticketing-postgres-venue"
+PG_ATTENDANCE_HOST="ticketing-postgres-attendance"
 PG_USERS_HOST="ticketing-postgres-users"
 MONGO_HOST="ticketing-mongodb"
 REDIS_HOST="ticketing-redis-master"
@@ -183,6 +197,7 @@ PG_AUTH_PASS="auth-local-secret"
 PG_ORDERS_PASS="orders-local-secret"
 PG_PAYMENTS_PASS="payments-local-secret"
 PG_VENUE_PASS="venue-local-secret"
+PG_ATTENDANCE_PASS="attendance-local-secret"
 PG_USERS_PASS="users-local-secret"
 
 # Helper: create or replace a secret (delete + recreate for idempotency)
@@ -244,6 +259,14 @@ apply_secret venue-service-secrets \
   --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092" \
   --from-literal=X_USER_ID_SIGNING_KEY="${X_USER_ID_SIGNING_KEY}"
 
+# attendance-service-secrets
+apply_secret attendance-service-secrets \
+  --from-literal=DATABASE_URL="postgresql://attendance_user:${PG_ATTENDANCE_PASS}@${PG_ATTENDANCE_HOST}:5432/attendance_db" \
+  --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092" \
+  --from-literal=QR_SIGNING_KEY="${QR_SIGNING_KEY}" \
+  --from-literal=TICKET_SERVICE_URL="ticketing-ticket-service.ticketing.svc.cluster.local:50051" \
+  --from-literal=X_USER_ID_SIGNING_KEY="${X_USER_ID_SIGNING_KEY}"
+
 # user-service-secrets
 apply_secret user-service-secrets \
   --from-literal=DATABASE_URL="postgresql://users_user:${PG_USERS_PASS}@${PG_USERS_HOST}:5432/users_db" \
@@ -279,6 +302,7 @@ helm upgrade --install ticketing "${HELM_CHART}" \
   --set "order-service.secretRef=order-service-secrets" \
   --set "payment-service.secretRef=payment-service-secrets" \
   --set "expiration-service.secretRef=expiration-service-secrets" \
+  --set "attendance-service.secretRef=attendance-service-secrets" \
   --set "venue-service.secretRef=venue-service-secrets" \
   --set "user-service.secretRef=user-service-secrets" \
   --timeout 10m \

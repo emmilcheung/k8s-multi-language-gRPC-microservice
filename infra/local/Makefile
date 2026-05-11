@@ -17,7 +17,8 @@
 #
 # First-time setup (run from the repo root):
 #   1. cp infra/local/secrets.env.example infra/local/secrets.env
-#   2. Fill in RSA_PRIVATE_KEY, KONG_RSA_PUBLIC_KEY, STRIPE_SECRET_KEY
+#   2. Fill in RSA_PRIVATE_KEY, KONG_RSA_PUBLIC_KEY, X_USER_ID_SIGNING_KEY,
+#      STRIPE_SECRET_KEY, QR_SIGNING_KEY
 #   3. make -C infra/local up   (or: cd infra/local && make up)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -49,7 +50,7 @@ CP_KAFKA_IMG   := confluentinc/cp-kafka:7.7.1
 KONG_IMG       := kong:3.9
 
 # ── Phony targets ─────────────────────────────────────────────────────────────
-.PHONY: help up deploy build build-order build-ticket build-services load-infra-images \
+.PHONY: help up deploy build build-order build-ticket build-attendance build-services load-infra-images \
         secrets kong-config helm-upgrade \
         tunnel status logs restart \
         down stop clean
@@ -104,7 +105,7 @@ deploy: _check-secrets secrets kong-config helm-upgrade
 # ─────────────────────────────────────────────────────────────────────────────
 ## build : Build all service Docker images and load them into minikube
 # ─────────────────────────────────────────────────────────────────────────────
-build: build-order build-ticket build-services build-venue
+build: build-order build-ticket build-attendance build-services build-venue
 	@echo "All images loaded into minikube."
 
 # order-service uses the repo root as its Docker build context (copies /proto)
@@ -130,6 +131,18 @@ build-ticket:
 		$(REPO_ROOT)
 	@minikube image load --overwrite ticket-service:latest
 	@echo "  Loaded ticket-service:latest"
+
+# attendance-service uses the repo root as its Docker build context because its
+# go.mod has a replace directive pointing to ../../libs/grpc-stubs/go.
+build-attendance:
+	@echo "  Building attendance-service (context: repo root)..."
+	@docker build \
+		--file $(REPO_ROOT)/services/attendance-service/Dockerfile \
+		--tag attendance-service:latest \
+		--quiet \
+		$(REPO_ROOT)
+	@minikube image load --overwrite attendance-service:latest
+	@echo "  Loaded attendance-service:latest"
 
 # All other services use their own directory as the build context
 build-services:
@@ -203,6 +216,8 @@ secrets: _check-secrets _namespace
 	@echo "Creating Kubernetes secrets..."
 	@RSA_PRIVATE_KEY='$(call _secret,RSA_PRIVATE_KEY)' \
 	STRIPE_SECRET_KEY='$(call _secret,STRIPE_SECRET_KEY)' \
+	QR_SIGNING_KEY='$(call _secret,QR_SIGNING_KEY)' \
+	X_USER_ID_SIGNING_KEY='$(call _secret,X_USER_ID_SIGNING_KEY)' \
 	 bash -c '\
 		_apply() { \
 			kubectl delete secret "$$1" -n $(NAMESPACE) --ignore-not-found=true 2>/dev/null; \
@@ -216,18 +231,21 @@ secrets: _check-secrets _namespace
 			--from-literal=JWT_EXPIRY="15m" \
 			--from-literal=COOKIE_DOMAIN="localhost" \
 			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092" \
-			--from-literal=REDIS_URL="redis://ticketing-redis-master:6379"; \
+			--from-literal=REDIS_URL="redis://ticketing-redis-master:6379" \
+			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
 		\
 		_apply ticket-service-secrets \
 			--from-literal=MONGO_URI="mongodb://mongo_user:mongo-local-secret@ticketing-mongodb:27017/tickets?authSource=admin" \
 			--from-literal=MONGO_DB="tickets" \
-			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092"; \
+			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092" \
+			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
 		\
 		_apply venue-service-secrets \
 			--from-literal=DATABASE_URL="postgres://venue_user:venue-local-secret@ticketing-postgres-venue:5432/venue_db?sslmode=disable" \
 			--from-literal=REDIS_URL="redis://ticketing-redis-master:6379" \
 			--from-literal=TICKET_SERVICE_URL="ticketing-ticket-service.ticketing.svc.cluster.local:50051" \
-			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092"; \
+			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092" \
+			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
 		\
 		_apply order-service-secrets \
 			--from-literal=SPRING_DATASOURCE_URL="jdbc:postgresql://ticketing-postgres-orders:5432/orders_db" \
@@ -236,17 +254,26 @@ secrets: _check-secrets _namespace
 			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092" \
 			--from-literal=TICKET_SERVICE_GRPC_HOST="ticketing-ticket-service.ticketing.svc.cluster.local" \
 			--from-literal=TICKET_SERVICE_GRPC_PORT="50051" \
-			--from-literal=ORDER_EXPIRATION_MINUTES="15"; \
+			--from-literal=ORDER_EXPIRATION_MINUTES="15" \
+			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
 		\
 		_apply payment-service-secrets \
 			--from-literal=DATABASE_URL="postgresql://payments_user:payments-local-secret@ticketing-postgres-payments:5432/payments_db" \
 			--from-literal=STRIPE_SECRET_KEY="$$STRIPE_SECRET_KEY" \
 			--from-literal=STRIPE_WEBHOOK_SECRET="whsec_test_placeholder" \
-			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092"; \
+			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092" \
+			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
 		\
 		_apply expiration-service-secrets \
 			--from-literal=REDIS_ADDR="ticketing-redis-master:6379" \
 			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092"; \
+		\
+		_apply attendance-service-secrets \
+			--from-literal=DATABASE_URL="postgresql://attendance_user:attendance-local-secret@ticketing-postgres-attendance:5432/attendance_db" \
+			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092" \
+			--from-literal=QR_SIGNING_KEY="$$QR_SIGNING_KEY" \
+			--from-literal=TICKET_SERVICE_URL="ticketing-ticket-service.ticketing.svc.cluster.local:50051" \
+			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
 		\
 		_apply user-service-secrets \
 			--from-literal=DATABASE_URL="postgresql://users_user:users-local-secret@ticketing-postgres-users:5432/users_db" \
@@ -282,6 +309,7 @@ helm-upgrade: _namespace
 		--set "order-service.secretRef=order-service-secrets" \
 		--set "payment-service.secretRef=payment-service-secrets" \
 		--set "expiration-service.secretRef=expiration-service-secrets" \
+		--set "attendance-service.secretRef=attendance-service-secrets" \
 		--set "user-service.secretRef=user-service-secrets" \
 		--timeout 10m \
 		--wait
@@ -309,7 +337,7 @@ status:
 logs:
 ifndef SVC
 	@echo "Usage: make logs SVC=<service-name>"
-	@echo "Available services: auth-service ticket-service order-service payment-service expiration-service client"
+	@echo "Available services: auth-service ticket-service order-service payment-service expiration-service attendance-service client"
 else
 	@kubectl logs -n $(NAMESPACE) deploy/ticketing-$(SVC) -c $(SVC) --follow
 endif
@@ -321,7 +349,7 @@ endif
 restart:
 ifndef SVC
 	@echo "Usage: make restart SVC=<service-name>"
-	@echo "Available services: auth-service ticket-service order-service payment-service expiration-service client"
+	@echo "Available services: auth-service ticket-service order-service payment-service expiration-service attendance-service client"
 else
 	@kubectl rollout restart deployment/ticketing-$(SVC) -n $(NAMESPACE)
 	@kubectl rollout status deployment/ticketing-$(SVC) -n $(NAMESPACE)

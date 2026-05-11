@@ -27,6 +27,14 @@ function makeAuthService(overrides: Partial<AuthService> = {}): AuthService {
       email: 'user@example.com',
       jti: 'jti-1',
     }),
+    lookupUserByEmail: vi.fn().mockResolvedValue({
+      id: 'buyer-uuid-1',
+      email: 'buyer@example.com',
+    }),
+    lookupUserByID: vi.fn().mockResolvedValue({
+      id: 'buyer-uuid-1',
+      email: 'buyer@example.com',
+    }),
     issueAccessTokenForUser: vi.fn().mockResolvedValue('new.access.token'),
     getJwks: vi.fn().mockReturnValue({ keys: [{ kid: 'key-1' }] }),
     ...overrides,
@@ -532,6 +540,39 @@ describe('AuthController', () => {
       const result = await controller.currentUser(req);
 
       expect(result).toEqual({ currentUser: null });
+    });
+  });
+
+  describe('lookupUser', () => {
+    it('should return user by email for authenticated requests', async () => {
+      const { controller, authService } = makeController();
+      const req = makeReq({ cookies: { token: 'access.token' } });
+
+      const result = await controller.lookupUser(
+        req,
+        'buyer@example.com',
+        undefined,
+      );
+
+      expect(authService.lookupUserByEmail).toHaveBeenCalledWith(
+        'buyer@example.com',
+      );
+      expect(result).toEqual({
+        user: { id: 'buyer-uuid-1', email: 'buyer@example.com' },
+      });
+    });
+
+    it('should throw NotFoundException when lookup misses', async () => {
+      const { controller } = makeController({
+        authService: {
+          lookupUserByEmail: vi.fn().mockResolvedValue(null),
+        },
+      });
+      const req = makeReq({ cookies: { token: 'access.token' } });
+
+      await expect(
+        controller.lookupUser(req, 'missing@example.com', undefined),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 

@@ -91,6 +91,11 @@ function parseOptionalPositiveInt(raw: string | null): number | undefined {
   return n;
 }
 
+function parseRequireQrForEntry(raw: string | null): boolean {
+  if (!raw) return true;
+  return raw.toLowerCase() !== "false";
+}
+
 async function linkSeatingPlanToTicket(
   ticketId: string,
   title: string,
@@ -115,6 +120,19 @@ async function linkSeatingPlanToTicket(
   return errBody?.error?.message ?? "Failed to attach seating plan to ticket.";
 }
 
+async function upsertAttendanceSettings(eventId: string, requireQrForEntry: boolean): Promise<string | null> {
+  const response = await fetch(`${base()}/api/attendance/events/${eventId}/settings`, {
+    method: "PATCH",
+    headers: await authHeaders(),
+    body: JSON.stringify({ requireQrForEntry }),
+  });
+
+  if (response.ok) return null;
+
+  const errBody = await response.json().catch(() => ({}));
+  return errBody?.error?.message ?? "Failed to save attendance settings.";
+}
+
 // ─── Mutations ────────────────────────────────────────────────────────────────
 
 /**
@@ -133,6 +151,7 @@ export async function createTicket(
   const priceNum = parseFloat(priceRaw);
   const ticketType = (formData.get("ticketType") as string | null) ?? "";
   const pricingMode = (formData.get("pricingMode") as string | null) ?? "single";
+  const requireQrForEntry = parseRequireQrForEntry(formData.get("requireQrForEntry") as string | null);
 
   // GA-specific
   const quota = parseOptionalPositiveInt(formData.get("quota") as string | null);
@@ -248,6 +267,11 @@ export async function createTicket(
     }
   }
 
+  const attendanceError = await upsertAttendanceSettings(ticket.id, requireQrForEntry);
+  if (attendanceError) {
+    return { error: attendanceError };
+  }
+
   revalidatePath("/");
   revalidatePath(`/tickets/${ticket.id}`);
   redirect(`/tickets/${ticket.id}`);
@@ -270,6 +294,7 @@ export async function updateTicket(
   const eventImageUrl = (formData.get("eventImageUrl") as string)?.trim() || "";
   const venueName = (formData.get("venueName") as string)?.trim() || "";
   const venueAddress = (formData.get("venueAddress") as string)?.trim() || "";
+  const requireQrForEntry = parseRequireQrForEntry(formData.get("requireQrForEntry") as string | null);
 
   if (!title?.trim()) return { error: "Title is required." };
   if (!priceRaw || isNaN(priceNum) || priceNum <= 0) return { error: "Price must be a positive number." };
@@ -311,6 +336,11 @@ export async function updateTicket(
     // ticket-service: { error: { message: "..." } }; Kong: { message: "..." }
     const errMsg = errBody?.error?.message ?? errBody?.message ?? "Failed to update ticket.";
     return { error: errMsg };
+  }
+
+  const attendanceError = await upsertAttendanceSettings(ticketId, requireQrForEntry);
+  if (attendanceError) {
+    return { error: attendanceError };
   }
 
   revalidatePath(`/tickets/${ticketId}`);
@@ -393,4 +423,3 @@ export async function replaceInactivePlan(
   revalidatePath(`/tickets/${ticketId}/plans/${replacementPlan.id}`);
   redirect(`/tickets/${ticketId}/plans/${replacementPlan.id}`);
 }
-

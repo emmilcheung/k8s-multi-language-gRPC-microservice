@@ -191,6 +191,26 @@ venue-service:
       cpu: 500m
       memory: 256Mi
 
+# ── attendance-service ───────────────────────────────────────────────────────
+attendance-service:
+  replicaCount: 2
+  image:
+    repository: attendance-service
+    tag: "SET_BY_CI"  # overridden to git SHA at deploy time; never use latest in any env (I-04)
+  env:
+    APP_ENV: production
+    HTTP_PORT: "3007"
+    LOG_LEVEL: info
+    TICKET_SERVICE_URL: "ticket-service:50051"
+  secretRef: attendance-service-secrets
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 # ── postgres-auth (Bitnami PostgreSQL) ────────────────────────────────────────
 postgres-auth:
   auth:
@@ -254,6 +274,25 @@ postgres-venue:
     database: venue_db
     username: venue_user
     existingSecret: postgres-venue-secret
+    secretKeys:
+      userPasswordKey: password
+  primary:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  metrics:
+    enabled: true
+
+# ── postgres-attendance (Bitnami PostgreSQL) ──────────────────────────────────
+postgres-attendance:
+  auth:
+    database: attendance_db
+    username: attendance_user
+    existingSecret: postgres-attendance-secret
     secretKeys:
       userPasswordKey: password
   primary:

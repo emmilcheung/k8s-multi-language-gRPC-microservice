@@ -26,6 +26,10 @@ expiration-service:
   networkPolicy:
     enabled: true
 
+attendance-service:
+  networkPolicy:
+    enabled: true
+
 client:
   networkPolicy:
     enabled: true

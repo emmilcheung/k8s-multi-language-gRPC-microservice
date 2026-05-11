@@ -237,9 +237,17 @@ export default async function OrderDetailPage({ params }: Props) {
 
           {/* Success message */}
           {order.status === "complete" && (
-            <div className="flex items-center gap-2 bg-emerald-400/8 border border-emerald-400/20 rounded-xl px-4 py-3 text-sm text-emerald-400">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              Payment received — enjoy the event!
+            <div className="flex flex-col gap-3 bg-emerald-400/8 border border-emerald-400/20 rounded-xl px-4 py-3 text-sm text-emerald-400">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                Payment received — enjoy the event!
+              </div>
+              <Link
+                href={`/tickets/${order.ticket.id}/admission?orderId=${order.id}`}
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
+              >
+                Open Admission Pass
+              </Link>
             </div>
           )}
         </div>

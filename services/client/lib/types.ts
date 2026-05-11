@@ -213,6 +213,77 @@ export interface Payment {
   status: string;
 }
 
+export interface AttendanceSettings {
+  eventId: string;
+  requireQrForEntry: boolean;
+  allowManualOverride: boolean;
+}
+
+export interface AttendanceSummary {
+  eventId: string;
+  totalAdmitted: number;
+  totalDenied: number;
+  totalCheckedIn: number;
+}
+
+export interface AttendanceCheckInItem {
+  credentialId: string;
+  ticketId: string;
+  orderId: string;
+  eventId: string;
+  status: "ISSUED" | "USED" | "REVOKED" | "EXPIRED";
+  buyerUserId?: string;
+  checkedInAt?: string;
+  checkedInByUserId?: string;
+  checkedInByDeviceId?: string;
+}
+
+export interface AttendanceCheckInList {
+  eventId: string;
+  items: AttendanceCheckInItem[];
+}
+
+export interface UserLookupResponse {
+  user: {
+    id: string;
+    email: string;
+  };
+}
+
+export interface AdmissionPass {
+  id: string;
+  ticketId: string;
+  orderId: string;
+  eventId: string;
+  status: "ISSUED" | "USED" | "REVOKED" | "EXPIRED";
+  issuedAt: string;
+  usedAt?: string;
+  qrToken?: string;
+}
+
+export type ScannerResultClass =
+  | "valid"
+  | "already_used"
+  | "revoked"
+  | "invalid_signature"
+  | "wrong_event"
+  | "not_found"
+  | "policy_block";
+
+export interface ScannerRequest {
+  token: string;
+  eventId: string;
+  deviceId: string;
+  gateId?: string;
+}
+
+export interface ScannerResponse {
+  result: ScannerResultClass;
+  credentialId?: string;
+  eventId?: string;
+  status?: "ISSUED" | "USED" | "REVOKED" | "EXPIRED";
+}
+
 export interface ApiErrorBody {
   error: {
     code: string;

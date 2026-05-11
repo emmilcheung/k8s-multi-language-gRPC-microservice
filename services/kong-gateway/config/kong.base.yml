@@ -10,12 +10,14 @@
 # Route layout (mirrors AGENTS.md §2.1):
 #   POST /api/users/signup|signin|signout  → auth-service   (public)
 #   GET  /api/users/currentuser            → auth-service   (JWT required)
+#   GET  /api/users/lookup                 → auth-service   (JWT required)
 #   GET  /.well-known/jwks.json            → auth-service   (public)
 #   GET  /api/tickets/*                    → ticket-service (public)
 #   *    /api/tickets/*                    → ticket-service (JWT required)
 #   *    /api/orders/*                     → order-service  (JWT required)
 #   *    /api/payments/*                   → payment-service (JWT required)
 #   *    /api/user-settings/*              → user-service   (JWT required)
+#   *    /api/attendance/*                 → attendance-service (JWT required)
 #   /*                                     → client         (catch-all, no JWT)
 #
 # Auth strategy:
@@ -170,6 +172,25 @@ services:
       - name: auth-currentuser
         paths:
           - /api/users/currentuser
+        methods: [GET]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+
+      # Protected: user lookup for internal tooling (scanner email fallback)
+      - name: auth-user-lookup
+        paths:
+          - /api/users/lookup
         methods: [GET]
         strip_path: false
         plugins:
@@ -739,6 +760,54 @@ services:
                   -- Setting it here in header_filter ensures nginx sees it on
                   -- every response from this route (K-SSE-01).
                   ngx.header["X-Accel-Buffering"] = "no"
+
+  # ── attendance-service ────────────────────────────────────────────────────────
+  - name: attendance-service
+    url: http://{{HOST_ATTENDANCE}}
+    connect_timeout: {{CONNECT_TIMEOUT_MS}}
+    read_timeout: {{READ_TIMEOUT_MS}}
+    write_timeout: {{WRITE_TIMEOUT_MS}}
+    routes:
+      # Scanner endpoints use tighter rate limits than catalog paths.
+      - name: attendance-scan
+        paths:
+          - ~/api/attendance/scan/(validate|check-in|check-in-user)$
+        methods: [POST]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
+          - name: rate-limiting
+            config:
+              minute: {{RATE_LIMIT_ATTENDANCE_SCAN_PER_MINUTE}}
+              policy: {{RATE_LIMIT_POLICY}}
+
+      - name: attendance-api
+        paths:
+          - ~/api/attendance/.*$
+        methods: [GET, POST, PATCH]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{JWT_SUB_LUA}}
 
   # ── apollo-router (GraphQL Federation gateway) ───────────────────────────────
   - name: apollo-router

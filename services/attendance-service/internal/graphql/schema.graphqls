@@ -1,0 +1,41 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key"])
+
+type AdmissionPass @key(fields: "id") {
+  id: ID!
+  ticketId: ID!
+  orderId: ID!
+  eventId: ID!
+  status: CredentialStatus!
+  issuedAt: String!
+  usedAt: String
+}
+
+type AttendancePolicy {
+  eventId: ID!
+  requireQrForEntry: Boolean!
+  allowManualOverride: Boolean!
+}
+
+type AttendanceSummary {
+  eventId: ID!
+  totalAdmitted: Int!
+  totalDenied: Int!
+  totalCheckedIn: Int!
+}
+
+enum CredentialStatus {
+  ISSUED
+  USED
+  REVOKED
+  EXPIRED
+}
+
+type Query {
+  # Buyer: get admission pass by ticketId (optionally filtered by orderId)
+  admissionPass(ticketId: ID!, orderId: ID): AdmissionPass
+  # Organizer: get attendance policy for an event
+  attendancePolicy(eventId: ID!): AttendancePolicy
+  # Organizer: get attendance summary for an event
+  attendanceSummary(eventId: ID!): AttendanceSummary
+}

@@ -109,6 +109,8 @@ export default async function TicketDetailPage({ params }: Props) {
   // quota-based reserved counter is > 0 (meaning at least one active reservation exists).
   const isReserved = !isSeated && (Boolean(ticket.orderId) || (ticket.reserved != null && ticket.reserved > 0));
   const updateAction = updateTicket.bind(null, ticketId);
+  let defaultRequireQrForEntry = true;
+  const attendanceLocked = (ticket.sold ?? 0) > 0;
 
   // When a plan is already attached, fetch its full details (sections included)
   // so the organizer can see a read-only preview of what is attached.
@@ -130,6 +132,15 @@ export default async function TicketDetailPage({ params }: Props) {
     }
     if (isOwner && results[2]?.status === "fulfilled") {
       attachedPlanTiers = results[2].value as PriceTier[];
+    }
+  }
+
+  if (isOwner) {
+    const settings = await serverApi<{ requireQrForEntry?: boolean }>(
+      `/api/attendance/events/${ticketId}/settings`
+    ).catch(() => null);
+    if (settings && typeof settings.requireQrForEntry === "boolean") {
+      defaultRequireQrForEntry = settings.requireQrForEntry;
     }
   }
 
@@ -323,25 +334,50 @@ export default async function TicketDetailPage({ params }: Props) {
           {isOwner ? (
             /* Owner: edit form + seating plan attachment */
             <div className="flex flex-col gap-4">
+              <div className="bg-card border border-border rounded p-4 flex flex-col gap-3">
+                <p className="text-sm font-semibold">Attendance tools</p>
+                <p className="text-xs text-muted-foreground">
+                  Open attendance settings to view checked-in attendees and manage QR policy for this ticket.
+                </p>
+                <Link
+                  href={`/tickets/${ticketId}/attendance`}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
+                >
+                  Attendance settings
+                </Link>
+                {defaultRequireQrForEntry && (
+                  <Link
+                    href={`/scan?eventId=${ticketId}`}
+                    className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
+                  >
+                    Open Scanner Console
+                  </Link>
+                )}
+              </div>
+
               {!isReserved ? (
-                <TicketForm
-                  action={updateAction}
-                  defaultTitle={ticket.title}
-                  defaultPrice={ticket.price}
-                  defaultQuota={ticket.quota}
-                  defaultMaxPerUser={ticket.maxPerUser}
-                  defaultTicketType={(ticket.ticketType as "GA" | "SEATED_MANUAL" | "SEATED_AUTO") ?? "GA"}
-                  defaultVenueId={attachedPlan?.venueId ?? undefined}
-                  defaultPricingMode={attachedPlan?.pricingMode}
-                  defaultStartsAt={toDateTimeLocalInput(ticket.event?.startsAt)}
-                  defaultEndsAt={toDateTimeLocalInput(ticket.event?.endsAt)}
-                  defaultEventTitle={ticket.event?.title ?? ""}
-                  defaultEventDescription={ticket.event?.description ?? ""}
-                  defaultEventImageUrl={ticket.event?.imageUrl ?? ""}
-                  defaultVenueName={ticket.event?.venueName ?? ""}
-                  defaultVenueAddress={ticket.event?.venueAddress ?? ""}
-                  submitLabel="Update Ticket"
-                />
+                <div className="flex flex-col gap-3">
+                  <TicketForm
+                    action={updateAction}
+                    defaultTitle={ticket.title}
+                    defaultPrice={ticket.price}
+                    defaultQuota={ticket.quota}
+                    defaultMaxPerUser={ticket.maxPerUser}
+                    defaultTicketType={(ticket.ticketType as "GA" | "SEATED_MANUAL" | "SEATED_AUTO") ?? "GA"}
+                    defaultVenueId={attachedPlan?.venueId ?? undefined}
+                    defaultPricingMode={attachedPlan?.pricingMode}
+                    defaultStartsAt={toDateTimeLocalInput(ticket.event?.startsAt)}
+                    defaultEndsAt={toDateTimeLocalInput(ticket.event?.endsAt)}
+                    defaultEventTitle={ticket.event?.title ?? ""}
+                    defaultEventDescription={ticket.event?.description ?? ""}
+                    defaultEventImageUrl={ticket.event?.imageUrl ?? ""}
+                    defaultVenueName={ticket.event?.venueName ?? ""}
+                    defaultVenueAddress={ticket.event?.venueAddress ?? ""}
+                    defaultRequireQrForEntry={defaultRequireQrForEntry}
+                    attendanceLocked={attendanceLocked}
+                    submitLabel="Update Ticket"
+                  />
+                </div>
               ) : (
                 <div className="bg-card border border-border rounded shadow-sm p-6 flex flex-col gap-3">
                   <p className="font-semibold">Your listing</p>

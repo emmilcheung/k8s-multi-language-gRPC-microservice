@@ -1,0 +1,6 @@
+apiVersion: v2
+name: attendance-service
+description: Attendance boundary service for QR admission, scan validation, and check-in.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

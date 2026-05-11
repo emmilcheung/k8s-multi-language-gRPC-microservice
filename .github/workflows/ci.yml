@@ -844,8 +844,8 @@ jobs:
     timeout-minutes: 20
     needs: [changes, auth, client, expiration, kong, order, payment, proto, ticket, user, venue]
     env:
-      E2E_INFRA_SERVICES: postgres-auth postgres-orders postgres-payments mongodb redis kafka schema-registry
-      E2E_APP_SERVICES: auth-service ticket-service venue-service order-service payment-service expiration-service user-service
+      E2E_INFRA_SERVICES: postgres-auth postgres-orders postgres-payments postgres-attendance mongodb redis kafka schema-registry
+      E2E_APP_SERVICES: auth-service ticket-service venue-service order-service payment-service expiration-service user-service attendance-service
     # Only run when:
     #   - The event is a pull_request (not a push to main)
     #   - Not a docs-only change (skip-ci == false)
@@ -871,12 +871,14 @@ jobs:
             printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY"
             printf 'KONG_RSA_PUBLIC_KEY="%b"\n' "$KONG_RSA_PUBLIC_KEY"
             printf 'X_USER_ID_SIGNING_KEY=%s\n' "$X_USER_ID_SIGNING_KEY"
+            printf 'QR_SIGNING_KEY=%s\n' "${QR_SIGNING_KEY:-ci_qr_signing_key_32_bytes_minimum_length_value}"
           } > .env
         env:
           RSA_PRIVATE_KEY: ${{ secrets.RSA_PRIVATE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           KONG_RSA_PUBLIC_KEY: ${{ secrets.KONG_RSA_PUBLIC_KEY }}
           X_USER_ID_SIGNING_KEY: ${{ secrets.X_USER_ID_SIGNING_KEY }}
+          QR_SIGNING_KEY: ${{ secrets.QR_SIGNING_KEY }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

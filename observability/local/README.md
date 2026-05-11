@@ -44,6 +44,13 @@ Use the same operator sequence every time so investigation starts with the highe
 4. Check Jaeger traces after narrowing the problem surface to confirm whether the break is ingress, a synchronous dependency hop, or async propagation.
 5. Check service logs only after the target, RED, and trace views tell you which service and time window matter.
 
+For attendance workflows, check these service metrics:
+
+- `attendance_scan_validations_total` by `result`
+- `attendance_scan_checkins_total` by `result`
+- `attendance_issuance_total`
+- `attendance_issuance_latency_seconds` (p95)
+
 ## Alert rules
 
 Prometheus now evaluates repo-managed rule files from `observability/local/prometheus/`.
@@ -145,4 +152,5 @@ collector is available again.
   is not yet configured to emit trace spans to Jaeger.
 - Order and payment outbox relays now persist trace headers with each outbox row
   so delayed publishes continue the original trace instead of starting a new one.
+- Attendance scan audit rows in `scan_events` store only hashed token material (`raw_token_hash`), never the raw QR payload.
 - The same OTLP boundary is intended to be reused later for AMP/AMG/X-Ray in AWS.
