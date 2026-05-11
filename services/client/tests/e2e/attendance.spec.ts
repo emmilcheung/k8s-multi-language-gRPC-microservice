@@ -319,6 +319,17 @@ test(
     });
     const ticketId = page.url().split("/tickets/")[1]!.split("/")[0]!;
 
+    // Manual email fallback is policy-gated; enable it before any sale locks settings.
+    await page.goto(`/tickets/${ticketId}/attendance`);
+    const manualOverrideToggle = page.getByLabel(/allow manual override/i);
+    await expect(manualOverrideToggle).toBeVisible({ timeout: 10_000 });
+    await manualOverrideToggle.check();
+    await page.getByRole("button", { name: /save settings/i }).click();
+    await expect(page.getByText(/settings saved\./i)).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(manualOverrideToggle).toBeChecked();
+
     await signout(page);
     await signup(page, buyerEmail);
 
@@ -350,7 +361,7 @@ test(
     await page.getByLabel(/buyer email/i).fill(buyerEmail);
     await expect(async () => {
       await page.getByRole("button", { name: /check in by email/i }).click();
-      await expect(page.getByText(/checked in/i)).toBeVisible({
+      await expect(page.getByText(/^checked in\.$/i)).toBeVisible({
         timeout: 5_000,
       });
     }).toPass({ timeout: 30_000, intervals: [2000, 3000, 5000] });
