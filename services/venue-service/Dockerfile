@@ -1,7 +1,7 @@
 # Stage 1: build — Debian (glibc) required by confluent-kafka-go vendored librdkafka
 # Build context must be the repo root (not the service directory) because
 # go.mod has a replace directive pointing to ../../libs/grpc-stubs/go.
-FROM golang:1.25-bookworm@sha256:29e59af995c51a5bf63d072eca973b918e0e7af4db0e4667aa73f1b8da1a6d8c AS builder
+FROM golang:1.25-bookworm@sha256:e3a54b77385b4f8a31c1db4d12429ffb3718ea76865731a787c497755d409547 AS builder
 
 # Install build dependencies needed by confluent-kafka-go (CGO-based)
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*

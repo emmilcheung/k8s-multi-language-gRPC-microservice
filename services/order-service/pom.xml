@@ -7,7 +7,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>4.0.2</version>
+    <version>4.0.6</version>
     <relativePath/>
   </parent>
 
@@ -24,12 +24,12 @@
     <testcontainers.version>1.21.4</testcontainers.version>
     <logback.version>1.5.32</logback.version>
     <logstash-logback.version>8.0</logstash-logback.version>
-    <postgresql.version>42.7.7</postgresql.version>
+    <postgresql.version>42.7.11</postgresql.version>
     <!-- Security patches -->
     <!-- CVE-2026-29145/34500/34487/34483/29146/24880/24734/32990/25854: Tomcat multiple CVEs -->
     <tomcat.version>11.0.21</tomcat.version>
-    <!-- CVE-2026-22737, CVE-2026-22735: spring-webmvc info disclosure + SSE corruption -->
-    <spring-framework.version>7.0.6</spring-framework.version>
+    <!-- CVE-2026-22737/22735/22745/22741: spring-webmvc info disclosure + SSE corruption -->
+    <spring-framework.version>7.0.7</spring-framework.version>
   </properties>
 
   <dependencyManagement>
