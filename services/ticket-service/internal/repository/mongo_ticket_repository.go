@@ -396,7 +396,7 @@ func ensureCollectionSchema(ctx context.Context, db *mongo.Database, coll *mongo
 		}},
 	}
 	createOpts := options.CreateCollection().SetValidator(validator)
-	err := db.CreateCollection(ctx, "tickets", createOpts)
+	err := createCollectionWithRetry(ctx, db, "tickets", createOpts)
 	if err != nil {
 		var cmdErr mongo.CommandError
 		if !errors.As(err, &cmdErr) || cmdErr.Code != 48 {
@@ -413,6 +413,43 @@ func ensureCollectionSchema(ctx context.Context, db *mongo.Database, coll *mongo
 		}
 	}
 	return nil
+}
+
+// createCollectionWithRetry retries CreateCollection on transient replica-set
+// errors (no elected primary, stepdown, repl state change) for up to 10s.
+// Real replica-set failovers and Testcontainers cold-starts can briefly leave
+// the driver pointed at a non-primary node.
+func createCollectionWithRetry(ctx context.Context, db *mongo.Database, name string, opts ...options.Lister[options.CreateCollectionOptions]) error {
+	const maxWait = 10 * time.Second
+	const step = 200 * time.Millisecond
+	deadline := time.Now().Add(maxWait)
+	for {
+		err := db.CreateCollection(ctx, name, opts...)
+		if err == nil || !isTransientPrimaryError(err) || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(step):
+		}
+	}
+}
+
+func isTransientPrimaryError(err error) bool {
+	var cmdErr mongo.CommandError
+	if !errors.As(err, &cmdErr) {
+		return false
+	}
+	switch cmdErr.Code {
+	case 10107, // NotWritablePrimary
+		13435, // NotPrimaryNoSecondaryOk
+		13436, // NotPrimaryOrSecondary
+		189,   // PrimaryStepdown
+		11602: // InterruptedDueToReplStateChange
+		return true
+	}
+	return false
 }
 
 func ensureReservationCollectionSchema(ctx context.Context, db *mongo.Database, coll *mongo.Collection) error {
@@ -437,7 +474,7 @@ func ensureReservationCollectionSchema(ctx context.Context, db *mongo.Database, 
 	}
 
 	createOpts := options.CreateCollection().SetValidator(validator)
-	err := db.CreateCollection(ctx, coll.Name(), createOpts)
+	err := createCollectionWithRetry(ctx, db, coll.Name(), createOpts)
 	if err != nil {
 		var cmdErr mongo.CommandError
 		if !errors.As(err, &cmdErr) || cmdErr.Code != 48 {
