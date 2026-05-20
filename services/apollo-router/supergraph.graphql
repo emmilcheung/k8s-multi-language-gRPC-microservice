@@ -25,11 +25,40 @@ directive @link(url: String, as: String, for: link__Purpose, import: [link__Impo
 
 directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
 
+type AdmissionPass
+  @join__type(graph: ATTENDANCE, key: "id")
+{
+  id: ID!
+  ticketId: ID!
+  orderId: ID!
+  eventId: ID!
+  status: CredentialStatus!
+  issuedAt: String!
+  usedAt: String
+}
+
 enum AssignmentMode
   @join__type(graph: VENUES)
 {
   MANUAL @join__enumValue(graph: VENUES)
   AUTO @join__enumValue(graph: VENUES)
+}
+
+type AttendancePolicy
+  @join__type(graph: ATTENDANCE)
+{
+  eventId: ID!
+  requireQrForEntry: Boolean!
+  allowManualOverride: Boolean!
+}
+
+type AttendanceSummary
+  @join__type(graph: ATTENDANCE)
+{
+  eventId: ID!
+  totalAdmitted: Int!
+  totalDenied: Int!
+  totalCheckedIn: Int!
 }
 
 type BillingAddress
@@ -88,10 +117,13 @@ input CreateTicketInput
   ticketType: TicketType!
 }
 
-input CreateVenueInput
-  @join__type(graph: VENUES)
+enum CredentialStatus
+  @join__type(graph: ATTENDANCE)
 {
-  name: String!
+  ISSUED @join__enumValue(graph: ATTENDANCE)
+  USED @join__enumValue(graph: ATTENDANCE)
+  REVOKED @join__enumValue(graph: ATTENDANCE)
+  EXPIRED @join__enumValue(graph: ATTENDANCE)
 }
 
 input join__ContextArgument {
@@ -108,6 +140,7 @@ scalar join__FieldSet
 scalar join__FieldValue
 
 enum join__Graph {
+  ATTENDANCE @join__graph(name: "attendance", url: "http://attendance-service:3005/graphql")
   AUTH @join__graph(name: "auth", url: "http://auth-service:3000/graphql")
   ORDERS @join__graph(name: "orders", url: "http://order-service:8082/graphql")
   PAYMENTS @join__graph(name: "payments", url: "http://payment-service:3002/graphql")
@@ -141,15 +174,8 @@ type Mutation
   createPayment(input: CreatePaymentInput!): Payment! @join__field(graph: PAYMENTS)
   createTicket(input: CreateTicketInput!): Ticket! @join__field(graph: TICKETS)
   updateTicket(id: ID!, input: UpdateTicketInput!): Ticket! @join__field(graph: TICKETS)
-  createVenue(input: CreateVenueInput!): Venue! @join__field(graph: VENUES)
-  updateVenue(id: ID!, input: UpdateVenueInput!): Venue! @join__field(graph: VENUES)
   createSection(venueId: ID!, input: CreateSectionInput!): VenueSection! @join__field(graph: VENUES)
-  updateSection(id: ID!, input: UpdateSectionInput!): VenueSection! @join__field(graph: VENUES)
   createSeatingPlan(input: CreateSeatingPlanInput!): SeatingPlan! @join__field(graph: VENUES)
-  updateSeatingPlan(id: ID!, input: UpdateSeatingPlanInput!): SeatingPlan! @join__field(graph: VENUES)
-  activateSeatingPlan(id: ID!): SeatingPlan! @join__field(graph: VENUES)
-  deactivateSeatingPlan(id: ID!): SeatingPlan! @join__field(graph: VENUES)
-  upsertPriceTier(planId: ID!, input: PriceTierInput!): PriceTier! @join__field(graph: VENUES)
   holdSeats(planId: ID!, seatIds: [ID!]!): SeatHoldResult! @join__field(graph: VENUES)
   releaseSeats(planId: ID!, seatIds: [ID!]!): Boolean! @join__field(graph: VENUES)
 }
@@ -214,25 +240,8 @@ enum PlanStatus
   ARCHIVED @join__enumValue(graph: VENUES)
 }
 
-type PriceTier
-  @join__type(graph: VENUES)
-{
-  id: ID!
-  planId: ID!
-  name: String!
-  priceCents: Int!
-  sectionIds: [ID!]!
-}
-
-input PriceTierInput
-  @join__type(graph: VENUES)
-{
-  name: String!
-  priceCents: Int!
-  sectionIds: [ID!]!
-}
-
 type Query
+  @join__type(graph: ATTENDANCE)
   @join__type(graph: AUTH)
   @join__type(graph: ORDERS)
   @join__type(graph: PAYMENTS)
@@ -240,16 +249,16 @@ type Query
   @join__type(graph: USERS)
   @join__type(graph: VENUES)
 {
+  admissionPass(ticketId: ID!, orderId: ID): AdmissionPass @join__field(graph: ATTENDANCE)
+  attendancePolicy(eventId: ID!): AttendancePolicy @join__field(graph: ATTENDANCE)
+  attendanceSummary(eventId: ID!): AttendanceSummary @join__field(graph: ATTENDANCE)
   currentUser: User @join__field(graph: AUTH)
   order(id: ID!): Order @join__field(graph: ORDERS)
   orders: [Order!]! @join__field(graph: ORDERS)
   payment(id: ID!): Payment @join__field(graph: PAYMENTS)
   tickets: [Ticket!]! @join__field(graph: TICKETS)
   ticket(id: ID!): Ticket @join__field(graph: TICKETS)
-  venues: [Venue!]! @join__field(graph: VENUES)
-  venue(id: ID!): Venue @join__field(graph: VENUES)
   seatingPlan(id: ID!): SeatingPlan @join__field(graph: VENUES)
-  seatingPlans(venueId: ID): [SeatingPlan!]! @join__field(graph: VENUES)
 }
 
 type Seat
@@ -259,15 +268,6 @@ type Seat
   label: String!
   price: Int!
   status: SeatStatus!
-}
-
-type SeatAvailability
-  @join__type(graph: VENUES)
-{
-  available: Int!
-  held: Int!
-  sold: Int!
-  total: Int!
 }
 
 type SeatHoldResult
@@ -282,27 +282,9 @@ type SeatingPlan
   @join__type(graph: VENUES, key: "id")
 {
   id: ID!
-  venueId: ID! @join__field(graph: VENUES)
-  name: String! @join__field(graph: VENUES)
   sections: [Section!]! @join__field(graph: VENUES)
-  priceTiers: [PriceTier!]! @join__field(graph: VENUES)
-  layout: SeatLayout! @join__field(graph: VENUES)
-  availability: SeatAvailability! @join__field(graph: VENUES)
   assignmentMode: AssignmentMode! @join__field(graph: VENUES)
   status: PlanStatus! @join__field(graph: VENUES)
-}
-
-type SeatLayout
-  @join__type(graph: VENUES)
-{
-  rows: [SeatLayoutRow!]!
-}
-
-type SeatLayoutRow
-  @join__type(graph: VENUES)
-{
-  label: String!
-  seats: [Seat!]!
 }
 
 enum SeatStatus
@@ -351,22 +333,6 @@ enum TicketType
   SEATED @join__enumValue(graph: TICKETS)
 }
 
-input UpdateSeatingPlanInput
-  @join__type(graph: VENUES)
-{
-  name: String
-  assignmentMode: AssignmentMode
-}
-
-input UpdateSectionInput
-  @join__type(graph: VENUES)
-{
-  name: String
-  rowCount: Int
-  columnCount: Int
-  displayOrder: Int
-}
-
 input UpdateTicketInput
   @join__type(graph: TICKETS)
 {
@@ -374,12 +340,6 @@ input UpdateTicketInput
   price: Int
   quota: Int
   maxPerUser: Int
-}
-
-input UpdateVenueInput
-  @join__type(graph: VENUES)
-{
-  name: String
 }
 
 type User
@@ -409,18 +369,6 @@ type UserProfile
   locale: String
   timezone: String
   billingAddress: BillingAddress @tag(name: "pii")
-}
-
-type Venue
-  @join__type(graph: VENUES, key: "id")
-{
-  id: ID!
-  name: String!
-  ownerId: ID!
-  sections: [VenueSection!]!
-  seatingPlans: [SeatingPlan!]!
-  createdAt: String!
-  updatedAt: String!
 }
 
 type VenueSection
