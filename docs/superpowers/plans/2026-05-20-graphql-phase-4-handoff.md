@@ -21,7 +21,7 @@ Phase 1 (client foundation) and most of Phase 2/3 (SDL + resolvers for user, aut
 5. **Every mutation resolver call from the client must go through Kong** (existing `executeMutation` already does this).
 6. **For each migrated page/action, delete the now-unused REST URL helper** in `lib/api.ts` only if no other caller remains. Run `grep -r "the-removed-url"` first.
 7. **No new dependencies** without justification. urql + graphql-codegen already installed.
-8. **Run after every domain PR:** `pnpm lint && pnpm tsc --noEmit && pnpm test`. E2E (`pnpm test:e2e`) at end of Phase 4.
+8. **Run the relevant service checks after every domain PR.** For client/TypeScript changes: `pnpm lint && pnpm tsc --noEmit && pnpm test`. For Go/Spring work, use the service-specific commands in Phase 6. E2E (`pnpm test:e2e`) stays the end-of-Phase-4 gate.
 9. **Match existing code style.** Re-use `getValidAccessToken()` and cookie-forwarding patterns already in `lib/server-utils.ts` and `lib/graphql/execute.ts`.
 
 ## Pattern to follow (already shipped — copy this shape)
@@ -182,8 +182,8 @@ return { data: data.createOrder };
 
 **Work:**
 - Add `@SchemaMapping(typeName = "Order", field = "payment")` returning a federation reference keyed by `orderId`: `Map.of("__typename", "Payment", "orderId", order.getId().toString())`. Do **not** add `paymentId` persistence to order-service for this branch.
-- Add `@MutationMapping createSeatedOrder` — delegate to existing `OrderService.createSeated(...)` (the same call backing `POST /api/orders/seated`). Apply existing `UserIdInterceptor` for signature validation.
-- Update `OrderGraphqlControllerTest` (mockito) with assertions for both new methods.
+- Add `@MutationMapping createSeatedOrder` — delegate to existing `OrderService.createSeatedOrder(...)` (the same call backing `POST /api/orders/seated`). Apply existing `UserIdInterceptor` for signature validation.
+- Update `OrderControllerTest` (mockito) with assertions for both new methods.
 - Run `mvn -q test`.
 
 ### R2. venue-service — full CRUD (Go gqlgen)  ★ largest
