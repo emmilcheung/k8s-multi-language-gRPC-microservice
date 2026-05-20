@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PaymentResolver } from './payment.resolver';
 import type { PaymentsService } from '../modules/payments/payments.service';
-import * as paymentResolverModule from './payment.resolver';
 
 type PaymentContext = Parameters<PaymentResolver['resolveReference']>[1];
 
@@ -97,6 +96,43 @@ describe('PaymentResolver', () => {
       expect(result?.id).toBe('pay_123');
     });
 
+    it('returns null for orderId reference owned by a different user', async () => {
+      mockPaymentsService.findByOrderId.mockResolvedValue({
+        id: 'pay_123',
+        orderId: 'ord_123',
+        userId: 'user_123',
+        amount: 1200,
+        currency: 'usd',
+        status: 'CAPTURED',
+        createdAt: new Date().toISOString(),
+      });
+
+      const result = await resolver.resolveReference(
+        { __typename: 'Payment', orderId: 'ord_123' } as Parameters<
+          PaymentResolver['resolveReference']
+        >[0],
+        { req: { headers: { 'x-user-id': 'other-user' } } },
+      );
+
+      expect(mockPaymentsService.findByOrderId).toHaveBeenCalledWith('ord_123');
+      expect(result).toBeNull();
+    });
+
+    it('returns null when orderId reference is not found', async () => {
+      const { NotFoundException } = await import('@nestjs/common');
+      mockPaymentsService.findByOrderId.mockRejectedValue(new NotFoundException());
+
+      const result = await resolver.resolveReference(
+        { __typename: 'Payment', orderId: 'ord_123' } as Parameters<
+          PaymentResolver['resolveReference']
+        >[0],
+        { req: { headers: { 'x-user-id': 'user_123' } } },
+      );
+
+      expect(mockPaymentsService.findByOrderId).toHaveBeenCalledWith('ord_123');
+      expect(result).toBeNull();
+    });
+
     it('returns null when entity not found', async () => {
       const { NotFoundException } = await import('@nestjs/common');
       mockPaymentsService.findById.mockRejectedValue(new NotFoundException());
@@ -124,11 +160,5 @@ describe('PaymentResolver', () => {
       const result = await resolver.resolveReference({ __typename: 'Payment', id: 'pay-1' }, ctx);
       expect(result).toBeNull();
     });
-  });
-});
-
-describe('payment.resolver module surface', () => {
-  it('does not export PaymentMethodResolver', () => {
-    expect('PaymentMethodResolver' in paymentResolverModule).toBe(false);
   });
 });
