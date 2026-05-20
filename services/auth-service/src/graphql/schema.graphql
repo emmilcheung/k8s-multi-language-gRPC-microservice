@@ -6,6 +6,27 @@ type User @key(fields: "id") {
   email: String @tag(name: "self-only")
 }
 
+type Session {
+  id: ID!
+  userAgent: String
+  ipAddress: String
+  createdAt: String!
+  lastUsedAt: String
+  current: Boolean!
+}
+
+type UserLookupResult {
+  id: ID!
+  email: String!
+  displayName: String
+}
+
 type Query {
   currentUser: User
+  sessions: [Session!]! @tag(name: "self-only")
+  userLookup(email: String, id: ID): UserLookupResult
+}
+
+type Mutation {
+  revokeSession(id: ID!): Boolean!
 }
