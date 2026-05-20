@@ -1,9 +1,38 @@
 extend schema
-  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@tag"])
+
+type Venue @key(fields: "id") {
+  id: ID!
+  name: String!
+  ownerId: ID!
+  sections: [VenueSection!]!
+  seatingPlans: [SeatingPlan!]!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type VenueSection {
+  id: ID!
+  venueId: ID!
+  name: String!
+  type: SectionType!
+  rowCount: Int!
+  columnCount: Int!
+  displayOrder: Int!
+  # Derived field:
+  # - GA sections: capacity = columnCount
+  # - seated sections: capacity = rowCount * columnCount
+  capacity: Int!
+}
 
 type SeatingPlan @key(fields: "id") {
   id: ID!
+  venueId: ID!
+  name: String!
   sections: [Section!]!
+  priceTiers: [PriceTier!]!
+  layout: SeatLayout!
+  availability: SeatAvailability!
   assignmentMode: AssignmentMode!
   status: PlanStatus!
 }
@@ -20,6 +49,40 @@ type Seat {
   label: String!
   price: Int!
   status: SeatStatus!
+}
+
+type PriceTier {
+  id: ID!
+  planId: ID!
+  name: String!
+  priceCents: Int!
+  sectionIds: [ID!]!
+}
+
+type SeatLayout {
+  rows: [SeatLayoutRow!]!
+}
+
+type SeatLayoutRow {
+  label: String!
+  seats: [Seat!]!
+}
+
+type SeatAvailability {
+  available: Int!
+  held: Int!
+  sold: Int!
+  total: Int!
+}
+
+type SeatHoldResult {
+  held: [ID!]!
+  expiresAt: String!
+}
+
+enum SectionType {
+  SEATED
+  GA
 }
 
 enum AssignmentMode {
@@ -39,6 +102,66 @@ enum PlanStatus {
   ARCHIVED
 }
 
+input CreateVenueInput {
+  name: String!
+}
+
+input UpdateVenueInput {
+  name: String
+}
+
+input CreateSectionInput {
+  name: String!
+  type: SectionType!
+  rowCount: Int
+  columnCount: Int!
+  displayOrder: Int
+}
+
+input UpdateSectionInput {
+  name: String
+  rowCount: Int
+  columnCount: Int
+  displayOrder: Int
+}
+
+input CreateSeatingPlanInput {
+  venueId: ID!
+  ticketId: ID!
+  name: String!
+  maxSeatsPerOrder: Int
+  assignmentMode: AssignmentMode!
+  pricingMode: String
+}
+
+input UpdateSeatingPlanInput {
+  name: String
+  assignmentMode: AssignmentMode
+}
+
+input PriceTierInput {
+  name: String!
+  priceCents: Int!
+  sectionIds: [ID!]!
+}
+
 type Query {
+  venues: [Venue!]!
+  venue(id: ID!): Venue
   seatingPlan(id: ID!): SeatingPlan
+  seatingPlans(venueId: ID): [SeatingPlan!]!
+}
+
+type Mutation {
+  createVenue(input: CreateVenueInput!): Venue!
+  updateVenue(id: ID!, input: UpdateVenueInput!): Venue!
+  createSection(venueId: ID!, input: CreateSectionInput!): VenueSection!
+  updateSection(id: ID!, input: UpdateSectionInput!): VenueSection!
+  createSeatingPlan(input: CreateSeatingPlanInput!): SeatingPlan!
+  updateSeatingPlan(id: ID!, input: UpdateSeatingPlanInput!): SeatingPlan!
+  activateSeatingPlan(id: ID!): SeatingPlan!
+  deactivateSeatingPlan(id: ID!): SeatingPlan!
+  upsertPriceTier(planId: ID!, input: PriceTierInput!): PriceTier!
+  holdSeats(planId: ID!, seatIds: [ID!]!): SeatHoldResult!
+  releaseSeats(planId: ID!, seatIds: [ID!]!): Boolean!
 }

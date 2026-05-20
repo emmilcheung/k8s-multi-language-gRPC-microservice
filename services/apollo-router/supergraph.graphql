@@ -57,6 +57,27 @@ input CreatePaymentInput
   token: String!
 }
 
+input CreateSeatingPlanInput
+  @join__type(graph: VENUES)
+{
+  venueId: ID!
+  ticketId: ID!
+  name: String!
+  maxSeatsPerOrder: Int
+  assignmentMode: AssignmentMode!
+  pricingMode: String
+}
+
+input CreateSectionInput
+  @join__type(graph: VENUES)
+{
+  name: String!
+  type: SectionType!
+  rowCount: Int
+  columnCount: Int!
+  displayOrder: Int
+}
+
 input CreateTicketInput
   @join__type(graph: TICKETS)
 {
@@ -65,6 +86,12 @@ input CreateTicketInput
   quota: Int!
   maxPerUser: Int
   ticketType: TicketType!
+}
+
+input CreateVenueInput
+  @join__type(graph: VENUES)
+{
+  name: String!
 }
 
 input join__ContextArgument {
@@ -107,12 +134,24 @@ type Mutation
   @join__type(graph: ORDERS)
   @join__type(graph: PAYMENTS)
   @join__type(graph: TICKETS)
+  @join__type(graph: VENUES)
 {
   createOrder(input: CreateOrderInput!): Order! @join__field(graph: ORDERS)
   cancelOrder(id: ID!): Order! @join__field(graph: ORDERS)
   createPayment(input: CreatePaymentInput!): Payment! @join__field(graph: PAYMENTS)
   createTicket(input: CreateTicketInput!): Ticket! @join__field(graph: TICKETS)
   updateTicket(id: ID!, input: UpdateTicketInput!): Ticket! @join__field(graph: TICKETS)
+  createVenue(input: CreateVenueInput!): Venue! @join__field(graph: VENUES)
+  updateVenue(id: ID!, input: UpdateVenueInput!): Venue! @join__field(graph: VENUES)
+  createSection(venueId: ID!, input: CreateSectionInput!): VenueSection! @join__field(graph: VENUES)
+  updateSection(id: ID!, input: UpdateSectionInput!): VenueSection! @join__field(graph: VENUES)
+  createSeatingPlan(input: CreateSeatingPlanInput!): SeatingPlan! @join__field(graph: VENUES)
+  updateSeatingPlan(id: ID!, input: UpdateSeatingPlanInput!): SeatingPlan! @join__field(graph: VENUES)
+  activateSeatingPlan(id: ID!): SeatingPlan! @join__field(graph: VENUES)
+  deactivateSeatingPlan(id: ID!): SeatingPlan! @join__field(graph: VENUES)
+  upsertPriceTier(planId: ID!, input: PriceTierInput!): PriceTier! @join__field(graph: VENUES)
+  holdSeats(planId: ID!, seatIds: [ID!]!): SeatHoldResult! @join__field(graph: VENUES)
+  releaseSeats(planId: ID!, seatIds: [ID!]!): Boolean! @join__field(graph: VENUES)
 }
 
 type Order
@@ -175,6 +214,24 @@ enum PlanStatus
   ARCHIVED @join__enumValue(graph: VENUES)
 }
 
+type PriceTier
+  @join__type(graph: VENUES)
+{
+  id: ID!
+  planId: ID!
+  name: String!
+  priceCents: Int!
+  sectionIds: [ID!]!
+}
+
+input PriceTierInput
+  @join__type(graph: VENUES)
+{
+  name: String!
+  priceCents: Int!
+  sectionIds: [ID!]!
+}
+
 type Query
   @join__type(graph: AUTH)
   @join__type(graph: ORDERS)
@@ -189,7 +246,10 @@ type Query
   payment(id: ID!): Payment @join__field(graph: PAYMENTS)
   tickets: [Ticket!]! @join__field(graph: TICKETS)
   ticket(id: ID!): Ticket @join__field(graph: TICKETS)
+  venues: [Venue!]! @join__field(graph: VENUES)
+  venue(id: ID!): Venue @join__field(graph: VENUES)
   seatingPlan(id: ID!): SeatingPlan @join__field(graph: VENUES)
+  seatingPlans(venueId: ID): [SeatingPlan!]! @join__field(graph: VENUES)
 }
 
 type Seat
@@ -201,14 +261,48 @@ type Seat
   status: SeatStatus!
 }
 
+type SeatAvailability
+  @join__type(graph: VENUES)
+{
+  available: Int!
+  held: Int!
+  sold: Int!
+  total: Int!
+}
+
+type SeatHoldResult
+  @join__type(graph: VENUES)
+{
+  held: [ID!]!
+  expiresAt: String!
+}
+
 type SeatingPlan
   @join__type(graph: TICKETS, key: "id", resolvable: false)
   @join__type(graph: VENUES, key: "id")
 {
   id: ID!
+  venueId: ID! @join__field(graph: VENUES)
+  name: String! @join__field(graph: VENUES)
   sections: [Section!]! @join__field(graph: VENUES)
+  priceTiers: [PriceTier!]! @join__field(graph: VENUES)
+  layout: SeatLayout! @join__field(graph: VENUES)
+  availability: SeatAvailability! @join__field(graph: VENUES)
   assignmentMode: AssignmentMode! @join__field(graph: VENUES)
   status: PlanStatus! @join__field(graph: VENUES)
+}
+
+type SeatLayout
+  @join__type(graph: VENUES)
+{
+  rows: [SeatLayoutRow!]!
+}
+
+type SeatLayoutRow
+  @join__type(graph: VENUES)
+{
+  label: String!
+  seats: [Seat!]!
 }
 
 enum SeatStatus
@@ -226,6 +320,13 @@ type Section
   name: String!
   seats: [Seat!]!
   availableSeats: Int!
+}
+
+enum SectionType
+  @join__type(graph: VENUES)
+{
+  SEATED @join__enumValue(graph: VENUES)
+  GA @join__enumValue(graph: VENUES)
 }
 
 type Ticket
@@ -250,6 +351,22 @@ enum TicketType
   SEATED @join__enumValue(graph: TICKETS)
 }
 
+input UpdateSeatingPlanInput
+  @join__type(graph: VENUES)
+{
+  name: String
+  assignmentMode: AssignmentMode
+}
+
+input UpdateSectionInput
+  @join__type(graph: VENUES)
+{
+  name: String
+  rowCount: Int
+  columnCount: Int
+  displayOrder: Int
+}
+
 input UpdateTicketInput
   @join__type(graph: TICKETS)
 {
@@ -257,6 +374,12 @@ input UpdateTicketInput
   price: Int
   quota: Int
   maxPerUser: Int
+}
+
+input UpdateVenueInput
+  @join__type(graph: VENUES)
+{
+  name: String
 }
 
 type User
@@ -286,4 +409,29 @@ type UserProfile
   locale: String
   timezone: String
   billingAddress: BillingAddress @tag(name: "pii")
+}
+
+type Venue
+  @join__type(graph: VENUES, key: "id")
+{
+  id: ID!
+  name: String!
+  ownerId: ID!
+  sections: [VenueSection!]!
+  seatingPlans: [SeatingPlan!]!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type VenueSection
+  @join__type(graph: VENUES)
+{
+  id: ID!
+  venueId: ID!
+  name: String!
+  type: SectionType!
+  rowCount: Int!
+  columnCount: Int!
+  displayOrder: Int!
+  capacity: Int!
 }
