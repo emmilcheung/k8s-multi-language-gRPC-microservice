@@ -175,7 +175,9 @@ type Mutation
   createTicket(input: CreateTicketInput!): Ticket! @join__field(graph: TICKETS)
   updateTicket(id: ID!, input: UpdateTicketInput!): Ticket! @join__field(graph: TICKETS)
   createSection(venueId: ID!, input: CreateSectionInput!): VenueSection! @join__field(graph: VENUES)
+  updateSection(id: ID!, input: UpdateSectionInput!): VenueSection! @join__field(graph: VENUES)
   createSeatingPlan(input: CreateSeatingPlanInput!): SeatingPlan! @join__field(graph: VENUES)
+  updateSeatingPlan(id: ID!, input: UpdateSeatingPlanInput!): SeatingPlan! @join__field(graph: VENUES)
   holdSeats(planId: ID!, seatIds: [ID!]!): SeatHoldResult! @join__field(graph: VENUES)
   releaseSeats(planId: ID!, seatIds: [ID!]!): Boolean! @join__field(graph: VENUES)
 }
@@ -331,6 +333,24 @@ enum TicketType
 {
   GENERAL_ADMISSION @join__enumValue(graph: TICKETS)
   SEATED @join__enumValue(graph: TICKETS)
+}
+
+input UpdateSeatingPlanInput
+  @join__type(graph: VENUES)
+{
+  name: String
+  maxSeatsPerOrder: Int
+  assignmentMode: AssignmentMode
+  pricingMode: String
+}
+
+input UpdateSectionInput
+  @join__type(graph: VENUES)
+{
+  name: String
+  rowCount: Int
+  columnCount: Int
+  displayOrder: Int
 }
 
 input UpdateTicketInput

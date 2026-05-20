@@ -54,12 +54,26 @@ input CreateSectionInput {
   displayOrder: Int
 }
 
+input UpdateSectionInput {
+  name: String
+  rowCount: Int
+  columnCount: Int
+  displayOrder: Int
+}
+
 input CreateSeatingPlanInput {
   venueId: ID!
   ticketId: ID!
   name: String!
   maxSeatsPerOrder: Int
   assignmentMode: AssignmentMode!
+  pricingMode: String
+}
+
+input UpdateSeatingPlanInput {
+  name: String
+  maxSeatsPerOrder: Int
+  assignmentMode: AssignmentMode
   pricingMode: String
 }
 
@@ -86,7 +100,9 @@ type Query {
 
 type Mutation {
   createSection(venueId: ID!, input: CreateSectionInput!): VenueSection!
+  updateSection(id: ID!, input: UpdateSectionInput!): VenueSection!
   createSeatingPlan(input: CreateSeatingPlanInput!): SeatingPlan!
+  updateSeatingPlan(id: ID!, input: UpdateSeatingPlanInput!): SeatingPlan!
   holdSeats(planId: ID!, seatIds: [ID!]!): SeatHoldResult!
   releaseSeats(planId: ID!, seatIds: [ID!]!): Boolean!
 }
