@@ -105,14 +105,6 @@ input CreatePaymentInput
   token: String!
 }
 
-input CreateSeatedOrderInput
-  @join__type(graph: ORDERS)
-{
-  ticketId: ID!
-  seatIds: [ID!]
-  quantity: Int
-}
-
 input CreateSeatingPlanInput
   @join__type(graph: VENUES)
 {
@@ -218,7 +210,6 @@ type Mutation
   revokeSession(id: ID!): Boolean! @join__field(graph: AUTH)
   createOrder(input: CreateOrderInput!): Order! @join__field(graph: ORDERS)
   cancelOrder(id: ID!): Order! @join__field(graph: ORDERS)
-  createSeatedOrder(input: CreateSeatedOrderInput!): Order! @join__field(graph: ORDERS)
   createPayment(input: CreatePaymentInput!): Payment! @join__field(graph: PAYMENTS)
   createTicket(input: CreateTicketInput!): Ticket! @join__field(graph: TICKETS)
   updateTicket(id: ID!, input: UpdateTicketInput!): Ticket! @join__field(graph: TICKETS)

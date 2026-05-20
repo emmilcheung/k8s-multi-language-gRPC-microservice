@@ -45,18 +45,9 @@ type Query {
 type Mutation {
   createOrder(input: CreateOrderInput!): Order!
   cancelOrder(id: ID!): Order!
-  createSeatedOrder(input: CreateSeatedOrderInput!): Order!
 }
 
 input CreateOrderInput {
   ticketId: ID!
   quantity: Int!
-}
-
-input CreateSeatedOrderInput {
-  ticketId: ID!
-  # When seatIds is provided, manual selection is used; otherwise the plan's
-  # auto-assignment mode picks `quantity` seats.
-  seatIds: [ID!]
-  quantity: Int
 }
