@@ -1,0 +1,15 @@
+query OrderDetail($id: ID!) {
+  order(id: $id) {
+    id
+    userId
+    status
+    quantity
+    expiresAt
+    createdAt
+    ticket {
+      id
+      title
+      price
+    }
+  }
+}
