@@ -72,6 +72,25 @@ type BillingAddress
   country: String
 }
 
+input BillingAddressInput
+  @join__type(graph: USERS)
+{
+  line1: String!
+  line2: String
+  city: String!
+  state: String
+  postalCode: String!
+  country: String!
+}
+
+enum CheckinSource
+  @join__type(graph: ATTENDANCE)
+{
+  QR_SCAN @join__enumValue(graph: ATTENDANCE)
+  MANUAL_OVERRIDE @join__enumValue(graph: ATTENDANCE)
+  USER_ID_LOOKUP @join__enumValue(graph: ATTENDANCE)
+}
+
 input CreateOrderInput
   @join__type(graph: ORDERS)
 {
@@ -142,6 +161,18 @@ enum CredentialStatus
   EXPIRED @join__enumValue(graph: ATTENDANCE)
 }
 
+type EventCheckin
+  @join__type(graph: ATTENDANCE)
+{
+  id: ID!
+  eventId: ID!
+  ticketId: ID!
+  orderId: ID!
+  userId: ID
+  checkedInAt: String!
+  source: CheckinSource!
+}
+
 input join__ContextArgument {
   name: String!
   type: String!
@@ -180,16 +211,27 @@ enum link__Purpose {
 }
 
 type Mutation
+  @join__type(graph: ATTENDANCE)
+  @join__type(graph: AUTH)
   @join__type(graph: ORDERS)
   @join__type(graph: PAYMENTS)
   @join__type(graph: TICKETS)
+  @join__type(graph: USERS)
   @join__type(graph: VENUES)
 {
+  updateAttendancePolicy(eventId: ID!, input: UpdateAttendancePolicyInput!): AttendancePolicy! @join__field(graph: ATTENDANCE)
+  validateScan(token: String!): ScanValidationResult! @join__field(graph: ATTENDANCE)
+  recordCheckin(input: RecordCheckinInput!): EventCheckin! @join__field(graph: ATTENDANCE)
+  recordCheckinByUserId(input: RecordCheckinByUserIdInput!): EventCheckin! @join__field(graph: ATTENDANCE)
+  revokeSession(id: ID!): Boolean! @join__field(graph: AUTH)
   createOrder(input: CreateOrderInput!): Order! @join__field(graph: ORDERS)
   cancelOrder(id: ID!): Order! @join__field(graph: ORDERS)
   createPayment(input: CreatePaymentInput!): Payment! @join__field(graph: PAYMENTS)
   createTicket(input: CreateTicketInput!): Ticket! @join__field(graph: TICKETS)
   updateTicket(id: ID!, input: UpdateTicketInput!): Ticket! @join__field(graph: TICKETS)
+  updateProfile(input: UpdateProfileInput!): UserProfile! @join__field(graph: USERS)
+  updatePreferences(input: UpdatePreferencesInput!): UserPreferences! @join__field(graph: USERS)
+  updateBillingAddress(input: BillingAddressInput!): BillingAddress! @join__field(graph: USERS)
   createVenue(input: CreateVenueInput!): Venue! @join__field(graph: VENUES)
   updateVenue(id: ID!, input: UpdateVenueInput!): Venue! @join__field(graph: VENUES)
   createSection(venueId: ID!, input: CreateSectionInput!): VenueSection! @join__field(graph: VENUES)
@@ -231,6 +273,13 @@ type OrderTicket
   id: ID!
   title: String!
   price: String!
+}
+
+type PageInfo
+  @join__type(graph: TICKETS)
+{
+  hasNextPage: Boolean!
+  endCursor: String
 }
 
 type Payment
@@ -284,13 +333,41 @@ type Query
   admissionPass(ticketId: ID!, orderId: ID): AdmissionPass @join__field(graph: ATTENDANCE)
   attendancePolicy(eventId: ID!): AttendancePolicy @join__field(graph: ATTENDANCE)
   attendanceSummary(eventId: ID!): AttendanceSummary @join__field(graph: ATTENDANCE)
+  eventCheckins(eventId: ID!, first: Int, after: String): [EventCheckin!]! @join__field(graph: ATTENDANCE)
   currentUser: User @join__field(graph: AUTH)
+  sessions: [Session!]! @join__field(graph: AUTH) @tag(name: "self-only")
+  userLookup(email: String, id: ID): UserLookupResult @join__field(graph: AUTH)
   order(id: ID!): Order @join__field(graph: ORDERS)
   orders: [Order!]! @join__field(graph: ORDERS)
   payment(id: ID!): Payment @join__field(graph: PAYMENTS)
   tickets: [Ticket!]! @join__field(graph: TICKETS)
+  ticketsConnection(filter: TicketFilter, first: Int, after: String): TicketConnection! @join__field(graph: TICKETS)
   ticket(id: ID!): Ticket @join__field(graph: TICKETS)
   seatingPlan(id: ID!): SeatingPlan @join__field(graph: VENUES)
+}
+
+input RecordCheckinByUserIdInput
+  @join__type(graph: ATTENDANCE)
+{
+  eventId: ID!
+  userId: ID!
+}
+
+input RecordCheckinInput
+  @join__type(graph: ATTENDANCE)
+{
+  ticketId: ID!
+  source: CheckinSource!
+}
+
+type ScanValidationResult
+  @join__type(graph: ATTENDANCE)
+{
+  valid: Boolean!
+  reason: String
+  ticketId: ID
+  orderId: ID
+  eventId: ID
 }
 
 type Seat
@@ -343,6 +420,17 @@ enum SectionType
   GA @join__enumValue(graph: VENUES)
 }
 
+type Session
+  @join__type(graph: AUTH)
+{
+  id: ID!
+  userAgent: String
+  ipAddress: String
+  createdAt: String!
+  lastUsedAt: String
+  current: Boolean!
+}
+
 type Ticket
   @join__type(graph: TICKETS, key: "id")
 {
@@ -358,11 +446,55 @@ type Ticket
   updatedAt: String!
 }
 
+type TicketConnection
+  @join__type(graph: TICKETS)
+{
+  edges: [TicketEdge!]!
+  pageInfo: PageInfo!
+}
+
+type TicketEdge
+  @join__type(graph: TICKETS)
+{
+  node: Ticket!
+  cursor: String!
+}
+
+input TicketFilter
+  @join__type(graph: TICKETS)
+{
+  availableOnly: Boolean
+  ticketType: TicketType
+}
+
 enum TicketType
   @join__type(graph: TICKETS)
 {
   GENERAL_ADMISSION @join__enumValue(graph: TICKETS)
   SEATED @join__enumValue(graph: TICKETS)
+}
+
+input UpdateAttendancePolicyInput
+  @join__type(graph: ATTENDANCE)
+{
+  requireQrForEntry: Boolean
+  allowManualOverride: Boolean
+}
+
+input UpdatePreferencesInput
+  @join__type(graph: USERS)
+{
+  marketingOptIn: Boolean
+  orderUpdates: Boolean
+  productUpdates: Boolean
+}
+
+input UpdateProfileInput
+  @join__type(graph: USERS)
+{
+  displayName: String
+  locale: String
+  timezone: String
 }
 
 input UpdateSeatingPlanInput
@@ -411,6 +543,15 @@ type User
   orders: [Order!]! @join__field(graph: ORDERS) @tag(name: "self-only")
   profile: UserProfile @join__field(graph: USERS) @tag(name: "self-only")
   preferences: UserPreferences @join__field(graph: USERS) @tag(name: "self-only")
+  billingAddress: BillingAddress @join__field(graph: USERS) @tag(name: "pii")
+}
+
+type UserLookupResult
+  @join__type(graph: AUTH)
+{
+  id: ID!
+  email: String!
+  displayName: String
 }
 
 type UserPreferences

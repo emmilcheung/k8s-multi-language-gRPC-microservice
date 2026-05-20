@@ -1,5 +1,5 @@
 extend schema
-  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@tag"])
 
 type AdmissionPass @key(fields: "id") {
   id: ID!
@@ -24,11 +24,50 @@ type AttendanceSummary {
   totalCheckedIn: Int!
 }
 
+type EventCheckin {
+  id: ID!
+  eventId: ID!
+  ticketId: ID!
+  orderId: ID!
+  userId: ID
+  checkedInAt: String!
+  source: CheckinSource!
+}
+
+type ScanValidationResult {
+  valid: Boolean!
+  reason: String
+  ticketId: ID
+  orderId: ID
+  eventId: ID
+}
+
 enum CredentialStatus {
   ISSUED
   USED
   REVOKED
   EXPIRED
+}
+
+enum CheckinSource {
+  QR_SCAN
+  MANUAL_OVERRIDE
+  USER_ID_LOOKUP
+}
+
+input UpdateAttendancePolicyInput {
+  requireQrForEntry: Boolean
+  allowManualOverride: Boolean
+}
+
+input RecordCheckinInput {
+  ticketId: ID!
+  source: CheckinSource!
+}
+
+input RecordCheckinByUserIdInput {
+  eventId: ID!
+  userId: ID!
 }
 
 type Query {
@@ -38,4 +77,13 @@ type Query {
   attendancePolicy(eventId: ID!): AttendancePolicy
   # Organizer: get attendance summary for an event
   attendanceSummary(eventId: ID!): AttendanceSummary
+  # Organizer: list check-ins for an event (paginated by checkedInAt desc)
+  eventCheckins(eventId: ID!, first: Int, after: String): [EventCheckin!]!
+}
+
+type Mutation {
+  updateAttendancePolicy(eventId: ID!, input: UpdateAttendancePolicyInput!): AttendancePolicy!
+  validateScan(token: String!): ScanValidationResult!
+  recordCheckin(input: RecordCheckinInput!): EventCheckin!
+  recordCheckinByUserId(input: RecordCheckinByUserIdInput!): EventCheckin!
 }

@@ -23,3 +23,7 @@ subgraphs:
     routing_url: http://order-service:8082/graphql
     schema:
       file: ../order-service/src/main/resources/schema/schema.graphqls
+  attendance:
+    routing_url: http://attendance-service:3005/graphql
+    schema:
+      file: ../attendance-service/internal/graphql/schema.graphqls
