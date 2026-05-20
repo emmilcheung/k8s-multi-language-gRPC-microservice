@@ -23,8 +23,32 @@ enum TicketType {
   SEATED
 }
 
+input TicketFilter {
+  availableOnly: Boolean
+  ticketType: TicketType
+}
+
+type TicketEdge {
+  node: Ticket!
+  cursor: String!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
+
+type TicketConnection {
+  edges: [TicketEdge!]!
+  pageInfo: PageInfo!
+}
+
 type Query {
+  # Legacy: returns the full list, no filter. Kept for backward compatibility.
+  # Prefer `ticketsConnection` for new operations.
   tickets: [Ticket!]!
+  # Paginated + filterable list. Phase 2 addition.
+  ticketsConnection(filter: TicketFilter, first: Int, after: String): TicketConnection!
   ticket(id: ID!): Ticket
 }
 

@@ -77,6 +77,65 @@ func (r *queryResolver) Tickets(ctx context.Context) ([]*Ticket, error) {
 	return result, nil
 }
 
+// TicketsConnection is the resolver for the ticketsConnection field.
+func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFilter, first *int, after *string) (*TicketConnection, error) {
+	limit := 20
+	if first != nil && *first > 0 {
+		limit = *first
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	params := repository.PaginationParams{Limit: limit + 1}
+	if after != nil {
+		params.After = *after
+	}
+	if filter != nil && filter.AvailableOnly != nil {
+		params.AvailableOnly = *filter.AvailableOnly
+	}
+
+	tickets, err := r.TicketService.ListTickets(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("ticketsConnection: %w", err)
+	}
+
+	// Apply ticketType filter in-memory (repo doesn't accept it yet).
+	if filter != nil && filter.TicketType != nil {
+		filtered := tickets[:0]
+		for _, t := range tickets {
+			if string(t.TicketType) == string(*filter.TicketType) {
+				filtered = append(filtered, t)
+			}
+		}
+		tickets = filtered
+	}
+
+	hasNext := len(tickets) > limit
+	if hasNext {
+		tickets = tickets[:limit]
+	}
+
+	edges := make([]*TicketEdge, len(tickets))
+	for i, t := range tickets {
+		edges[i] = &TicketEdge{
+			Node:   mapTicketToGQL(t),
+			Cursor: fmt.Sprintf("%d:%s", t.CreatedAt.UnixMilli(), t.ID),
+		}
+	}
+
+	var endCursor *string
+	if len(edges) > 0 {
+		c := edges[len(edges)-1].Cursor
+		endCursor = &c
+	}
+
+	return &TicketConnection{
+		Edges:    edges,
+		PageInfo: &PageInfo{HasNextPage: hasNext, EndCursor: endCursor},
+	}, nil
+}
+
 // Ticket is the resolver for the ticket field.
 func (r *queryResolver) Ticket(ctx context.Context, id string) (*Ticket, error) {
 	t, err := r.TicketService.GetTicketByID(ctx, id)

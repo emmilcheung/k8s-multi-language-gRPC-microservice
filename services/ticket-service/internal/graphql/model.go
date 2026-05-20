@@ -20,6 +20,11 @@ type CreateTicketInput struct {
 type Mutation struct {
 }
 
+type PageInfo struct {
+	HasNextPage bool    `json:"hasNextPage"`
+	EndCursor   *string `json:"endCursor,omitempty"`
+}
+
 type Query struct {
 }
 
@@ -43,6 +48,21 @@ type Ticket struct {
 }
 
 func (Ticket) IsEntity() {}
+
+type TicketConnection struct {
+	Edges    []*TicketEdge `json:"edges"`
+	PageInfo *PageInfo     `json:"pageInfo"`
+}
+
+type TicketEdge struct {
+	Node   *Ticket `json:"node"`
+	Cursor string  `json:"cursor"`
+}
+
+type TicketFilter struct {
+	AvailableOnly *bool       `json:"availableOnly,omitempty"`
+	TicketType    *TicketType `json:"ticketType,omitempty"`
+}
 
 type UpdateTicketInput struct {
 	Title      *string `json:"title,omitempty"`
