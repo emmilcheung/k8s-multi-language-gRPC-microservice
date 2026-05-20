@@ -1,6 +1,15 @@
 extend schema
   @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key"])
 
+type Venue {
+  id: ID!
+  organizerId: ID!
+  name: String!
+  capacity: Int!
+  timezone: String!
+  address: String!
+}
+
 type VenueSection {
   id: ID!
   venueId: ID!
@@ -61,6 +70,20 @@ input UpdateSectionInput {
   displayOrder: Int
 }
 
+input CreateVenueInput {
+  name: String!
+  capacity: Int!
+  timezone: String!
+  address: String
+}
+
+input UpdateVenueInput {
+  name: String!
+  capacity: Int!
+  timezone: String!
+  address: String
+}
+
 input CreateSeatingPlanInput {
   venueId: ID!
   ticketId: ID!
@@ -75,6 +98,18 @@ input UpdateSeatingPlanInput {
   maxSeatsPerOrder: Int
   assignmentMode: AssignmentMode
   pricingMode: String
+}
+
+type PriceTier {
+  id: ID!
+  planId: ID!
+  name: String!
+  price: String!
+}
+
+input CreatePriceTierInput {
+  name: String!
+  price: String!
 }
 
 enum AssignmentMode {
@@ -99,10 +134,15 @@ type Query {
 }
 
 type Mutation {
+  createVenue(input: CreateVenueInput!): Venue!
+  updateVenue(id: ID!, input: UpdateVenueInput!): Venue!
   createSection(venueId: ID!, input: CreateSectionInput!): VenueSection!
   updateSection(id: ID!, input: UpdateSectionInput!): VenueSection!
   createSeatingPlan(input: CreateSeatingPlanInput!): SeatingPlan!
   updateSeatingPlan(id: ID!, input: UpdateSeatingPlanInput!): SeatingPlan!
+  activateSeatingPlan(id: ID!): SeatingPlan!
+  deactivateSeatingPlan(id: ID!): SeatingPlan!
+  createPriceTier(planId: ID!, input: CreatePriceTierInput!): PriceTier!
   holdSeats(planId: ID!, seatIds: [ID!]!): SeatHoldResult!
   releaseSeats(planId: ID!, seatIds: [ID!]!): Boolean!
 }
