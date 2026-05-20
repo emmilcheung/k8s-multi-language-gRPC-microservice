@@ -1,5 +1,5 @@
 extend schema
-  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@tag"])
+  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key"])
 
 type Payment @key(fields: "id") @key(fields: "orderId") {
   id: ID!
@@ -10,16 +10,6 @@ type Payment @key(fields: "id") @key(fields: "orderId") {
   createdAt: String!
 }
 
-type PaymentMethod @key(fields: "id") {
-  id: ID!
-  brand: String!
-  last4: String!
-  expMonth: Int!
-  expYear: Int!
-  isDefault: Boolean!
-  label: String!
-}
-
 enum PaymentStatus {
   PENDING
   CAPTURED
@@ -27,24 +17,12 @@ enum PaymentStatus {
   REFUNDED
 }
 
-input RegisterPaymentMethodInput {
-  # Stripe payment-method id captured by Stripe.js on the client.
-  providerPaymentMethodId: String!
-  setAsDefault: Boolean
-  consentAccepted: Boolean!
-  consentVersion: String!
-}
-
 type Query {
   payment(id: ID!): Payment
-  paymentMethods: [PaymentMethod!]! @tag(name: "self-only")
 }
 
 type Mutation {
   createPayment(input: CreatePaymentInput!): Payment!
-  registerPaymentMethod(input: RegisterPaymentMethodInput!): PaymentMethod!
-  setDefaultPaymentMethod(id: ID!): PaymentMethod!
-  deletePaymentMethod(id: ID!): Boolean!
 }
 
 input CreatePaymentInput {

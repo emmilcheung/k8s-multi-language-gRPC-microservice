@@ -220,9 +220,6 @@ type Mutation
   cancelOrder(id: ID!): Order! @join__field(graph: ORDERS)
   createSeatedOrder(input: CreateSeatedOrderInput!): Order! @join__field(graph: ORDERS)
   createPayment(input: CreatePaymentInput!): Payment! @join__field(graph: PAYMENTS)
-  registerPaymentMethod(input: RegisterPaymentMethodInput!): PaymentMethod! @join__field(graph: PAYMENTS)
-  setDefaultPaymentMethod(id: ID!): PaymentMethod! @join__field(graph: PAYMENTS)
-  deletePaymentMethod(id: ID!): Boolean! @join__field(graph: PAYMENTS)
   createTicket(input: CreateTicketInput!): Ticket! @join__field(graph: TICKETS)
   updateTicket(id: ID!, input: UpdateTicketInput!): Ticket! @join__field(graph: TICKETS)
   updateProfile(input: UpdateProfileInput!): UserProfile! @join__field(graph: USERS)
@@ -291,18 +288,6 @@ type Payment
   createdAt: String! @join__field(graph: PAYMENTS)
 }
 
-type PaymentMethod
-  @join__type(graph: PAYMENTS, key: "id")
-{
-  id: ID!
-  brand: String!
-  last4: String!
-  expMonth: Int!
-  expYear: Int!
-  isDefault: Boolean!
-  label: String!
-}
-
 enum PaymentStatus
   @join__type(graph: PAYMENTS)
 {
@@ -357,7 +342,6 @@ type Query
   order(id: ID!): Order @join__field(graph: ORDERS)
   orders: [Order!]! @join__field(graph: ORDERS)
   payment(id: ID!): Payment @join__field(graph: PAYMENTS)
-  paymentMethods: [PaymentMethod!]! @join__field(graph: PAYMENTS) @tag(name: "self-only")
   tickets: [Ticket!]! @join__field(graph: TICKETS)
   ticketsConnection(filter: TicketFilter, first: Int, after: String): TicketConnection! @join__field(graph: TICKETS)
   ticket(id: ID!): Ticket @join__field(graph: TICKETS)
@@ -379,15 +363,6 @@ input RecordCheckinInput
 {
   ticketId: ID!
   source: CheckinSource!
-}
-
-input RegisterPaymentMethodInput
-  @join__type(graph: PAYMENTS)
-{
-  providerPaymentMethodId: String!
-  setAsDefault: Boolean
-  consentAccepted: Boolean!
-  consentVersion: String!
 }
 
 type ScanValidationResult
