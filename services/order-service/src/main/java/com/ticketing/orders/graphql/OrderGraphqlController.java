@@ -60,6 +60,46 @@ public class OrderGraphqlController {
         return orderService.cancelOrder(UUID.fromString(id), UUID.fromString(userId));
     }
 
+    @MutationMapping
+    public OrderResponse createSeatedOrder(
+            @Argument Map<String, Object> input,
+            GraphQLContext ctx) {
+        String userId = ctx.get(UserIdInterceptor.USER_ID_KEY);
+        if (userId == null) return null;
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId((String) input.get("ticketId"));
+        
+        // Handle optional seatIds for MANUAL_SEATED flow
+        @SuppressWarnings("unchecked")
+        List<String> seatIds = (List<String>) input.get("seatIds");
+        if (seatIds != null) {
+            req.setSeatIds(seatIds);
+        }
+        
+        // Handle optional quantity (defaults to 1 in CreateOrderRequest)
+        Integer quantity = (Integer) input.get("quantity");
+        if (quantity != null) {
+            req.setQuantity(quantity);
+        }
+        
+        return orderService.createSeatedOrder(UUID.fromString(userId), req);
+    }
+
+    @SchemaMapping(typeName = "Order", field = "payment")
+    public Map<String, Object> payment(OrderResponse order, GraphQLContext ctx) {
+        String requesterId = ctx.get(UserIdInterceptor.USER_ID_KEY);
+        if (requesterId == null || order == null || order.getUserId() == null || order.getId() == null) {
+            return null;
+        }
+        if (!order.getUserId().toString().equals(requesterId)) {
+            return null;
+        }
+        return Map.of(
+                "__typename", "Payment",
+                "orderId", order.getId().toString()
+        );
+    }
+
     @SchemaMapping(typeName = "User", field = "orders")
     public List<OrderResponse> userOrders(
             Map<String, Object> user,

@@ -564,6 +564,16 @@ export class PaymentsService {
     return payment;
   }
 
+  async findByOrderId(orderId: string): Promise<Payment> {
+    const payment = await this.paymentsRepo.findByOrderId(orderId);
+    if (!payment) {
+      throw new NotFoundException({
+        error: { code: 'PAYMENT_NOT_FOUND', message: 'Payment not found' },
+      });
+    }
+    return payment;
+  }
+
   /**
    * Process an order event received from Kafka.
    *

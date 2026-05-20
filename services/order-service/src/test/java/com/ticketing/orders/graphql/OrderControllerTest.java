@@ -9,8 +9,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -92,5 +94,80 @@ class OrderControllerTest {
         List<OrderResponse> result = controller.userOrders(userRef, ctxWithUserId(requesterId));
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    void payment_returnsFederatedReferenceForOwner() {
+        String userId = UUID.randomUUID().toString();
+        OrderResponse order = new OrderResponse();
+        ReflectionTestUtils.setField(order, "id", UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        ReflectionTestUtils.setField(order, "userId", UUID.fromString(userId));
+
+        Map<String, Object> result = controller.payment(order, ctxWithUserId(userId));
+
+        assertThat(result).containsEntry("__typename", "Payment");
+        assertThat(result).containsEntry("orderId", "11111111-1111-1111-1111-111111111111");
+    }
+
+    @Test
+    void payment_returnsNullForOtherUser() {
+        String userId = UUID.randomUUID().toString();
+        OrderResponse order = new OrderResponse();
+        ReflectionTestUtils.setField(order, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(order, "userId", UUID.fromString(userId));
+
+        Map<String, Object> result = controller.payment(order, ctxWithUserId(UUID.randomUUID().toString()));
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void createSeatedOrder_withSeatIds() {
+        String userId = UUID.randomUUID().toString();
+        String ticketId = UUID.randomUUID().toString();
+        String seatId1 = UUID.randomUUID().toString();
+        String seatId2 = UUID.randomUUID().toString();
+        
+        OrderResponse expectedOrder = new OrderResponse();
+        when(orderService.createSeatedOrder(any(UUID.class), any())).thenReturn(expectedOrder);
+
+        java.util.Map<String, Object> input = java.util.Map.of(
+                "ticketId", ticketId,
+                "seatIds", java.util.List.of(seatId1, seatId2)
+        );
+        
+        OrderResponse result = controller.createSeatedOrder(input, ctxWithUserId(userId));
+
+        assertThat(result).isSameAs(expectedOrder);
+        verify(orderService).createSeatedOrder(eq(UUID.fromString(userId)), any());
+    }
+
+    @Test
+    void createSeatedOrder_withQuantity() {
+        String userId = UUID.randomUUID().toString();
+        String ticketId = UUID.randomUUID().toString();
+        
+        OrderResponse expectedOrder = new OrderResponse();
+        when(orderService.createSeatedOrder(any(UUID.class), any())).thenReturn(expectedOrder);
+
+        java.util.Map<String, Object> input = java.util.Map.of(
+                "ticketId", ticketId,
+                "quantity", 3
+        );
+        
+        OrderResponse result = controller.createSeatedOrder(input, ctxWithUserId(userId));
+
+        assertThat(result).isSameAs(expectedOrder);
+        verify(orderService).createSeatedOrder(eq(UUID.fromString(userId)), any());
+    }
+
+    @Test
+    void createSeatedOrder_returnsNullWhenNoUserId() {
+        java.util.Map<String, Object> input = java.util.Map.of("ticketId", UUID.randomUUID().toString());
+        
+        OrderResponse result = controller.createSeatedOrder(input, GraphQLContext.newContext().build());
+
+        assertThat(result).isNull();
+        verifyNoInteractions(orderService);
     }
 }
