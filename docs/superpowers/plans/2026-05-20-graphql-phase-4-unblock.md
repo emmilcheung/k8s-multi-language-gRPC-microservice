@@ -442,7 +442,7 @@ Expected:
 - the three unblock commits are present
 - no extra resets of prior branch work
 
-- [ ] **Step 3: Push and stop**
+- [x] **Step 3: Push and stop**
 
 ```bash
 git push origin feat/client-graphql-foundation
