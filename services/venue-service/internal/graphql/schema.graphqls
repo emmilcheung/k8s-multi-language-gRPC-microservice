@@ -130,6 +130,9 @@ enum PlanStatus {
 }
 
 type Query {
+  venues: [Venue!]!
+  venue(id: ID!): Venue
+  seatingPlans(venueId: ID!): [SeatingPlan!]!
   seatingPlan(id: ID!): SeatingPlan
 }
 

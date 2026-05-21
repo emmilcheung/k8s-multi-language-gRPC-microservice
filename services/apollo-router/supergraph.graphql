@@ -35,6 +35,7 @@ type AdmissionPass
   status: CredentialStatus!
   issuedAt: String!
   usedAt: String
+  qrToken: String
 }
 
 enum AssignmentMode
@@ -206,7 +207,7 @@ scalar join__FieldSet
 scalar join__FieldValue
 
 enum join__Graph {
-  ATTENDANCE @join__graph(name: "attendance", url: "http://attendance-service:3005/graphql")
+  ATTENDANCE @join__graph(name: "attendance", url: "http://attendance-service:3007/graphql")
   AUTH @join__graph(name: "auth", url: "http://auth-service:3000/graphql")
   ORDERS @join__graph(name: "orders", url: "http://order-service:8082/graphql")
   PAYMENTS @join__graph(name: "payments", url: "http://payment-service:3002/graphql")
@@ -378,6 +379,9 @@ type Query
   tickets: [Ticket!]! @join__field(graph: TICKETS)
   ticketsConnection(filter: TicketFilter, first: Int, after: String): TicketConnection! @join__field(graph: TICKETS)
   ticket(id: ID!): Ticket @join__field(graph: TICKETS)
+  venues: [Venue!]! @join__field(graph: VENUES)
+  venue(id: ID!): Venue @join__field(graph: VENUES)
+  seatingPlans(venueId: ID!): [SeatingPlan!]! @join__field(graph: VENUES)
   seatingPlan(id: ID!): SeatingPlan @join__field(graph: VENUES)
 }
 

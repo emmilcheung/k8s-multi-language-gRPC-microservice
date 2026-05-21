@@ -256,11 +256,19 @@ func main() {
 	// A per-request DataLoader middleware is wrapped around the handler so that
 	// every _entities batch call gets its own loader instance (prevents
 	// cross-request data leaks and keeps the per-request cache correct).
-	gqlResolver := &gqlgraph.Resolver{PlanRepo: planRepo, SectionRepo: sectionRepo}
+	gqlResolver := &gqlgraph.Resolver{
+		PlanRepo:         planRepo,
+		SectionRepo:      sectionRepo,
+		VenueRepo:        venueRepo,
+		VenueSectionRepo: venueSectionRepo,
+		PriceTierRepo:    priceTierRepo,
+		HoldMgr:          holdMgr,
+	}
 	gqlSrv := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{Resolvers: gqlResolver}))
 	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		loader := gqlgraph.NewPlanLoader(planRepo, sectionRepo)
 		ctx := gqlgraph.WithPlanLoader(r.Context(), loader)
+		ctx = gqlgraph.WithHTTPRequest(ctx, r)
 		gqlSrv.ServeHTTP(w, r.WithContext(ctx))
 	})
 	e.POST("/graphql", echo.WrapHandler(gqlgraph.WrapWithUserIDSignatureValidation(gqlHandler, sigValidator)))

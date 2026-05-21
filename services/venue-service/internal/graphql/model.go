@@ -9,6 +9,45 @@ import (
 	"strconv"
 )
 
+type CreatePriceTierInput struct {
+	Name  string `json:"name"`
+	Price string `json:"price"`
+}
+
+type CreateSeatingPlanInput struct {
+	VenueID          string         `json:"venueId"`
+	TicketID         string         `json:"ticketId"`
+	Name             string         `json:"name"`
+	MaxSeatsPerOrder *int           `json:"maxSeatsPerOrder,omitempty"`
+	AssignmentMode   AssignmentMode `json:"assignmentMode"`
+	PricingMode      *string        `json:"pricingMode,omitempty"`
+}
+
+type CreateSectionInput struct {
+	Name         string      `json:"name"`
+	Type         SectionType `json:"type"`
+	RowCount     *int        `json:"rowCount,omitempty"`
+	ColumnCount  int         `json:"columnCount"`
+	DisplayOrder *int        `json:"displayOrder,omitempty"`
+}
+
+type CreateVenueInput struct {
+	Name     string  `json:"name"`
+	Capacity int     `json:"capacity"`
+	Timezone string  `json:"timezone"`
+	Address  *string `json:"address,omitempty"`
+}
+
+type Mutation struct {
+}
+
+type PriceTier struct {
+	ID     string `json:"id"`
+	PlanID string `json:"planId"`
+	Name   string `json:"name"`
+	Price  string `json:"price"`
+}
+
 type Query struct {
 }
 
@@ -17,6 +56,11 @@ type Seat struct {
 	Label  string     `json:"label"`
 	Price  int        `json:"price"`
 	Status SeatStatus `json:"status"`
+}
+
+type SeatHoldResult struct {
+	Held      []string `json:"held"`
+	ExpiresAt string   `json:"expiresAt"`
 }
 
 type SeatingPlan struct {
@@ -33,6 +77,47 @@ type Section struct {
 	Name           string  `json:"name"`
 	Seats          []*Seat `json:"seats"`
 	AvailableSeats int     `json:"availableSeats"`
+}
+
+type UpdateSeatingPlanInput struct {
+	Name             *string         `json:"name,omitempty"`
+	MaxSeatsPerOrder *int            `json:"maxSeatsPerOrder,omitempty"`
+	AssignmentMode   *AssignmentMode `json:"assignmentMode,omitempty"`
+	PricingMode      *string         `json:"pricingMode,omitempty"`
+}
+
+type UpdateSectionInput struct {
+	Name         *string `json:"name,omitempty"`
+	RowCount     *int    `json:"rowCount,omitempty"`
+	ColumnCount  *int    `json:"columnCount,omitempty"`
+	DisplayOrder *int    `json:"displayOrder,omitempty"`
+}
+
+type UpdateVenueInput struct {
+	Name     string  `json:"name"`
+	Capacity int     `json:"capacity"`
+	Timezone string  `json:"timezone"`
+	Address  *string `json:"address,omitempty"`
+}
+
+type Venue struct {
+	ID          string `json:"id"`
+	OrganizerID string `json:"organizerId"`
+	Name        string `json:"name"`
+	Capacity    int    `json:"capacity"`
+	Timezone    string `json:"timezone"`
+	Address     string `json:"address"`
+}
+
+type VenueSection struct {
+	ID           string      `json:"id"`
+	VenueID      string      `json:"venueId"`
+	Name         string      `json:"name"`
+	Type         SectionType `json:"type"`
+	RowCount     int         `json:"rowCount"`
+	ColumnCount  int         `json:"columnCount"`
+	DisplayOrder int         `json:"displayOrder"`
+	Capacity     int         `json:"capacity"`
 }
 
 type AssignmentMode string
@@ -199,6 +284,61 @@ func (e *SeatStatus) UnmarshalJSON(b []byte) error {
 }
 
 func (e SeatStatus) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type SectionType string
+
+const (
+	SectionTypeSeated SectionType = "SEATED"
+	SectionTypeGa     SectionType = "GA"
+)
+
+var AllSectionType = []SectionType{
+	SectionTypeSeated,
+	SectionTypeGa,
+}
+
+func (e SectionType) IsValid() bool {
+	switch e {
+	case SectionTypeSeated, SectionTypeGa:
+		return true
+	}
+	return false
+}
+
+func (e SectionType) String() string {
+	return string(e)
+}
+
+func (e *SectionType) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = SectionType(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid SectionType", str)
+	}
+	return nil
+}
+
+func (e SectionType) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *SectionType) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e SectionType) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil

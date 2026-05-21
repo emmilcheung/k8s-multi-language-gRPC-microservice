@@ -8,9 +8,376 @@ package graph
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/acme/venue-service/internal/repository"
 )
+
+// CreateVenue is the resolver for the createVenue field.
+func (r *mutationResolver) CreateVenue(ctx context.Context, input CreateVenueInput) (*Venue, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	address := ""
+	if input.Address != nil {
+		address = *input.Address
+	}
+	v := &repository.Venue{
+		OrganizerID: organizerID,
+		Name:        input.Name,
+		Capacity:    input.Capacity,
+		Timezone:    input.Timezone,
+		Address:     address,
+	}
+	if err := r.VenueRepo.Create(ctx, v); err != nil {
+		return nil, err
+	}
+	return mapVenueToGQL(v), nil
+}
+
+// UpdateVenue is the resolver for the updateVenue field.
+func (r *mutationResolver) UpdateVenue(ctx context.Context, id string, input UpdateVenueInput) (*Venue, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	address := ""
+	if input.Address != nil {
+		address = *input.Address
+	}
+	v := &repository.Venue{
+		ID:          id,
+		OrganizerID: organizerID,
+		Name:        input.Name,
+		Capacity:    input.Capacity,
+		Timezone:    input.Timezone,
+		Address:     address,
+	}
+	if err := r.VenueRepo.Update(ctx, v); err != nil {
+		if errors.Is(err, repository.ErrVenueNotFound) {
+			return nil, fmt.Errorf("not found: venue not found")
+		}
+		return nil, err
+	}
+	return mapVenueToGQL(v), nil
+}
+
+// CreateSection is the resolver for the createSection field.
+// Creates a VenueSection template attached to the given venue.
+func (r *mutationResolver) CreateSection(ctx context.Context, venueID string, input CreateSectionInput) (*VenueSection, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	// Ownership check — only the venue owner may add template sections.
+	venue, err := r.VenueRepo.FindByID(ctx, venueID)
+	if err != nil {
+		if errors.Is(err, repository.ErrVenueNotFound) {
+			return nil, fmt.Errorf("not found: venue not found")
+		}
+		return nil, err
+	}
+	if venue.OrganizerID != organizerID {
+		return nil, fmt.Errorf("forbidden: not the venue owner")
+	}
+
+	sectionType := repository.SectionTypeSeated
+	if input.Type == SectionTypeGa {
+		sectionType = repository.SectionTypeGA
+	}
+	rowCount := 0
+	if input.RowCount != nil {
+		rowCount = *input.RowCount
+	}
+	displayOrder := 0
+	if input.DisplayOrder != nil {
+		displayOrder = *input.DisplayOrder
+	}
+	vs := &repository.VenueSection{
+		VenueID:      venueID,
+		Name:         input.Name,
+		Type:         sectionType,
+		RowCount:     rowCount,
+		ColumnCount:  input.ColumnCount,
+		DisplayOrder: displayOrder,
+	}
+	if err := r.VenueSectionRepo.Create(ctx, vs); err != nil {
+		return nil, err
+	}
+	return mapVenueSectionToGQL(vs), nil
+}
+
+// UpdateSection is the resolver for the updateSection field.
+func (r *mutationResolver) UpdateSection(ctx context.Context, id string, input UpdateSectionInput) (*VenueSection, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	existing, err := r.VenueSectionRepo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrSectionNotFound) {
+			return nil, fmt.Errorf("not found: section not found")
+		}
+		return nil, err
+	}
+	// Ownership check via the parent venue.
+	venue, err := r.VenueRepo.FindByID(ctx, existing.VenueID)
+	if err != nil {
+		return nil, err
+	}
+	if venue.OrganizerID != organizerID {
+		return nil, fmt.Errorf("forbidden: not the venue owner")
+	}
+
+	if input.Name != nil {
+		existing.Name = *input.Name
+	}
+	if input.RowCount != nil {
+		existing.RowCount = *input.RowCount
+	}
+	if input.ColumnCount != nil {
+		existing.ColumnCount = *input.ColumnCount
+	}
+	if input.DisplayOrder != nil {
+		existing.DisplayOrder = *input.DisplayOrder
+	}
+	if err := r.VenueSectionRepo.Update(ctx, existing); err != nil {
+		return nil, err
+	}
+	return mapVenueSectionToGQL(existing), nil
+}
+
+// CreateSeatingPlan is the resolver for the createSeatingPlan field.
+func (r *mutationResolver) CreateSeatingPlan(ctx context.Context, input CreateSeatingPlanInput) (*SeatingPlan, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	maxSeats := 0
+	if input.MaxSeatsPerOrder != nil {
+		maxSeats = *input.MaxSeatsPerOrder
+	}
+	pricingMode := ""
+	if input.PricingMode != nil {
+		pricingMode = *input.PricingMode
+	}
+	p := &repository.SeatingPlan{
+		VenueID:          input.VenueID,
+		TicketID:         input.TicketID,
+		OrganizerID:      organizerID,
+		Name:             input.Name,
+		MaxSeatsPerOrder: maxSeats,
+		AssignmentMode:   string(input.AssignmentMode),
+		PricingMode:      pricingMode,
+	}
+	if err := r.PlanRepo.Create(ctx, p); err != nil {
+		return nil, err
+	}
+	// Auto-provision sections from the venue template (best-effort).
+	if _, provErr := r.SectionRepo.ProvisionFromVenue(ctx, p.ID, input.VenueID); provErr != nil {
+		// Non-fatal: plan created, sections missing.
+		_ = provErr
+	}
+	sections, err := loadSections(ctx, r.SectionRepo, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	return mapPlanToGQL(p, sections), nil
+}
+
+// UpdateSeatingPlan is the resolver for the updateSeatingPlan field.
+func (r *mutationResolver) UpdateSeatingPlan(ctx context.Context, id string, input UpdateSeatingPlanInput) (*SeatingPlan, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	existing, err := r.PlanRepo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrPlanNotFound) {
+			return nil, fmt.Errorf("not found: seating plan not found")
+		}
+		return nil, err
+	}
+	if input.Name != nil {
+		existing.Name = *input.Name
+	}
+	if input.MaxSeatsPerOrder != nil {
+		existing.MaxSeatsPerOrder = *input.MaxSeatsPerOrder
+	}
+	if input.AssignmentMode != nil {
+		existing.AssignmentMode = string(*input.AssignmentMode)
+	}
+	if input.PricingMode != nil {
+		existing.PricingMode = *input.PricingMode
+	}
+	existing.OrganizerID = organizerID
+	if err := r.PlanRepo.Update(ctx, existing); err != nil {
+		if errors.Is(err, repository.ErrPlanNotFound) {
+			return nil, fmt.Errorf("not found: seating plan not found")
+		}
+		return nil, err
+	}
+	sections, err := loadSections(ctx, r.SectionRepo, existing.ID)
+	if err != nil {
+		return nil, err
+	}
+	return mapPlanToGQL(existing, sections), nil
+}
+
+// ActivateSeatingPlan is the resolver for the activateSeatingPlan field.
+func (r *mutationResolver) ActivateSeatingPlan(ctx context.Context, id string) (*SeatingPlan, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	existing, err := r.PlanRepo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrPlanNotFound) {
+			return nil, fmt.Errorf("not found: seating plan not found")
+		}
+		return nil, err
+	}
+	if existing.OrganizerID != organizerID {
+		return nil, fmt.Errorf("forbidden: not the plan owner")
+	}
+	if err := r.PlanRepo.Activate(ctx, id, existing.Version); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrPlanAlreadyActive):
+			return nil, fmt.Errorf("conflict: plan is already active")
+		case errors.Is(err, repository.ErrPlanHasNoSections):
+			return nil, fmt.Errorf("unprocessable: plan must have at least one section before activation")
+		case errors.Is(err, repository.ErrVersionConflict):
+			return nil, fmt.Errorf("conflict: plan was modified concurrently")
+		default:
+			return nil, err
+		}
+	}
+	return loadPlanWithSections(ctx, r.PlanRepo, r.SectionRepo, id)
+}
+
+// DeactivateSeatingPlan is the resolver for the deactivateSeatingPlan field.
+func (r *mutationResolver) DeactivateSeatingPlan(ctx context.Context, id string) (*SeatingPlan, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	if err := r.PlanRepo.Deactivate(ctx, id, organizerID); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrPlanNotFound):
+			return nil, fmt.Errorf("not found: seating plan not found")
+		case errors.Is(err, repository.ErrPlanNotActive):
+			return nil, fmt.Errorf("conflict: plan is not active")
+		default:
+			return nil, err
+		}
+	}
+	return loadPlanWithSections(ctx, r.PlanRepo, r.SectionRepo, id)
+}
+
+// CreatePriceTier is the resolver for the createPriceTier field.
+func (r *mutationResolver) CreatePriceTier(ctx context.Context, planID string, input CreatePriceTierInput) (*PriceTier, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	// Ownership check.
+	plan, err := r.PlanRepo.FindByID(ctx, planID)
+	if err != nil {
+		if errors.Is(err, repository.ErrPlanNotFound) {
+			return nil, fmt.Errorf("not found: seating plan not found")
+		}
+		return nil, err
+	}
+	if plan.OrganizerID != organizerID {
+		return nil, fmt.Errorf("forbidden: not the plan owner")
+	}
+
+	t := &repository.PriceTier{
+		PlanID: planID,
+		Name:   input.Name,
+		Price:  input.Price,
+	}
+	if err := r.PriceTierRepo.Create(ctx, t); err != nil {
+		return nil, err
+	}
+	return mapPriceTierToGQL(t), nil
+}
+
+// HoldSeats is the resolver for the holdSeats field.
+func (r *mutationResolver) HoldSeats(ctx context.Context, planID string, seatIds []string) (*SeatHoldResult, error) {
+	userID := userIDFromContext(ctx)
+	if userID == "" {
+		return nil, fmt.Errorf("unauthorized: user identity required")
+	}
+	result, err := r.HoldMgr.HoldSeats(ctx, planID, userID, "", seatIds)
+	if err != nil {
+		return nil, err
+	}
+	return holdResultToGQL(result), nil
+}
+
+// ReleaseSeats is the resolver for the releaseSeats field.
+func (r *mutationResolver) ReleaseSeats(ctx context.Context, planID string, seatIds []string) (bool, error) {
+	userID := userIDFromContext(ctx)
+	if userID == "" {
+		return false, fmt.Errorf("unauthorized: user identity required")
+	}
+	if err := r.HoldMgr.ReleaseHold(ctx, planID, userID, seatIds); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// Venues is the resolver for the venues field.
+func (r *queryResolver) Venues(ctx context.Context) ([]*Venue, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	venues, err := r.VenueRepo.ListByOrganizer(ctx, organizerID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*Venue, len(venues))
+	for i, v := range venues {
+		result[i] = mapVenueToGQL(v)
+	}
+	return result, nil
+}
+
+// Venue is the resolver for the venue field.
+func (r *queryResolver) Venue(ctx context.Context, id string) (*Venue, error) {
+	v, err := r.VenueRepo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrVenueNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return mapVenueToGQL(v), nil
+}
+
+// SeatingPlans is the resolver for the seatingPlans field.
+func (r *queryResolver) SeatingPlans(ctx context.Context, venueID string) ([]*SeatingPlan, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	plans, err := r.PlanRepo.ListByVenue(ctx, venueID, organizerID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*SeatingPlan, len(plans))
+	for i, p := range plans {
+		sections, err := loadSections(ctx, r.SectionRepo, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = mapPlanToGQL(p, sections)
+	}
+	return result, nil
+}
 
 // SeatingPlan is the resolver for the seatingPlan field.
 func (r *queryResolver) SeatingPlan(ctx context.Context, id string) (*SeatingPlan, error) {
@@ -28,7 +395,11 @@ func (r *queryResolver) SeatingPlan(ctx context.Context, id string) (*SeatingPla
 	return mapPlanToGQL(plan, sections), nil
 }
 
+// Mutation returns MutationResolver implementation.
+func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
+
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
+type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
