@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { TicketPage } from "@/app/actions/tickets";
-import type { Order, Ticket } from "@/lib/types";
+import type { Ticket } from "@/lib/types";
 
 // ── Next.js shims ──────────────────────────────────────────────────────────────
 
@@ -46,30 +46,23 @@ vi.mock("react", async () => {
 
 // ── Data module mocks ──────────────────────────────────────────────────────────
 
-const fetchTicketPageMock = vi.fn<() => Promise<TicketPage>>();
+const fetchTicketPageViaGraphQLMock = vi.fn<() => Promise<TicketPage>>();
 vi.mock("@/app/actions/tickets", () => ({
-  fetchTicketPage: (...args: unknown[]) => fetchTicketPageMock(...args as Parameters<typeof fetchTicketPageMock>),
+  fetchTicketPageViaGraphQL: (...args: unknown[]) => fetchTicketPageViaGraphQLMock(...args as Parameters<typeof fetchTicketPageViaGraphQLMock>),
   updateTicket: vi.fn(),
 }));
 
-const serverApiMock = vi.fn<() => Promise<Ticket>>();
-const getAttendanceSettingsMock = vi.fn();
-const getAttendanceSummaryMock = vi.fn();
-const getAttendanceCheckInsMock = vi.fn();
+const executeQueryMock = vi.fn();
+vi.mock("@/lib/graphql/execute", () => ({
+  executeQuery: (...args: unknown[]) => executeQueryMock(...args),
+}));
+
+const serverApiMock = vi.fn<() => Promise<unknown>>();
 const lookupUserMock = vi.fn();
-const getAdmissionPassMock = vi.fn();
 vi.mock("@/lib/api", () => ({
   serverApi: (...args: unknown[]) => serverApiMock(...args as Parameters<typeof serverApiMock>),
-  getAttendanceSettings: (...args: unknown[]) =>
-    getAttendanceSettingsMock(...args as Parameters<typeof getAttendanceSettingsMock>),
-  getAttendanceSummary: (...args: unknown[]) =>
-    getAttendanceSummaryMock(...args as Parameters<typeof getAttendanceSummaryMock>),
-  getAttendanceCheckIns: (...args: unknown[]) =>
-    getAttendanceCheckInsMock(...args as Parameters<typeof getAttendanceCheckInsMock>),
   lookupUser: (...args: unknown[]) =>
     lookupUserMock(...args as Parameters<typeof lookupUserMock>),
-  getAdmissionPass: (...args: unknown[]) =>
-    getAdmissionPassMock(...args as Parameters<typeof getAdmissionPassMock>),
   ApiError: class ApiError extends Error {
     constructor(public status: number, message: string) { super(message); }
   },
@@ -96,12 +89,23 @@ vi.mock("@/components/purchase-button", () => ({
 }));
 
 // lucide-react icons — render as bare spans to avoid SVG parse overhead
+vi.mock("@/components/scanner-client", () => ({
+  ScannerClient: ({ eventId }: { eventId: string }) => (
+    <div data-testid="scanner-client" data-event-id={eventId} />
+  ),
+}));
+
 vi.mock("lucide-react", () => ({
   Ticket: () => <span />,
   ArrowRight: () => <span />,
   Tag: () => <span />,
   Zap: () => <span />,
   Shield: () => <span />,
+  Clock: () => <span />,
+  CheckCircle2: () => <span />,
+  XCircle: () => <span />,
+  CircleDot: () => <span />,
+  ShoppingBag: () => <span />,
   Globe: () => <span />,
   ArrowLeft: () => <span />,
   User: () => <span />,
@@ -123,20 +127,26 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   };
 }
 
-function makeOrder(overrides: Partial<Order> = {}): Order {
+function makeTicketDetailGraphql(ticket: Ticket) {
   return {
-    id: "order-uuid-1",
-    userId: "buyer-uuid",
-    status: "complete",
-    expiresAt: "2026-12-01T20:00:00Z",
-    ticket: {
-      id: "ticket-uuid-1",
-      title: "Concert Night",
-      price: "49.99",
-    },
-    quantity: 1,
-    version: 1,
-    ...overrides,
+    id: ticket.id,
+    title: ticket.title,
+    price: parseFloat(ticket.price),
+    priceDecimal: ticket.price,
+    userId: ticket.userId,
+    orderId: ticket.orderId ?? null,
+    quota: ticket.quota ?? 1,
+    reserved: ticket.reserved ?? 0,
+    sold: ticket.sold ?? 0,
+    available:
+      ticket.available ??
+      Math.max((ticket.quota ?? 1) - (ticket.reserved ?? 0) - (ticket.sold ?? 0), 0),
+    maxPerUser: ticket.maxPerUser ?? 1,
+    ticketType:
+      ticket.ticketType === "SEATED_MANUAL" || ticket.ticketType === "SEATED_AUTO"
+        ? "SEATED"
+        : "GENERAL_ADMISSION",
+    seatingPlan: ticket.seatingPlanId ? { id: ticket.seatingPlanId } : null,
   };
 }
 
@@ -154,7 +164,7 @@ describe("HomePage", () => {
   });
 
   it("renders the hero heading", async () => {
-    fetchTicketPageMock.mockResolvedValue({ tickets: [], cursor: null, hasMore: false });
+    fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets: [], cursor: null, hasMore: false });
 
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
@@ -165,7 +175,7 @@ describe("HomePage", () => {
 
   it("renders TicketGrid with the fetched tickets", async () => {
     const tickets = [makeTicket(), makeTicket({ id: "ticket-uuid-2" })];
-    fetchTicketPageMock.mockResolvedValue({ tickets, cursor: null, hasMore: false });
+    fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets, cursor: null, hasMore: false });
 
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
@@ -176,19 +186,19 @@ describe("HomePage", () => {
   });
 
   it("shows available ticket count when tickets exist", async () => {
-    const tickets = [makeTicket(), makeTicket({ id: "t2", orderId: "order-1" })];
-    fetchTicketPageMock.mockResolvedValue({ tickets, cursor: null, hasMore: false });
+    const tickets = [makeTicket(), makeTicket({ id: "t2" })];
+    fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets, cursor: null, hasMore: false });
 
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
 
-    // availableCount = 1 (one ticket has no orderId)
-    expect(screen.getByText(/1\s*listings/)).toBeInTheDocument();
+    // availableCount = 2 (all tickets returned by GraphQL are available)
+    expect(screen.getByText(/2\s*listings/)).toBeInTheDocument();
   });
 
   it("shows hasMore '+' indicator when there are more pages", async () => {
     const tickets = [makeTicket()];
-    fetchTicketPageMock.mockResolvedValue({ tickets, cursor: "cursor-abc", hasMore: true });
+    fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets, cursor: "cursor-abc", hasMore: true });
 
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
@@ -196,8 +206,8 @@ describe("HomePage", () => {
     expect(screen.getByText(/1\s*\+\s*listings/)).toBeInTheDocument();
   });
 
-  it("falls back gracefully when fetchTicketPage rejects", async () => {
-    fetchTicketPageMock.mockRejectedValue(new Error("network error"));
+  it("falls back gracefully when fetchTicketPageViaGraphQL rejects", async () => {
+    fetchTicketPageViaGraphQLMock.mockRejectedValue(new Error("network error"));
 
     const { default: HomePage } = await import("@/app/page");
     // Should not throw — page catches and defaults to empty state
@@ -209,12 +219,55 @@ describe("HomePage", () => {
   });
 });
 
+// ── OrdersPage ───────────────────────────────────────────────────────────────
+
+describe("OrdersPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    executeQueryMock.mockReset();
+    serverApiMock.mockReset();
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+  });
+
+  it("renders the authenticated order list from GraphQL", async () => {
+    executeQueryMock.mockResolvedValue({
+      orders: [
+        {
+          id: "order-uuid-1",
+          userId: "buyer-uuid",
+          status: "AWAITING_PAYMENT",
+          quantity: 2,
+          expiresAt: "2026-12-01T20:00:00Z",
+          createdAt: "2026-12-01T19:00:00Z",
+          ticket: {
+            id: "ticket-uuid-1",
+            title: "Concert Night",
+            price: "49.99",
+          },
+        },
+      ],
+    });
+    serverApiMock.mockRejectedValue(new Error("OrdersPage should not use REST"));
+
+    const { default: OrdersPage } = await import("@/app/orders/page");
+    render(await OrdersPage());
+
+    expect(executeQueryMock).toHaveBeenCalledTimes(1);
+    expect(serverApiMock).not.toHaveBeenCalledWith("/api/tickets/ticket-uuid-1");
+    expect(screen.getByRole("heading", { level: 1, name: /my orders/i })).toBeInTheDocument();
+    expect(screen.getByText(/1 order/i)).toBeInTheDocument();
+    expect(screen.getByText("Concert Night")).toBeInTheDocument();
+    expect(screen.getByText("$99.98")).toBeInTheDocument();
+    expect(screen.getByText(/awaiting payment/i)).toBeInTheDocument();
+  });
+});
+
 // ── TicketDetailPage ──────────────────────────────────────────────────────────
 
 describe("TicketDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    serverApiMock.mockReset();
+    executeQueryMock.mockReset();
     // Default: no auth cookie
     cookieStoreMock.get.mockReturnValue(undefined);
   });
@@ -222,7 +275,8 @@ describe("TicketDetailPage", () => {
   const params = Promise.resolve({ ticketId: "ticket-uuid-1" });
 
   it("shows ticket title and price", async () => {
-    serverApiMock.mockResolvedValue(makeTicket());
+    const ticket = makeTicket();
+    serverApiMock.mockResolvedValue(ticket);
 
     const { default: TicketDetailPage } = await import(
       "@/app/tickets/[ticketId]/page"
@@ -236,9 +290,9 @@ describe("TicketDetailPage", () => {
     expect(screen.getAllByText("$49.99").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("calls notFound() when the API throws a 404 ApiError", async () => {
-    const { ApiError } = await import("@/lib/api");
-    serverApiMock.mockRejectedValue(new ApiError(404, "not found"));
+  it("calls notFound() when the GraphQL query returns null", async () => {
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+    executeQueryMock.mockResolvedValue({ ticket: null });
 
     const { notFound } = await import("next/navigation");
     const { default: TicketDetailPage } = await import(
@@ -246,12 +300,32 @@ describe("TicketDetailPage", () => {
     );
 
     await expect(TicketDetailPage({ params })).rejects.toThrow("NEXT_NOT_FOUND");
-    expect(notFound).toHaveBeenCalledOnce();
+    expect(notFound).toHaveBeenCalled();
   }, 10000);
+
+  it("uses ticket detail GraphQL parity fields without REST fallback", async () => {
+    executeQueryMock.mockResolvedValue({
+      ticket: makeTicketDetailGraphql(
+        makeTicket({ userId: "owner-uuid", orderId: "order-1", reserved: 1, sold: 0 })
+      ),
+    });
+    serverApiMock.mockRejectedValue(new Error("REST fallback should not be used"));
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+
+    const { default: TicketDetailPage } = await import(
+      "@/app/tickets/[ticketId]/page"
+    );
+    render(await TicketDetailPage({ params }));
+
+    expect(serverApiMock).not.toHaveBeenCalledWith("/api/tickets/ticket-uuid-1");
+    expect(screen.queryByTestId("ticket-form")).not.toBeInTheDocument();
+    expect(screen.getByText(/cannot be edited/i)).toBeInTheDocument();
+  });
 
   it("shows TicketForm when the viewer is the owner and ticket is not reserved", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    serverApiMock.mockResolvedValue(ticket);
+    serverApiMock.mockResolvedValueOnce({ requireQrForEntry: true });
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
     const { default: TicketDetailPage } = await import(
@@ -265,7 +339,8 @@ describe("TicketDetailPage", () => {
 
   it("shows an attendance settings link for owners", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    serverApiMock.mockResolvedValue(ticket);
+    serverApiMock.mockResolvedValueOnce({ requireQrForEntry: true });
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
     const { default: TicketDetailPage } = await import(
@@ -281,7 +356,8 @@ describe("TicketDetailPage", () => {
 
   it("shows 'cannot be edited' message when owner views reserved ticket", async () => {
     const ticket = makeTicket({ userId: "owner-uuid", orderId: "order-1" });
-    serverApiMock.mockResolvedValue(ticket);
+    serverApiMock.mockResolvedValueOnce({ requireQrForEntry: true });
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
     const { default: TicketDetailPage } = await import(
@@ -295,9 +371,8 @@ describe("TicketDetailPage", () => {
 
   it("keeps attendance navigation visible for owners on reserved tickets", async () => {
     const ticket = makeTicket({ userId: "owner-uuid", orderId: "order-1" });
-    serverApiMock
-      .mockResolvedValueOnce(ticket)
-      .mockResolvedValueOnce({ requireQrForEntry: true });
+    serverApiMock.mockResolvedValueOnce({ requireQrForEntry: true });
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
     const { default: TicketDetailPage } = await import(
@@ -317,10 +392,7 @@ describe("TicketDetailPage", () => {
 
   it("shows PurchaseButton for a signed-in buyer on an available ticket", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    serverApiMock
-      .mockResolvedValueOnce(ticket)
-      .mockResolvedValueOnce([makeOrder()])
-      .mockResolvedValueOnce({ id: "cred-1" });
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
 
     const { default: TicketDetailPage } = await import(
@@ -337,7 +409,7 @@ describe("TicketDetailPage", () => {
 
   it("does not show admission pass link when buyer has no completed order", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    serverApiMock.mockResolvedValueOnce(ticket).mockResolvedValueOnce([]);
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
 
     const { default: TicketDetailPage } = await import(
@@ -350,7 +422,8 @@ describe("TicketDetailPage", () => {
   });
 
   it("shows 'Sign in to Purchase' link for an unauthenticated buyer", async () => {
-    serverApiMock.mockResolvedValue(makeTicket({ userId: "owner-uuid" }));
+    const ticket = makeTicket({ userId: "owner-uuid" });
+    serverApiMock.mockResolvedValue(ticket);
     cookieStoreMock.get.mockReturnValue(undefined);
 
     const { default: TicketDetailPage } = await import(
@@ -365,7 +438,7 @@ describe("TicketDetailPage", () => {
 
   it("shows 'Already Reserved' disabled button for a buyer on a reserved ticket", async () => {
     const ticket = makeTicket({ userId: "owner-uuid", orderId: "order-1" });
-    serverApiMock.mockResolvedValue(ticket);
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
 
     const { default: TicketDetailPage } = await import(
@@ -379,7 +452,8 @@ describe("TicketDetailPage", () => {
   });
 
   it("falls back to purchase view (non-owner) when JWT is malformed", async () => {
-    serverApiMock.mockResolvedValue(makeTicket({ userId: "owner-uuid" }));
+    const ticket = makeTicket({ userId: "owner-uuid" });
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     // Malformed token — cannot decode payload
     cookieStoreMock.get.mockReturnValue({ value: "not.a.real.jwt" });
 
@@ -398,9 +472,8 @@ describe("TicketDetailPage", () => {
 
   it("shows scanner entry point only for owner when attendance policy requires QR", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    serverApiMock
-      .mockResolvedValueOnce(ticket)
-      .mockResolvedValueOnce({ requireQrForEntry: true });
+    serverApiMock.mockResolvedValueOnce({ requireQrForEntry: true });
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
     const { default: TicketDetailPage } = await import(
@@ -416,9 +489,8 @@ describe("TicketDetailPage", () => {
 
   it("hides scanner entry point when attendance policy does not require QR", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    serverApiMock
-      .mockResolvedValueOnce(ticket)
-      .mockResolvedValueOnce({ requireQrForEntry: false });
+    serverApiMock.mockResolvedValueOnce({ requireQrForEntry: false });
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
     const { default: TicketDetailPage } = await import(
@@ -433,27 +505,16 @@ describe("TicketDetailPage", () => {
 describe("AttendanceSettingsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getAttendanceSettingsMock.mockReset();
-    getAttendanceSummaryMock.mockReset();
-    getAttendanceCheckInsMock.mockReset();
     lookupUserMock.mockReset();
-    getAdmissionPassMock.mockReset();
-    getAttendanceCheckInsMock.mockResolvedValue({ eventId: "ticket-uuid-1", items: [] });
     lookupUserMock.mockResolvedValue({ user: { id: "buyer-uuid", email: "buyer@example.com" } });
   });
 
   it("renders the policy form with settings and summary", async () => {
-    serverApiMock.mockResolvedValue(makeTicket({ userId: "owner-uuid" }));
-    getAttendanceSettingsMock.mockResolvedValue({
-      eventId: "ticket-uuid-1",
-      requireQrForEntry: true,
-      allowManualOverride: false,
-    });
-    getAttendanceSummaryMock.mockResolvedValue({
-      eventId: "ticket-uuid-1",
-      totalAdmitted: 7,
-      totalDenied: 2,
-      totalCheckedIn: 7,
+    executeQueryMock.mockResolvedValue({
+      ticket: { id: "ticket-uuid-1", title: "Concert Night", userId: "owner-uuid", sold: 0 },
+      attendancePolicy: { eventId: "ticket-uuid-1", requireQrForEntry: true, allowManualOverride: false },
+      attendanceSummary: { eventId: "ticket-uuid-1", totalAdmitted: 7, totalDenied: 2, totalCheckedIn: 7 },
+      eventCheckins: [],
     });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
@@ -468,17 +529,11 @@ describe("AttendanceSettingsPage", () => {
   });
 
   it("locks attendance requirement controls after tickets are sold", async () => {
-    serverApiMock.mockResolvedValue(makeTicket({ userId: "owner-uuid", sold: 1 }));
-    getAttendanceSettingsMock.mockResolvedValue({
-      eventId: "ticket-uuid-1",
-      requireQrForEntry: true,
-      allowManualOverride: false,
-    });
-    getAttendanceSummaryMock.mockResolvedValue({
-      eventId: "ticket-uuid-1",
-      totalAdmitted: 0,
-      totalDenied: 0,
-      totalCheckedIn: 0,
+    executeQueryMock.mockResolvedValue({
+      ticket: { id: "ticket-uuid-1", title: "Concert Night", userId: "owner-uuid", sold: 1 },
+      attendancePolicy: { eventId: "ticket-uuid-1", requireQrForEntry: true, allowManualOverride: false },
+      attendanceSummary: { eventId: "ticket-uuid-1", totalAdmitted: 0, totalDenied: 0, totalCheckedIn: 0 },
+      eventCheckins: [],
     });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
@@ -495,14 +550,17 @@ describe("AttendanceSettingsPage", () => {
 describe("AdmissionPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getAdmissionPassMock.mockResolvedValue({
-      id: "cred-1",
-      ticketId: "ticket-uuid-1",
-      orderId: "order-1",
-      eventId: "ticket-uuid-1",
-      status: "USED",
-      issuedAt: new Date().toISOString(),
-      qrToken: "signed-token",
+    executeQueryMock.mockResolvedValue({
+      admissionPass: {
+        id: "cred-1",
+        ticketId: "ticket-uuid-1",
+        orderId: "order-1",
+        eventId: "ticket-uuid-1",
+        status: "USED",
+        issuedAt: new Date().toISOString(),
+        usedAt: null,
+        qrToken: "signed-token",
+      },
     });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
   });
@@ -521,5 +579,75 @@ describe("AdmissionPage", () => {
     expect(screen.getByText(/already been used for entry/i)).toBeInTheDocument();
     expect(screen.queryByText(/qr token payload/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/signed-token/i)).not.toBeInTheDocument();
+  });
+});
+
+// ── ScanPage ─────────────────────────────────────────────────────────────────
+
+import { TicketDetailDocument, AttendancePolicyDocument } from "@/lib/graphql/generated";
+
+describe("ScanPage", () => {
+  const searchParams = Promise.resolve({ eventId: "event-uuid-1" });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    executeQueryMock.mockReset();
+  });
+
+  it("renders scanner console when organizer owns the event and policy requires QR", async () => {
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+    executeQueryMock
+      .mockResolvedValueOnce({ ticket: { id: "event-uuid-1", userId: "owner-uuid" } })
+      .mockResolvedValueOnce({ attendancePolicy: { requireQrForEntry: true } });
+
+    const { default: ScanPage } = await import("@/app/scan/page");
+    render(await ScanPage({ searchParams }));
+
+    expect(screen.getByRole("heading", { level: 1, name: /scanner console/i })).toBeInTheDocument();
+    expect(screen.getByTestId("scanner-client")).toHaveAttribute("data-event-id", "event-uuid-1");
+
+    expect(executeQueryMock).toHaveBeenCalledTimes(2);
+    expect(executeQueryMock).toHaveBeenNthCalledWith(
+      1,
+      TicketDetailDocument,
+      { id: "event-uuid-1" },
+      expect.objectContaining({}),
+    );
+    expect(executeQueryMock).toHaveBeenNthCalledWith(
+      2,
+      AttendancePolicyDocument,
+      { eventId: "event-uuid-1" },
+      expect.objectContaining({}),
+    );
+  });
+
+  it("calls notFound when the organizer ownership check fails (different userId)", async () => {
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+    executeQueryMock
+      .mockResolvedValueOnce({ ticket: { id: "event-uuid-1", userId: "owner-uuid" } })
+      .mockResolvedValueOnce({ attendancePolicy: { requireQrForEntry: true } });
+
+    const { default: ScanPage } = await import("@/app/scan/page");
+    await expect(ScanPage({ searchParams })).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("calls notFound when QR policy is disabled", async () => {
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+    executeQueryMock
+      .mockResolvedValueOnce({ ticket: { id: "event-uuid-1", userId: "owner-uuid" } })
+      .mockResolvedValueOnce({ attendancePolicy: { requireQrForEntry: false } });
+
+    const { default: ScanPage } = await import("@/app/scan/page");
+    await expect(ScanPage({ searchParams })).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+
+  it("calls notFound when no event is found", async () => {
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+    executeQueryMock
+      .mockResolvedValueOnce({ ticket: null })
+      .mockResolvedValueOnce({ attendancePolicy: null });
+
+    const { default: ScanPage } = await import("@/app/scan/page");
+    await expect(ScanPage({ searchParams })).rejects.toThrow("NEXT_NOT_FOUND");
   });
 });

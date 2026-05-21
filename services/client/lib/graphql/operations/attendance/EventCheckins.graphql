@@ -1,0 +1,11 @@
+query EventCheckins($eventId: ID!) {
+  eventCheckins(eventId: $eventId) {
+    id
+    eventId
+    ticketId
+    orderId
+    userId
+    checkedInAt
+    source
+  }
+}

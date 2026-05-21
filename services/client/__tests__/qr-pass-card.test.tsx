@@ -20,4 +20,26 @@ describe("QRPassCard", () => {
 
     expect(screen.getByText(/no longer valid for entry/i)).toBeInTheDocument();
   });
+
+  it("renders QR image with data-qr-token attribute for an issued pass", () => {
+    render(
+      <QRPassCard
+        pass={{
+          id: "cred-2",
+          ticketId: "ticket-1",
+          orderId: "order-1",
+          eventId: "event-1",
+          status: "ISSUED",
+          issuedAt: "2026-01-01T00:00:00Z",
+          qrToken: "qr-secret-token",
+        }}
+        qrDataUrl="data:image/png;base64,abc123"
+      />
+    );
+
+    const img = screen.getByRole("img", { name: /admission qr code/i });
+    expect(img).toBeInTheDocument();
+    expect(img).toHaveAttribute("data-qr-token", "qr-secret-token");
+    expect(img).toHaveAttribute("src", "data:image/png;base64,abc123");
+  });
 });

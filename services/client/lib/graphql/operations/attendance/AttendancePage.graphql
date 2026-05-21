@@ -1,0 +1,28 @@
+query AttendancePage($id: ID!) {
+  ticket(id: $id) {
+    id
+    title
+    userId
+    sold
+  }
+  attendancePolicy(eventId: $id) {
+    eventId
+    requireQrForEntry
+    allowManualOverride
+  }
+  attendanceSummary(eventId: $id) {
+    eventId
+    totalAdmitted
+    totalDenied
+    totalCheckedIn
+  }
+  eventCheckins(eventId: $id) {
+    id
+    eventId
+    ticketId
+    orderId
+    userId
+    checkedInAt
+    source
+  }
+}
