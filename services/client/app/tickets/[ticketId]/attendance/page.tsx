@@ -7,8 +7,9 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { executeQuery } from "@/lib/graphql/execute";
 import { AttendancePageDocument } from "@/lib/graphql/generated";
-import { lookupUser } from "@/lib/api";
+import { serverApi } from "@/lib/api";
 import { readCurrentUserIdFromToken } from "@/lib/server-utils";
+import type { UserLookupResponse } from "@/lib/types";
 import type { AttendanceCheckInItem } from "@/lib/types";
 
 interface Props {
@@ -76,7 +77,7 @@ export default async function AttendanceSettingsPage({ params }: Props) {
   await Promise.all(
     buyerUserIDs.map(async (buyerUserID) => {
       try {
-        const lookup = await lookupUser({ id: buyerUserID });
+        const lookup = await serverApi<UserLookupResponse>(`/api/users/lookup?id=${encodeURIComponent(buyerUserID)}`);
         buyerEmailsByUserID.set(buyerUserID, lookup.user.email);
       } catch {
         // Best-effort enrichment: keep user ID fallback in the UI.

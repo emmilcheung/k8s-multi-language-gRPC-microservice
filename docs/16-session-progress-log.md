@@ -9,6 +9,48 @@
 
 ---
 
+## Session: 2026-05-22 — feat(client): complete GraphQL Phase 4 migration ✅ COMPLETE
+
+**Branch:** `feat/client-graphql-foundation`
+
+### What was done
+
+Completed the full GraphQL-first migration for the `services/client` Next.js app across Phases 4.1–4.7 plus cleanup (Stage 5).
+
+#### Commits on this branch (newest first)
+
+| Commit | Scope | Summary |
+|---|---|---|
+| Stage 5 | cleanup | Narrow `lib/api.ts`; add AGENTS.md data-fetching section; update docs |
+| `4430489` | Phase 4.6 | Browser urql seat selection (HoldSeats, ReleaseSeats, 5s polling) |
+| `fd2ed10` | Phase 4.7 | Attendance + scan pages → GraphQL |
+| `9391482` | Phase 4.4 | Payment-method registration milestone |
+| `e2baa49` | Phase 4.3 | Orders, cancel, payment → GraphQL |
+| `3ebf238` | Phase 4.2 | Ticket browse + detail → GraphQL |
+| `12a13ca` | Phase 4.1 | Settings page → GraphQL |
+| `25c0a42` | infra | Apollo Router cookie propagation + attendance routing |
+
+#### Key outcomes
+
+- All app screens now use `executeQuery` / `executeMutation` from `lib/graphql/execute.ts` (server) or urql hooks (browser, seat map only).
+- `lib/api.ts` narrowed to `serverApi` + `ApiError`; all domain REST wrappers removed.
+- REST keep-list documented in `services/client/AGENTS.md §Data Fetching`.
+- Schema gaps (SeatingPlan.name, AvailabilitySnapshot.counts) kept as REST; reasons documented.
+- Hard stops 11–12 added to `docs/15-agent-hard-stops.md`: no SDL copying into client, no inline gql strings.
+- `docs/03-api-design.md` updated with Phase 4 migration outcome.
+
+### Verification (pre-commit)
+
+| Check | Result |
+|---|---|
+| `pnpm tsc --noEmit` | ✅ 0 errors |
+| `pnpm lint` | ✅ clean |
+| `pnpm test` | ✅ 143/143 |
+| Inline-gql grep | ✅ OK (0 matches) |
+| REST keeplist grep | ✅ OK (0 violations) |
+
+---
+
 ## Session: 2026-05-07 — docs(qr-attendance): register repo-grounded superpowers plan ✅ COMPLETE
 
 **Branch:** `main`

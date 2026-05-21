@@ -81,6 +81,43 @@ playwright.config.ts        ← E2E test configuration (base URL: http://localho
 
 ---
 
+## Data Fetching
+
+The client uses **GraphQL as the primary data layer** via Apollo Router (supergraph). REST is kept only for a short keeplist where the GraphQL schema has gaps.
+
+### GraphQL (default for all new work)
+
+- **Server Components / Server Actions**: use `executeQuery` / `executeMutation` from `lib/graphql/execute.ts`.
+- **Browser-side** (seat-map only, `app/tickets/[ticketId]/seats/`): use `urql` hooks (`useQuery`, `useMutation`) inside `UrqlProvider`.
+- Operations live in `lib/graphql/operations/<domain>/<OperationName>.graphql`. **Never** write inline `gql` template literals in `.ts` / `.tsx`.
+- After editing any `.graphql` file run `pnpm codegen` to regenerate `lib/graphql/generated/index.ts`.
+
+### REST keep-list (allowed, do not migrate without schema support)
+
+| Endpoint pattern | Reason stays REST |
+|---|---|
+| `POST /api/auth/signin` | Auth token exchange |
+| `POST /api/auth/signup` | Auth token exchange |
+| `POST /api/auth/signout` | Session teardown |
+| `GET /api/auth/refresh` | Token refresh |
+| `POST /api/payments/webhook` | Stripe webhook (raw body required) |
+| `GET /api/oauth/consent` | OAuth consent redirect |
+| `GET /api/seating-plans/:id` | SeatingPlan.name not in GraphQL schema |
+| `GET /api/seating-plans/:id/availability` | AvailabilitySnapshot.counts not in GraphQL schema |
+| `GET /api/seating-plans` (list) | SeatingPlan list query absent from schema |
+| `GET /api/seating-plans/:id/price-tiers` | PriceTier list query absent |
+| `GET /api/venues/:id/sections` | Venue sections list absent |
+| `DELETE /api/venues/:id/sections/:sid` | deleteSection mutation absent |
+| `POST /api/seating-plans` (venue-context) | GraphQL createSeatingPlan requires ticketId |
+| `POST /api/seating-plans/:id/sections` | createSection mutation absent |
+| `PATCH /api/seating-plans/:id/layout` | saveLayout mutation absent |
+| `GET /api/users/lookup` | User lookup by ID/email (no GraphQL equivalent) |
+| `GET /api/attendance/events/:id/settings` | TicketDetailPage: inline serverApi call |
+
+Use `lib/api.ts:serverApi` for all keep-list REST calls. Do **not** add new domain-specific wrapper functions to `lib/api.ts` — call `serverApi` inline with the typed response.
+
+---
+
 ## Next.js App Router Conventions
 
 - **Server Components by default.** Only add `"use client"` where interactivity or browser APIs are genuinely required. Lean Server Components reduce bundle size.

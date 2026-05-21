@@ -12,3 +12,5 @@ The agent must **not** perform the following without explicit user confirmation 
 8. Include a secret, token, or password in any file, log, or terminal output.
 9. Install a new dependency without noting it and stating why it is needed.
 10. Open a port, configure a public endpoint, or change a security group / NetworkPolicy without user review.
+11. Copy the Apollo Router `supergraph.graphql` or any subgraph SDL into the client service repo. The client **only** consumes the supergraph via HTTP; SDL lives in `services/apollo-router/`.
+12. Add inline `gql` / `query` / `mutation` template literal strings in `.ts` or `.tsx` files inside `services/client`. All GraphQL operations must live in `lib/graphql/operations/<domain>/<OperationName>.graphql` and be registered via `pnpm codegen`.

@@ -16,6 +16,16 @@
 - Prefer **REST** when the endpoint is integration-facing, automation-friendly, or operationally command-like: webhooks, scanner/check-in APIs, batch jobs, exports, uploads, callbacks, or MCP tools.
 - If a workflow has both needs, split by consumer rather than forcing one protocol to fit all parties.
 
+### Client GraphQL Migration (Phase 4 — 2026-05)
+
+The `services/client` Next.js app completed a full migration from REST-first to GraphQL-first data fetching:
+
+- All user, order, ticket, settings, payment-method, attendance, and scan data now flows through the Apollo Router supergraph (`/graphql`).
+- Server Components and Server Actions use `executeQuery` / `executeMutation` from `lib/graphql/execute.ts`.
+- Browser urql is scoped exclusively to `app/tickets/[ticketId]/seats/` for real-time seat availability polling.
+- `lib/api.ts` was narrowed to `serverApi` (generic REST client) + `ApiError` only. Domain-specific REST wrappers were removed as GraphQL equivalents went live.
+- A REST keep-list is documented in `services/client/AGENTS.md §Data Fetching`. Schema gaps (SeatingPlan.name, AvailabilitySnapshot.counts, etc.) mean a subset of venue/seating endpoints remain REST until the subgraphs are extended.
+
 ### GraphQL Evolution
 
 - GraphQL schema changes should be additive where possible: add fields, add types, and deprecate before removal.
