@@ -1,0 +1,12 @@
+mutation UpdateVenueSection($id: ID!, $input: UpdateSectionInput!) {
+  updateSection(id: $id, input: $input) {
+    id
+    venueId
+    name
+    type
+    rowCount
+    columnCount
+    displayOrder
+    capacity
+  }
+}

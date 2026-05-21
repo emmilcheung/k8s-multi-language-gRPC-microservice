@@ -6,10 +6,9 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { ApiError, serverApi } from "@/lib/api";
-import { base } from "@/lib/server-utils";
-import { traceHeaders } from "@/lib/tracing";
-import type { Ticket, SeatingPlan, AvailabilitySnapshot, PriceTier } from "@/lib/types";
+import type { Ticket, SeatingPlan, PriceTier } from "@/lib/types";
 import { fetchPriceTiers } from "@/app/actions/venues";
+import { UrqlProvider } from "@/app/_lib/urql-client";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { ArrowLeft } from "lucide-react";
@@ -126,46 +125,11 @@ export default async function SeatsPage({ params }: Props) {
     );
   }
 
-  // Fetch initial availability snapshot + price tiers (server-side for first paint).
-  let initialAvailability: AvailabilitySnapshot | null = null;
   let priceTiers: PriceTier[] = [];
   try {
-    const apiBase = base();
-    const [availRes] = await Promise.all([
-      fetch(`${apiBase}/api/seating-plans/${planId}/availability`, {
-        cache: "no-store",
-        headers: traceHeaders(),
-      }),
-    ]);
-    if (availRes.ok) {
-      initialAvailability = await availRes.json() as AvailabilitySnapshot;
-    }
     priceTiers = await fetchPriceTiers(planId);
   } catch {
-    // Non-fatal — client will re-fetch.
-  }
-
-  if (initialAvailability && initialAvailability.counts.available === 0) {
-    return (
-      <div className="flex flex-col gap-8 max-w-4xl mx-auto">
-        <Link
-          href={`/tickets/${ticketId}`}
-          className={cn(
-            buttonVariants({ variant: "ghost", size: "sm" }),
-            "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2"
-          )}
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Back to ticket
-        </Link>
-        <div className="glass rounded-2xl p-8 text-center">
-          <p className="text-destructive font-semibold">Sold out</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            No seats are currently available for this ticket.
-          </p>
-        </div>
-      </div>
-    );
+    // Non-fatal — client will load price tiers separately.
   }
 
   return (
@@ -188,15 +152,16 @@ export default async function SeatsPage({ params }: Props) {
         </p>
       </div>
 
-      <SeatMapClient
-        ticketId={ticketId}
-        planId={planId}
-        plan={plan}
-        initialAvailability={initialAvailability}
-        basePrice={ticket.price}
-        priceTiers={priceTiers}
-        assignmentMode={plan.assignmentMode ?? "manual"}
-      />
+      <UrqlProvider>
+        <SeatMapClient
+          ticketId={ticketId}
+          planId={planId}
+          plan={plan}
+          basePrice={ticket.price}
+          priceTiers={priceTiers}
+          assignmentMode={plan.assignmentMode ?? "manual"}
+        />
+      </UrqlProvider>
     </div>
   );
 }

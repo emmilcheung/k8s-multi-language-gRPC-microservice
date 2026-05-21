@@ -12,10 +12,12 @@ import {
   CreateVenueDocument,
   UpdateVenueDocument,
   CreateVenueSectionDocument,
+  UpdateVenueSectionDocument,
   ActivateSeatingPlanDocument,
   DeactivateSeatingPlanDocument,
   CreatePriceTierDocument,
   CreateSeatingPlanDocument,
+  UpdateSeatingPlanDocument,
 } from "@/lib/graphql/generated";
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
@@ -547,5 +549,60 @@ export async function updateVenue(
   } catch (error) {
     if (isRedirectError(error)) throw error;
     return { error: error instanceof Error ? error.message : "Failed to update venue." };
+  }
+}
+
+export async function updateSeatingPlan(
+  planId: string,
+  prev: PlanState,
+  formData: FormData
+): Promise<PlanState> {
+  void prev;
+
+  const name = (formData.get("name") as string)?.trim();
+  const maxSeatsPerOrderRaw = formData.get("maxSeatsPerOrder") as string;
+  const maxSeatsPerOrder = maxSeatsPerOrderRaw ? parseInt(maxSeatsPerOrderRaw, 10) : undefined;
+
+  try {
+    await executeMutation(UpdateSeatingPlanDocument, {
+      id: planId,
+      input: {
+        name: name || undefined,
+        maxSeatsPerOrder: maxSeatsPerOrder ?? undefined,
+      },
+    });
+    revalidatePath(`/venues`);
+    return {};
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Failed to update seating plan." };
+  }
+}
+
+export async function updateVenueSection(
+  sectionId: string,
+  prev: VenueState,
+  formData: FormData
+): Promise<VenueState> {
+  void prev;
+
+  const name = (formData.get("name") as string)?.trim();
+  const rowCountRaw = formData.get("rowCount") as string;
+  const columnCountRaw = formData.get("columnCount") as string;
+  const rowCount = rowCountRaw ? parseInt(rowCountRaw, 10) : undefined;
+  const columnCount = columnCountRaw ? parseInt(columnCountRaw, 10) : undefined;
+
+  try {
+    await executeMutation(UpdateVenueSectionDocument, {
+      id: sectionId,
+      input: {
+        name: name || undefined,
+        rowCount: rowCount ?? undefined,
+        columnCount: columnCount ?? undefined,
+      },
+    });
+    revalidatePath("/venues");
+    return {};
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Failed to update venue section." };
   }
 }

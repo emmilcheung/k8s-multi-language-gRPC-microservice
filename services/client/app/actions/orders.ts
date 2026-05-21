@@ -4,7 +4,6 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { executeMutation } from "@/lib/graphql/execute";
-import { base, authHeaders } from "@/lib/server-utils";
 import {
   CancelOrderDocument,
   CreateOrderDocument,
@@ -163,64 +162,3 @@ export async function createAutoAssignSeatedOrder(
   }
 }
 
-// ─── Seat hold actions ────────────────────────────────────────────────────────
-
-export interface SeatHoldState {
-  error?: string;
-  held?: string[];
-  expiresAt?: string;
-}
-
-/**
- * Holds seats via venue-service.
- * Calls POST /api/seating-plans/:planId/seats/hold.
- */
-export async function holdSeats(
-  planId: string,
-  seatIds: string[],
-  sessionId: string
-): Promise<SeatHoldState> {
-  const res = await fetch(
-    `${base()}/api/seating-plans/${planId}/seats/hold`,
-    {
-      method: "POST",
-      headers: await authHeaders(),
-      body: JSON.stringify({ seatIds, sessionId }),
-    }
-  );
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    // venue-service returns { error: "string" }, not { error: { message: "..." } }
-    const msg = typeof body?.error === "string" ? body.error : (body?.error?.message ?? "Failed to hold seats.");
-    return { error: msg };
-  }
-
-  const data = await res.json() as { held: string[]; expiresAt: string };
-  return { held: data.held, expiresAt: data.expiresAt };
-}
-
-/**
- * Releases held seats via venue-service.
- * Calls POST /api/seating-plans/:planId/seats/release.
- */
-export async function releaseSeats(
-  planId: string,
-  seatIds: string[]
-): Promise<{ error?: string }> {
-  const res = await fetch(
-    `${base()}/api/seating-plans/${planId}/seats/release`,
-    {
-      method: "POST",
-      headers: await authHeaders(),
-      body: JSON.stringify({ seatIds }),
-    }
-  );
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error?.message ?? "Failed to release seats." };
-  }
-
-  return {};
-}

@@ -1,0 +1,6 @@
+mutation HoldSeats($planId: ID!, $seatIds: [ID!]!) {
+  holdSeats(planId: $planId, seatIds: $seatIds) {
+    held
+    expiresAt
+  }
+}
