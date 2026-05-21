@@ -64,6 +64,7 @@ describe("Order admission entry point", () => {
           createdAt: "2026-01-01T00:00:00Z",
           ticket: { id: "ticket-1", title: "Show", price: "10.00" },
         },
+        currentUser: { id: "buyer-1", paymentMethods: [] },
       },
     });
 
@@ -74,6 +75,7 @@ describe("Order admission entry point", () => {
       "href",
       "/tickets/ticket-1/admission?orderId=order-1"
     );
+    expect(serverApiMock).not.toHaveBeenCalled();
   });
 
   it("does not show admission pass link for non-complete orders", async () => {
@@ -88,6 +90,7 @@ describe("Order admission entry point", () => {
           createdAt: "2026-01-01T00:00:00Z",
           ticket: { id: "ticket-1", title: "Show", price: "10.00" },
         },
+        currentUser: { id: "buyer-1", paymentMethods: [] },
       },
     });
 
@@ -95,5 +98,6 @@ describe("Order admission entry point", () => {
     render(await OrderDetailPage({ params: Promise.resolve({ orderId: "order-2" }) }));
 
     expect(screen.queryByRole("link", { name: /open admission pass/i })).not.toBeInTheDocument();
+    expect(serverApiMock).not.toHaveBeenCalled();
   });
 });

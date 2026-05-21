@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
-import { base, authHeaders } from "@/lib/server-utils";
+import { base } from "@/lib/server-utils";
 import { traceResponseHeaders } from "@/lib/tracing";
 
 interface SubmitPaymentRequest {
@@ -11,17 +11,22 @@ interface SubmitPaymentRequest {
   savedPaymentMethodId?: string;
 }
 
-async function readJsonBody(response: Response): Promise<unknown> {
-  const rawBody = await response.text();
-  if (!rawBody) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(rawBody) as unknown;
-  } catch {
-    return null;
-  }
+async function submitPaymentViaRest(
+  body: SubmitPaymentRequest,
+  cookieHeader: string | undefined,
+): Promise<Response> {
+  return fetch(`${base()}/api/payments`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+    },
+    body: JSON.stringify(
+      body.savedPaymentMethodId
+        ? { orderId: body.orderId, savedPaymentMethodId: body.savedPaymentMethodId }
+        : { orderId: body.orderId, token: body.paymentMethodId }
+    ),
+  });
 }
 
 /**
@@ -30,8 +35,9 @@ async function readJsonBody(response: Response): Promise<unknown> {
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const body = (await request.json()) as SubmitPaymentRequest;
-    const { orderId, paymentMethodId, savedPaymentMethodId } = body;
+    const requestBody = (await request.json()) as SubmitPaymentRequest;
+    const { orderId, paymentMethodId, savedPaymentMethodId } = requestBody;
+    const cookieHeader = request.headers.get("cookie") ?? undefined;
 
     // Validate input — must have orderId and exactly one payment identifier
     if (!orderId || (!paymentMethodId && !savedPaymentMethodId)) {
@@ -41,35 +47,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Build payment-service payload — use saved method ID or Stripe token
-    const paymentPayload = savedPaymentMethodId
-      ? { orderId, savedPaymentMethodId }
-      : { orderId, token: paymentMethodId };
+    const response = await submitPaymentViaRest(requestBody, cookieHeader);
+    const body = await response.json().catch(() => ({}));
 
-    // Call the backend payment service
-    const res = await fetch(`${base()}/api/payments`, {
-      method: "POST",
-      headers: await authHeaders(request),
-      body: JSON.stringify(paymentPayload),
-    });
-
-    if (!res.ok) {
-      const body = (await readJsonBody(res)) as { error?: unknown } | null;
-      return NextResponse.json(
-        { error: body?.error ?? { message: "Payment processing failed." } },
-        { status: res.status, headers: traceResponseHeaders() }
-      );
+    if (!response.ok) {
+      return NextResponse.json(body, {
+        status: response.status,
+        headers: traceResponseHeaders(),
+      });
     }
 
-    const paymentResponse = await readJsonBody(res);
-
-    // Revalidate the order page to reflect payment status
     revalidatePath(`/orders/${orderId}`);
 
-    return NextResponse.json(paymentResponse ?? {}, {
-      status: 201,
-      headers: traceResponseHeaders(),
-    });
+    return NextResponse.json(body, { status: response.status, headers: traceResponseHeaders() });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error("Payment submission error:", errorMessage);

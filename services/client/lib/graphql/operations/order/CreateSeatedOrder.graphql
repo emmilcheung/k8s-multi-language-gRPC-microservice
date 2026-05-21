@@ -1,0 +1,5 @@
+mutation CreateSeatedOrder($input: CreateSeatedOrderInput!) {
+  createSeatedOrder(input: $input) {
+    id
+  }
+}

@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { ApiError } from "@/lib/api";
 
-const authHeadersMock = vi.fn();
+const executeQueryMock = vi.fn();
 
-vi.mock("@/lib/server-utils", () => ({
-  base: () => "http://localhost:8000",
-  authHeaders: (...args: unknown[]) => authHeadersMock(...args),
+vi.mock("@/lib/graphql/execute", () => ({
+  executeQuery: (...args: unknown[]) => executeQueryMock(...args),
 }));
 
 vi.mock("@/lib/tracing", () => ({
+  traceHeaders: () => ({}),
   traceResponseHeaders: () => ({ "x-trace-id": "test-trace" }),
 }));
 
@@ -17,29 +18,30 @@ import { GET } from "@/app/api/orders/[orderId]/status/route";
 describe("order status route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    authHeadersMock.mockResolvedValue({ "Content-Type": "application/json" });
   });
 
-  it("returns order status when upstream succeeds", async () => {
-    const mockOrder = {
+  it("returns order status when GraphQL succeeds", async () => {
+    executeQueryMock.mockResolvedValue({
+      order: {
+        id: "order-1",
+        userId: "user-1",
+        status: "COMPLETE",
+        expiresAt: "2099-12-31T23:59:59.000Z",
+        createdAt: "2099-12-31T22:59:59.000Z",
+        ticket: { id: "ticket-1", title: "Test Ticket", price: "25.00" },
+        quantity: 1,
+      },
+    });
+
+    const expectedOrder = {
       id: "order-1",
       userId: "user-1",
       status: "complete",
       expiresAt: "2099-12-31T23:59:59.000Z",
       ticket: { id: "ticket-1", title: "Test Ticket", price: "25.00" },
       quantity: 1,
-      version: 1,
+      version: 0,
     };
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify(mockOrder), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
-      )
-    );
 
     const request = new NextRequest("http://localhost/api/orders/order-1/status", {
       method: "GET",
@@ -49,7 +51,7 @@ describe("order status route", () => {
 
     expect(response.status).toBe(200);
     const body = await response.json() as { order?: object };
-    expect(body.order).toEqual(mockOrder);
+    expect(body.order).toEqual(expectedOrder);
   });
 
   it("returns error when orderId is missing", async () => {
@@ -64,18 +66,11 @@ describe("order status route", () => {
     expect(body.error?.code).toBe("INVALID_INPUT");
   });
 
-  it("returns upstream error when fetch fails", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ error: { code: "NOT_FOUND", message: "Order not found" } }),
-          {
-            status: 404,
-            headers: { "Content-Type": "application/json" },
-          }
-        )
-      )
+  it("returns GraphQL error when the order query fails", async () => {
+    executeQueryMock.mockRejectedValue(
+      new ApiError(404, "Order not found", {
+        error: { code: "NOT_FOUND", message: "Order not found" },
+      }),
     );
 
     const request = new NextRequest("http://localhost/api/orders/order-1/status", {

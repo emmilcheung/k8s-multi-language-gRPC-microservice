@@ -4,11 +4,10 @@
 import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { serverApi } from "@/lib/api";
 import { executeQuery } from "@/lib/graphql/execute";
-import { OrderDetailDocument } from "@/lib/graphql/generated";
+import { OrderPageDocument } from "@/lib/graphql/generated";
 import type { Order, SavedPaymentMethod } from "@/lib/types";
-import { STATUS_LABEL, STATUS_BADGE } from "@/lib/order-status";
+import { STATUS_LABEL, STATUS_BADGE, coerceOrderStatus } from "@/lib/order-status";
 import { calculateOrderTotal } from "@/lib/order-utils";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -33,18 +32,33 @@ export async function generateMetadata({ params }: Props) {
   return { title: `Order ${orderId.slice(0, 8)} — Ticketing` };
 }
 
-async function getOrderViaGraphQL(orderId: string, cookie: string): Promise<Order | null> {
-  const data = await executeQuery(OrderDetailDocument, { id: orderId }, { cookie });
+async function getOrderPageData(
+  orderId: string,
+  cookie: string,
+): Promise<{ order: Order | null; savedPaymentMethods: SavedPaymentMethod[] }> {
+  const data = await executeQuery(OrderPageDocument, { id: orderId }, { cookie });
   const raw = data.order;
-  if (!raw) return null;
   return {
-    id: raw.id,
-    userId: raw.userId,
-    status: raw.status.toLowerCase() as Order["status"],
-    quantity: raw.quantity,
-    expiresAt: raw.expiresAt ?? "",
-    ticket: { id: raw.ticket.id, title: raw.ticket.title, price: raw.ticket.price },
-    version: 0,
+    order: raw
+      ? {
+          id: raw.id,
+          userId: raw.userId,
+          status: coerceOrderStatus(raw.status),
+          quantity: raw.quantity,
+          expiresAt: raw.expiresAt ?? "",
+          ticket: { id: raw.ticket.id, title: raw.ticket.title, price: raw.ticket.price },
+          version: 0,
+        }
+      : null,
+    savedPaymentMethods: (data.currentUser?.paymentMethods ?? []).map((method) => ({
+      id: method.id,
+      brand: method.brand ?? undefined,
+      label: method.label ?? undefined,
+      last4: method.last4 ?? undefined,
+      expMonth: method.expMonth ?? undefined,
+      expYear: method.expYear ?? undefined,
+      isDefault: method.isDefault ?? undefined,
+    })),
   };
 }
 
@@ -74,18 +88,12 @@ export default async function OrderDetailPage({ params }: Props) {
   let savedPaymentMethods: SavedPaymentMethod[] = [];
   try {
     const cookieHeader = cookieStore.toString();
-    const [orderResult, methodsResult] = await Promise.allSettled([
-      getOrderViaGraphQL(orderId, cookieHeader),
-      serverApi<{ paymentMethods: SavedPaymentMethod[] }>(`/api/payments/methods`),
-    ]);
-
-    if (orderResult.status === "rejected" || orderResult.value === null) {
+    const result = await getOrderPageData(orderId, cookieHeader);
+    if (result.order === null) {
       notFound();
     }
-    order = orderResult.value;
-    if (methodsResult.status === "fulfilled") {
-      savedPaymentMethods = methodsResult.value.paymentMethods ?? [];
-    }
+    order = result.order;
+    savedPaymentMethods = result.savedPaymentMethods;
   } catch {
     notFound();
   }

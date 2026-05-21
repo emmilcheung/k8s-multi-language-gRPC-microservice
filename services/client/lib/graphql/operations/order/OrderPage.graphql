@@ -1,0 +1,27 @@
+query OrderPage($id: ID!) {
+  order(id: $id) {
+    id
+    userId
+    status
+    quantity
+    expiresAt
+    createdAt
+    ticket {
+      id
+      title
+      price
+    }
+  }
+  currentUser {
+    id
+    paymentMethods {
+      id
+      brand
+      label
+      last4
+      expMonth
+      expYear
+      isDefault
+    }
+  }
+}
