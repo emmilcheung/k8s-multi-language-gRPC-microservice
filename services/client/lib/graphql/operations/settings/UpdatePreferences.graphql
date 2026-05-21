@@ -1,0 +1,7 @@
+mutation UpdatePreferences($input: UpdatePreferencesInput!) {
+  updatePreferences(input: $input) {
+    marketingOptIn
+    orderUpdates
+    productUpdates
+  }
+}

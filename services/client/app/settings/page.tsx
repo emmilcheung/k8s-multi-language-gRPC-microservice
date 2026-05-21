@@ -16,7 +16,7 @@ import {
   deletePaymentMethodAction,
 } from "@/app/actions/settings";
 import { SettingsAddPaymentMethodForm } from "@/components/settings-add-payment-method-form";
-import { ArrowRight, Clock, Shield, CreditCard, MapPinHouse, UserRound } from "lucide-react";
+import { ArrowRight, Clock, Shield, CreditCard, MapPinHouse, UserRound, X } from "lucide-react";
 
 export const metadata = { title: "Settings — Marquee" };
 
@@ -26,7 +26,69 @@ function formatTimestamp(value?: string | null): string {
   return Number.isNaN(parsed.getTime()) ? "Unknown" : parsed.toLocaleString();
 }
 
-export default async function SettingsPage() {
+/** Wrapper for form action: delegates to updateProfileAction and redirects on error */
+async function handleUpdateProfile(formData: FormData): Promise<void> {
+  "use server";
+  const result = await updateProfileAction(formData);
+  if (result.error) {
+    redirect(`/settings?error=${encodeURIComponent(result.error)}`);
+  }
+}
+
+/** Wrapper for form action: delegates to updatePreferencesAction and redirects on error */
+async function handleUpdatePreferences(formData: FormData): Promise<void> {
+  "use server";
+  const result = await updatePreferencesAction(formData);
+  if (result.error) {
+    redirect(`/settings?error=${encodeURIComponent(result.error)}`);
+  }
+}
+
+/** Wrapper for form action: delegates to updateBillingAddressAction and redirects on error */
+async function handleUpdateBillingAddress(formData: FormData): Promise<void> {
+  "use server";
+  const result = await updateBillingAddressAction(formData);
+  if (result.error) {
+    redirect(`/settings?error=${encodeURIComponent(result.error)}`);
+  }
+}
+
+/** Wrapper for form action: delegates to revokeSessionAction and redirects on error */
+async function handleRevokeSession(formData: FormData): Promise<void> {
+  "use server";
+  const result = await revokeSessionAction(formData);
+  if (result.error) {
+    redirect(`/settings?error=${encodeURIComponent(result.error)}`);
+  }
+}
+
+/** Wrapper for form action: delegates to setDefaultPaymentMethodAction and redirects on error */
+async function handleSetDefaultPaymentMethod(formData: FormData): Promise<void> {
+  "use server";
+  const result = await setDefaultPaymentMethodAction(formData);
+  if (result.error) {
+    redirect(`/settings?error=${encodeURIComponent(result.error)}`);
+  }
+}
+
+/** Wrapper for form action: delegates to deletePaymentMethodAction and redirects on error */
+async function handleDeletePaymentMethod(formData: FormData): Promise<void> {
+  "use server";
+  const result = await deletePaymentMethodAction(formData);
+  if (result.error) {
+    redirect(`/settings?error=${encodeURIComponent(result.error)}`);
+  }
+}
+
+interface SettingsPageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function SettingsPage(props: SettingsPageProps) {
+  const searchParams = await props.searchParams;
+  const errorParam = searchParams.error;
+  const error = typeof errorParam === "string" ? errorParam : undefined;
+
   const cookieStore = await cookies();
   const token = cookieStore.get("token")?.value;
   if (!token) {
@@ -54,6 +116,14 @@ export default async function SettingsPage() {
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8">
+      {error && (
+        <div className="rounded border border-destructive/50 bg-destructive/5 p-3 flex items-start gap-3">
+          <X className="size-4 text-destructive mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-destructive">{error}</p>
+          </div>
+        </div>
+      )}
       <header className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <span className="inline-block h-px w-6 bg-primary" />
@@ -80,7 +150,7 @@ export default async function SettingsPage() {
             <CardDescription>Update personal information used for your account.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            <form action={updateProfileAction} className="grid gap-3">
+            <form action={handleUpdateProfile} className="grid gap-3">
               <div className="grid gap-1.5">
                 <label htmlFor="displayName" className="text-xs font-medium text-muted-foreground">
                   Display name
@@ -106,7 +176,7 @@ export default async function SettingsPage() {
               <button type="submit" className={cn(buttonVariants(), "w-fit")}>Save profile</button>
             </form>
 
-            <form action={updatePreferencesAction} className="grid gap-3 rounded border border-border p-3">
+            <form action={handleUpdatePreferences} className="grid gap-3 rounded border border-border p-3">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                 Preferences
               </p>
@@ -179,7 +249,7 @@ export default async function SettingsPage() {
                   </div>
 
                   {!session.current && (
-                    <form action={revokeSessionAction}>
+                    <form action={handleRevokeSession}>
                       <input type="hidden" name="sessionId" value={session.sessionId} />
                       <button
                         type="submit"
@@ -235,7 +305,7 @@ export default async function SettingsPage() {
 
                   <div className="flex gap-2">
                     {!method.isDefault && (
-                      <form action={setDefaultPaymentMethodAction}>
+                      <form action={handleSetDefaultPaymentMethod}>
                         <input type="hidden" name="methodId" value={method.id} />
                         <button
                           type="submit"
@@ -245,7 +315,7 @@ export default async function SettingsPage() {
                         </button>
                       </form>
                     )}
-                    <form action={deletePaymentMethodAction}>
+                    <form action={handleDeletePaymentMethod}>
                       <input type="hidden" name="methodId" value={method.id} />
                       <button
                         type="submit"
@@ -270,7 +340,7 @@ export default async function SettingsPage() {
             <CardDescription>Keep your billing details up to date for invoices and receipts.</CardDescription>
           </CardHeader>
           <CardContent>
-            <form action={updateBillingAddressAction} className="grid gap-3">
+            <form action={handleUpdateBillingAddress} className="grid gap-3">
               <div className="grid gap-1.5">
                 <label htmlFor="line1" className="text-xs font-medium text-muted-foreground">
                   Address line 1

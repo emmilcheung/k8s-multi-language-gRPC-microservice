@@ -26,3 +26,12 @@ export const STATUS_BORDER: Record<Order["status"], string> = {
   cancelled: "border-l-destructive",
   complete: "border-l-emerald-500",
 };
+
+export function coerceOrderStatus(status: string): Order["status"] {
+  const normalized = status.toLowerCase();
+  const valid = ["created", "awaiting_payment", "cancelled", "complete"] as const;
+  if (valid.includes(normalized as Order["status"])) {
+    return normalized as Order["status"];
+  }
+  throw new Error(`Invalid order status: ${status}`);
+}

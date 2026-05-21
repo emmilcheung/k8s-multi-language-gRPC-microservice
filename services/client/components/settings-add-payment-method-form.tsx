@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { registerPaymentMethodAction } from "@/app/actions/settings";
 
 interface CardElement {
   mount(container: HTMLElement | string): void;
@@ -198,41 +199,32 @@ export function SettingsAddPaymentMethodForm() {
     setErrorMessage(null);
 
     try {
-      const result = await stripeInstanceRef.current.createPaymentMethod({
+      const stripeResult = await stripeInstanceRef.current.createPaymentMethod({
         type: "card",
         card: cardElementInstanceRef.current,
       });
 
-      if (result.error) {
-        setErrorMessage(result.error.message || "Card validation failed.");
+      if (stripeResult.error) {
+        setErrorMessage(stripeResult.error.message || "Card validation failed.");
         setIsSubmitting(false);
         return;
       }
 
-      if (!result.paymentMethod?.id) {
+      if (!stripeResult.paymentMethod?.id) {
         setErrorMessage("Failed to register card. Please try again.");
         setIsSubmitting(false);
         return;
       }
 
-      const response = await fetch("/api/payment-methods/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          paymentMethodId: result.paymentMethod.id,
-          setAsDefault,
-          consentAccepted: consentChecked,
-          consentVersion: CARD_SAVE_CONSENT_VERSION,
-        }),
+      const actionResult = await registerPaymentMethodAction({
+        providerPaymentMethodId: stripeResult.paymentMethod.id,
+        setAsDefault,
+        consentAccepted: consentChecked,
+        consentVersion: CARD_SAVE_CONSENT_VERSION,
       });
 
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as
-          | { error?: { message?: string } }
-          | null;
-        setErrorMessage(body?.error?.message ?? "Failed to save payment method.");
+      if (actionResult.error) {
+        setErrorMessage(actionResult.error);
         setIsSubmitting(false);
         return;
       }

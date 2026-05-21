@@ -131,9 +131,11 @@ function isTransient(error: CombinedError): boolean {
  * uniformly.
  */
 export function toApiError(error: CombinedError): ApiError {
+  const transportStatus = (error.response as { status?: number } | undefined)?.status;
   const status =
-    (error.response as { status?: number } | undefined)?.status ??
-    (error.graphQLErrors.length > 0 ? 400 : 502);
+    error.graphQLErrors.length > 0
+      ? (typeof transportStatus === "number" && transportStatus >= 400 ? transportStatus : 400)
+      : (transportStatus ?? 502);
   const message =
     error.graphQLErrors[0]?.message ??
     error.networkError?.message ??
