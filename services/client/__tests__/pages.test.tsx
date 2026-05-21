@@ -509,6 +509,24 @@ describe("AttendanceSettingsPage", () => {
     lookupUserMock.mockResolvedValue({ user: { id: "buyer-uuid", email: "buyer@example.com" } });
   });
 
+  it("redirects to sign-in when the viewer is logged out", async () => {
+    cookieStoreMock.get.mockReturnValue(undefined);
+
+    const navigation = await import("next/navigation");
+    vi.mocked(navigation.redirect).mockImplementationOnce(() => {
+      throw new Error("NEXT_REDIRECT");
+    });
+
+    const { default: AttendanceSettingsPage } = await import(
+      "@/app/tickets/[ticketId]/attendance/page"
+    );
+
+    await expect(
+      AttendanceSettingsPage({ params: Promise.resolve({ ticketId: "ticket-uuid-1" }) })
+    ).rejects.toThrow("NEXT_REDIRECT");
+    expect(navigation.redirect).toHaveBeenCalledWith("/auth/signin");
+  });
+
   it("renders the policy form with settings and summary", async () => {
     executeQueryMock.mockResolvedValue({
       ticket: { id: "ticket-uuid-1", title: "Concert Night", userId: "owner-uuid", sold: 0 },
@@ -526,6 +544,24 @@ describe("AttendanceSettingsPage", () => {
     expect(screen.getByRole("heading", { level: 1, name: /attendance settings/i })).toBeInTheDocument();
     expect(screen.getByText(/7 admitted/i)).toBeInTheDocument();
     expect(screen.getByText(/2 denied/i)).toBeInTheDocument();
+  });
+
+  it("calls notFound when a logged-in non-owner opens attendance settings", async () => {
+    executeQueryMock.mockResolvedValue({
+      ticket: { id: "ticket-uuid-1", title: "Concert Night", userId: "owner-uuid", sold: 0 },
+      attendancePolicy: { eventId: "ticket-uuid-1", requireQrForEntry: true, allowManualOverride: false },
+      attendanceSummary: { eventId: "ticket-uuid-1", totalAdmitted: 0, totalDenied: 0, totalCheckedIn: 0 },
+      eventCheckins: [],
+    });
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+
+    const { default: AttendanceSettingsPage } = await import(
+      "@/app/tickets/[ticketId]/attendance/page"
+    );
+
+    await expect(
+      AttendanceSettingsPage({ params: Promise.resolve({ ticketId: "ticket-uuid-1" }) })
+    ).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
   it("locks attendance requirement controls after tickets are sold", async () => {

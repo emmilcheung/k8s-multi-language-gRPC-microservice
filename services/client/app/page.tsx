@@ -1,18 +1,18 @@
 import Link from "next/link";
-import { fetchTicketPage } from "@/app/actions/tickets";
+import { fetchTicketPageViaGraphQL } from "@/app/actions/tickets";
 import { TicketGrid } from "@/components/ticket-grid";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { Tag, ArrowRight } from "lucide-react";
 
 export default async function HomePage() {
-  const firstPage = await fetchTicketPage(null).catch(() => ({
+  const firstPage = await fetchTicketPageViaGraphQL(null).catch(() => ({
     tickets: [],
     cursor: null,
     hasMore: false,
   }));
 
-  const availableCount = firstPage.tickets.filter((t) => !t.orderId).length;
+  const availableCount = firstPage.tickets.length;
 
   return (
     <div className="flex flex-col gap-16">

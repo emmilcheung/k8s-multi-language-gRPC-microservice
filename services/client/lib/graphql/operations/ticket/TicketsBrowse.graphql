@@ -1,0 +1,21 @@
+query TicketsBrowse($first: Int, $after: String) {
+  ticketsConnection(filter: { availableOnly: true }, first: $first, after: $after) {
+    edges {
+      node {
+        id
+        title
+        price
+        available
+        ticketType
+        seatingPlan {
+          id
+        }
+      }
+      cursor
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}

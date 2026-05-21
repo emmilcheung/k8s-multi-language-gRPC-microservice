@@ -3,7 +3,10 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { base, authHeaders } from "@/lib/server-utils";
+import { executeQuery } from "@/lib/graphql/execute";
+import { TicketsBrowseDocument } from "@/lib/graphql/generated";
 import type { AvailabilitySnapshot, SeatingPlan, Ticket } from "@/lib/types";
 import { createSeatingPlanForTicket } from "./venues";
 
@@ -21,60 +24,77 @@ export interface TicketPage {
 
 const PAGE_SIZE = 20;
 
-async function isPubliclyAvailableTicket(ticket: Ticket): Promise<boolean> {
-  if (!ticket.seatingPlanId) {
-    return !ticket.orderId;
-  }
-
-  const [planRes, availabilityRes] = await Promise.all([
-    fetch(`${base()}/api/seating-plans/${ticket.seatingPlanId}`, { cache: "no-store" }),
-    fetch(`${base()}/api/seating-plans/${ticket.seatingPlanId}/availability`, { cache: "no-store" }),
-  ]);
-
-  if (!planRes.ok || !availabilityRes.ok) {
-    return false;
-  }
+async function isPubliclyAvailableSeatedTicket(planId: string): Promise<boolean> {
+  const planRes = await fetch(`${base()}/api/seating-plans/${planId}`, {
+    cache: "no-store",
+  });
+  if (!planRes.ok) return false;
 
   const plan = await planRes.json() as SeatingPlan;
-  const availability = await availabilityRes.json() as AvailabilitySnapshot;
+  if (plan.status !== "active") return false;
 
-  return plan.status === "active" && availability.counts.available > 0;
+  const availabilityRes = await fetch(`${base()}/api/seating-plans/${planId}/availability`, {
+    cache: "no-store",
+  });
+  if (!availabilityRes.ok) return false;
+
+  const availability = await availabilityRes.json() as AvailabilitySnapshot;
+  return availability.counts.available > 0;
 }
 
 /**
  * Fetches one page of available (unreserved) tickets using cursor-based
- * pagination. Pass `after=null` for the first page; subsequent pages use the
+ * pagination via GraphQL. Pass `after=null` for the first page; subsequent pages use the
  * `cursor` returned from the previous call.
  *
  * This is a Server Action so it can be called from Client Components without
  * exposing the internal API URL or auth cookie logic to the browser.
  */
-export async function fetchTicketPage(after: string | null): Promise<TicketPage> {
-  const url = new URL(`${base()}/api/tickets`);
-  url.searchParams.set("limit", String(PAGE_SIZE));
-  url.searchParams.set("available", "true");
-  if (after) url.searchParams.set("after", after);
+export async function fetchTicketPageViaGraphQL(after: string | null): Promise<TicketPage> {
+  try {
+    const cookieStore = await cookies();
+    const cookieHeader = cookieStore.toString();
 
-  // Public endpoint — no auth cookie required.
-  const res = await fetch(url.toString(), { cache: "no-store" });
+    const data = await executeQuery(
+      TicketsBrowseDocument,
+      { first: PAGE_SIZE, after: after || undefined },
+      { cookie: cookieHeader }
+    );
 
-  if (!res.ok) {
+    if (!data.ticketsConnection) {
+      return { tickets: [], cursor: null, hasMore: false };
+    }
+
+    const gqlTickets = data.ticketsConnection.edges.map((edge) => ({
+      id: edge.node.id,
+      title: edge.node.title,
+      price: String(edge.node.price),
+      available: edge.node.available,
+      ticketType: edge.node.ticketType,
+      seatingPlanId: edge.node.seatingPlan?.id ?? null,
+    }));
+
+    const visibleTickets = (
+      await Promise.all(
+        gqlTickets.map(async (ticket) => {
+          if (!ticket.seatingPlanId) return ticket;
+          return (await isPubliclyAvailableSeatedTicket(ticket.seatingPlanId)) ? ticket : null;
+        })
+      )
+    ).filter((ticket): ticket is (typeof gqlTickets)[number] => ticket !== null);
+
+    const cursor = data.ticketsConnection.pageInfo.endCursor ?? null;
+    const hasMore = data.ticketsConnection.pageInfo.hasNextPage;
+
+    return {
+      tickets: visibleTickets as unknown as Ticket[],
+      cursor,
+      hasMore,
+    };
+  } catch {
     // Non-fatal: return empty page so the UI degrades gracefully.
     return { tickets: [], cursor: null, hasMore: false };
   }
-
-  const all: Ticket[] = await res.json();
-  const filtered = await Promise.all(
-    all.map(async (ticket) => ((await isPubliclyAvailableTicket(ticket)) ? ticket : null))
-  );
-  const tickets = filtered.filter((ticket): ticket is Ticket => ticket !== null);
-  // Compound cursor: "<createdAtUnixMilli>:<id>" matches the backend EncodeCursor format.
-  const lastTicket = all.length > 0 ? all[all.length - 1] : null;
-  const cursor = lastTicket?.createdAt
-    ? `${new Date(lastTicket.createdAt).getTime()}:${lastTicket.id}`
-    : (lastTicket?.id ?? null);
-  const hasMore = all.length === PAGE_SIZE;
-  return { tickets, cursor, hasMore };
 }
 
 export interface TicketState {

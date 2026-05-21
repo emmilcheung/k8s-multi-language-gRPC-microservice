@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import type { Ticket } from "@/lib/types";
-import { fetchTicketPage } from "@/app/actions/tickets";
+import { fetchTicketPageViaGraphQL } from "@/app/actions/tickets";
 
 interface TicketGridProps {
   initialTickets: Ticket[];
@@ -25,12 +25,12 @@ export function TicketGrid({
   const [hasMore, setHasMore] = useState(initialHasMore);
   const [isPending, startTransition] = useTransition();
 
-  const available = tickets.filter((t) => !t.orderId);
+  const available = tickets;
 
   function loadMore() {
     if (!cursor || isPending) return;
     startTransition(async () => {
-      const page = await fetchTicketPage(cursor);
+      const page = await fetchTicketPageViaGraphQL(cursor);
       setTickets((prev) => [...prev, ...page.tickets]);
       setCursor(page.cursor);
       setHasMore(page.hasMore);

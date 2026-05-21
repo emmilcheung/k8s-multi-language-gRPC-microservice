@@ -117,6 +117,13 @@ const TICKET_TYPES: { value: TicketType; label: string; description: string; ico
   },
 ];
 
+function isRedirectError(error: unknown): error is Error & { digest?: string } {
+  if (!(error instanceof Error)) return false;
+  if (error.message === "NEXT_REDIRECT") return true;
+  const redirectError = error as Error & { digest?: string };
+  return typeof redirectError.digest === "string" && redirectError.digest.startsWith("NEXT_REDIRECT");
+}
+
 export function TicketForm({
   action,
   defaultTitle = "",
@@ -278,6 +285,7 @@ export function TicketForm({
         setPending(false);
       }
     } catch (err) {
+      if (isRedirectError(err)) return;
       setError(err instanceof Error ? err.message : "An error occurred");
       setPending(false);
     }
