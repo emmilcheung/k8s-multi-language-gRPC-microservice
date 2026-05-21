@@ -1,6 +1,16 @@
-import { Resolver, Query, ResolveReference, Args, Context } from '@nestjs/graphql';
-import { NotFoundException, UseGuards } from '@nestjs/common';
+import {
+  Resolver,
+  Query,
+  ResolveReference,
+  Args,
+  Context,
+  Mutation,
+  ResolveField,
+  Parent,
+} from '@nestjs/graphql';
+import { NotFoundException, UseGuards, ForbiddenException } from '@nestjs/common';
 import { PaymentsService } from '../modules/payments/payments.service';
+import type { SavedPaymentMethod } from '../database/schema';
 import { UserIdSigGuard } from './guards/user-id-sig.guard';
 
 interface GqlContext {
@@ -10,6 +20,67 @@ interface GqlContext {
 }
 
 type PaymentReference = { __typename: string; id?: string; orderId?: string };
+type UserReference = { __typename: string; id: string };
+
+function extractUserId(ctx: GqlContext): string | null {
+  const userId = ctx.req.headers['x-user-id'];
+  if (typeof userId === 'string' && userId.length > 0) {
+    return userId;
+  }
+  return null;
+}
+
+function extractUserIdSig(ctx: GqlContext): string | undefined {
+  const signature = ctx.req.headers['x-user-id-sig'];
+  if (typeof signature === 'string' && signature.length > 0) {
+    return signature;
+  }
+  return undefined;
+}
+
+function extractConsentSource(ctx: GqlContext): string {
+  const header = ctx.req.headers['x-consent-source'];
+  if (typeof header !== 'string') {
+    return 'unknown';
+  }
+  const normalized = header.trim();
+  return normalized.length > 0 ? normalized.slice(0, 64) : 'unknown';
+}
+
+function extractUserAgent(ctx: GqlContext): string | undefined {
+  const value = ctx.req.headers['user-agent'];
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized.slice(0, 512) : undefined;
+}
+
+function extractClientIp(ctx: GqlContext): string | undefined {
+  const forwardedFor = ctx.req.headers['x-forwarded-for'];
+  if (Array.isArray(forwardedFor)) {
+    const first = forwardedFor.find((entry) => typeof entry === 'string' && entry.trim().length);
+    return first?.split(',')[0]?.trim();
+  }
+  if (typeof forwardedFor === 'string') {
+    return forwardedFor.split(',')[0]?.trim();
+  }
+  return undefined;
+}
+
+function toPaymentMethodResponse(savedPaymentMethod: SavedPaymentMethod) {
+  const brand = savedPaymentMethod.brand;
+  const last4 = savedPaymentMethod.last4;
+  return {
+    id: savedPaymentMethod.id,
+    brand,
+    last4,
+    expMonth: savedPaymentMethod.expMonth,
+    expYear: savedPaymentMethod.expYear,
+    isDefault: savedPaymentMethod.isDefault,
+    label: `${brand.toUpperCase()} •••• ${last4}`,
+  };
+}
 
 @Resolver('Payment')
 export class PaymentResolver {
@@ -44,5 +115,91 @@ export class PaymentResolver {
       if (e instanceof NotFoundException) return null;
       throw e;
     }
+  }
+}
+
+@Resolver('User')
+export class UserPaymentMethodResolver {
+  constructor(private readonly paymentsService: PaymentsService) {}
+
+  @ResolveField()
+  @UseGuards(UserIdSigGuard)
+  async paymentMethods(@Parent() user: UserReference, @Context() ctx: GqlContext) {
+    const requesterId = extractUserId(ctx);
+    if (!requesterId || requesterId !== user.id) {
+      return [];
+    }
+    const methods = await this.paymentsService.listSavedPaymentMethods(user.id);
+    return methods.map(toPaymentMethodResponse);
+  }
+}
+
+@Resolver()
+export class PaymentMethodMutationResolver {
+  constructor(private readonly paymentsService: PaymentsService) {}
+
+  @Mutation('createPayment')
+  @UseGuards(UserIdSigGuard)
+  async createPayment(
+    @Args('input') input: Record<string, unknown>,
+    @Context() ctx: GqlContext,
+  ) {
+    const userId = extractUserId(ctx);
+    if (!userId) {
+      throw new ForbiddenException('Missing X-User-Id');
+    }
+    return this.paymentsService.charge({
+      orderId: input.orderId as string,
+      userId,
+      token: input.token as string | undefined,
+      savedPaymentMethodId: input.savedPaymentMethodId as string | undefined,
+      userIdSig: extractUserIdSig(ctx),
+    });
+  }
+
+  @Mutation('setDefaultPaymentMethod')
+  @UseGuards(UserIdSigGuard)
+  async setDefaultPaymentMethod(@Args('id') id: string, @Context() ctx: GqlContext) {
+    const userId = extractUserId(ctx);
+    if (!userId) {
+      throw new ForbiddenException('Missing X-User-Id');
+    }
+    const method = await this.paymentsService.setDefaultSavedPaymentMethod(userId, id);
+    return toPaymentMethodResponse(method);
+  }
+
+  @Mutation('deletePaymentMethod')
+  @UseGuards(UserIdSigGuard)
+  async deletePaymentMethod(@Args('id') id: string, @Context() ctx: GqlContext) {
+    const userId = extractUserId(ctx);
+    if (!userId) {
+      throw new ForbiddenException('Missing X-User-Id');
+    }
+    await this.paymentsService.deleteSavedPaymentMethod(userId, id);
+    return true;
+  }
+
+  @Mutation('registerPaymentMethod')
+  @UseGuards(UserIdSigGuard)
+  async registerPaymentMethod(
+    @Args('input') input: Record<string, unknown>,
+    @Context() ctx: GqlContext,
+  ) {
+    const userId = extractUserId(ctx);
+    if (!userId) {
+      throw new ForbiddenException('Missing X-User-Id');
+    }
+    const dto = {
+      providerPaymentMethodId: input.providerPaymentMethodId as string,
+      setAsDefault: (input.setAsDefault as boolean | undefined) ?? false,
+      consentAccepted: input.consentAccepted as boolean,
+      consentVersion: input.consentVersion as string,
+    };
+    const method = await this.paymentsService.registerSavedPaymentMethod(userId, dto, {
+      source: extractConsentSource(ctx),
+      userAgent: extractUserAgent(ctx),
+      ipAddress: extractClientIp(ctx),
+    });
+    return toPaymentMethodResponse(method);
   }
 }

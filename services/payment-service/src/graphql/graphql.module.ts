@@ -1,7 +1,11 @@
 import { Module } from '@nestjs/common';
 import { GraphQLModule } from '@nestjs/graphql';
 import { ApolloFederationDriver, ApolloFederationDriverConfig } from '@nestjs/apollo';
-import { PaymentResolver } from './payment.resolver';
+import {
+  PaymentResolver,
+  UserPaymentMethodResolver,
+  PaymentMethodMutationResolver,
+} from './payment.resolver';
 import { PaymentsModule } from '../modules/payments/payments.module';
 import { SecurityModule } from '../common/security/security.module';
 import { UserIdSigGuard } from './guards/user-id-sig.guard';
@@ -16,6 +20,11 @@ import { UserIdSigGuard } from './guards/user-id-sig.guard';
     PaymentsModule,
     SecurityModule,
   ],
-  providers: [PaymentResolver, UserIdSigGuard],
+  providers: [
+    PaymentResolver,
+    UserPaymentMethodResolver,
+    PaymentMethodMutationResolver,
+    UserIdSigGuard,
+  ],
 })
 export class PaymentGraphQLModule {}

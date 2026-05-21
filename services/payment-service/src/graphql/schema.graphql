@@ -1,5 +1,20 @@
 extend schema
-  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@external", "@tag"])
+
+extend type User @key(fields: "id") {
+  id: ID! @external
+  paymentMethods: [PaymentMethod!]! @tag(name: "self-only")
+}
+
+type PaymentMethod {
+  id: ID!
+  brand: String
+  label: String
+  last4: String
+  expMonth: Int
+  expYear: Int
+  isDefault: Boolean
+}
 
 type Payment @key(fields: "id") @key(fields: "orderId") {
   id: ID!
@@ -23,9 +38,20 @@ type Query {
 
 type Mutation {
   createPayment(input: CreatePaymentInput!): Payment!
+  setDefaultPaymentMethod(id: ID!): PaymentMethod!
+  deletePaymentMethod(id: ID!): Boolean!
+  registerPaymentMethod(input: RegisterPaymentMethodInput!): PaymentMethod!
 }
 
 input CreatePaymentInput {
   orderId: ID!
-  token: String!
+  token: String
+  savedPaymentMethodId: ID
+}
+
+input RegisterPaymentMethodInput {
+  providerPaymentMethodId: String!
+  setAsDefault: Boolean
+  consentAccepted: Boolean!
+  consentVersion: String!
 }
