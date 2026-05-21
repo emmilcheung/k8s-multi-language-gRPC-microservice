@@ -43,6 +43,7 @@ type ComplexityRoot struct {
 		ID       func(childComplexity int) int
 		IssuedAt func(childComplexity int) int
 		OrderID  func(childComplexity int) int
+		QRToken  func(childComplexity int) int
 		Status   func(childComplexity int) int
 		TicketID func(childComplexity int) int
 		UsedAt   func(childComplexity int) int
@@ -158,6 +159,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.AdmissionPass.OrderID(childComplexity), true
+	case "AdmissionPass.qrToken":
+		if e.ComplexityRoot.AdmissionPass.QRToken == nil {
+			break
+		}
+
+		return e.ComplexityRoot.AdmissionPass.QRToken(childComplexity), true
 	case "AdmissionPass.status":
 		if e.ComplexityRoot.AdmissionPass.Status == nil {
 			break
@@ -612,6 +619,8 @@ func (ec *executionContext) childFields_AdmissionPass(ctx context.Context, field
 		return ec.fieldContext_AdmissionPass_issuedAt(ctx, field)
 	case "usedAt":
 		return ec.fieldContext_AdmissionPass_usedAt(ctx, field)
+	case "qrToken":
+		return ec.fieldContext_AdmissionPass_qrToken(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type AdmissionPass", field.Name)
 }
@@ -1210,6 +1219,29 @@ func (ec *executionContext) _AdmissionPass_usedAt(ctx context.Context, field gra
 	)
 }
 func (ec *executionContext) fieldContext_AdmissionPass_usedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("AdmissionPass", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _AdmissionPass_qrToken(ctx context.Context, field graphql.CollectedField, obj *AdmissionPass) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_AdmissionPass_qrToken(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.QRToken, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_AdmissionPass_qrToken(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("AdmissionPass", field, false, false, errors.New("field of type String does not have child fields"))
 }
 
@@ -3462,6 +3494,8 @@ func (ec *executionContext) _AdmissionPass(ctx context.Context, sel ast.Selectio
 			}
 		case "usedAt":
 			out.Values[i] = ec._AdmissionPass_usedAt(ctx, field, obj)
+		case "qrToken":
+			out.Values[i] = ec._AdmissionPass_qrToken(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}

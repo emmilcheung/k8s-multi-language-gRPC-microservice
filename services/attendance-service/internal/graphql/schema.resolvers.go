@@ -97,12 +97,24 @@ func (r *mutationResolver) RecordCheckin(ctx context.Context, input RecordChecki
 	if scannerUserID == "" {
 		return nil, fmt.Errorf("unauthorized: scanner identity required")
 	}
+	if input.Source == CheckinSourceUserIDLookup {
+		return nil, fmt.Errorf("invalid source USER_ID_LOOKUP for recordCheckin; use recordCheckinByUserId")
+	}
 
 	// Look up the credential to get eventId and buyerUserId.
 	cred, err := r.Svc.GetAdmissionPass(ctx, input.TicketID, nil)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, fmt.Errorf("not found: ticket not found")
+		}
+		return nil, err
+	}
+	if err := r.Svc.EnsureOrganizerOwnsEvent(ctx, cred.EventID, scannerUserID); err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			return nil, fmt.Errorf("forbidden: organizer is not allowed for this event")
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, fmt.Errorf("not found: event not found")
 		}
 		return nil, err
 	}
@@ -148,6 +160,15 @@ func (r *mutationResolver) RecordCheckinByUserID(ctx context.Context, input Reco
 	if scannerUserID == "" {
 		return nil, fmt.Errorf("unauthorized: scanner identity required")
 	}
+	if err := r.Svc.EnsureOrganizerOwnsEvent(ctx, input.EventID, scannerUserID); err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			return nil, fmt.Errorf("forbidden: organizer is not allowed for this event")
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, fmt.Errorf("not found: event not found")
+		}
+		return nil, err
+	}
 
 	policy, perr := r.Svc.GetAttendancePolicy(ctx, input.EventID)
 	if perr != nil && !errors.Is(perr, repository.ErrNotFound) {
@@ -179,10 +200,17 @@ func (r *mutationResolver) RecordCheckinByUserID(ctx context.Context, input Reco
 
 // AdmissionPass is the resolver for the admissionPass field.
 func (r *queryResolver) AdmissionPass(ctx context.Context, ticketID string, orderID *string) (*AdmissionPass, error) {
-	cred, err := r.Svc.GetAdmissionPass(ctx, ticketID, orderID)
+	buyerID := userIDFromContext(ctx)
+	if buyerID == "" {
+		return nil, fmt.Errorf("unauthorized: buyer identity required")
+	}
+	cred, err := r.Svc.GetAdmissionPassForBuyer(ctx, ticketID, orderID, buyerID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, nil
+		}
+		if errors.Is(err, service.ErrForbidden) {
+			return nil, fmt.Errorf("forbidden: admission pass not accessible")
 		}
 		return nil, err
 	}
@@ -191,10 +219,28 @@ func (r *queryResolver) AdmissionPass(ctx context.Context, ticketID string, orde
 
 // AttendancePolicy is the resolver for the attendancePolicy field.
 func (r *queryResolver) AttendancePolicy(ctx context.Context, eventID string) (*AttendancePolicy, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	if err := r.Svc.EnsureOrganizerOwnsEvent(ctx, eventID, organizerID); err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			return nil, fmt.Errorf("forbidden: organizer is not allowed for this event")
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, fmt.Errorf("not found: event not found")
+		}
+		return nil, err
+	}
+
 	policy, err := r.Svc.GetAttendancePolicy(ctx, eventID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, nil
+			return &AttendancePolicy{
+				EventID:             eventID,
+				RequireQRForEntry:   true,
+				AllowManualOverride: false,
+			}, nil
 		}
 		return nil, err
 	}
@@ -207,6 +253,19 @@ func (r *queryResolver) AttendancePolicy(ctx context.Context, eventID string) (*
 
 // AttendanceSummary is the resolver for the attendanceSummary field.
 func (r *queryResolver) AttendanceSummary(ctx context.Context, eventID string) (*AttendanceSummary, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	if err := r.Svc.EnsureOrganizerOwnsEvent(ctx, eventID, organizerID); err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			return nil, fmt.Errorf("forbidden: organizer is not allowed for this event")
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, fmt.Errorf("not found: event not found")
+		}
+		return nil, err
+	}
 	summary, err := r.Svc.GetAttendanceSummary(ctx, eventID)
 	if err != nil {
 		return nil, err
@@ -221,9 +280,29 @@ func (r *queryResolver) AttendanceSummary(ctx context.Context, eventID string) (
 
 // EventCheckins is the resolver for the eventCheckins field.
 func (r *queryResolver) EventCheckins(ctx context.Context, eventID string, first *int, after *string) ([]*EventCheckin, error) {
+	organizerID := userIDFromContext(ctx)
+	if organizerID == "" {
+		return nil, fmt.Errorf("unauthorized: organizer identity required")
+	}
+	if err := r.Svc.EnsureOrganizerOwnsEvent(ctx, eventID, organizerID); err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			return nil, fmt.Errorf("forbidden: organizer is not allowed for this event")
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, fmt.Errorf("not found: event not found")
+		}
+		return nil, err
+	}
+	if after != nil && *after != "" {
+		return nil, fmt.Errorf("pagination cursor is not yet supported for eventCheckins")
+	}
+
 	limit := 50
 	if first != nil && *first > 0 {
 		limit = *first
+	}
+	if limit > 500 {
+		limit = 500
 	}
 	creds, err := r.Svc.ListCheckedIn(ctx, eventID, limit)
 	if err != nil {
@@ -244,4 +323,3 @@ func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
-

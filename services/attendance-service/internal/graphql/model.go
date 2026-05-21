@@ -17,6 +17,7 @@ type AdmissionPass struct {
 	Status   CredentialStatus `json:"status"`
 	IssuedAt string           `json:"issuedAt"`
 	UsedAt   *string          `json:"usedAt,omitempty"`
+	QRToken  *string          `json:"qrToken,omitempty"`
 }
 
 func (AdmissionPass) IsEntity() {}

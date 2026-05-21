@@ -17,6 +17,9 @@ func mapCredentialToGQL(c *repository.AdmissionCredential) *AdmissionPass {
 		usedAt := c.UsedAt.Format("2006-01-02T15:04:05Z07:00")
 		ap.UsedAt = &usedAt
 	}
+	if c.QRToken != nil {
+		ap.QRToken = c.QRToken
+	}
 	return ap
 }
 

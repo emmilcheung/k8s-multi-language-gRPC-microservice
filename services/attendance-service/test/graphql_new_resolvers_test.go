@@ -24,16 +24,50 @@ func contextWithUserID(userID string) context.Context {
 	return gqlgraph.WithHTTPRequest(context.Background(), req)
 }
 
+// --- attendanceSummary ---
+
+func TestGraphQL_AttendanceSummary_RequiresOrganizerIdentity(t *testing.T) {
+	svc := &stubAttendanceSvcWithCheckedIn{}
+	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}}
+	_, err := resolver.Query().AttendanceSummary(context.Background(), "event-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unauthorized")
+}
+
+func TestGraphQL_AttendanceSummary_RequiresOwnership(t *testing.T) {
+	svc := &stubAttendanceSvcWithCheckedIn{
+		checkErr: service.ErrForbidden,
+	}
+	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}}
+	_, err := resolver.Query().AttendanceSummary(contextWithUserID("organizer-2"), "event-secure")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "forbidden")
+}
+
+func TestGraphQL_AttendancePolicy_RequiresOrganizerIdentity(t *testing.T) {
+	svc := &stubAttendanceSvcWithCheckedIn{}
+	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}}
+	_, err := resolver.Query().AttendancePolicy(context.Background(), "event-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unauthorized")
+}
+
+func TestGraphQL_AttendancePolicy_RequiresOwnership(t *testing.T) {
+	svc := &stubAttendanceSvcWithCheckedIn{
+		checkErr: service.ErrForbidden,
+	}
+	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}}
+	_, err := resolver.Query().AttendancePolicy(contextWithUserID("organizer-2"), "event-secure")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "forbidden")
+}
+
 // --- eventCheckins ---
 
 func TestGraphQL_EventCheckins_ReturnsEmpty(t *testing.T) {
-	svc := service.NewAttendanceService(
-		&stubCredentialRepo{},
-		&stubPolicyRepo{},
-		&stubScanRepo{},
-	)
+	svc := &stubAttendanceSvcWithCheckedIn{}
 	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}}
-	result, err := resolver.Query().EventCheckins(context.Background(), "event-1", nil, nil)
+	result, err := resolver.Query().EventCheckins(contextWithUserID("organizer-1"), "event-1", nil, nil)
 	require.NoError(t, err)
 	assert.Empty(t, result)
 }
@@ -52,13 +86,9 @@ func TestGraphQL_EventCheckins_ReturnsMappedList(t *testing.T) {
 			UsedAt:   &usedAt,
 		},
 	}
-	svc := service.NewAttendanceService(
-		&stubCredentialRepoWithList{creds: creds},
-		&stubPolicyRepo{},
-		&stubScanRepo{},
-	)
+	svc := &stubAttendanceSvcWithCheckedIn{creds: creds}
 	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}}
-	result, err := resolver.Query().EventCheckins(context.Background(), "event-2", nil, nil)
+	result, err := resolver.Query().EventCheckins(contextWithUserID("organizer-1"), "event-2", nil, nil)
 	require.NoError(t, err)
 	require.Len(t, result, 1)
 	assert.Equal(t, "cred-1", result[0].ID)
@@ -67,6 +97,36 @@ func TestGraphQL_EventCheckins_ReturnsMappedList(t *testing.T) {
 	assert.Equal(t, "order-1", result[0].OrderID)
 	assert.Equal(t, gqlgraph.CheckinSourceQRScan, result[0].Source)
 	assert.NotEmpty(t, result[0].CheckedInAt)
+}
+
+func TestGraphQL_EventCheckins_RequiresOrganizerOwnership(t *testing.T) {
+	svc := &stubAttendanceSvcWithCheckedIn{
+		checkErr: service.ErrForbidden,
+	}
+	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}}
+
+	ctx := contextWithUserID("organizer-2")
+	_, err := resolver.Query().EventCheckins(ctx, "event-secure", nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "forbidden")
+}
+
+func TestGraphQL_EventCheckins_RejectsUnsupportedCursor(t *testing.T) {
+	svc := &stubAttendanceSvcWithCheckedIn{}
+	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}}
+	after := "opaque-cursor"
+	_, err := resolver.Query().EventCheckins(contextWithUserID("organizer-1"), "event-1", nil, &after)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pagination cursor is not yet supported")
+}
+
+func TestGraphQL_EventCheckins_CapsRequestedPageSize(t *testing.T) {
+	svc := &stubAttendanceSvcWithCheckedIn{}
+	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}}
+	first := 1000
+	_, err := resolver.Query().EventCheckins(contextWithUserID("organizer-1"), "event-1", &first, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 500, svc.lastLimit)
 }
 
 // --- updateAttendancePolicy ---
@@ -184,10 +244,11 @@ func TestGraphQL_RecordCheckinByUserID_SuccessfulCheckin(t *testing.T) {
 		EventID:             "event-ci1",
 		AllowManualOverride: true,
 	}
-	svc := service.NewAttendanceService(
+	svc := service.NewAttendanceServiceWithTicketLookup(
 		&stubCredentialRepo{credential: cred},
 		&stubPolicyRepo{policy: policy},
 		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "scanner-1"},
 	)
 	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{outcome: outcome}}
 
@@ -200,6 +261,135 @@ func TestGraphQL_RecordCheckinByUserID_SuccessfulCheckin(t *testing.T) {
 	require.NotNil(t, result)
 	assert.Equal(t, "cred-ci1", result.ID)
 	assert.Equal(t, gqlgraph.CheckinSourceUserIDLookup, result.Source)
+}
+
+func TestGraphQL_RecordCheckin_RequiresOrganizerOwnership(t *testing.T) {
+	now := time.Now()
+	buyerID := "buyer-ci1"
+	cred := &repository.AdmissionCredential{
+		ID:          "cred-ci2",
+		TicketID:    "ticket-ci2",
+		OrderID:     "order-ci2",
+		EventID:     "event-ci2",
+		BuyerUserID: &buyerID,
+		Status:      repository.CredentialStatusIssued,
+		IssuedAt:    now,
+	}
+	policy := &repository.AttendancePolicy{
+		EventID:             "event-ci2",
+		AllowManualOverride: true,
+	}
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{credential: cred},
+		&stubPolicyRepo{policy: policy},
+		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "different-organizer"},
+	)
+	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}}
+
+	_, err := resolver.Mutation().RecordCheckin(contextWithUserID("scanner-1"), gqlgraph.RecordCheckinInput{
+		TicketID: "ticket-ci2",
+		Source:   gqlgraph.CheckinSourceManualOverride,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "forbidden")
+}
+
+func TestGraphQL_RecordCheckin_SuccessfulCheckin(t *testing.T) {
+	now := time.Now()
+	usedAt := now
+	buyerID := "buyer-ci4"
+	cred := &repository.AdmissionCredential{
+		ID:          "cred-ci4",
+		TicketID:    "ticket-ci4",
+		OrderID:     "order-ci4",
+		EventID:     "event-ci4",
+		BuyerUserID: &buyerID,
+		Status:      repository.CredentialStatusUsed,
+		IssuedAt:    now.Add(-1 * time.Hour),
+		UsedAt:      &usedAt,
+	}
+	outcome := &service.ScanOutcome{
+		Result:       service.ScanResultValid,
+		CredentialID: "cred-ci4",
+		EventID:      "event-ci4",
+	}
+	policy := &repository.AttendancePolicy{
+		EventID:             "event-ci4",
+		AllowManualOverride: true,
+	}
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{credential: cred},
+		&stubPolicyRepo{policy: policy},
+		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "scanner-1"},
+	)
+	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{outcome: outcome}}
+
+	result, err := resolver.Mutation().RecordCheckin(contextWithUserID("scanner-1"), gqlgraph.RecordCheckinInput{
+		TicketID: "ticket-ci4",
+		Source:   gqlgraph.CheckinSourceManualOverride,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "cred-ci4", result.ID)
+	assert.Equal(t, "ticket-ci4", result.TicketID)
+	assert.Equal(t, "order-ci4", result.OrderID)
+	assert.Equal(t, gqlgraph.CheckinSourceManualOverride, result.Source)
+	assert.Equal(t, usedAt.Format("2006-01-02T15:04:05Z07:00"), result.CheckedInAt)
+}
+
+func TestGraphQL_RecordCheckin_RejectsUserIDLookupSource(t *testing.T) {
+	now := time.Now()
+	buyerID := "buyer-ci5"
+	cred := &repository.AdmissionCredential{
+		ID:          "cred-ci5",
+		TicketID:    "ticket-ci5",
+		OrderID:     "order-ci5",
+		EventID:     "event-ci5",
+		BuyerUserID: &buyerID,
+		Status:      repository.CredentialStatusIssued,
+		IssuedAt:    now,
+	}
+	policy := &repository.AttendancePolicy{
+		EventID:             "event-ci5",
+		AllowManualOverride: true,
+	}
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{credential: cred},
+		&stubPolicyRepo{policy: policy},
+		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "scanner-1"},
+	)
+	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}}
+
+	_, err := resolver.Mutation().RecordCheckin(contextWithUserID("scanner-1"), gqlgraph.RecordCheckinInput{
+		TicketID: "ticket-ci5",
+		Source:   gqlgraph.CheckinSourceUserIDLookup,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid source")
+}
+
+func TestGraphQL_RecordCheckinByUserID_RequiresOrganizerOwnership(t *testing.T) {
+	policy := &repository.AttendancePolicy{
+		EventID:             "event-ci3",
+		AllowManualOverride: true,
+	}
+	svc := service.NewAttendanceServiceWithTicketLookup(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{policy: policy},
+		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "different-organizer"},
+	)
+	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}}
+
+	_, err := resolver.Mutation().RecordCheckinByUserID(contextWithUserID("scanner-1"), gqlgraph.RecordCheckinByUserIDInput{
+		EventID: "event-ci3",
+		UserID:  "user-ci3",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "forbidden")
 }
 
 // --- auth wrapper ---
@@ -291,6 +481,45 @@ func (s *stubPolicyRepoWithUpsert) Upsert(_ context.Context, p *repository.Atten
 	s.upserted = p
 	s.policy = p
 	return nil
+}
+
+type stubAttendanceSvcWithCheckedIn struct {
+	creds    []*repository.AdmissionCredential
+	checkErr error
+	lastLimit int
+}
+
+func (s *stubAttendanceSvcWithCheckedIn) GetAdmissionPass(_ context.Context, _ string, _ *string) (*repository.AdmissionCredential, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (s *stubAttendanceSvcWithCheckedIn) GetAdmissionPassForBuyer(_ context.Context, _ string, _ *string, _ string) (*repository.AdmissionCredential, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (s *stubAttendanceSvcWithCheckedIn) GetAdmissionPassByCredentialID(_ context.Context, _ string) (*repository.AdmissionCredential, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (s *stubAttendanceSvcWithCheckedIn) GetAttendancePolicy(_ context.Context, _ string) (*repository.AttendancePolicy, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (s *stubAttendanceSvcWithCheckedIn) UpsertAttendancePolicy(_ context.Context, _ *repository.AttendancePolicy) error {
+	return nil
+}
+
+func (s *stubAttendanceSvcWithCheckedIn) GetAttendanceSummary(_ context.Context, _ string) (*repository.AttendanceSummary, error) {
+	return &repository.AttendanceSummary{}, nil
+}
+
+func (s *stubAttendanceSvcWithCheckedIn) ListCheckedIn(_ context.Context, _ string, limit int) ([]*repository.AdmissionCredential, error) {
+	s.lastLimit = limit
+	return s.creds, nil
+}
+
+func (s *stubAttendanceSvcWithCheckedIn) EnsureOrganizerOwnsEvent(_ context.Context, _, _ string) error {
+	return s.checkErr
 }
 
 // stubAttendanceSvcWithPolicyRepo is a minimal AttendanceService stub that allows

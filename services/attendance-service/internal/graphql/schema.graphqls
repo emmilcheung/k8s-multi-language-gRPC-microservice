@@ -9,6 +9,7 @@ type AdmissionPass @key(fields: "id") {
   status: CredentialStatus!
   issuedAt: String!
   usedAt: String
+  qrToken: String
 }
 
 type AttendancePolicy {
