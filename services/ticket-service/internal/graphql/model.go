@@ -35,16 +35,22 @@ type SeatingPlan struct {
 func (SeatingPlan) IsEntity() {}
 
 type Ticket struct {
-	ID          string       `json:"id"`
-	Title       string       `json:"title"`
-	Price       int          `json:"price"`
-	Quota       int          `json:"quota"`
-	Available   int          `json:"available"`
-	MaxPerUser  *int         `json:"maxPerUser,omitempty"`
-	TicketType  TicketType   `json:"ticketType"`
-	SeatingPlan *SeatingPlan `json:"seatingPlan,omitempty"`
-	CreatedAt   string       `json:"createdAt"`
-	UpdatedAt   string       `json:"updatedAt"`
+	ID           string       `json:"id"`
+	Title        string       `json:"title"`
+	Price        int          `json:"price"`
+	PriceDecimal string       `json:"priceDecimal"`
+	UserID       string       `json:"userId"`
+	OrderID      *string      `json:"orderId,omitempty"`
+	Quota        int          `json:"quota"`
+	Reserved     int          `json:"reserved"`
+	Sold         int          `json:"sold"`
+	Available    int          `json:"available"`
+	MaxPerUser   *int         `json:"maxPerUser,omitempty"`
+	TicketType   TicketType   `json:"ticketType"`
+	SeatingPlan  *SeatingPlan `json:"seatingPlan,omitempty"`
+	Event        *TicketEvent `json:"event,omitempty"`
+	CreatedAt    string       `json:"createdAt"`
+	UpdatedAt    string       `json:"updatedAt"`
 }
 
 func (Ticket) IsEntity() {}
@@ -57,6 +63,16 @@ type TicketConnection struct {
 type TicketEdge struct {
 	Node   *Ticket `json:"node"`
 	Cursor string  `json:"cursor"`
+}
+
+type TicketEvent struct {
+	Title        string  `json:"title"`
+	Description  *string `json:"description,omitempty"`
+	StartsAt     string  `json:"startsAt"`
+	EndsAt       *string `json:"endsAt,omitempty"`
+	ImageURL     *string `json:"imageUrl,omitempty"`
+	VenueName    *string `json:"venueName,omitempty"`
+	VenueAddress *string `json:"venueAddress,omitempty"`
 }
 
 type TicketFilter struct {

@@ -64,16 +64,22 @@ type ComplexityRoot struct {
 	}
 
 	Ticket struct {
-		Available   func(childComplexity int) int
-		CreatedAt   func(childComplexity int) int
-		ID          func(childComplexity int) int
-		MaxPerUser  func(childComplexity int) int
-		Price       func(childComplexity int) int
-		Quota       func(childComplexity int) int
-		SeatingPlan func(childComplexity int) int
-		TicketType  func(childComplexity int) int
-		Title       func(childComplexity int) int
-		UpdatedAt   func(childComplexity int) int
+		Available    func(childComplexity int) int
+		CreatedAt    func(childComplexity int) int
+		Event        func(childComplexity int) int
+		ID           func(childComplexity int) int
+		MaxPerUser   func(childComplexity int) int
+		OrderID      func(childComplexity int) int
+		Price        func(childComplexity int) int
+		PriceDecimal func(childComplexity int) int
+		Quota        func(childComplexity int) int
+		Reserved     func(childComplexity int) int
+		SeatingPlan  func(childComplexity int) int
+		Sold         func(childComplexity int) int
+		TicketType   func(childComplexity int) int
+		Title        func(childComplexity int) int
+		UpdatedAt    func(childComplexity int) int
+		UserID       func(childComplexity int) int
 	}
 
 	TicketConnection struct {
@@ -84,6 +90,16 @@ type ComplexityRoot struct {
 	TicketEdge struct {
 		Cursor func(childComplexity int) int
 		Node   func(childComplexity int) int
+	}
+
+	TicketEvent struct {
+		Description  func(childComplexity int) int
+		EndsAt       func(childComplexity int) int
+		ImageURL     func(childComplexity int) int
+		StartsAt     func(childComplexity int) int
+		Title        func(childComplexity int) int
+		VenueAddress func(childComplexity int) int
+		VenueName    func(childComplexity int) int
 	}
 
 	_Service struct {
@@ -231,6 +247,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Ticket.CreatedAt(childComplexity), true
+	case "Ticket.event":
+		if e.ComplexityRoot.Ticket.Event == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Ticket.Event(childComplexity), true
 	case "Ticket.id":
 		if e.ComplexityRoot.Ticket.ID == nil {
 			break
@@ -243,24 +265,48 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Ticket.MaxPerUser(childComplexity), true
+	case "Ticket.orderId":
+		if e.ComplexityRoot.Ticket.OrderID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Ticket.OrderID(childComplexity), true
 	case "Ticket.price":
 		if e.ComplexityRoot.Ticket.Price == nil {
 			break
 		}
 
 		return e.ComplexityRoot.Ticket.Price(childComplexity), true
+	case "Ticket.priceDecimal":
+		if e.ComplexityRoot.Ticket.PriceDecimal == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Ticket.PriceDecimal(childComplexity), true
 	case "Ticket.quota":
 		if e.ComplexityRoot.Ticket.Quota == nil {
 			break
 		}
 
 		return e.ComplexityRoot.Ticket.Quota(childComplexity), true
+	case "Ticket.reserved":
+		if e.ComplexityRoot.Ticket.Reserved == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Ticket.Reserved(childComplexity), true
 	case "Ticket.seatingPlan":
 		if e.ComplexityRoot.Ticket.SeatingPlan == nil {
 			break
 		}
 
 		return e.ComplexityRoot.Ticket.SeatingPlan(childComplexity), true
+	case "Ticket.sold":
+		if e.ComplexityRoot.Ticket.Sold == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Ticket.Sold(childComplexity), true
 	case "Ticket.ticketType":
 		if e.ComplexityRoot.Ticket.TicketType == nil {
 			break
@@ -279,6 +325,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Ticket.UpdatedAt(childComplexity), true
+	case "Ticket.userId":
+		if e.ComplexityRoot.Ticket.UserID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Ticket.UserID(childComplexity), true
 
 	case "TicketConnection.edges":
 		if e.ComplexityRoot.TicketConnection.Edges == nil {
@@ -305,6 +357,49 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.TicketEdge.Node(childComplexity), true
+
+	case "TicketEvent.description":
+		if e.ComplexityRoot.TicketEvent.Description == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TicketEvent.Description(childComplexity), true
+	case "TicketEvent.endsAt":
+		if e.ComplexityRoot.TicketEvent.EndsAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TicketEvent.EndsAt(childComplexity), true
+	case "TicketEvent.imageUrl":
+		if e.ComplexityRoot.TicketEvent.ImageURL == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TicketEvent.ImageURL(childComplexity), true
+	case "TicketEvent.startsAt":
+		if e.ComplexityRoot.TicketEvent.StartsAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TicketEvent.StartsAt(childComplexity), true
+	case "TicketEvent.title":
+		if e.ComplexityRoot.TicketEvent.Title == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TicketEvent.Title(childComplexity), true
+	case "TicketEvent.venueAddress":
+		if e.ComplexityRoot.TicketEvent.VenueAddress == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TicketEvent.VenueAddress(childComplexity), true
+	case "TicketEvent.venueName":
+		if e.ComplexityRoot.TicketEvent.VenueName == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TicketEvent.VenueName(childComplexity), true
 
 	case "_Service.sdl":
 		if e.ComplexityRoot._Service.SDL == nil {
@@ -662,8 +757,18 @@ func (ec *executionContext) fieldContext_Entity_findTicketByID(ctx context.Conte
 				return ec.fieldContext_Ticket_title(ctx, field)
 			case "price":
 				return ec.fieldContext_Ticket_price(ctx, field)
+			case "priceDecimal":
+				return ec.fieldContext_Ticket_priceDecimal(ctx, field)
+			case "userId":
+				return ec.fieldContext_Ticket_userId(ctx, field)
+			case "orderId":
+				return ec.fieldContext_Ticket_orderId(ctx, field)
 			case "quota":
 				return ec.fieldContext_Ticket_quota(ctx, field)
+			case "reserved":
+				return ec.fieldContext_Ticket_reserved(ctx, field)
+			case "sold":
+				return ec.fieldContext_Ticket_sold(ctx, field)
 			case "available":
 				return ec.fieldContext_Ticket_available(ctx, field)
 			case "maxPerUser":
@@ -672,6 +777,8 @@ func (ec *executionContext) fieldContext_Entity_findTicketByID(ctx context.Conte
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
+			case "event":
+				return ec.fieldContext_Ticket_event(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Ticket_createdAt(ctx, field)
 			case "updatedAt":
@@ -725,8 +832,18 @@ func (ec *executionContext) fieldContext_Mutation_createTicket(ctx context.Conte
 				return ec.fieldContext_Ticket_title(ctx, field)
 			case "price":
 				return ec.fieldContext_Ticket_price(ctx, field)
+			case "priceDecimal":
+				return ec.fieldContext_Ticket_priceDecimal(ctx, field)
+			case "userId":
+				return ec.fieldContext_Ticket_userId(ctx, field)
+			case "orderId":
+				return ec.fieldContext_Ticket_orderId(ctx, field)
 			case "quota":
 				return ec.fieldContext_Ticket_quota(ctx, field)
+			case "reserved":
+				return ec.fieldContext_Ticket_reserved(ctx, field)
+			case "sold":
+				return ec.fieldContext_Ticket_sold(ctx, field)
 			case "available":
 				return ec.fieldContext_Ticket_available(ctx, field)
 			case "maxPerUser":
@@ -735,6 +852,8 @@ func (ec *executionContext) fieldContext_Mutation_createTicket(ctx context.Conte
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
+			case "event":
+				return ec.fieldContext_Ticket_event(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Ticket_createdAt(ctx, field)
 			case "updatedAt":
@@ -788,8 +907,18 @@ func (ec *executionContext) fieldContext_Mutation_updateTicket(ctx context.Conte
 				return ec.fieldContext_Ticket_title(ctx, field)
 			case "price":
 				return ec.fieldContext_Ticket_price(ctx, field)
+			case "priceDecimal":
+				return ec.fieldContext_Ticket_priceDecimal(ctx, field)
+			case "userId":
+				return ec.fieldContext_Ticket_userId(ctx, field)
+			case "orderId":
+				return ec.fieldContext_Ticket_orderId(ctx, field)
 			case "quota":
 				return ec.fieldContext_Ticket_quota(ctx, field)
+			case "reserved":
+				return ec.fieldContext_Ticket_reserved(ctx, field)
+			case "sold":
+				return ec.fieldContext_Ticket_sold(ctx, field)
 			case "available":
 				return ec.fieldContext_Ticket_available(ctx, field)
 			case "maxPerUser":
@@ -798,6 +927,8 @@ func (ec *executionContext) fieldContext_Mutation_updateTicket(ctx context.Conte
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
+			case "event":
+				return ec.fieldContext_Ticket_event(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Ticket_createdAt(ctx, field)
 			case "updatedAt":
@@ -908,8 +1039,18 @@ func (ec *executionContext) fieldContext_Query_tickets(_ context.Context, field 
 				return ec.fieldContext_Ticket_title(ctx, field)
 			case "price":
 				return ec.fieldContext_Ticket_price(ctx, field)
+			case "priceDecimal":
+				return ec.fieldContext_Ticket_priceDecimal(ctx, field)
+			case "userId":
+				return ec.fieldContext_Ticket_userId(ctx, field)
+			case "orderId":
+				return ec.fieldContext_Ticket_orderId(ctx, field)
 			case "quota":
 				return ec.fieldContext_Ticket_quota(ctx, field)
+			case "reserved":
+				return ec.fieldContext_Ticket_reserved(ctx, field)
+			case "sold":
+				return ec.fieldContext_Ticket_sold(ctx, field)
 			case "available":
 				return ec.fieldContext_Ticket_available(ctx, field)
 			case "maxPerUser":
@@ -918,6 +1059,8 @@ func (ec *executionContext) fieldContext_Query_tickets(_ context.Context, field 
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
+			case "event":
+				return ec.fieldContext_Ticket_event(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Ticket_createdAt(ctx, field)
 			case "updatedAt":
@@ -1007,8 +1150,18 @@ func (ec *executionContext) fieldContext_Query_ticket(ctx context.Context, field
 				return ec.fieldContext_Ticket_title(ctx, field)
 			case "price":
 				return ec.fieldContext_Ticket_price(ctx, field)
+			case "priceDecimal":
+				return ec.fieldContext_Ticket_priceDecimal(ctx, field)
+			case "userId":
+				return ec.fieldContext_Ticket_userId(ctx, field)
+			case "orderId":
+				return ec.fieldContext_Ticket_orderId(ctx, field)
 			case "quota":
 				return ec.fieldContext_Ticket_quota(ctx, field)
+			case "reserved":
+				return ec.fieldContext_Ticket_reserved(ctx, field)
+			case "sold":
+				return ec.fieldContext_Ticket_sold(ctx, field)
 			case "available":
 				return ec.fieldContext_Ticket_available(ctx, field)
 			case "maxPerUser":
@@ -1017,6 +1170,8 @@ func (ec *executionContext) fieldContext_Query_ticket(ctx context.Context, field
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
+			case "event":
+				return ec.fieldContext_Ticket_event(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Ticket_createdAt(ctx, field)
 			case "updatedAt":
@@ -1337,6 +1492,93 @@ func (ec *executionContext) fieldContext_Ticket_price(_ context.Context, field g
 	return fc, nil
 }
 
+func (ec *executionContext) _Ticket_priceDecimal(ctx context.Context, field graphql.CollectedField, obj *Ticket) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Ticket_priceDecimal,
+		func(ctx context.Context) (any, error) {
+			return obj.PriceDecimal, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Ticket_priceDecimal(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Ticket",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Ticket_userId(ctx context.Context, field graphql.CollectedField, obj *Ticket) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Ticket_userId,
+		func(ctx context.Context) (any, error) {
+			return obj.UserID, nil
+		},
+		nil,
+		ec.marshalNID2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Ticket_userId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Ticket",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Ticket_orderId(ctx context.Context, field graphql.CollectedField, obj *Ticket) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Ticket_orderId,
+		func(ctx context.Context) (any, error) {
+			return obj.OrderID, nil
+		},
+		nil,
+		ec.marshalOID2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Ticket_orderId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Ticket",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Ticket_quota(ctx context.Context, field graphql.CollectedField, obj *Ticket) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -1354,6 +1596,64 @@ func (ec *executionContext) _Ticket_quota(ctx context.Context, field graphql.Col
 }
 
 func (ec *executionContext) fieldContext_Ticket_quota(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Ticket",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Ticket_reserved(ctx context.Context, field graphql.CollectedField, obj *Ticket) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Ticket_reserved,
+		func(ctx context.Context) (any, error) {
+			return obj.Reserved, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Ticket_reserved(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Ticket",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Ticket_sold(ctx context.Context, field graphql.CollectedField, obj *Ticket) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Ticket_sold,
+		func(ctx context.Context) (any, error) {
+			return obj.Sold, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Ticket_sold(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Ticket",
 		Field:      field,
@@ -1481,6 +1781,51 @@ func (ec *executionContext) fieldContext_Ticket_seatingPlan(_ context.Context, f
 				return ec.fieldContext_SeatingPlan_id(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type SeatingPlan", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Ticket_event(ctx context.Context, field graphql.CollectedField, obj *Ticket) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Ticket_event,
+		func(ctx context.Context) (any, error) {
+			return obj.Event, nil
+		},
+		nil,
+		ec.marshalOTicketEvent2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketEvent,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Ticket_event(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Ticket",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "title":
+				return ec.fieldContext_TicketEvent_title(ctx, field)
+			case "description":
+				return ec.fieldContext_TicketEvent_description(ctx, field)
+			case "startsAt":
+				return ec.fieldContext_TicketEvent_startsAt(ctx, field)
+			case "endsAt":
+				return ec.fieldContext_TicketEvent_endsAt(ctx, field)
+			case "imageUrl":
+				return ec.fieldContext_TicketEvent_imageUrl(ctx, field)
+			case "venueName":
+				return ec.fieldContext_TicketEvent_venueName(ctx, field)
+			case "venueAddress":
+				return ec.fieldContext_TicketEvent_venueAddress(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type TicketEvent", field.Name)
 		},
 	}
 	return fc, nil
@@ -1644,8 +1989,18 @@ func (ec *executionContext) fieldContext_TicketEdge_node(_ context.Context, fiel
 				return ec.fieldContext_Ticket_title(ctx, field)
 			case "price":
 				return ec.fieldContext_Ticket_price(ctx, field)
+			case "priceDecimal":
+				return ec.fieldContext_Ticket_priceDecimal(ctx, field)
+			case "userId":
+				return ec.fieldContext_Ticket_userId(ctx, field)
+			case "orderId":
+				return ec.fieldContext_Ticket_orderId(ctx, field)
 			case "quota":
 				return ec.fieldContext_Ticket_quota(ctx, field)
+			case "reserved":
+				return ec.fieldContext_Ticket_reserved(ctx, field)
+			case "sold":
+				return ec.fieldContext_Ticket_sold(ctx, field)
 			case "available":
 				return ec.fieldContext_Ticket_available(ctx, field)
 			case "maxPerUser":
@@ -1654,6 +2009,8 @@ func (ec *executionContext) fieldContext_TicketEdge_node(_ context.Context, fiel
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
+			case "event":
+				return ec.fieldContext_Ticket_event(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Ticket_createdAt(ctx, field)
 			case "updatedAt":
@@ -1684,6 +2041,209 @@ func (ec *executionContext) _TicketEdge_cursor(ctx context.Context, field graphq
 func (ec *executionContext) fieldContext_TicketEdge_cursor(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "TicketEdge",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TicketEvent_title(ctx context.Context, field graphql.CollectedField, obj *TicketEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_TicketEvent_title,
+		func(ctx context.Context) (any, error) {
+			return obj.Title, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_TicketEvent_title(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TicketEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TicketEvent_description(ctx context.Context, field graphql.CollectedField, obj *TicketEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_TicketEvent_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_TicketEvent_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TicketEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TicketEvent_startsAt(ctx context.Context, field graphql.CollectedField, obj *TicketEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_TicketEvent_startsAt,
+		func(ctx context.Context) (any, error) {
+			return obj.StartsAt, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_TicketEvent_startsAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TicketEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TicketEvent_endsAt(ctx context.Context, field graphql.CollectedField, obj *TicketEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_TicketEvent_endsAt,
+		func(ctx context.Context) (any, error) {
+			return obj.EndsAt, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_TicketEvent_endsAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TicketEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TicketEvent_imageUrl(ctx context.Context, field graphql.CollectedField, obj *TicketEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_TicketEvent_imageUrl,
+		func(ctx context.Context) (any, error) {
+			return obj.ImageURL, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_TicketEvent_imageUrl(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TicketEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TicketEvent_venueName(ctx context.Context, field graphql.CollectedField, obj *TicketEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_TicketEvent_venueName,
+		func(ctx context.Context) (any, error) {
+			return obj.VenueName, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_TicketEvent_venueName(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TicketEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TicketEvent_venueAddress(ctx context.Context, field graphql.CollectedField, obj *TicketEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_TicketEvent_venueAddress,
+		func(ctx context.Context) (any, error) {
+			return obj.VenueAddress, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_TicketEvent_venueAddress(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TicketEvent",
 		Field:      field,
 		IsMethod:   false,
 		IsResolver: false,
@@ -3733,8 +4293,30 @@ func (ec *executionContext) _Ticket(ctx context.Context, sel ast.SelectionSet, o
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "priceDecimal":
+			out.Values[i] = ec._Ticket_priceDecimal(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "userId":
+			out.Values[i] = ec._Ticket_userId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "orderId":
+			out.Values[i] = ec._Ticket_orderId(ctx, field, obj)
 		case "quota":
 			out.Values[i] = ec._Ticket_quota(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "reserved":
+			out.Values[i] = ec._Ticket_reserved(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "sold":
+			out.Values[i] = ec._Ticket_sold(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -3752,6 +4334,8 @@ func (ec *executionContext) _Ticket(ctx context.Context, sel ast.SelectionSet, o
 			}
 		case "seatingPlan":
 			out.Values[i] = ec._Ticket_seatingPlan(ctx, field, obj)
+		case "event":
+			out.Values[i] = ec._Ticket_event(ctx, field, obj)
 		case "createdAt":
 			out.Values[i] = ec._Ticket_createdAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -3850,6 +4434,60 @@ func (ec *executionContext) _TicketEdge(ctx context.Context, sel ast.SelectionSe
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var ticketEventImplementors = []string{"TicketEvent"}
+
+func (ec *executionContext) _TicketEvent(ctx context.Context, sel ast.SelectionSet, obj *TicketEvent) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, ticketEventImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("TicketEvent")
+		case "title":
+			out.Values[i] = ec._TicketEvent_title(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "description":
+			out.Values[i] = ec._TicketEvent_description(ctx, field, obj)
+		case "startsAt":
+			out.Values[i] = ec._TicketEvent_startsAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "endsAt":
+			out.Values[i] = ec._TicketEvent_endsAt(ctx, field, obj)
+		case "imageUrl":
+			out.Values[i] = ec._TicketEvent_imageUrl(ctx, field, obj)
+		case "venueName":
+			out.Values[i] = ec._TicketEvent_venueName(ctx, field, obj)
+		case "venueAddress":
+			out.Values[i] = ec._TicketEvent_venueAddress(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -4813,6 +5451,24 @@ func (ec *executionContext) marshalOBoolean2ᚖbool(ctx context.Context, sel ast
 	return res
 }
 
+func (ec *executionContext) unmarshalOID2ᚖstring(ctx context.Context, v any) (*string, error) {
+	if v == nil {
+		return nil, nil
+	}
+	res, err := graphql.UnmarshalID(v)
+	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOID2ᚖstring(ctx context.Context, sel ast.SelectionSet, v *string) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	_ = sel
+	_ = ctx
+	res := graphql.MarshalID(*v)
+	return res
+}
+
 func (ec *executionContext) unmarshalOInt2ᚖint(ctx context.Context, v any) (*int, error) {
 	if v == nil {
 		return nil, nil
@@ -4909,6 +5565,13 @@ func (ec *executionContext) marshalOTicket2ᚖgithubᚗcomᚋacmeᚋticketᚑser
 		return graphql.Null
 	}
 	return ec._Ticket(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalOTicketEvent2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketEvent(ctx context.Context, sel ast.SelectionSet, v *TicketEvent) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._TicketEvent(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalOTicketFilter2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketFilter(ctx context.Context, v any) (*TicketFilter, error) {

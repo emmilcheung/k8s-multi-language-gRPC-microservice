@@ -5,13 +5,29 @@ type Ticket @key(fields: "id") {
   id: ID!
   title: String!
   price: Int!
+  priceDecimal: String!
+  userId: ID!
+  orderId: ID
   quota: Int!
+  reserved: Int!
+  sold: Int!
   available: Int!
   maxPerUser: Int
   ticketType: TicketType!
   seatingPlan: SeatingPlan
+  event: TicketEvent
   createdAt: String!
   updatedAt: String!
+}
+
+type TicketEvent {
+  title: String!
+  description: String
+  startsAt: String!
+  endsAt: String
+  imageUrl: String
+  venueName: String
+  venueAddress: String
 }
 
 type SeatingPlan @key(fields: "id", resolvable: false) {
