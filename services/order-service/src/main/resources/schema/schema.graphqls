@@ -45,9 +45,24 @@ type Query {
 type Mutation {
   createOrder(input: CreateOrderInput!): Order!
   cancelOrder(id: ID!): Order!
+  createSeatedOrder(input: CreateSeatedOrderInput!): Order!
 }
 
 input CreateOrderInput {
   ticketId: ID!
   quantity: Int!
+}
+
+input CreateSeatedOrderInput {
+  ticketId: ID!
+  quantity: Int!
+  planId: ID!
+  seatIds: [ID!]
+  sectionId: ID
+  attendees: [AttendeeInput!]
+}
+
+input AttendeeInput {
+  seatId: ID!
+  name: String!
 }

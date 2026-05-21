@@ -1,5 +1,6 @@
 package com.ticketing.orders.graphql;
 
+import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
 import com.ticketing.orders.exception.ForbiddenException;
 import com.ticketing.orders.service.OrderService;
@@ -119,5 +120,32 @@ class OrderControllerTest {
         Map<String, Object> result = controller.payment(order, ctxWithUserId(UUID.randomUUID().toString()));
 
         assertThat(result).isNull();
+    }
+
+    @Test
+    void createSeatedOrder_withAttendeeInvalidUuidSeatId_throwsIllegalArgumentException() {
+        String userId = UUID.randomUUID().toString();
+        when(orderService.createSeatedOrder(eq(UUID.fromString(userId)), any(CreateOrderRequest.class)))
+                .thenAnswer(invocation -> {
+                    CreateOrderRequest req = invocation.getArgument(1);
+                    req.validate();
+                    return null;
+                });
+
+        Map<String, Object> attendeeWithInvalidSeatId = Map.of(
+                "seatId", "not-a-uuid",
+                "name", "John Doe"
+        );
+        Map<String, Object> input = Map.of(
+                "ticketId", UUID.randomUUID().toString(),
+                "quantity", 1,
+                "planId", UUID.randomUUID().toString(),
+                "attendees", List.of(attendeeWithInvalidSeatId)
+        );
+
+        assertThatThrownBy(() -> controller.createSeatedOrder(input, ctxWithUserId(userId)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("attendee[0].seatId")
+                .hasMessageContaining("valid UUID");
     }
 }

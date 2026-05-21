@@ -60,6 +60,41 @@ public class OrderGraphqlController {
         return orderService.cancelOrder(UUID.fromString(id), UUID.fromString(userId));
     }
 
+    @MutationMapping
+    public OrderResponse createSeatedOrder(
+            @Argument Map<String, Object> input,
+            GraphQLContext ctx) {
+        String userId = ctx.get(UserIdInterceptor.USER_ID_KEY);
+        if (userId == null) return null;
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId((String) input.get("ticketId"));
+        req.setQuantity((Integer) input.getOrDefault("quantity", 1));
+        req.setPlanId((String) input.get("planId"));
+        
+        if (input.get("seatIds") instanceof java.util.List<?> seatList) {
+            req.setSeatIds(seatList.stream()
+                    .map(Object::toString)
+                    .toList());
+        }
+        
+        req.setSectionId((String) input.get("sectionId"));
+        
+        if (input.get("attendees") instanceof java.util.List<?> attendeeList) {
+            var attendees = attendeeList.stream()
+                    .map(a -> {
+                        var map = (java.util.Map<String, Object>) a;
+                        var info = new CreateOrderRequest.AttendeeInfo();
+                        info.setSeatId((String) map.get("seatId"));
+                        info.setName((String) map.get("name"));
+                        return info;
+                    })
+                    .toList();
+            req.setAttendees(attendees);
+        }
+        
+        return orderService.createSeatedOrder(UUID.fromString(userId), req);
+    }
+
     @SchemaMapping(typeName = "Order", field = "payment")
     public Map<String, Object> payment(OrderResponse order, GraphQLContext ctx) {
         String requesterId = ctx.get(UserIdInterceptor.USER_ID_KEY);
