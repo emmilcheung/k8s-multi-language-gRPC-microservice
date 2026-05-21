@@ -82,6 +82,7 @@ jobs:
               - 'services/*/src/main/resources/schema/**'
               - 'services/apollo-router/supergraph-config.yaml'
               - 'services/apollo-router/supergraph.graphql'
+              - 'services/client/lib/graphql/operations/**'
             kong:
               - 'services/kong-gateway/**'
               - '.github/workflows/ci.yml'
@@ -231,6 +232,17 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --silent
+
+      - name: Validate GraphQL operations
+        run: pnpm codegen
+
+      - name: Enforce no inline GraphQL strings
+        run: |
+          if grep -rEn 'gql`|'"'"'[[:space:]]*(query|mutation|subscription|fragment)[[:space:]]'"'"'|"[[:space:]]*(query|mutation|subscription|fragment)[[:space:]]"' lib/ app/ 2>/dev/null; then
+            echo "FAIL: inline gql strings found — move operations to lib/graphql/operations/"
+            exit 1
+          fi
+          echo "OK: no inline gql strings"
 
       - name: Lint
         run: pnpm lint
