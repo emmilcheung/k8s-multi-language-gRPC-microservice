@@ -1,67 +1,76 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { AttendanceSettingsForm } from "@/components/attendance-settings-form";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
-import {
-  ApiError,
-  getAttendanceCheckIns,
-  getAttendanceSettings,
-  getAttendanceSummary,
-  lookupUser,
-  serverApi,
-} from "@/lib/api";
-import type { Ticket } from "@/lib/types";
+import { executeQuery } from "@/lib/graphql/execute";
+import { AttendancePageDocument } from "@/lib/graphql/generated";
+import { lookupUser } from "@/lib/api";
+import { readCurrentUserIdFromToken } from "@/lib/server-utils";
+import type { AttendanceCheckInItem } from "@/lib/types";
 
 interface Props {
   params: Promise<{ ticketId: string }>;
 }
 
-function readCurrentUserIdFromToken(token?: string): string | null {
-  if (!token) return null;
-  try {
-    const payloadB64 = token.split(".")[1];
-    if (!payloadB64) return null;
-    const json = Buffer.from(payloadB64, "base64url").toString("utf-8");
-    const payload = JSON.parse(json) as { sub?: string };
-    return payload.sub ?? null;
-  } catch {
-    return null;
-  }
-}
-
 export default async function AttendanceSettingsPage({ params }: Props) {
   const { ticketId } = await params;
 
-  const ticket = await serverApi<Ticket>(`/api/tickets/${ticketId}`).catch((error) => {
-    if (error instanceof ApiError && error.status === 404) {
-      notFound();
-    }
-    throw error;
-  });
-
   const cookieStore = await cookies();
   const token = cookieStore.get("token")?.value;
+  if (!token) {
+    redirect("/auth/signin");
+  }
   const currentUserId = readCurrentUserIdFromToken(token);
-  if (!currentUserId || ticket.userId !== currentUserId) {
+  if (!currentUserId) {
+    redirect("/auth/signin");
+  }
+
+  const data = await executeQuery(
+    AttendancePageDocument,
+    { id: ticketId },
+    { cookie: cookieStore.toString() }
+  ).catch(() => notFound());
+
+  const ticket = data.ticket;
+  if (!ticket || ticket.userId !== currentUserId) {
     notFound();
   }
 
-  const [settings, summary, checkIns] = await Promise.all([
-    getAttendanceSettings(ticket.id).catch((error) => {
-      if (error instanceof ApiError && error.status === 404) {
-        notFound();
+  const settings = data.attendancePolicy
+    ? {
+        eventId: data.attendancePolicy.eventId,
+        requireQrForEntry: data.attendancePolicy.requireQrForEntry,
+        allowManualOverride: data.attendancePolicy.allowManualOverride,
       }
-      throw error;
-    }),
-    getAttendanceSummary(ticket.id).catch(() => null),
-    getAttendanceCheckIns(ticket.id).catch(() => ({ eventId: ticket.id, items: [] })),
-  ]);
+    : null;
+  if (!settings) {
+    notFound();
+  }
+
+  const summary = data.attendanceSummary
+    ? {
+        eventId: data.attendanceSummary.eventId,
+        totalAdmitted: data.attendanceSummary.totalAdmitted,
+        totalDenied: data.attendanceSummary.totalDenied,
+        totalCheckedIn: data.attendanceSummary.totalCheckedIn,
+      }
+    : null;
+
+  const checkIns: AttendanceCheckInItem[] = (data.eventCheckins ?? []).map((checkIn) => ({
+    credentialId: checkIn.id,
+    ticketId: checkIn.ticketId,
+    orderId: checkIn.orderId,
+    eventId: checkIn.eventId,
+    status: "USED",
+    buyerUserId: checkIn.userId ?? undefined,
+    checkedInAt: checkIn.checkedInAt,
+  }));
 
   const buyerUserIDs = Array.from(
-    new Set(checkIns.items.map((item) => item.buyerUserId).filter((value): value is string => Boolean(value)))
+    new Set(checkIns.map((item) => item.buyerUserId).filter((value): value is string => Boolean(value)))
   );
   const buyerEmailsByUserID = new Map<string, string>();
   await Promise.all(
@@ -94,7 +103,7 @@ export default async function AttendanceSettingsPage({ params }: Props) {
         eventId={ticket.id}
         initialSettings={settings}
         summary={summary}
-        checkIns={checkIns.items}
+        checkIns={checkIns}
         buyerEmailsByUserID={Object.fromEntries(buyerEmailsByUserID.entries())}
         locked={(ticket.sold ?? 0) > 0}
       />

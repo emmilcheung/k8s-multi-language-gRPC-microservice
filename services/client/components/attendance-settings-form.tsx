@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { updateAttendancePolicyAction } from "@/app/actions/attendance-policy";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import type { AttendanceCheckInItem, AttendanceSettings, AttendanceSummary } from "@/lib/types";
@@ -34,22 +35,14 @@ export function AttendanceSettingsForm({
     setSaved(false);
     setSaving(true);
     try {
-      const res = await fetch(`/api/attendance/events/${eventId}/settings`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          requireQrForEntry,
-          allowManualOverride,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body?.error?.message ?? "Failed to save attendance settings.");
+      const result = await updateAttendancePolicyAction(eventId, { requireQrForEntry, allowManualOverride });
+      if (result.error) {
+        setError(result.error);
+      } else if (result.policy) {
+        setRequireQrForEntry(result.policy.requireQrForEntry);
+        setAllowManualOverride(result.policy.allowManualOverride);
+        setSaved(true);
       }
-      const body = (await res.json()) as AttendanceSettings;
-      setRequireQrForEntry(body.requireQrForEntry);
-      setAllowManualOverride(body.allowManualOverride);
-      setSaved(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save attendance settings.");
     } finally {

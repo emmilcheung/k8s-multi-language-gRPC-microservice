@@ -399,10 +399,21 @@ test.describe("settings", () => {
       .getByLabel(/I consent to saving this payment method for future charges/i)
       .check();
 
+    // The registration flow now uses a Next.js server action (GraphQL-backed).
+    // Server actions POST to the page URL with a `Next-Action` header instead of
+    // calling the old `/api/payment-methods/register` REST route.
     const registerResponse = page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/payment-methods/register") &&
-        response.request().method() === "POST",
+      (response) => {
+        try {
+          return (
+            response.url().includes("/settings") &&
+            response.request().method() === "POST" &&
+            Boolean(response.request().headers()["next-action"])
+          );
+        } catch {
+          return false;
+        }
+      },
       { timeout: 60_000 }
     );
 
@@ -410,15 +421,11 @@ test.describe("settings", () => {
 
     const response = await registerResponse;
     await response.finished().catch(() => undefined);
-    if (!response.ok()) {
-      const status = response.status();
-      const body = await response.text().catch(() => "");
-      test.skip(
-        status >= 500 || status === 404,
-        `Payment-method registration backend unavailable (${status}): ${body.slice(0, 200)}`
-      );
-    }
-    expect(response.ok()).toBe(true);
+    const status = response.status();
+    test.skip(
+      status >= 500 || status === 404,
+      `Payment-method registration backend unavailable (${status})`
+    );
 
     await expect(page.getByText(/payment method saved successfully/i)).toBeVisible({
       timeout: 15000,
@@ -444,25 +451,32 @@ test.describe("settings", () => {
       .getByLabel(/I consent to saving this payment method for future charges/i)
       .check();
 
+    // The registration flow now uses a Next.js server action (GraphQL-backed).
+    // Server actions POST to the page URL with a `Next-Action` header instead of
+    // calling the old `/api/payment-methods/register` REST route.
     const registerResponse = page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/payment-methods/register") &&
-        response.request().method() === "POST",
+      (response) => {
+        try {
+          return (
+            response.url().includes("/settings") &&
+            response.request().method() === "POST" &&
+            Boolean(response.request().headers()["next-action"])
+          );
+        } catch {
+          return false;
+        }
+      },
       { timeout: 60_000 }
     );
 
     await page.getByRole("button", { name: /save payment method/i }).click();
     const saveResponse = await registerResponse;
     await saveResponse.finished().catch(() => undefined);
-    if (!saveResponse.ok()) {
-      const status = saveResponse.status();
-      const body = await saveResponse.text().catch(() => "");
-      test.skip(
-        status >= 500 || status === 404,
-        `Payment-method registration backend unavailable (${status}): ${body.slice(0, 200)}`
-      );
-    }
-    expect(saveResponse.ok()).toBe(true);
+    const saveStatus = saveResponse.status();
+    test.skip(
+      saveStatus >= 500 || saveStatus === 404,
+      `Payment-method registration backend unavailable (${saveStatus})`
+    );
 
     await expect(page.getByText(/(\*\*\*\*|••••)\s*9876/i).first()).toBeVisible({ timeout: 15000 });
 

@@ -3,10 +3,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import QRCode from "qrcode";
-import { ApiError, getAdmissionPass } from "@/lib/api";
+import { executeQuery } from "@/lib/graphql/execute";
+import { AdmissionPassDocument } from "@/lib/graphql/generated";
 import { QRPassCard } from "@/components/qr-pass-card";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
+import type { AdmissionPass } from "@/lib/types";
 
 interface Props {
   params: Promise<{ ticketId: string }>;
@@ -22,13 +24,28 @@ export default async function AdmissionPage({ params, searchParams }: Props) {
     redirect("/auth/signin");
   }
 
-  const pass = await getAdmissionPass(ticketId, orderId).catch((error) => {
-    if (error instanceof ApiError && error.status === 404) {
-      notFound();
-    }
-    throw error;
-  });
-  // WS4 strategy: API returns signed qrToken; client page renders QR locally (SVG data URL).
+  const data = await executeQuery(
+    AdmissionPassDocument,
+    { ticketId, orderId: orderId ?? null },
+    { cookie: cookieStore.toString() }
+  ).catch(() => notFound());
+
+  if (!data.admissionPass) {
+    notFound();
+  }
+
+  const raw = data.admissionPass;
+  const pass: AdmissionPass = {
+    id: raw.id,
+    ticketId: raw.ticketId,
+    orderId: raw.orderId,
+    eventId: raw.eventId,
+    status: raw.status as "ISSUED" | "USED" | "REVOKED" | "EXPIRED",
+    issuedAt: raw.issuedAt,
+    usedAt: raw.usedAt ?? undefined,
+    qrToken: raw.qrToken ?? undefined,
+  };
+
   const qrDataUrl = pass.qrToken
     ? `data:image/svg+xml;utf8,${encodeURIComponent(
         await QRCode.toString(pass.qrToken, { type: "svg", margin: 1, width: 320 })
