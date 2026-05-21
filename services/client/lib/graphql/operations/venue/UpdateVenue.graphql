@@ -1,0 +1,9 @@
+mutation UpdateVenue($id: ID!, $input: UpdateVenueInput!) {
+  updateVenue(id: $id, input: $input) {
+    id
+    name
+    capacity
+    timezone
+    address
+  }
+}

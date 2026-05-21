@@ -3,10 +3,22 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { executeQuery, executeMutation } from "@/lib/graphql/execute";
 import { base, authHeaders } from "@/lib/server-utils";
-import type { SeatingPlan, PriceTier, VenueSection } from "@/lib/types";
+import type { SeatingPlan, PriceTier, VenueSection, Section } from "@/lib/types";
+import {
+  VenuesListDocument,
+  VenueDetailDocument,
+  CreateVenueDocument,
+  UpdateVenueDocument,
+  CreateVenueSectionDocument,
+  ActivateSeatingPlanDocument,
+  DeactivateSeatingPlanDocument,
+  CreatePriceTierDocument,
+  CreateSeatingPlanDocument,
+} from "@/lib/graphql/generated";
 
-// ─── Venue types ─────────────────────────────────────────────────────────────
+// ─── Shared types ─────────────────────────────────────────────────────────────
 
 export interface Venue {
   id: string;
@@ -14,8 +26,7 @@ export interface Venue {
   name: string;
   capacity: number;
   timezone: string;
-  address?: string;
-  version: number;
+  address: string;
 }
 
 export interface VenueState {
@@ -26,41 +37,45 @@ export interface PlanState {
   error?: string;
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function isRedirectError(error: unknown): error is Error & { digest?: string } {
+  if (!(error instanceof Error)) return false;
+  if (error.message === "NEXT_REDIRECT") return true;
+  const e = error as Error & { digest?: string };
+  return typeof e.digest === "string" && e.digest.startsWith("NEXT_REDIRECT");
+}
+
+// ─── Venue queries ────────────────────────────────────────────────────────────
+
+/**
+ * Fetches all venues belonging to the authenticated organizer via GraphQL.
+ */
+export async function fetchMyVenues() {
+  try {
+    const data = await executeQuery(VenuesListDocument, {});
+    return data.venues;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetches a single venue by ID via GraphQL.
+ */
+export async function fetchVenue(venueId: string) {
+  try {
+    const data = await executeQuery(VenueDetailDocument, { id: venueId });
+    return data.venue;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Venue mutations ──────────────────────────────────────────────────────────
 
 /**
- * Fetches all venues belonging to the authenticated organizer.
- * GET /api/venues — Kong → venue-service.
- */
-export async function fetchMyVenues(): Promise<Venue[]> {
-  const res = await fetch(`${base()}/api/venues`, {
-    cache: "no-store",
-    headers: await authHeaders(),
-  });
-
-  if (!res.ok) return [];
-
-  const data = await res.json();
-  return (data?.venues ?? []) as Venue[];
-}
-
-/**
- * Fetches a single venue by ID.
- * GET /api/venues/:id — Kong → venue-service.
- */
-export async function fetchVenue(venueId: string): Promise<Venue | null> {
-  const res = await fetch(`${base()}/api/venues/${venueId}`, {
-    cache: "no-store",
-    headers: await authHeaders(),
-  });
-
-  if (!res.ok) return null;
-  return res.json() as Promise<Venue>;
-}
-
-/**
- * Creates a new venue.
- * POST /api/venues — Kong → venue-service.
+ * Creates a new venue via GraphQL.
  */
 export async function createVenue(
   _prev: VenueState,
@@ -80,20 +95,16 @@ export async function createVenue(
 
   if (!timezone) return { error: "Timezone is required." };
 
-  const res = await fetch(`${base()}/api/venues`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({ name, capacity, timezone, address }),
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error ?? "Failed to create venue." };
+  try {
+    const data = await executeMutation(CreateVenueDocument, {
+      input: { name, capacity, timezone, address: address || undefined },
+    });
+    revalidatePath("/venues");
+    redirect(`/venues/${data.createVenue.id}`);
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return { error: error instanceof Error ? error.message : "Failed to create venue." };
   }
-
-  const venue = await res.json();
-  revalidatePath("/venues");
-  redirect(`/venues/${venue.id}`);
 }
 
 // ─── Venue section template mutations ────────────────────────────────────────
@@ -113,8 +124,7 @@ export async function fetchVenueSections(venueId: string): Promise<VenueSection[
 }
 
 /**
- * Adds a template section to a venue.
- * POST /api/venues/:venueId/sections — Kong → venue-service.
+ * Adds a template section to a venue via GraphQL.
  */
 export async function createVenueSection(
   venueId: string,
@@ -139,19 +149,19 @@ export async function createVenueSection(
     return { error: "GA sections require capacity >= 1." };
   }
 
-  const res = await fetch(`${base()}/api/venues/${venueId}/sections`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({ name, type, rowCount, columnCount }),
-  });
+  const gqlType = type === "ga" ? "GA" : "SEATED";
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error ?? "Failed to add section." };
+  try {
+    await executeMutation(CreateVenueSectionDocument, {
+      venueId,
+      input: { name, type: gqlType, rowCount: rowCount || undefined, columnCount },
+    });
+    revalidatePath(`/venues/${venueId}`);
+    redirect(`/venues/${venueId}`);
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return { error: error instanceof Error ? error.message : "Failed to add section." };
   }
-
-  revalidatePath(`/venues/${venueId}`);
-  redirect(`/venues/${venueId}`);
 }
 
 /**
@@ -183,16 +193,15 @@ export async function deleteVenueSection(
   redirect(`/venues/${venueId}`);
 }
 
-// ─── Seating plan mutations ───────────────────────────────────────────────────
+// ─── Seating plan queries ─────────────────────────────────────────────────────
 
 /**
- * Fetches all seating plans the organizer has created for a given venue.
- * There's no direct "list by venue" endpoint, so we use the seating plan list
- * endpoint filtered via query param (?venueId=...) if supported, otherwise
- * we rely on the UI to pass plans obtained from plan creation.
+ * Fetches all seating plans for a given venue.
+ * GET /api/seating-plans?venueId=... — Kong → venue-service.
+ *
+ * Stays as REST: GraphQL SeatingPlan type lacks name/maxSeatsPerOrder/ticketId.
  */
 export async function fetchPlansByVenue(venueId: string): Promise<SeatingPlan[]> {
-  // venue-service exposes GET /api/seating-plans with optional ?venueId filter
   const url = new URL(`${base()}/api/seating-plans`);
   url.searchParams.set("venueId", venueId);
 
@@ -204,17 +213,15 @@ export async function fetchPlansByVenue(venueId: string): Promise<SeatingPlan[]>
   if (!res.ok) return [];
 
   const data = await res.json();
-  // API returns { plans: [...] } or array directly
   if (Array.isArray(data)) return data as SeatingPlan[];
   return (data?.plans ?? []) as SeatingPlan[];
 }
 
 /**
- * Fetches all seating plans the organizer has created across all their venues.
- * Calls GET /api/venues to get the list of venues, then GET /api/seating-plans?venueId=X
- * for each venue and merges the results.
+ * Fetches all seating plans across all organizer venues.
+ * Used by ticket detail page to populate "Attach seating plan" dropdown.
  *
- * Used by the ticket detail page to populate the "Attach seating plan" dropdown.
+ * Stays as REST: GraphQL SeatingPlan type lacks name/maxSeatsPerOrder/ticketId.
  */
 export async function fetchAllMyPlans(): Promise<SeatingPlan[]> {
   const venues = await fetchMyVenues();
@@ -227,9 +234,13 @@ export async function fetchAllMyPlans(): Promise<SeatingPlan[]> {
   return perVenue.flat();
 }
 
+// ─── Seating plan mutations ───────────────────────────────────────────────────
+
 /**
- * Creates a new seating plan for a venue.
+ * Creates a new seating plan for a venue (venue-context, no ticketId).
  * POST /api/seating-plans — Kong → venue-service.
+ *
+ * Stays as REST: GraphQL createSeatingPlan requires ticketId.
  */
 export async function createSeatingPlan(
   _prev: PlanState,
@@ -261,11 +272,8 @@ export async function createSeatingPlan(
 }
 
 /**
- * Creates a new seating plan for a ticket with a venue as template.
- * Phase 3: ticket-first creation flow.
- * POST /api/seating-plans — Kong → venue-service.
- * 
- * This creates the plan with ticketId already set (no separate attach step).
+ * Creates a new seating plan for a ticket with a venue as template via GraphQL.
+ * Phase 3: ticket-first creation flow with ticketId pre-set.
  */
 export async function createSeatingPlanForTicket(
   ticketId: string,
@@ -274,35 +282,31 @@ export async function createSeatingPlanForTicket(
   assignmentMode: "manual" | "auto",
   maxSeatsPerOrder?: number,
   pricingMode?: "single" | "section" | "seat"
-): Promise<SeatingPlan | null> {
+): Promise<{ id: string } | null> {
   if (!ticketId || !venueId || !planName) return null;
 
-  const res = await fetch(`${base()}/api/seating-plans`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({
-      ticketId,
-      venueId,
-      name: planName,
-      assignmentMode,
-      maxSeatsPerOrder: maxSeatsPerOrder ?? 10,
-      ...(pricingMode ? { pricingMode } : {}),
-    }),
-  });
-
-  if (!res.ok) {
+  try {
+    const data = await executeMutation(CreateSeatingPlanDocument, {
+      input: {
+        ticketId,
+        venueId,
+        name: planName,
+        assignmentMode: assignmentMode === "auto" ? "AUTO" : "MANUAL",
+        maxSeatsPerOrder: maxSeatsPerOrder ?? 10,
+        pricingMode: pricingMode ?? undefined,
+      },
+    });
+    return { id: data.createSeatingPlan.id };
+  } catch {
     return null;
   }
-
-  return res.json() as Promise<SeatingPlan>;
 }
 
 /**
  * Fetches sections for a seating plan.
  * GET /api/seating-plans/:planId — returns plan with sections array.
- * Used by ticket creation form for section pricing table.
  */
-export async function fetchPlanSections(planId: string): Promise<import("@/lib/types").Section[]> {
+export async function fetchPlanSections(planId: string): Promise<Section[]> {
   if (!planId) return [];
   const res = await fetch(`${base()}/api/seating-plans/${planId}`, {
     cache: "no-store",
@@ -310,7 +314,7 @@ export async function fetchPlanSections(planId: string): Promise<import("@/lib/t
   });
   if (!res.ok) return [];
   const data = await res.json();
-  return (data?.sections ?? []) as import("@/lib/types").Section[];
+  return (data?.sections ?? []) as Section[];
 }
 
 /**
@@ -328,11 +332,10 @@ export async function fetchPriceTiers(planId: string): Promise<PriceTier[]> {
 }
 
 /**
- * Creates a price tier inside a seating plan.
- * POST /api/seating-plans/:planId/price-tiers — Kong → venue-service.
- * 
- * venueId can be empty string when called from ticket-context (plan is already ticket-owned).
- * ticketId can be provided to redirect back to ticket plan page instead of venue plan page.
+ * Creates a price tier inside a seating plan via GraphQL.
+ *
+ * venueId can be empty string when called from ticket-context.
+ * ticketId can be provided to redirect back to ticket plan page.
  */
 export async function createPriceTier(
   planId: string,
@@ -349,24 +352,22 @@ export async function createPriceTier(
     return { error: "Price must be a valid non-negative number." };
   }
 
-  const res = await fetch(`${base()}/api/seating-plans/${planId}/price-tiers`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({ name, price }),
-  });
+  try {
+    await executeMutation(CreatePriceTierDocument, {
+      planId,
+      input: { name, price },
+    });
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error ?? "Failed to create price tier." };
-  }
-
-  // Redirect to ticket plan page if ticketId provided, otherwise to venue plan page
-  if (ticketId) {
-    revalidatePath(`/tickets/${ticketId}/plans/${planId}`);
-    redirect(`/tickets/${ticketId}/plans/${planId}`);
-  } else {
-    revalidatePath(`/venues/${venueId}/plans/${planId}`);
-    redirect(`/venues/${venueId}/plans/${planId}`);
+    if (ticketId) {
+      revalidatePath(`/tickets/${ticketId}/plans/${planId}`);
+      redirect(`/tickets/${ticketId}/plans/${planId}`);
+    } else {
+      revalidatePath(`/venues/${venueId}/plans/${planId}`);
+      redirect(`/venues/${venueId}/plans/${planId}`);
+    }
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return { error: error instanceof Error ? error.message : "Failed to create price tier." };
   }
 }
 
@@ -418,9 +419,6 @@ export async function createSection(
 /**
  * Saves the 2-D canvas layout blob for a draft seating plan.
  * PATCH /api/seating-plans/:planId/layout — Kong → venue-service.
- *
- * This is called from the SeatingPlanCanvas component on manual save or debounced
- * autosave. Only allowed while the plan is in 'draft' status.
  */
 export async function saveLayout(
   planId: string,
@@ -446,11 +444,10 @@ export async function saveLayout(
 }
 
 /**
- * Deactivates an active seating plan, stopping new purchases.
- * POST /api/seating-plans/:planId/deactivate — Kong → venue-service.
- * 
+ * Deactivates an active seating plan via GraphQL.
+ *
  * venueId can be empty string when called from ticket-context.
- * ticketId can be provided to redirect back to ticket plan page instead of venue plan page.
+ * ticketId can be provided to redirect back to ticket plan page.
  */
 export async function deactivatePlan(
   planId: string,
@@ -464,37 +461,31 @@ export async function deactivatePlan(
 
   if (!planId) return { error: "planId is required." };
 
-  const res = await fetch(`${base()}/api/seating-plans/${planId}/deactivate`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({}),
-  });
+  try {
+    await executeMutation(DeactivateSeatingPlanDocument, { id: planId });
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error ?? "Failed to deactivate plan." };
-  }
-
-  // Redirect to ticket plan page if ticketId provided, otherwise to venue plan page
-  if (ticketId) {
-    revalidatePath(`/tickets/${ticketId}/plans/${planId}`);
-    redirect(`/tickets/${ticketId}/plans/${planId}`);
-  } else {
-    revalidatePath(`/venues/${venueId}/plans/${planId}`);
-    redirect(`/venues/${venueId}/plans/${planId}`);
+    if (ticketId) {
+      revalidatePath(`/tickets/${ticketId}/plans/${planId}`);
+      redirect(`/tickets/${ticketId}/plans/${planId}`);
+    } else {
+      revalidatePath(`/venues/${venueId}/plans/${planId}`);
+      redirect(`/venues/${venueId}/plans/${planId}`);
+    }
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return { error: error instanceof Error ? error.message : "Failed to deactivate plan." };
   }
 }
 
 /**
- * Activates a draft seating plan.
- * POST /api/seating-plans/:planId/activate — Kong → venue-service.
+ * Activates a draft seating plan via GraphQL.
  *
  * Pre-conditions (enforced by the service):
  *   - Plan must be in "draft" status.
  *   - Plan must have at least one section.
- * 
+ *
  * venueId can be empty string when called from ticket-context.
- * ticketId can be provided to redirect back to ticket plan page instead of venue plan page.
+ * ticketId can be provided to redirect back to ticket plan page.
  */
 export async function activatePlan(
   planId: string,
@@ -508,30 +499,24 @@ export async function activatePlan(
 
   if (!planId) return { error: "planId is required." };
 
-  const res = await fetch(`${base()}/api/seating-plans/${planId}/activate`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({}),
-  });
+  try {
+    await executeMutation(ActivateSeatingPlanDocument, { id: planId });
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error ?? "Failed to activate plan." };
-  }
-
-  // Redirect to ticket plan page if ticketId provided, otherwise to venue plan page
-  if (ticketId) {
-    revalidatePath(`/tickets/${ticketId}/plans/${planId}`);
-    redirect(`/tickets/${ticketId}/plans/${planId}`);
-  } else {
-    revalidatePath(`/venues/${venueId}/plans/${planId}`);
-    redirect(`/venues/${venueId}/plans/${planId}`);
+    if (ticketId) {
+      revalidatePath(`/tickets/${ticketId}/plans/${planId}`);
+      redirect(`/tickets/${ticketId}/plans/${planId}`);
+    } else {
+      revalidatePath(`/venues/${venueId}/plans/${planId}`);
+      redirect(`/venues/${venueId}/plans/${planId}`);
+    }
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return { error: error instanceof Error ? error.message : "Failed to activate plan." };
   }
 }
 
 /**
- * Updates an existing venue.
- * PUT /api/venues/:id — Kong → venue-service.
+ * Updates an existing venue via GraphQL.
  */
 export async function updateVenue(
   venueId: string,
@@ -550,19 +535,17 @@ export async function updateVenue(
   if (!capacityRaw || !Number.isFinite(capacity) || capacity < 1)
     return { error: "Capacity must be a positive number." };
 
-  const res = await fetch(`${base()}/api/venues/${venueId}`, {
-    method: "PUT",
-    headers: await authHeaders(),
-    body: JSON.stringify({ name, capacity, timezone, address }),
-  });
+  try {
+    await executeMutation(UpdateVenueDocument, {
+      id: venueId,
+      input: { name, capacity, timezone, address: address || undefined },
+    });
 
-  if (!res.ok) {
-    if (res.status === 401) redirect("/auth/signin");
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error?.message ?? body?.message ?? "Failed to update venue." };
+    revalidatePath(`/venues/${venueId}`);
+    revalidatePath("/venues");
+    redirect(`/venues/${venueId}`);
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return { error: error instanceof Error ? error.message : "Failed to update venue." };
   }
-
-  revalidatePath(`/venues/${venueId}`);
-  revalidatePath("/venues");
-  redirect(`/venues/${venueId}`);
 }

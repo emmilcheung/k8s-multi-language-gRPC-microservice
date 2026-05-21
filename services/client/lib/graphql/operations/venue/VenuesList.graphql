@@ -1,0 +1,10 @@
+query VenuesList {
+  venues {
+    id
+    organizerId
+    name
+    capacity
+    timezone
+    address
+  }
+}

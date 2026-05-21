@@ -1,0 +1,8 @@
+mutation CreatePriceTier($planId: ID!, $input: CreatePriceTierInput!) {
+  createPriceTier(planId: $planId, input: $input) {
+    id
+    planId
+    name
+    price
+  }
+}

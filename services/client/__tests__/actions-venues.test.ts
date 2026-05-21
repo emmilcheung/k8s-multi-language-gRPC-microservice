@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const revalidatePathMock = vi.fn();
 const redirectMock = vi.fn();
 const authHeadersMock = vi.fn();
+const executeMutationMock = vi.fn();
 
 vi.mock("next/cache", () => ({
   revalidatePath: (...args: unknown[]) => revalidatePathMock(...args),
@@ -15,6 +16,11 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/server-utils", () => ({
   base: () => "http://localhost:8080",
   authHeaders: () => authHeadersMock(),
+}));
+
+vi.mock("@/lib/graphql/execute", () => ({
+  executeMutation: (...args: unknown[]) => executeMutationMock(...args),
+  executeQuery: vi.fn(),
 }));
 
 import { createVenue, createSeatingPlan, saveLayout } from "@/app/actions/venues";
@@ -56,26 +62,14 @@ describe("venue server actions", () => {
       expect(result).toEqual({ error: "Timezone is required." });
     });
 
-    it("should return upstream error message on API failure", async () => {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn().mockResolvedValue({
-          ok: false,
-          json: vi.fn().mockResolvedValue({ error: "internal error" }),
-        })
-      );
+    it("should return upstream error message on GraphQL failure", async () => {
+      executeMutationMock.mockRejectedValue(new Error("internal error"));
       const result = await createVenue({}, venueForm("MSG", "500", "America/New_York"));
       expect(result).toEqual({ error: "internal error" });
     });
 
     it("should revalidate /venues and redirect on success", async () => {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn().mockResolvedValue({
-          ok: true,
-          json: vi.fn().mockResolvedValue({ id: "venue-1" }),
-        })
-      );
+      executeMutationMock.mockResolvedValue({ createVenue: { id: "venue-1" } });
       await createVenue({}, venueForm("MSG", "500", "America/New_York"));
       expect(revalidatePathMock).toHaveBeenCalledWith("/venues");
       expect(redirectMock).toHaveBeenCalledWith("/venues/venue-1");

@@ -1,0 +1,7 @@
+mutation ActivateSeatingPlan($id: ID!) {
+  activateSeatingPlan(id: $id) {
+    id
+    status
+    assignmentMode
+  }
+}
