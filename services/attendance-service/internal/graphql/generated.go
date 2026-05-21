@@ -30,6 +30,7 @@ type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 
 type ResolverRoot interface {
 	Entity() EntityResolver
+	Mutation() MutationResolver
 	Query() QueryResolver
 }
 
@@ -64,12 +65,38 @@ type ComplexityRoot struct {
 		FindAdmissionPassByID func(childComplexity int, id string) int
 	}
 
+	EventCheckin struct {
+		CheckedInAt func(childComplexity int) int
+		EventID     func(childComplexity int) int
+		ID          func(childComplexity int) int
+		OrderID     func(childComplexity int) int
+		Source      func(childComplexity int) int
+		TicketID    func(childComplexity int) int
+		UserID      func(childComplexity int) int
+	}
+
+	Mutation struct {
+		RecordCheckin          func(childComplexity int, input RecordCheckinInput) int
+		RecordCheckinByUserID  func(childComplexity int, input RecordCheckinByUserIDInput) int
+		UpdateAttendancePolicy func(childComplexity int, eventID string, input UpdateAttendancePolicyInput) int
+		ValidateScan           func(childComplexity int, token string) int
+	}
+
 	Query struct {
 		AdmissionPass      func(childComplexity int, ticketID string, orderID *string) int
 		AttendancePolicy   func(childComplexity int, eventID string) int
 		AttendanceSummary  func(childComplexity int, eventID string) int
+		EventCheckins      func(childComplexity int, eventID string, first *int, after *string) int
 		__resolve__service func(childComplexity int) int
 		__resolve_entities func(childComplexity int, representations []map[string]any) int
+	}
+
+	ScanValidationResult struct {
+		EventID  func(childComplexity int) int
+		OrderID  func(childComplexity int) int
+		Reason   func(childComplexity int) int
+		TicketID func(childComplexity int) int
+		Valid    func(childComplexity int) int
 	}
 
 	_Service struct {
@@ -80,10 +107,17 @@ type ComplexityRoot struct {
 type EntityResolver interface {
 	FindAdmissionPassByID(ctx context.Context, id string) (*AdmissionPass, error)
 }
+type MutationResolver interface {
+	UpdateAttendancePolicy(ctx context.Context, eventID string, input UpdateAttendancePolicyInput) (*AttendancePolicy, error)
+	ValidateScan(ctx context.Context, token string) (*ScanValidationResult, error)
+	RecordCheckin(ctx context.Context, input RecordCheckinInput) (*EventCheckin, error)
+	RecordCheckinByUserID(ctx context.Context, input RecordCheckinByUserIDInput) (*EventCheckin, error)
+}
 type QueryResolver interface {
 	AdmissionPass(ctx context.Context, ticketID string, orderID *string) (*AdmissionPass, error)
 	AttendancePolicy(ctx context.Context, eventID string) (*AttendancePolicy, error)
 	AttendanceSummary(ctx context.Context, eventID string) (*AttendanceSummary, error)
+	EventCheckins(ctx context.Context, eventID string, first *int, after *string) ([]*EventCheckin, error)
 }
 
 type executableSchema graphql.ExecutableSchemaState[ResolverRoot, DirectiveRoot, ComplexityRoot]
@@ -199,6 +233,94 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.Entity.FindAdmissionPassByID(childComplexity, args["id"].(string)), true
 
+	case "EventCheckin.checkedInAt":
+		if e.ComplexityRoot.EventCheckin.CheckedInAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.EventCheckin.CheckedInAt(childComplexity), true
+	case "EventCheckin.eventId":
+		if e.ComplexityRoot.EventCheckin.EventID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.EventCheckin.EventID(childComplexity), true
+	case "EventCheckin.id":
+		if e.ComplexityRoot.EventCheckin.ID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.EventCheckin.ID(childComplexity), true
+	case "EventCheckin.orderId":
+		if e.ComplexityRoot.EventCheckin.OrderID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.EventCheckin.OrderID(childComplexity), true
+	case "EventCheckin.source":
+		if e.ComplexityRoot.EventCheckin.Source == nil {
+			break
+		}
+
+		return e.ComplexityRoot.EventCheckin.Source(childComplexity), true
+	case "EventCheckin.ticketId":
+		if e.ComplexityRoot.EventCheckin.TicketID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.EventCheckin.TicketID(childComplexity), true
+	case "EventCheckin.userId":
+		if e.ComplexityRoot.EventCheckin.UserID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.EventCheckin.UserID(childComplexity), true
+
+	case "Mutation.recordCheckin":
+		if e.ComplexityRoot.Mutation.RecordCheckin == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_recordCheckin_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.RecordCheckin(childComplexity, args["input"].(RecordCheckinInput)), true
+	case "Mutation.recordCheckinByUserId":
+		if e.ComplexityRoot.Mutation.RecordCheckinByUserID == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_recordCheckinByUserId_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.RecordCheckinByUserID(childComplexity, args["input"].(RecordCheckinByUserIDInput)), true
+	case "Mutation.updateAttendancePolicy":
+		if e.ComplexityRoot.Mutation.UpdateAttendancePolicy == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_updateAttendancePolicy_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.UpdateAttendancePolicy(childComplexity, args["eventId"].(string), args["input"].(UpdateAttendancePolicyInput)), true
+	case "Mutation.validateScan":
+		if e.ComplexityRoot.Mutation.ValidateScan == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_validateScan_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.ValidateScan(childComplexity, args["token"].(string)), true
+
 	case "Query.admissionPass":
 		if e.ComplexityRoot.Query.AdmissionPass == nil {
 			break
@@ -232,6 +354,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Query.AttendanceSummary(childComplexity, args["eventId"].(string)), true
+	case "Query.eventCheckins":
+		if e.ComplexityRoot.Query.EventCheckins == nil {
+			break
+		}
+
+		args, err := ec.field_Query_eventCheckins_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Query.EventCheckins(childComplexity, args["eventId"].(string), args["first"].(*int), args["after"].(*string)), true
 
 	case "Query._service":
 		if e.ComplexityRoot.Query.__resolve__service == nil {
@@ -251,6 +384,37 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.Query.__resolve_entities(childComplexity, args["representations"].([]map[string]any)), true
 
+	case "ScanValidationResult.eventId":
+		if e.ComplexityRoot.ScanValidationResult.EventID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ScanValidationResult.EventID(childComplexity), true
+	case "ScanValidationResult.orderId":
+		if e.ComplexityRoot.ScanValidationResult.OrderID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ScanValidationResult.OrderID(childComplexity), true
+	case "ScanValidationResult.reason":
+		if e.ComplexityRoot.ScanValidationResult.Reason == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ScanValidationResult.Reason(childComplexity), true
+	case "ScanValidationResult.ticketId":
+		if e.ComplexityRoot.ScanValidationResult.TicketID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ScanValidationResult.TicketID(childComplexity), true
+	case "ScanValidationResult.valid":
+		if e.ComplexityRoot.ScanValidationResult.Valid == nil {
+			break
+		}
+
+		return e.ComplexityRoot.ScanValidationResult.Valid(childComplexity), true
+
 	case "_Service.sdl":
 		if e.ComplexityRoot._Service.SDL == nil {
 			break
@@ -265,7 +429,11 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	opCtx := graphql.GetOperationContext(ctx)
 	ec := newExecutionContext(opCtx, e, make(chan graphql.DeferredResult))
-	inputUnmarshalMap := graphql.BuildUnmarshalerMap()
+	inputUnmarshalMap := graphql.BuildUnmarshalerMap(
+		ec.unmarshalInputRecordCheckinByUserIdInput,
+		ec.unmarshalInputRecordCheckinInput,
+		ec.unmarshalInputUpdateAttendancePolicyInput,
+	)
 	first := true
 
 	switch opCtx.Operation.Operation {
@@ -298,6 +466,21 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 			}
 
 			return &response
+		}
+	case ast.Mutation:
+		return func(ctx context.Context) *graphql.Response {
+			if !first {
+				return nil
+			}
+			first = false
+			ctx = graphql.WithUnmarshalerMap(ctx, inputUnmarshalMap)
+			data := ec._Mutation(ctx, opCtx.Operation.SelectionSet)
+			var buf bytes.Buffer
+			data.MarshalGQL(&buf)
+
+			return &graphql.Response{
+				Data: buf.Bytes(),
+			}
 		}
 
 	default:
@@ -459,6 +642,42 @@ func (ec *executionContext) childFields_AttendanceSummary(ctx context.Context, f
 	return nil, fmt.Errorf("no field named %q was found under type AttendanceSummary", field.Name)
 }
 
+func (ec *executionContext) childFields_EventCheckin(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "id":
+		return ec.fieldContext_EventCheckin_id(ctx, field)
+	case "eventId":
+		return ec.fieldContext_EventCheckin_eventId(ctx, field)
+	case "ticketId":
+		return ec.fieldContext_EventCheckin_ticketId(ctx, field)
+	case "orderId":
+		return ec.fieldContext_EventCheckin_orderId(ctx, field)
+	case "userId":
+		return ec.fieldContext_EventCheckin_userId(ctx, field)
+	case "checkedInAt":
+		return ec.fieldContext_EventCheckin_checkedInAt(ctx, field)
+	case "source":
+		return ec.fieldContext_EventCheckin_source(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type EventCheckin", field.Name)
+}
+
+func (ec *executionContext) childFields_ScanValidationResult(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "valid":
+		return ec.fieldContext_ScanValidationResult_valid(ctx, field)
+	case "reason":
+		return ec.fieldContext_ScanValidationResult_reason(ctx, field)
+	case "ticketId":
+		return ec.fieldContext_ScanValidationResult_ticketId(ctx, field)
+	case "orderId":
+		return ec.fieldContext_ScanValidationResult_orderId(ctx, field)
+	case "eventId":
+		return ec.fieldContext_ScanValidationResult_eventId(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type ScanValidationResult", field.Name)
+}
+
 func (ec *executionContext) childFields__Service(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 	switch field.Name {
 	case "sdl":
@@ -597,6 +816,70 @@ func (ec *executionContext) field_Entity_findAdmissionPassByID_args(ctx context.
 	return args, nil
 }
 
+func (ec *executionContext) field_Mutation_recordCheckinByUserId_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (RecordCheckinByUserIDInput, error) {
+			return ec.unmarshalNRecordCheckinByUserIdInput2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐRecordCheckinByUserIDInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_recordCheckin_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (RecordCheckinInput, error) {
+			return ec.unmarshalNRecordCheckinInput2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐRecordCheckinInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_updateAttendancePolicy_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "eventId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNID2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["eventId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (UpdateAttendancePolicyInput, error) {
+			return ec.unmarshalNUpdateAttendancePolicyInput2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐUpdateAttendancePolicyInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_validateScan_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "token",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["token"] = arg0
+	return args, nil
+}
+
 func (ec *executionContext) field_Query___type_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -672,6 +955,36 @@ func (ec *executionContext) field_Query_attendanceSummary_args(ctx context.Conte
 		return nil, err
 	}
 	args["eventId"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_eventCheckins_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "eventId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNID2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["eventId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "first",
+		func(ctx context.Context, v any) (*int, error) {
+			return ec.unmarshalOInt2ᚖint(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["first"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "after",
+		func(ctx context.Context, v any) (*string, error) {
+			return ec.unmarshalOString2ᚖstring(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["after"] = arg2
 	return args, nil
 }
 
@@ -1105,6 +1418,343 @@ func (ec *executionContext) fieldContext_Entity_findAdmissionPassByID(ctx contex
 	return fc, nil
 }
 
+func (ec *executionContext) _EventCheckin_id(ctx context.Context, field graphql.CollectedField, obj *EventCheckin) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_EventCheckin_id(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNID2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_EventCheckin_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("EventCheckin", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _EventCheckin_eventId(ctx context.Context, field graphql.CollectedField, obj *EventCheckin) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_EventCheckin_eventId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.EventID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNID2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_EventCheckin_eventId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("EventCheckin", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _EventCheckin_ticketId(ctx context.Context, field graphql.CollectedField, obj *EventCheckin) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_EventCheckin_ticketId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.TicketID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNID2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_EventCheckin_ticketId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("EventCheckin", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _EventCheckin_orderId(ctx context.Context, field graphql.CollectedField, obj *EventCheckin) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_EventCheckin_orderId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.OrderID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNID2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_EventCheckin_orderId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("EventCheckin", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _EventCheckin_userId(ctx context.Context, field graphql.CollectedField, obj *EventCheckin) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_EventCheckin_userId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.UserID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_EventCheckin_userId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("EventCheckin", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _EventCheckin_checkedInAt(ctx context.Context, field graphql.CollectedField, obj *EventCheckin) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_EventCheckin_checkedInAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CheckedInAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_EventCheckin_checkedInAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("EventCheckin", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _EventCheckin_source(ctx context.Context, field graphql.CollectedField, obj *EventCheckin) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_EventCheckin_source(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Source, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v CheckinSource) graphql.Marshaler {
+			return ec.marshalNCheckinSource2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐCheckinSource(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_EventCheckin_source(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("EventCheckin", field, false, false, errors.New("field of type CheckinSource does not have child fields"))
+}
+
+func (ec *executionContext) _Mutation_updateAttendancePolicy(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_updateAttendancePolicy(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().UpdateAttendancePolicy(ctx, fc.Args["eventId"].(string), fc.Args["input"].(UpdateAttendancePolicyInput))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *AttendancePolicy) graphql.Marshaler {
+			return ec.marshalNAttendancePolicy2ᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐAttendancePolicy(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_updateAttendancePolicy(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_AttendancePolicy(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_updateAttendancePolicy_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_validateScan(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_validateScan(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().ValidateScan(ctx, fc.Args["token"].(string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *ScanValidationResult) graphql.Marshaler {
+			return ec.marshalNScanValidationResult2ᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐScanValidationResult(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_validateScan(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_ScanValidationResult(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_validateScan_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_recordCheckin(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_recordCheckin(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().RecordCheckin(ctx, fc.Args["input"].(RecordCheckinInput))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *EventCheckin) graphql.Marshaler {
+			return ec.marshalNEventCheckin2ᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐEventCheckin(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_recordCheckin(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_EventCheckin(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_recordCheckin_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_recordCheckinByUserId(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_recordCheckinByUserId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().RecordCheckinByUserID(ctx, fc.Args["input"].(RecordCheckinByUserIDInput))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *EventCheckin) graphql.Marshaler {
+			return ec.marshalNEventCheckin2ᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐEventCheckin(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_recordCheckinByUserId(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_EventCheckin(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_recordCheckinByUserId_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Query_admissionPass(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -1231,6 +1881,50 @@ func (ec *executionContext) fieldContext_Query_attendanceSummary(ctx context.Con
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_attendanceSummary_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_eventCheckins(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Query_eventCheckins(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Query().EventCheckins(ctx, fc.Args["eventId"].(string), fc.Args["first"].(*int), fc.Args["after"].(*string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*EventCheckin) graphql.Marshaler {
+			return ec.marshalNEventCheckin2ᚕᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐEventCheckinᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Query_eventCheckins(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_EventCheckin(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_eventCheckins_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -1387,6 +2081,121 @@ func (ec *executionContext) fieldContext_Query___schema(_ context.Context, field
 		},
 	}
 	return fc, nil
+}
+
+func (ec *executionContext) _ScanValidationResult_valid(ctx context.Context, field graphql.CollectedField, obj *ScanValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ScanValidationResult_valid(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Valid, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v bool) graphql.Marshaler {
+			return ec.marshalNBoolean2bool(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_ScanValidationResult_valid(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ScanValidationResult", field, false, false, errors.New("field of type Boolean does not have child fields"))
+}
+
+func (ec *executionContext) _ScanValidationResult_reason(ctx context.Context, field graphql.CollectedField, obj *ScanValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ScanValidationResult_reason(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Reason, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ScanValidationResult_reason(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ScanValidationResult", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _ScanValidationResult_ticketId(ctx context.Context, field graphql.CollectedField, obj *ScanValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ScanValidationResult_ticketId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.TicketID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ScanValidationResult_ticketId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ScanValidationResult", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _ScanValidationResult_orderId(ctx context.Context, field graphql.CollectedField, obj *ScanValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ScanValidationResult_orderId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.OrderID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ScanValidationResult_orderId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ScanValidationResult", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _ScanValidationResult_eventId(ctx context.Context, field graphql.CollectedField, obj *ScanValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_ScanValidationResult_eventId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.EventID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_ScanValidationResult_eventId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("ScanValidationResult", field, false, false, errors.New("field of type ID does not have child fields"))
 }
 
 func (ec *executionContext) __Service_sdl(ctx context.Context, field graphql.CollectedField, obj *fedruntime.Service) (ret graphql.Marshaler) {
@@ -2471,6 +3280,117 @@ func (ec *executionContext) fieldContext___Type_isOneOf(_ context.Context, field
 
 // region    **************************** input.gotpl *****************************
 
+func (ec *executionContext) unmarshalInputRecordCheckinByUserIdInput(ctx context.Context, obj any) (RecordCheckinByUserIDInput, error) {
+	var it RecordCheckinByUserIDInput
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"eventId", "userId"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "eventId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("eventId"))
+			data, err := ec.unmarshalNID2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.EventID = data
+		case "userId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("userId"))
+			data, err := ec.unmarshalNID2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.UserID = data
+		}
+	}
+	return it, nil
+}
+
+func (ec *executionContext) unmarshalInputRecordCheckinInput(ctx context.Context, obj any) (RecordCheckinInput, error) {
+	var it RecordCheckinInput
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"ticketId", "source"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "ticketId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("ticketId"))
+			data, err := ec.unmarshalNID2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.TicketID = data
+		case "source":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("source"))
+			data, err := ec.unmarshalNCheckinSource2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐCheckinSource(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Source = data
+		}
+	}
+	return it, nil
+}
+
+func (ec *executionContext) unmarshalInputUpdateAttendancePolicyInput(ctx context.Context, obj any) (UpdateAttendancePolicyInput, error) {
+	var it UpdateAttendancePolicyInput
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"requireQrForEntry", "allowManualOverride"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "requireQrForEntry":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("requireQrForEntry"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.RequireQRForEntry = data
+		case "allowManualOverride":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("allowManualOverride"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.AllowManualOverride = data
+		}
+	}
+	return it, nil
+}
+
 // endregion **************************** input.gotpl *****************************
 
 // region    ************************** interface.gotpl ***************************
@@ -2732,6 +3652,142 @@ func (ec *executionContext) _Entity(ctx context.Context, sel ast.SelectionSet) g
 	return out
 }
 
+var eventCheckinImplementors = []string{"EventCheckin"}
+
+func (ec *executionContext) _EventCheckin(ctx context.Context, sel ast.SelectionSet, obj *EventCheckin) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, eventCheckinImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("EventCheckin")
+		case "id":
+			out.Values[i] = ec._EventCheckin_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "eventId":
+			out.Values[i] = ec._EventCheckin_eventId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "ticketId":
+			out.Values[i] = ec._EventCheckin_ticketId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "orderId":
+			out.Values[i] = ec._EventCheckin_orderId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "userId":
+			out.Values[i] = ec._EventCheckin_userId(ctx, field, obj)
+		case "checkedInAt":
+			out.Values[i] = ec._EventCheckin_checkedInAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "source":
+			out.Values[i] = ec._EventCheckin_source(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferred), math.MaxInt32)))
+
+	for label, dfs := range deferred {
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var mutationImplementors = []string{"Mutation"}
+
+func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, mutationImplementors)
+	ctx = graphql.WithFieldContext(ctx, &graphql.FieldContext{
+		Object: "Mutation",
+	})
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		innerCtx := graphql.WithRootFieldContext(ctx, &graphql.RootFieldContext{
+			Object: field.Name,
+			Field:  field,
+		})
+
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("Mutation")
+		case "updateAttendancePolicy":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_updateAttendancePolicy(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "validateScan":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_validateScan(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "recordCheckin":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_recordCheckin(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "recordCheckinByUserId":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_recordCheckinByUserId(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferred), math.MaxInt32)))
+
+	for label, dfs := range deferred {
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var queryImplementors = []string{"Query"}
 
 func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) graphql.Marshaler {
@@ -2808,6 +3864,28 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "eventCheckins":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_eventCheckins(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
 		case "_entities":
 			field := field
 
@@ -2860,6 +3938,53 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Query___schema(ctx, field)
 			})
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferred), math.MaxInt32)))
+
+	for label, dfs := range deferred {
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var scanValidationResultImplementors = []string{"ScanValidationResult"}
+
+func (ec *executionContext) _ScanValidationResult(ctx context.Context, sel ast.SelectionSet, obj *ScanValidationResult) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, scanValidationResultImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ScanValidationResult")
+		case "valid":
+			out.Values[i] = ec._ScanValidationResult_valid(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "reason":
+			out.Values[i] = ec._ScanValidationResult_reason(ctx, field, obj)
+		case "ticketId":
+			out.Values[i] = ec._ScanValidationResult_ticketId(ctx, field, obj)
+		case "orderId":
+			out.Values[i] = ec._ScanValidationResult_orderId(ctx, field, obj)
+		case "eventId":
+			out.Values[i] = ec._ScanValidationResult_eventId(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -3268,6 +4393,20 @@ func (ec *executionContext) marshalNAdmissionPass2ᚖgithubᚗcomᚋacmeᚋatten
 	return ec._AdmissionPass(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNAttendancePolicy2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐAttendancePolicy(ctx context.Context, sel ast.SelectionSet, v AttendancePolicy) graphql.Marshaler {
+	return ec._AttendancePolicy(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNAttendancePolicy2ᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐAttendancePolicy(ctx context.Context, sel ast.SelectionSet, v *AttendancePolicy) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._AttendancePolicy(ctx, sel, v)
+}
+
 func (ec *executionContext) unmarshalNBoolean2bool(ctx context.Context, v any) (bool, error) {
 	res, err := graphql.UnmarshalBoolean(v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -3284,6 +4423,16 @@ func (ec *executionContext) marshalNBoolean2bool(ctx context.Context, sel ast.Se
 	return res
 }
 
+func (ec *executionContext) unmarshalNCheckinSource2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐCheckinSource(ctx context.Context, v any) (CheckinSource, error) {
+	var res CheckinSource
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNCheckinSource2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐCheckinSource(ctx context.Context, sel ast.SelectionSet, v CheckinSource) graphql.Marshaler {
+	return v
+}
+
 func (ec *executionContext) unmarshalNCredentialStatus2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐCredentialStatus(ctx context.Context, v any) (CredentialStatus, error) {
 	var res CredentialStatus
 	err := res.UnmarshalGQL(v)
@@ -3292,6 +4441,36 @@ func (ec *executionContext) unmarshalNCredentialStatus2githubᚗcomᚋacmeᚋatt
 
 func (ec *executionContext) marshalNCredentialStatus2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐCredentialStatus(ctx context.Context, sel ast.SelectionSet, v CredentialStatus) graphql.Marshaler {
 	return v
+}
+
+func (ec *executionContext) marshalNEventCheckin2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐEventCheckin(ctx context.Context, sel ast.SelectionSet, v EventCheckin) graphql.Marshaler {
+	return ec._EventCheckin(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNEventCheckin2ᚕᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐEventCheckinᚄ(ctx context.Context, sel ast.SelectionSet, v []*EventCheckin) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNEventCheckin2ᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐEventCheckin(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNEventCheckin2ᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐEventCheckin(ctx context.Context, sel ast.SelectionSet, v *EventCheckin) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._EventCheckin(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNFieldSet2string(ctx context.Context, v any) (string, error) {
@@ -3342,6 +4521,30 @@ func (ec *executionContext) marshalNInt2int(ctx context.Context, sel ast.Selecti
 	return res
 }
 
+func (ec *executionContext) unmarshalNRecordCheckinByUserIdInput2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐRecordCheckinByUserIDInput(ctx context.Context, v any) (RecordCheckinByUserIDInput, error) {
+	res, err := ec.unmarshalInputRecordCheckinByUserIdInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) unmarshalNRecordCheckinInput2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐRecordCheckinInput(ctx context.Context, v any) (RecordCheckinInput, error) {
+	res, err := ec.unmarshalInputRecordCheckinInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNScanValidationResult2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐScanValidationResult(ctx context.Context, sel ast.SelectionSet, v ScanValidationResult) graphql.Marshaler {
+	return ec._ScanValidationResult(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNScanValidationResult2ᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐScanValidationResult(ctx context.Context, sel ast.SelectionSet, v *ScanValidationResult) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ScanValidationResult(ctx, sel, v)
+}
+
 func (ec *executionContext) unmarshalNString2string(ctx context.Context, v any) (string, error) {
 	res, err := graphql.UnmarshalString(v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -3356,6 +4559,11 @@ func (ec *executionContext) marshalNString2string(ctx context.Context, sel ast.S
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalNUpdateAttendancePolicyInput2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐUpdateAttendancePolicyInput(ctx context.Context, v any) (UpdateAttendancePolicyInput, error) {
+	res, err := ec.unmarshalInputUpdateAttendancePolicyInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
 }
 
 func (ec *executionContext) unmarshalN_Any2map(ctx context.Context, v any) (map[string]any, error) {
@@ -3783,6 +4991,24 @@ func (ec *executionContext) marshalOID2ᚖstring(ctx context.Context, sel ast.Se
 	_ = sel
 	_ = ctx
 	res := graphql.MarshalID(*v)
+	return res
+}
+
+func (ec *executionContext) unmarshalOInt2ᚖint(ctx context.Context, v any) (*int, error) {
+	if v == nil {
+		return nil, nil
+	}
+	res, err := graphql.UnmarshalInt(v)
+	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOInt2ᚖint(ctx context.Context, sel ast.SelectionSet, v *int) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	_ = sel
+	_ = ctx
+	res := graphql.MarshalInt(*v)
 	return res
 }
 

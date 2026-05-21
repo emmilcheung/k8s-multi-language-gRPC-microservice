@@ -61,6 +61,13 @@ type AttendanceSummary
   totalCheckedIn: Int!
 }
 
+input AttendeeInput
+  @join__type(graph: ORDERS)
+{
+  seatId: ID!
+  name: String!
+}
+
 type BillingAddress
   @join__type(graph: USERS)
 {
@@ -102,7 +109,8 @@ input CreatePaymentInput
   @join__type(graph: PAYMENTS)
 {
   orderId: ID!
-  token: String!
+  token: String
+  savedPaymentMethodId: ID
 }
 
 input CreatePriceTierInput
@@ -110,6 +118,17 @@ input CreatePriceTierInput
 {
   name: String!
   price: String!
+}
+
+input CreateSeatedOrderInput
+  @join__type(graph: ORDERS)
+{
+  ticketId: ID!
+  quantity: Int!
+  planId: ID!
+  seatIds: [ID!]
+  sectionId: ID
+  attendees: [AttendeeInput!]
 }
 
 input CreateSeatingPlanInput
@@ -226,7 +245,11 @@ type Mutation
   revokeSession(id: ID!): Boolean! @join__field(graph: AUTH)
   createOrder(input: CreateOrderInput!): Order! @join__field(graph: ORDERS)
   cancelOrder(id: ID!): Order! @join__field(graph: ORDERS)
+  createSeatedOrder(input: CreateSeatedOrderInput!): Order! @join__field(graph: ORDERS)
   createPayment(input: CreatePaymentInput!): Payment! @join__field(graph: PAYMENTS)
+  setDefaultPaymentMethod(id: ID!): PaymentMethod! @join__field(graph: PAYMENTS)
+  deletePaymentMethod(id: ID!): Boolean! @join__field(graph: PAYMENTS)
+  registerPaymentMethod(input: RegisterPaymentMethodInput!): PaymentMethod! @join__field(graph: PAYMENTS)
   createTicket(input: CreateTicketInput!): Ticket! @join__field(graph: TICKETS)
   updateTicket(id: ID!, input: UpdateTicketInput!): Ticket! @join__field(graph: TICKETS)
   updateProfile(input: UpdateProfileInput!): UserProfile! @join__field(graph: USERS)
@@ -295,6 +318,18 @@ type Payment
   createdAt: String! @join__field(graph: PAYMENTS)
 }
 
+type PaymentMethod
+  @join__type(graph: PAYMENTS)
+{
+  id: ID!
+  brand: String
+  label: String
+  last4: String
+  expMonth: Int
+  expYear: Int
+  isDefault: Boolean
+}
+
 enum PaymentStatus
   @join__type(graph: PAYMENTS)
 {
@@ -358,6 +393,15 @@ input RecordCheckinInput
 {
   ticketId: ID!
   source: CheckinSource!
+}
+
+input RegisterPaymentMethodInput
+  @join__type(graph: PAYMENTS)
+{
+  providerPaymentMethodId: String!
+  setAsDefault: Boolean
+  consentAccepted: Boolean!
+  consentVersion: String!
 }
 
 type ScanValidationResult
@@ -437,11 +481,17 @@ type Ticket
   id: ID!
   title: String!
   price: Int!
+  priceDecimal: String!
+  userId: ID!
+  orderId: ID
   quota: Int!
+  reserved: Int!
+  sold: Int!
   available: Int!
   maxPerUser: Int
   ticketType: TicketType!
   seatingPlan: SeatingPlan
+  event: TicketEvent
   createdAt: String!
   updatedAt: String!
 }
@@ -458,6 +508,18 @@ type TicketEdge
 {
   node: Ticket!
   cursor: String!
+}
+
+type TicketEvent
+  @join__type(graph: TICKETS)
+{
+  title: String!
+  description: String
+  startsAt: String!
+  endsAt: String
+  imageUrl: String
+  venueName: String
+  venueAddress: String
 }
 
 input TicketFilter
@@ -536,11 +598,13 @@ input UpdateVenueInput
 type User
   @join__type(graph: AUTH, key: "id")
   @join__type(graph: ORDERS, key: "id")
+  @join__type(graph: PAYMENTS, key: "id", extension: true)
   @join__type(graph: USERS, key: "id")
 {
-  id: ID! @join__field(graph: AUTH) @join__field(graph: ORDERS) @join__field(graph: USERS, external: true)
+  id: ID! @join__field(graph: AUTH) @join__field(graph: ORDERS) @join__field(graph: PAYMENTS) @join__field(graph: USERS, external: true)
   email: String @join__field(graph: AUTH) @tag(name: "self-only")
   orders: [Order!]! @join__field(graph: ORDERS) @tag(name: "self-only")
+  paymentMethods: [PaymentMethod!]! @join__field(graph: PAYMENTS) @tag(name: "self-only")
   profile: UserProfile @join__field(graph: USERS) @tag(name: "self-only")
   preferences: UserPreferences @join__field(graph: USERS) @tag(name: "self-only")
   billingAddress: BillingAddress @join__field(graph: USERS) @tag(name: "pii")
