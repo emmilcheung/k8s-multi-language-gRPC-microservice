@@ -113,7 +113,7 @@ describe('SessionResolver', () => {
       const ctx = {
         req: {
           headers: { 'x-user-id': 'u-1' },
-          cookies: { refresh_token: 'cookie' },
+          cookies: { refreshToken: 'cookie' },
         },
       };
       const out = await resolver.sessions(ctx as any);
@@ -124,6 +124,30 @@ describe('SessionResolver', () => {
         lastUsedAt: '2026-05-02T00:00:00Z',
       });
       expect(out[1]).toMatchObject({ id: 'sess-2', current: false });
+    });
+
+    it('uses refreshToken (not refresh_token) as the default cookie key for current-session detection', async () => {
+      mockRefreshTokenService.listSessions.mockResolvedValue([
+        {
+          sessionId: 'sess-1',
+          userAgent: null,
+          ipAddress: null,
+          createdAt: '2026-05-01T00:00:00Z',
+          lastRotatedAt: null,
+        },
+      ]);
+      // Only the correctly-named cookie is present; the old 'refresh_token' name is absent.
+      mockRefreshTokenService.extractSessionId.mockImplementation(
+        (token: string | undefined) => (token === 'my-rt' ? 'sess-1' : null),
+      );
+      const ctx = {
+        req: {
+          headers: { 'x-user-id': 'u-1' },
+          cookies: { refreshToken: 'my-rt' },
+        },
+      };
+      const out = await resolver.sessions(ctx as any);
+      expect(out[0]).toMatchObject({ id: 'sess-1', current: true });
     });
 
     it('throws when X-User-Id missing', async () => {

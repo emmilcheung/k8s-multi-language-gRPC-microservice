@@ -16,7 +16,7 @@ import { RefreshTokenService } from '../modules/auth/refresh-token.service';
 import { AuthService } from '../modules/auth/auth.service';
 import { UserIdSigGuard } from './guards/user-id-sig.guard';
 
-const DEFAULT_REFRESH_TOKEN_COOKIE = 'refresh_token';
+const DEFAULT_REFRESH_TOKEN_COOKIE = 'refreshToken';
 
 type GqlContext = {
   req: {
