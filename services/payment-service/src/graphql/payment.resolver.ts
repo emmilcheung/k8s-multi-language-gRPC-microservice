@@ -140,10 +140,7 @@ export class PaymentMethodMutationResolver {
 
   @Mutation('createPayment')
   @UseGuards(UserIdSigGuard)
-  async createPayment(
-    @Args('input') input: Record<string, unknown>,
-    @Context() ctx: GqlContext,
-  ) {
+  async createPayment(@Args('input') input: Record<string, unknown>, @Context() ctx: GqlContext) {
     const userId = extractUserId(ctx);
     if (!userId) {
       throw new ForbiddenException('Missing X-User-Id');

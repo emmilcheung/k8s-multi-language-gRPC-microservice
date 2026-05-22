@@ -266,7 +266,10 @@ describe('PaymentMethodMutationResolver', () => {
     registerSavedPaymentMethod: vi.fn(),
   } satisfies Pick<
     PaymentsService,
-    'charge' | 'setDefaultSavedPaymentMethod' | 'deleteSavedPaymentMethod' | 'registerSavedPaymentMethod'
+    | 'charge'
+    | 'setDefaultSavedPaymentMethod'
+    | 'deleteSavedPaymentMethod'
+    | 'registerSavedPaymentMethod'
   >;
 
   beforeEach(() => {
@@ -336,7 +339,10 @@ describe('PaymentMethodMutationResolver', () => {
         },
       };
 
-      const result = await resolver.createPayment({ orderId: 'order-1', token: 'pm_card_visa' }, ctx);
+      const result = await resolver.createPayment(
+        { orderId: 'order-1', token: 'pm_card_visa' },
+        ctx,
+      );
 
       expect(mockPaymentsService.charge).toHaveBeenCalledWith({
         orderId: 'order-1',
@@ -391,9 +397,9 @@ describe('PaymentMethodMutationResolver', () => {
       const { ForbiddenException } = await import('@nestjs/common');
       const ctx = { req: { headers: {} } };
 
-      await expect(resolver.createPayment({ orderId: 'order-1', token: 'pm_card_visa' }, ctx)).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        resolver.createPayment({ orderId: 'order-1', token: 'pm_card_visa' }, ctx),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 
