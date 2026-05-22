@@ -584,6 +584,37 @@ services:
     networks:
       - microservices-net
 
+  # ── graphql-seed (deterministic smoke fixture) ───────────────────────────────
+  graphql-seed:
+    image: curlimages/curl:8.8.0
+    restart: unless-stopped
+    depends_on:
+      kong:
+        condition: service_healthy
+      apollo-router:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      ticket-service:
+        condition: service_healthy
+    volumes:
+      - ./services/client/seed:/seed:ro
+    command:
+      - /bin/sh
+      - -lc
+      - /seed/seed-smoke-data.sh && touch /tmp/seed.done && tail -f /dev/null
+    environment:
+      KONG_URL: http://kong:8000
+      SEED_PASSWORD: Password123!
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/seed.done"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks:
+      - microservices-net
+
   # ── expiration-service: Go / asynq / Redis + Kafka ──────────────────────────
   expiration-service:
     build:
