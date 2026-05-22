@@ -251,11 +251,12 @@ jobs:
       - name: Enforce REST migration gate
         run: |
           # Matches outbound Kong calls (base()}/api/<domain>) for domains fully migrated to GraphQL.
-          # Keep-listed paths (seating-plans, venues, users, auth, attendance/events, payments/webhook,
-          # oauth) are intentionally excluded.
-          forbidden='/api/(tickets|attendance\/scan|orders\/[^s]|submit-payment|payment-methods\/register)'
+          # Keep-listed paths (seating-plans, venues, users, auth, payments/webhook, oauth) excluded.
+          # attendance/events is excluded only for the proxy route handler (app/api/attendance/events/).
+          forbidden='/api/(tickets|attendance\/(scan|events)|orders\/[^s]|submit-payment|payment-methods\/register)'
           if grep -rEn "base\(\)[^/]*/api/" app/ components/ __tests__/ tests/ lib/ 2>/dev/null \
-               | grep -Ev '(seating-plans|venues|users|auth|attendance/events|payments/webhook|oauth)' \
+               | grep -Ev '(seating-plans|venues|users|auth|payments/webhook|oauth)' \
+               | grep -Ev '^app/api/attendance/events/' \
                | grep -E "$forbidden"; then
             echo "FAIL: REST migration gate matched forbidden service REST paths"
             exit 1

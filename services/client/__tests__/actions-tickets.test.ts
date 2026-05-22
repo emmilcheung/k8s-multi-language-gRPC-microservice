@@ -94,16 +94,9 @@ describe("ticket server actions", () => {
   });
 
   it("createTicket redirects to created ticket on success", async () => {
-    executeMutationMock.mockResolvedValueOnce({
-      createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" },
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue({}),
-      })
-    );
+    executeMutationMock
+      .mockResolvedValueOnce({ createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" } })
+      .mockResolvedValueOnce({ updateAttendancePolicy: { eventId: "ticket-1", requireQrForEntry: true, allowManualOverride: false } });
 
     await createTicket({}, ticketForm("Concert", "12.50"));
 
@@ -113,63 +106,35 @@ describe("ticket server actions", () => {
   });
 
   it("createTicket retries attendance settings when event projection is not ready", async () => {
-    executeMutationMock.mockResolvedValueOnce({
-      createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" },
-    });
-
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        json: vi.fn().mockResolvedValue({
-          error: { message: "event not found" },
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: vi.fn().mockResolvedValue({}),
-      });
-    vi.stubGlobal("fetch", fetchMock);
+    executeMutationMock
+      .mockResolvedValueOnce({ createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" } })
+      .mockRejectedValueOnce(new Error("not found: event not found"))
+      .mockResolvedValueOnce({ updateAttendancePolicy: { eventId: "ticket-1", requireQrForEntry: true, allowManualOverride: false } });
 
     await createTicket({}, ticketForm("Concert", "12.50"));
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/attendance/events/ticket-1/settings");
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost:8080/api/attendance/events/ticket-1/settings");
+    expect(executeMutationMock).toHaveBeenCalledTimes(3);
     expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1");
   });
 
   it("createTicket does not block redirect when attendance event stays unavailable", async () => {
-    executeMutationMock.mockResolvedValueOnce({
-      createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" },
-    });
-
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 404,
-      json: vi.fn().mockResolvedValue({
-        error: { message: "event not found" },
-      }),
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const notFoundErr = new Error("not found: event not found");
+    executeMutationMock
+      .mockResolvedValueOnce({ createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" } })
+      .mockRejectedValue(notFoundErr);
 
     await createTicket({}, ticketForm("Concert", "12.50"));
 
-    expect(fetchMock).toHaveBeenCalledTimes(8);
+    expect(executeMutationMock).toHaveBeenCalledTimes(9);
     expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1");
   });
 
   it("createTicket creates and links a seating plan for seated tickets", async () => {
     executeMutationMock
-      .mockResolvedValueOnce({
-        createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" },
-      })
+      .mockResolvedValueOnce({ createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" } })
       .mockResolvedValueOnce({ createSeatingPlan: { id: "plan-1", status: "DRAFT", assignmentMode: "MANUAL" } })
-      .mockResolvedValueOnce({ updateTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" } });
-    const fetchMock = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: vi.fn().mockResolvedValue({}),
-    });
-    vi.stubGlobal("fetch", fetchMock);
+      .mockResolvedValueOnce({ updateTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" } })
+      .mockResolvedValueOnce({ updateAttendancePolicy: { eventId: "ticket-1", requireQrForEntry: true, allowManualOverride: false } });
 
     await createTicket({}, seatedTicketForm("Concert", "12.50", "11111111-1111-1111-1111-111111111111"));
 
@@ -191,14 +156,8 @@ describe("ticket server actions", () => {
         maxSeatsPerOrder: 10,
       },
     });
-    expect(executeMutationMock.mock.calls[2]?.[1]).toEqual({
-      id: "ticket-1",
-      input: { seatingPlanId: "plan-1" },
-    });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/attendance/events/ticket-1/settings");
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
-      requireQrForEntry: true,
-    });
+    expect(executeMutationMock.mock.calls[2]?.[1]).toEqual({ id: "ticket-1", input: { seatingPlanId: "plan-1" } });
+    expect(executeMutationMock.mock.calls[3]?.[1]).toMatchObject({ eventId: "ticket-1", input: { requireQrForEntry: true } });
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
     expect(revalidatePathMock).toHaveBeenCalledWith("/tickets/ticket-1");
     expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1");
@@ -206,37 +165,24 @@ describe("ticket server actions", () => {
 
   it("createTicket retries seated plan creation when ticket projection is delayed", async () => {
     executeMutationMock
-      .mockResolvedValueOnce({
-        createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" },
-      })
+      .mockResolvedValueOnce({ createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" } })
       .mockRejectedValueOnce(new Error("ticket not found"))
       .mockResolvedValueOnce({ createSeatingPlan: { id: "plan-1", status: "DRAFT", assignmentMode: "MANUAL" } })
-      .mockResolvedValueOnce({ updateTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" } });
-    const fetchMock = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: vi.fn().mockResolvedValue({}),
-    });
-    vi.stubGlobal("fetch", fetchMock);
+      .mockResolvedValueOnce({ updateTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" } })
+      .mockResolvedValueOnce({ updateAttendancePolicy: { eventId: "ticket-1", requireQrForEntry: true, allowManualOverride: false } });
 
     await createTicket({}, seatedTicketForm("Concert", "12.50", "11111111-1111-1111-1111-111111111111"));
 
-    expect(executeMutationMock).toHaveBeenCalledTimes(4);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/attendance/events/ticket-1/settings");
+    expect(executeMutationMock).toHaveBeenCalledTimes(5);
     expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1");
   });
 
   it("createTicket creates and links a manual seating plan for seated tickets", async () => {
     executeMutationMock
-      .mockResolvedValueOnce({
-        createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" },
-      })
+      .mockResolvedValueOnce({ createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" } })
       .mockResolvedValueOnce({ createSeatingPlan: { id: "plan-1", status: "DRAFT", assignmentMode: "MANUAL" } })
-      .mockResolvedValueOnce({ updateTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" } });
-    const fetchMock = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: vi.fn().mockResolvedValue({}),
-    });
-    vi.stubGlobal("fetch", fetchMock);
+      .mockResolvedValueOnce({ updateTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" } })
+      .mockResolvedValueOnce({ updateAttendancePolicy: { eventId: "ticket-1", requireQrForEntry: true, allowManualOverride: false } });
 
     await createTicket({}, seatedTicketForm("Concert", "12.50", "11111111-1111-1111-1111-111111111111"));
 
@@ -251,11 +197,7 @@ describe("ticket server actions", () => {
         assignmentMode: "MANUAL",
       },
     });
-    expect(executeMutationMock.mock.calls[2]?.[1]).toEqual({
-      id: "ticket-1",
-      input: { seatingPlanId: "plan-1" },
-    });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/attendance/events/ticket-1/settings");
+    expect(executeMutationMock.mock.calls[2]?.[1]).toEqual({ id: "ticket-1", input: { seatingPlanId: "plan-1" } });
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
     expect(revalidatePathMock).toHaveBeenCalledWith("/tickets/ticket-1");
     expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1");
@@ -263,13 +205,10 @@ describe("ticket server actions", () => {
 
   it("createTicket creates and links an auto-assigned seating plan for seated tickets", async () => {
     executeMutationMock
-      .mockResolvedValueOnce({
-        createTicket: { id: "ticket-2", title: "Concert", price: 1250, priceDecimal: "12.50" },
-      })
+      .mockResolvedValueOnce({ createTicket: { id: "ticket-2", title: "Concert", price: 1250, priceDecimal: "12.50" } })
       .mockResolvedValueOnce({ createSeatingPlan: { id: "plan-2", status: "DRAFT", assignmentMode: "AUTO" } })
-      .mockResolvedValueOnce({ updateTicket: { id: "ticket-2", title: "Concert", price: 1250, priceDecimal: "12.50" } });
-    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({}) });
-    vi.stubGlobal("fetch", fetchMock);
+      .mockResolvedValueOnce({ updateTicket: { id: "ticket-2", title: "Concert", price: 1250, priceDecimal: "12.50" } })
+      .mockResolvedValueOnce({ updateAttendancePolicy: { eventId: "ticket-2", requireQrForEntry: true, allowManualOverride: false } });
 
     await createTicket(
       {},
@@ -287,10 +226,7 @@ describe("ticket server actions", () => {
         assignmentMode: "AUTO",
       },
     });
-    expect(executeMutationMock.mock.calls[2]?.[1]).toEqual({
-      id: "ticket-2",
-      input: { seatingPlanId: "plan-2" },
-    });
+    expect(executeMutationMock.mock.calls[2]?.[1]).toEqual({ id: "ticket-2", input: { seatingPlanId: "plan-2" } });
   });
 
   it("fetchTicketPageViaGraphQL excludes seated tickets whose plans are not active", async () => {
