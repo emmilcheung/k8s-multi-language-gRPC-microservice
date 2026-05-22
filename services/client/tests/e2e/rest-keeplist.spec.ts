@@ -8,17 +8,13 @@
  * Runs as part of the Playwright suite so CI captures it alongside E2E tests.
  */
 import { test, expect } from "@playwright/test";
-import { execSync } from "node:child_process";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const clientRoot = resolve(here, "..", "..");
+const clientRoot = process.cwd();
 
 function grep(pattern: string, dirs: string[]): string {
   try {
-    const dirArgs = dirs.join(" ");
-    return execSync(`grep -rEn ${JSON.stringify(pattern)} ${dirArgs}`, {
+    return execFileSync("grep", ["-rEn", pattern, ...dirs], {
       cwd: clientRoot,
       encoding: "utf8",
     });
@@ -61,14 +57,17 @@ test.describe("REST keep-list enforcement (static analysis)", () => {
     // The generated index.ts must be gitignored — only .graphql-cache + generated/
     // are ephemeral build artifacts.
     try {
-      execSync("git ls-files --error-unmatch lib/graphql/generated/index.ts", {
+      execFileSync("git", ["ls-files", "--error-unmatch", "lib/graphql/generated/index.ts"], {
         cwd: clientRoot,
         encoding: "utf8",
       });
       // If the above didn't throw, the file IS tracked — fail the test
       expect(false, "lib/graphql/generated/index.ts should be gitignored, not committed").toBe(true);
-    } catch {
+    } catch (err: unknown) {
       // git ls-files --error-unmatch exits non-zero when file is not tracked — expected
+      if ((err as NodeJS.ErrnoException & { status?: number }).status !== 1) {
+        throw err;
+      }
     }
   });
 });
