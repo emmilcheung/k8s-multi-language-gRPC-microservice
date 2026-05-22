@@ -9,6 +9,40 @@
 
 ---
 
+## Session: 2026-05-22 — runbook(graphql): add explicit migration revert sequence ✅ COMPLETE
+
+**Branch:** `feat/client-graphql-foundation`
+
+### Rollback command sequence (dry-run ready)
+
+Use a throwaway branch, then run the migration-range revert exactly in this order:
+
+```bash
+git checkout -b chore/graphql-revert-dry-run
+git revert --no-commit 09bea9e^..cbf61f1
+```
+
+If the dry-run is only for rehearsing rollback mechanics, discard local changes:
+
+```bash
+git restore --staged .
+git restore .
+```
+
+### Post-revert smoke check
+
+After a real revert commit, run:
+
+```bash
+docker compose up -d --build --wait
+curl -fsS http://localhost:8000/healthz/live
+curl -fsS http://localhost:8001/status
+```
+
+Expected: compose healthy, gateway liveness 200, Kong status 200.
+
+---
+
 ## Session: 2026-05-22 — feat(client): complete GraphQL Phase 4 migration ✅ COMPLETE
 
 **Branch:** `feat/client-graphql-foundation`
