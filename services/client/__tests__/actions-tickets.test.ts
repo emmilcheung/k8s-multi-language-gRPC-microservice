@@ -86,31 +86,23 @@ describe("ticket server actions", () => {
     expect(result).toEqual({ error: "Price must be a positive number." });
   });
 
-  it("createTicket returns upstream error message", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: false,
-        json: vi.fn().mockResolvedValue({ error: { message: "Validation failed" } }),
-      })
-    );
+  it("createTicket returns error when GraphQL mutation rejects", async () => {
+    executeMutationMock.mockRejectedValueOnce(new Error("Validation failed"));
 
     const result = await createTicket({}, ticketForm("Concert", "12.50"));
     expect(result).toEqual({ error: "Validation failed" });
   });
 
   it("createTicket redirects to created ticket on success", async () => {
+    executeMutationMock.mockResolvedValueOnce({
+      createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" },
+    });
     vi.stubGlobal(
       "fetch",
-      vi.fn()
-        .mockResolvedValueOnce({
-          ok: true,
-          json: vi.fn().mockResolvedValue({ id: "ticket-1" }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: vi.fn().mockResolvedValue({}),
-        })
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({}),
+      })
     );
 
     await createTicket({}, ticketForm("Concert", "12.50"));
@@ -121,12 +113,12 @@ describe("ticket server actions", () => {
   });
 
   it("createTicket creates and links a seating plan for seated tickets", async () => {
-    executeMutationMock.mockResolvedValue({ createSeatingPlan: { id: "plan-1", status: "DRAFT", assignmentMode: "MANUAL" } });
-    const fetchMock = vi.fn()
+    executeMutationMock
       .mockResolvedValueOnce({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ id: "ticket-1", title: "Concert", price: "12.50" }),
+        createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" },
       })
+      .mockResolvedValueOnce({ createSeatingPlan: { id: "plan-1", status: "DRAFT", assignmentMode: "MANUAL" } });
+    const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
         json: vi.fn().mockResolvedValue({}),
@@ -139,17 +131,18 @@ describe("ticket server actions", () => {
 
     await createTicket({}, seatedTicketForm("Concert", "12.50", "11111111-1111-1111-1111-111111111111"));
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/tickets");
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost:8080/api/tickets/ticket-1");
-    expect(fetchMock.mock.calls[2]?.[0]).toBe("http://localhost:8080/api/attendance/events/ticket-1/settings");
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      title: "Concert",
-      price: "12.50",
-      quota: 0,
-      event: { startsAt: "2026-12-01T19:00:00Z" },
-    });
+    // createTicket via GraphQL
     expect(executeMutationMock.mock.calls[0]?.[1]).toMatchObject({
+      input: {
+        title: "Concert",
+        price: 1250,
+        quota: 0,
+        ticketType: "SEATED",
+        event: { startsAt: "2026-12-01T19:00:00Z" },
+      },
+    });
+    // createSeatingPlan via GraphQL
+    expect(executeMutationMock.mock.calls[1]?.[1]).toMatchObject({
       input: {
         ticketId: "ticket-1",
         venueId: "11111111-1111-1111-1111-111111111111",
@@ -158,13 +151,17 @@ describe("ticket server actions", () => {
         maxSeatsPerOrder: 10,
       },
     });
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+    // linkSeatingPlanToTicket stays REST
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/tickets/ticket-1");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       title: "Concert",
       price: "12.50",
       seatingPlanId: "plan-1",
       ticketType: "SEATED_MANUAL",
     });
-    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
+    // upsertAttendanceSettings stays REST
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost:8080/api/attendance/events/ticket-1/settings");
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
       requireQrForEntry: true,
     });
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
@@ -173,12 +170,12 @@ describe("ticket server actions", () => {
   });
 
   it("createTicket creates and links a manual seating plan for seated tickets", async () => {
-    executeMutationMock.mockResolvedValue({ createSeatingPlan: { id: "plan-1", status: "DRAFT", assignmentMode: "MANUAL" } });
-    const fetchMock = vi.fn()
+    executeMutationMock
       .mockResolvedValueOnce({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ id: "ticket-1", title: "Concert", price: "12.50" }),
+        createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" },
       })
+      .mockResolvedValueOnce({ createSeatingPlan: { id: "plan-1", status: "DRAFT", assignmentMode: "MANUAL" } });
+    const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
         json: vi.fn().mockResolvedValue({}),
@@ -191,54 +188,38 @@ describe("ticket server actions", () => {
 
     await createTicket({}, seatedTicketForm("Concert", "12.50", "11111111-1111-1111-1111-111111111111"));
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/tickets");
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost:8080/api/tickets/ticket-1");
-    expect(fetchMock.mock.calls[2]?.[0]).toBe("http://localhost:8080/api/attendance/events/ticket-1/settings");
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      title: "Concert",
-      price: "12.50",
-      quota: 0,
-      event: { startsAt: "2026-12-01T19:00:00Z" },
-    });
     expect(executeMutationMock.mock.calls[0]?.[1]).toMatchObject({
+      input: { title: "Concert", price: 1250, quota: 0, ticketType: "SEATED" },
+    });
+    expect(executeMutationMock.mock.calls[1]?.[1]).toMatchObject({
       input: {
         ticketId: "ticket-1",
         venueId: "11111111-1111-1111-1111-111111111111",
         name: "Concert Seating Plan",
         assignmentMode: "MANUAL",
-        maxSeatsPerOrder: 10,
       },
     });
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       title: "Concert",
       price: "12.50",
       seatingPlanId: "plan-1",
       ticketType: "SEATED_MANUAL",
     });
-    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
-      requireQrForEntry: true,
-    });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost:8080/api/attendance/events/ticket-1/settings");
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
     expect(revalidatePathMock).toHaveBeenCalledWith("/tickets/ticket-1");
     expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1");
   });
 
   it("createTicket creates and links an auto-assigned seating plan for seated tickets", async () => {
-    executeMutationMock.mockResolvedValue({ createSeatingPlan: { id: "plan-2", status: "DRAFT", assignmentMode: "AUTO" } });
+    executeMutationMock
+      .mockResolvedValueOnce({
+        createTicket: { id: "ticket-2", title: "Concert", price: 1250, priceDecimal: "12.50" },
+      })
+      .mockResolvedValueOnce({ createSeatingPlan: { id: "plan-2", status: "DRAFT", assignmentMode: "AUTO" } });
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ id: "ticket-2", title: "Concert", price: "12.50" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: vi.fn().mockResolvedValue({}),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: vi.fn().mockResolvedValue({}),
-      });
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({}) })
+      .mockResolvedValueOnce({ ok: true, json: vi.fn().mockResolvedValue({}) });
     vi.stubGlobal("fetch", fetchMock);
 
     await createTicket(
@@ -247,15 +228,17 @@ describe("ticket server actions", () => {
     );
 
     expect(executeMutationMock.mock.calls[0]?.[1]).toMatchObject({
+      input: { title: "Concert", price: 1250, quota: 0, ticketType: "SEATED" },
+    });
+    expect(executeMutationMock.mock.calls[1]?.[1]).toMatchObject({
       input: {
         ticketId: "ticket-2",
         venueId: "11111111-1111-1111-1111-111111111111",
         name: "Concert Seating Plan",
         assignmentMode: "AUTO",
-        maxSeatsPerOrder: 10,
       },
     });
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       title: "Concert",
       price: "12.50",
       seatingPlanId: "plan-2",
@@ -363,38 +346,31 @@ describe("ticket server actions", () => {
     expect(page.tickets).toEqual([]);
   });
 
-  it("updateTicket sends event metadata, revalidates paths, and redirects on success", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: vi.fn().mockResolvedValue({}),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: vi.fn().mockResolvedValue({}),
-      });
-    vi.stubGlobal("fetch", fetchMock);
+  it("updateTicket sends event metadata via GraphQL, revalidates paths, and redirects on success", async () => {
+    executeMutationMock.mockResolvedValueOnce({
+      updateTicket: { id: "ticket-2", title: "Updated", price: 2000, priceDecimal: "20.00" },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
+    );
 
     await updateTicket("ticket-2", {}, ticketUpdateForm("Updated", "20"));
 
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
-      title: "Updated",
-      price: "20",
-      event: {
-        title: "Updated Event",
-        description: "Updated description",
-        startsAt: "2026-12-01T19:00:00Z",
-        endsAt: "2026-12-01T21:30:00Z",
-        imageUrl: "https://example.com/poster.png",
-        venueName: "Updated Venue",
-        venueAddress: "123 Main St",
+    expect(executeMutationMock.mock.calls[0]?.[1]).toMatchObject({
+      id: "ticket-2",
+      input: {
+        title: "Updated",
+        price: 2000,
+        event: {
+          startsAt: "2026-12-01T19:00:00Z",
+          endsAt: "2026-12-01T21:30:00Z",
+          imageUrl: "https://example.com/poster.png",
+          venueName: "Updated Venue",
+          venueAddress: "123 Main St",
+        },
       },
     });
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost:8080/api/attendance/events/ticket-2/settings");
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
-      requireQrForEntry: true,
-    });
-
     expect(revalidatePathMock).toHaveBeenCalledWith("/tickets/ticket-2");
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
     expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-2");

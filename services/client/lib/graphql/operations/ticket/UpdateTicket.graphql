@@ -1,0 +1,8 @@
+mutation UpdateTicket($id: ID!, $input: UpdateTicketInput!) {
+  updateTicket(id: $id, input: $input) {
+    id
+    title
+    price
+    priceDecimal
+  }
+}

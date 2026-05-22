@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
@@ -19,7 +20,6 @@ import (
 func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketInput) (*Ticket, error) {
 	price := strconv.Itoa(input.Price)
 
-	// TicketType is set when seatingPlanId is attached to the ticket via the update path.
 	svcInput := service.CreateTicketInput{
 		Title: input.Title,
 		Price: price,
@@ -27,6 +27,13 @@ func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketI
 	}
 	if input.MaxPerUser != nil {
 		svcInput.MaxPerUser = *input.MaxPerUser
+	}
+	if input.Event != nil {
+		ev, err := mapEventInput(input.Event)
+		if err != nil {
+			return nil, fmt.Errorf("createTicket: %w", err)
+		}
+		svcInput.Event = ev
 	}
 
 	t, err := r.TicketService.CreateTicket(ctx, svcInput)
@@ -56,12 +63,51 @@ func (r *mutationResolver) UpdateTicket(ctx context.Context, id string, input Up
 	if input.Price != nil {
 		svcInput.Price = strconv.Itoa(*input.Price)
 	}
+	if input.Event != nil {
+		ev, err := mapEventInput(input.Event)
+		if err != nil {
+			return nil, fmt.Errorf("updateTicket: %w", err)
+		}
+		svcInput.Event = ev
+	}
 
 	t, err := r.TicketService.UpdateTicket(ctx, svcInput)
 	if err != nil {
 		return nil, fmt.Errorf("updateTicket: %w", err)
 	}
 	return mapTicketToGQL(t), nil
+}
+
+// mapEventInput converts the GraphQL TicketEventInput to the repository TicketEvent.
+func mapEventInput(in *TicketEventInput) (*repository.TicketEvent, error) {
+	startsAt, err := time.Parse(time.RFC3339, in.StartsAt)
+	if err != nil {
+		return nil, fmt.Errorf("invalid startsAt %q: %w", in.StartsAt, err)
+	}
+	ev := &repository.TicketEvent{StartsAt: startsAt}
+	if in.Title != nil {
+		ev.Title = *in.Title
+	}
+	if in.Description != nil {
+		ev.Description = *in.Description
+	}
+	if in.EndsAt != nil {
+		t, err := time.Parse(time.RFC3339, *in.EndsAt)
+		if err != nil {
+			return nil, fmt.Errorf("invalid endsAt %q: %w", *in.EndsAt, err)
+		}
+		ev.EndsAt = &t
+	}
+	if in.ImageURL != nil {
+		ev.ImageURL = *in.ImageURL
+	}
+	if in.VenueName != nil {
+		ev.VenueName = *in.VenueName
+	}
+	if in.VenueAddress != nil {
+		ev.VenueAddress = *in.VenueAddress
+	}
+	return ev, nil
 }
 
 // Tickets is the resolver for the tickets field.

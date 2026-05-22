@@ -73,12 +73,23 @@ type Mutation {
   updateTicket(id: ID!, input: UpdateTicketInput!): Ticket!
 }
 
+input TicketEventInput {
+  title: String
+  description: String
+  startsAt: String!
+  endsAt: String
+  imageUrl: String
+  venueName: String
+  venueAddress: String
+}
+
 input CreateTicketInput {
   title: String!
   price: Int!
   quota: Int!
   maxPerUser: Int
   ticketType: TicketType!
+  event: TicketEventInput!
 }
 
 input UpdateTicketInput {
@@ -86,4 +97,5 @@ input UpdateTicketInput {
   price: Int
   quota: Int
   maxPerUser: Int
+  event: TicketEventInput
 }

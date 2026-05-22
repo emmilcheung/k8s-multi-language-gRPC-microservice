@@ -5,8 +5,13 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { base, authHeaders } from "@/lib/server-utils";
-import { executeQuery } from "@/lib/graphql/execute";
-import { TicketsBrowseDocument } from "@/lib/graphql/generated";
+import { executeQuery, executeMutation } from "@/lib/graphql/execute";
+import { ApiError } from "@/lib/api";
+import {
+  TicketsBrowseDocument,
+  CreateTicketDocument,
+  UpdateTicketDocument,
+} from "@/lib/graphql/generated";
 import type { AvailabilitySnapshot, SeatingPlan, Ticket } from "@/lib/types";
 import { createSeatingPlanForTicket } from "./venues";
 
@@ -234,9 +239,10 @@ export async function createTicket(
     if (maxSeatsPerOrder !== undefined) reqBody.maxPerUser = maxSeatsPerOrder;
   }
 
-  // Attach event sub-document — backend TicketEvent struct already handles this
-  reqBody.event = {
-    startsAt,
+  const gqlTicketType = ticketType.startsWith("SEATED") ? "SEATED" : "GENERAL_ADMISSION";
+  const priceInCents = Math.round(parseFloat(effectivePrice) * 100);
+  const eventInput = {
+    startsAt: startsAt!,
     ...(eventTitle && { title: eventTitle }),
     ...(endsAt && { endsAt }),
     ...(eventDescription && { description: eventDescription }),
@@ -245,18 +251,23 @@ export async function createTicket(
     ...(venueAddress && { venueAddress }),
   };
 
-  const res = await fetch(`${base()}/api/tickets`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify(reqBody),
-  });
-
-  if (!res.ok) {
-    const errBody = await res.json().catch(() => ({}));
-    return { error: errBody?.error?.message ?? "Failed to create ticket." };
+  let ticket: { id: string; title: string; priceDecimal: string };
+  try {
+    const result = await executeMutation(CreateTicketDocument, {
+      input: {
+        title: title.trim(),
+        price: priceInCents,
+        quota: (reqBody.quota as number | undefined) ?? 0,
+        ...(reqBody.maxPerUser !== undefined && { maxPerUser: reqBody.maxPerUser as number }),
+        ticketType: gqlTicketType,
+        event: eventInput,
+      },
+    });
+    ticket = result.createTicket;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to create ticket.";
+    return { error: msg };
   }
-
-  const ticket = await res.json();
 
   // Phase 3: If seating plan, create it with ticketId (no separate attach)
   if (ticketType.startsWith("SEATED") && venueId) {
@@ -277,7 +288,7 @@ export async function createTicket(
     const updateError = await linkSeatingPlanToTicket(
       ticket.id,
       ticket.title,
-      ticket.price,
+      ticket.priceDecimal,
       plan.id,
       ticketType
     );
@@ -330,32 +341,28 @@ export async function updateTicket(
     endsAt += ":00Z";
   }
 
-  const reqBody: Record<string, unknown> = { title: title.trim(), price: priceRaw };
-  if (quota !== undefined) reqBody.quota = quota;
-  if (maxPerUser !== undefined) reqBody.maxPerUser = maxPerUser;
-  reqBody.event = {
-    title: eventTitle,
-    description: eventDescription,
-    startsAt,
-    imageUrl: eventImageUrl,
-    venueName,
-    venueAddress,
-    ...(endsAt ? { endsAt } : {}),
+  const updateInput = {
+    title: title.trim(),
+    price: Math.round(priceNum * 100),
+    ...(quota !== undefined && { quota }),
+    ...(maxPerUser !== undefined && { maxPerUser }),
+    event: {
+      title: eventTitle || undefined,
+      description: eventDescription || undefined,
+      startsAt,
+      imageUrl: eventImageUrl || undefined,
+      venueName: venueName || undefined,
+      venueAddress: venueAddress || undefined,
+      ...(endsAt ? { endsAt } : {}),
+    },
   };
 
-  const res = await fetch(`${base()}/api/tickets/${ticketId}`, {
-    method: "PUT",
-    headers: await authHeaders(),
-    // ticket-service requires price as a decimal string (e.g. "25.00"), not a number
-    body: JSON.stringify(reqBody),
-  });
-
-  if (!res.ok) {
-    if (res.status === 401) redirect("/auth/signin");
-    const errBody = await res.json().catch(() => ({}));
-    // ticket-service: { error: { message: "..." } }; Kong: { message: "..." }
-    const errMsg = errBody?.error?.message ?? errBody?.message ?? "Failed to update ticket.";
-    return { error: errMsg };
+  try {
+    await executeMutation(UpdateTicketDocument, { id: ticketId, input: updateInput });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) redirect("/auth/signin");
+    const msg = err instanceof Error ? err.message : "Failed to update ticket.";
+    return { error: msg };
   }
 
   const attendanceError = await upsertAttendanceSettings(ticketId, requireQrForEntry);

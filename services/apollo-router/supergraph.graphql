@@ -161,6 +161,7 @@ input CreateTicketInput
   quota: Int!
   maxPerUser: Int
   ticketType: TicketType!
+  event: TicketEventInput!
 }
 
 input CreateVenueInput
@@ -526,6 +527,18 @@ type TicketEvent
   venueAddress: String
 }
 
+input TicketEventInput
+  @join__type(graph: TICKETS)
+{
+  title: String
+  description: String
+  startsAt: String!
+  endsAt: String
+  imageUrl: String
+  venueName: String
+  venueAddress: String
+}
+
 input TicketFilter
   @join__type(graph: TICKETS)
 {
@@ -588,6 +601,7 @@ input UpdateTicketInput
   price: Int
   quota: Int
   maxPerUser: Int
+  event: TicketEventInput
 }
 
 input UpdateVenueInput

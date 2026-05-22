@@ -1,0 +1,10 @@
+mutation RecordCheckinByUserId($input: RecordCheckinByUserIdInput!) {
+  recordCheckinByUserId(input: $input) {
+    id
+    eventId
+    ticketId
+    orderId
+    checkedInAt
+    source
+  }
+}

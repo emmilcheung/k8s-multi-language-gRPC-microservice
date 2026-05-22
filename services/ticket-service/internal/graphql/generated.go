@@ -417,6 +417,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	ec := newExecutionContext(opCtx, e, make(chan graphql.DeferredResult))
 	inputUnmarshalMap := graphql.BuildUnmarshalerMap(
 		ec.unmarshalInputCreateTicketInput,
+		ec.unmarshalInputTicketEventInput,
 		ec.unmarshalInputTicketFilter,
 		ec.unmarshalInputUpdateTicketInput,
 	)
@@ -3740,7 +3741,7 @@ func (ec *executionContext) unmarshalInputCreateTicketInput(ctx context.Context,
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"title", "price", "quota", "maxPerUser", "ticketType"}
+	fieldsInOrder := [...]string{"title", "price", "quota", "maxPerUser", "ticketType", "event"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -3782,6 +3783,85 @@ func (ec *executionContext) unmarshalInputCreateTicketInput(ctx context.Context,
 				return it, err
 			}
 			it.TicketType = data
+		case "event":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("event"))
+			data, err := ec.unmarshalNTicketEventInput2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketEventInput(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Event = data
+		}
+	}
+	return it, nil
+}
+
+func (ec *executionContext) unmarshalInputTicketEventInput(ctx context.Context, obj any) (TicketEventInput, error) {
+	var it TicketEventInput
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"title", "description", "startsAt", "endsAt", "imageUrl", "venueName", "venueAddress"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "title":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("title"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Title = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		case "startsAt":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("startsAt"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.StartsAt = data
+		case "endsAt":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("endsAt"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.EndsAt = data
+		case "imageUrl":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("imageUrl"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ImageURL = data
+		case "venueName":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("venueName"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.VenueName = data
+		case "venueAddress":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("venueAddress"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.VenueAddress = data
 		}
 	}
 	return it, nil
@@ -3835,7 +3915,7 @@ func (ec *executionContext) unmarshalInputUpdateTicketInput(ctx context.Context,
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"title", "price", "quota", "maxPerUser"}
+	fieldsInOrder := [...]string{"title", "price", "quota", "maxPerUser", "event"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -3870,6 +3950,13 @@ func (ec *executionContext) unmarshalInputUpdateTicketInput(ctx context.Context,
 				return it, err
 			}
 			it.MaxPerUser = data
+		case "event":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("event"))
+			data, err := ec.unmarshalOTicketEventInput2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketEventInput(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Event = data
 		}
 	}
 	return it, nil
@@ -5047,6 +5134,11 @@ func (ec *executionContext) marshalNTicketEdge2ᚖgithubᚗcomᚋacmeᚋticket�
 	return ec._TicketEdge(ctx, sel, v)
 }
 
+func (ec *executionContext) unmarshalNTicketEventInput2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketEventInput(ctx context.Context, v any) (*TicketEventInput, error) {
+	res, err := ec.unmarshalInputTicketEventInput(ctx, v)
+	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
 func (ec *executionContext) unmarshalNTicketType2githubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketType(ctx context.Context, v any) (TicketType, error) {
 	var res TicketType
 	err := res.UnmarshalGQL(v)
@@ -5572,6 +5664,14 @@ func (ec *executionContext) marshalOTicketEvent2ᚖgithubᚗcomᚋacmeᚋticket�
 		return graphql.Null
 	}
 	return ec._TicketEvent(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalOTicketEventInput2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketEventInput(ctx context.Context, v any) (*TicketEventInput, error) {
+	if v == nil {
+		return nil, nil
+	}
+	res, err := ec.unmarshalInputTicketEventInput(ctx, v)
+	return &res, graphql.ErrorOnPath(ctx, err)
 }
 
 func (ec *executionContext) unmarshalOTicketFilter2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketFilter(ctx context.Context, v any) (*TicketFilter, error) {

@@ -10,11 +10,12 @@ import (
 )
 
 type CreateTicketInput struct {
-	Title      string     `json:"title"`
-	Price      int        `json:"price"`
-	Quota      int        `json:"quota"`
-	MaxPerUser *int       `json:"maxPerUser,omitempty"`
-	TicketType TicketType `json:"ticketType"`
+	Title      string            `json:"title"`
+	Price      int               `json:"price"`
+	Quota      int               `json:"quota"`
+	MaxPerUser *int              `json:"maxPerUser,omitempty"`
+	TicketType TicketType        `json:"ticketType"`
+	Event      *TicketEventInput `json:"event"`
 }
 
 type Mutation struct {
@@ -75,16 +76,27 @@ type TicketEvent struct {
 	VenueAddress *string `json:"venueAddress,omitempty"`
 }
 
+type TicketEventInput struct {
+	Title        *string `json:"title,omitempty"`
+	Description  *string `json:"description,omitempty"`
+	StartsAt     string  `json:"startsAt"`
+	EndsAt       *string `json:"endsAt,omitempty"`
+	ImageURL     *string `json:"imageUrl,omitempty"`
+	VenueName    *string `json:"venueName,omitempty"`
+	VenueAddress *string `json:"venueAddress,omitempty"`
+}
+
 type TicketFilter struct {
 	AvailableOnly *bool       `json:"availableOnly,omitempty"`
 	TicketType    *TicketType `json:"ticketType,omitempty"`
 }
 
 type UpdateTicketInput struct {
-	Title      *string `json:"title,omitempty"`
-	Price      *int    `json:"price,omitempty"`
-	Quota      *int    `json:"quota,omitempty"`
-	MaxPerUser *int    `json:"maxPerUser,omitempty"`
+	Title      *string           `json:"title,omitempty"`
+	Price      *int              `json:"price,omitempty"`
+	Quota      *int              `json:"quota,omitempty"`
+	MaxPerUser *int              `json:"maxPerUser,omitempty"`
+	Event      *TicketEventInput `json:"event,omitempty"`
 }
 
 type TicketType string

@@ -4,24 +4,43 @@
 // cookies() / authHeaders() are available in the request context.
 
 import { base, authHeaders } from "@/lib/server-utils";
-import type { ScannerRequest, ScannerResponse } from "@/lib/types";
+import type { ScannerRequest, ScannerResponse, ScannerResultClass } from "@/lib/types";
+import { executeMutation } from "@/lib/graphql/execute";
+import {
+  ValidateScanDocument,
+  RecordCheckinDocument,
+  RecordCheckinByUserIdDocument,
+} from "@/lib/graphql/generated";
 
 export async function scanCheckIn(
   input: ScannerRequest
 ): Promise<ScannerResponse> {
-  const res = await fetch(`${base()}/api/attendance/scan/check-in`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify(input),
+  // Step 1: validate the QR token to get ticketId and confirm it is unused.
+  const { validateScan: scan } = await executeMutation(ValidateScanDocument, {
+    token: input.token,
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(
-      (body as { error?: { message?: string } })?.error?.message ??
-        `Scan check-in failed (${res.status}).`
-    );
+
+  if (!scan.valid) {
+    return {
+      result: (scan.reason ?? "invalid_signature") as ScannerResultClass,
+      eventId: scan.eventId ?? undefined,
+    };
   }
-  return res.json() as Promise<ScannerResponse>;
+
+  if (!scan.ticketId) {
+    return { result: "invalid_signature" };
+  }
+
+  // Step 2: record the check-in with QR source.
+  const { recordCheckin: checkin } = await executeMutation(RecordCheckinDocument, {
+    input: { ticketId: scan.ticketId, source: "QR_SCAN" },
+  });
+
+  return {
+    result: "valid",
+    credentialId: checkin.id,
+    eventId: checkin.eventId,
+  };
 }
 
 export async function scanCheckInByEmail(input: {
@@ -29,6 +48,7 @@ export async function scanCheckInByEmail(input: {
   email: string;
   deviceId: string;
 }): Promise<ScannerResponse> {
+  // Users/lookup stays REST — no GraphQL equivalent.
   const lookupRes = await fetch(
     `${base()}/api/users/lookup?email=${encodeURIComponent(input.email)}`,
     {
@@ -50,21 +70,13 @@ export async function scanCheckInByEmail(input: {
     throw new Error("Buyer account lookup returned an invalid response.");
   }
 
-  const checkInRes = await fetch(`${base()}/api/attendance/scan/check-in-user`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({
-      eventId: input.eventId,
-      buyerUserId,
-      deviceId: input.deviceId,
-    }),
-  });
-  if (!checkInRes.ok) {
-    const body = await checkInRes.json().catch(() => ({}));
-    throw new Error(
-      (body as { error?: { message?: string } })?.error?.message ??
-        `Email check-in failed (${checkInRes.status}).`
-    );
-  }
-  return checkInRes.json() as Promise<ScannerResponse>;
+  const { recordCheckinByUserId: checkin } = await executeMutation(
+    RecordCheckinByUserIdDocument,
+    { input: { eventId: input.eventId, userId: buyerUserId } }
+  );
+
+  return {
+    result: "valid",
+    eventId: checkin.eventId,
+  };
 }
