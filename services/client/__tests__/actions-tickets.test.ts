@@ -112,6 +112,52 @@ describe("ticket server actions", () => {
     expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1");
   });
 
+  it("createTicket retries attendance settings when event projection is not ready", async () => {
+    executeMutationMock.mockResolvedValueOnce({
+      createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" },
+    });
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        json: vi.fn().mockResolvedValue({
+          error: { message: "event not found" },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({}),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createTicket({}, ticketForm("Concert", "12.50"));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/attendance/events/ticket-1/settings");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost:8080/api/attendance/events/ticket-1/settings");
+    expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1");
+  });
+
+  it("createTicket does not block redirect when attendance event stays unavailable", async () => {
+    executeMutationMock.mockResolvedValueOnce({
+      createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" },
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: vi.fn().mockResolvedValue({
+        error: { message: "event not found" },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createTicket({}, ticketForm("Concert", "12.50"));
+
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1");
+  });
+
   it("createTicket creates and links a seating plan for seated tickets", async () => {
     executeMutationMock
       .mockResolvedValueOnce({

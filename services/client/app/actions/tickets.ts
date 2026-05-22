@@ -146,16 +146,30 @@ async function linkSeatingPlanToTicket(
 }
 
 async function upsertAttendanceSettings(eventId: string, requireQrForEntry: boolean): Promise<string | null> {
-  const response = await fetch(`${base()}/api/attendance/events/${eventId}/settings`, {
-    method: "PATCH",
-    headers: await authHeaders(),
-    body: JSON.stringify({ requireQrForEntry }),
-  });
+  let lastNotFound = false;
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    const response = await fetch(`${base()}/api/attendance/events/${eventId}/settings`, {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ requireQrForEntry }),
+    });
 
-  if (response.ok) return null;
+    if (response.ok) return null;
 
-  const errBody = await response.json().catch(() => ({}));
-  return errBody?.error?.message ?? "Failed to save attendance settings.";
+    const errBody = await response.json().catch(() => ({}));
+    const message = errBody?.error?.message ?? "Failed to save attendance settings.";
+    const isNotFound = response.status === 404 || String(message).toLowerCase().includes("event not found");
+    if (!isNotFound) {
+      return message;
+    }
+    lastNotFound = true;
+    if (attempt === 8) break;
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  if (lastNotFound) return null;
+  return "Failed to save attendance settings.";
 }
 
 // ─── Mutations ────────────────────────────────────────────────────────────────
