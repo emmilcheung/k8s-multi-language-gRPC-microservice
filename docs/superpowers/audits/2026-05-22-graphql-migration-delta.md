@@ -1,7 +1,7 @@
 # GraphQL Migration Delta Audit — 2026-05-22
 
 - **Branch:** `feat/client-graphql-foundation`
-- **HEAD:** `6a26873ae0b5d7903e078721b5f8e7865d1ecdeb`
+- **HEAD:** `e48af62a41131ef64513102195f99e0fbfe9011f`
 - **Delta auditor model:** GPT-5.3-Codex
 - **Original verdict:** HOLD (10 defects: 4 P0 / 3 P1 / 1 P2 / 3 RISK)
 
