@@ -215,6 +215,32 @@ describe("ticket server actions", () => {
     expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1");
   });
 
+  it("createTicket retries seated plan creation when ticket projection is delayed", async () => {
+    executeMutationMock
+      .mockResolvedValueOnce({
+        createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" },
+      })
+      .mockRejectedValueOnce(new Error("ticket not found"))
+      .mockResolvedValueOnce({ createSeatingPlan: { id: "plan-1", status: "DRAFT", assignmentMode: "MANUAL" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({}),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({}),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createTicket({}, seatedTicketForm("Concert", "12.50", "11111111-1111-1111-1111-111111111111"));
+
+    expect(executeMutationMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/tickets/ticket-1");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost:8080/api/attendance/events/ticket-1/settings");
+    expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1");
+  });
+
   it("createTicket creates and links a manual seating plan for seated tickets", async () => {
     executeMutationMock
       .mockResolvedValueOnce({

@@ -287,21 +287,30 @@ export async function createSeatingPlanForTicket(
 ): Promise<{ id: string } | null> {
   if (!ticketId || !venueId || !planName) return null;
 
-  try {
-    const data = await executeMutation(CreateSeatingPlanDocument, {
-      input: {
-        ticketId,
-        venueId,
-        name: planName,
-        assignmentMode: assignmentMode === "auto" ? "AUTO" : "MANUAL",
-        maxSeatsPerOrder: maxSeatsPerOrder ?? 10,
-        pricingMode: pricingMode ?? undefined,
-      },
-    });
-    return { id: data.createSeatingPlan.id };
-  } catch {
-    return null;
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    try {
+      const data = await executeMutation(CreateSeatingPlanDocument, {
+        input: {
+          ticketId,
+          venueId,
+          name: planName,
+          assignmentMode: assignmentMode === "auto" ? "AUTO" : "MANUAL",
+          maxSeatsPerOrder: maxSeatsPerOrder ?? 10,
+          pricingMode: pricingMode ?? undefined,
+        },
+      });
+      return { id: data.createSeatingPlan.id };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      const isNotFound = message.toLowerCase().includes("not found");
+      if (!isNotFound || attempt === 8) {
+        return null;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   }
+
+  return null;
 }
 
 /**
