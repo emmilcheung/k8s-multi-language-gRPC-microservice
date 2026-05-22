@@ -199,19 +199,11 @@ func main() {
 	gqlResolver := &gqlgraph.Resolver{TicketService: svc}
 	gqlSrv := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{Resolvers: gqlResolver}))
 	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID := r.Header.Get("X-User-Id")
-		sig := r.Header.Get("X-User-Id-Sig")
-		if userID != "" && !signatureValidator.IsValidSignature(userID, sig) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"errors":[{"message":"unauthorized: invalid user identity signature"}]}`)) //nolint:errcheck
-			return
-		}
 		loader := gqlgraph.NewTicketLoader(svc)
 		ctx := gqlgraph.WithTicketLoader(r.Context(), loader)
 		gqlSrv.ServeHTTP(w, r.WithContext(ctx))
 	})
-	e.POST("/graphql", echo.WrapHandler(gqlHandler))
+	e.POST("/graphql", echo.WrapHandler(gqlgraph.WrapWithUserIDSignatureValidation(gqlHandler, signatureValidator)))
 
 	// R-06: Use errgroup to propagate server errors back to main instead of
 	// calling log.Fatal inside goroutines (which calls os.Exit, skipping all deferred cleanup).
