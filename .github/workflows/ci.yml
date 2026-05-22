@@ -1050,9 +1050,23 @@ jobs:
           path: services/client/playwright-report/
           retention-days: 7
 
-      - name: Dump docker compose logs on failure
-        if: failure()
-        run: docker compose logs --no-color > /tmp/compose-logs.txt && cat /tmp/compose-logs.txt
+      - name: Capture docker compose logs
+        if: always()
+        run: docker compose logs --no-color > /tmp/compose-logs.raw.txt
+
+      - name: Enforce secret-free compose logs
+        if: always()
+        run: |
+          SECRET_PATTERN='STRIPE_SECRET|DATABASE_URL|SIGNING_KEY|REFRESH_TOKEN|JWT_SECRET|RSA_PRIVATE_KEY'
+          if grep -qiE "$SECRET_PATTERN" /tmp/compose-logs.raw.txt; then
+            echo "FAIL: secret-like pattern detected in compose logs"
+            exit 1
+          fi
+          echo "OK: no secret-like patterns detected in compose logs"
+
+      - name: Scrub compose logs for artifact upload
+        if: always()
+        run: bash audit/scripts/scrub-secrets.sh < /tmp/compose-logs.raw.txt > /tmp/compose-logs.txt
 
       - name: Upload compose logs on failure
         if: failure()
