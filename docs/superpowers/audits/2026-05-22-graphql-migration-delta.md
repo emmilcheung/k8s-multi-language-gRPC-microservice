@@ -1,7 +1,7 @@
 # GraphQL Migration Delta Audit — 2026-05-22
 
 - **Branch:** `feat/client-graphql-foundation`
-- **HEAD:** `8edd55480ff4b2fbf24f529ae4ec3353126b3342`
+- **HEAD:** `fbdd10e6d76fca2e32b6840d7538f7a841f7f835`
 - **Delta auditor model:** GPT-5.3-Codex
 - **Original verdict:** HOLD (10 defects: 4 P0 / 3 P1 / 1 P2 / 3 RISK)
 
@@ -19,7 +19,8 @@
 | P2-001 kubeconform CI step | REAL | **FIXED** | `9838b18` | `.github/workflows/ci.yml`, `/tmp/graphql-delta/d8-helm-kubeconform.log` |
 | RISK D1-F1 | RISK | **FIXED via P1-003** | `b4e0672` | Same as P1-003 |
 | RISK D7-F1 metrics coverage | RISK | **RE-PROVED on Node 24** | n/a | `/tmp/graphql-delta/d7-metrics-results.log` |
-| RISK D9-F1/2 dependency backlog | RISK | **RE-PROVED + TRIAGED (not fully remediated)** | n/a | `/tmp/graphql-delta/d9-*-pnpm-audit.log`, `/tmp/graphql-delta/d9-*-go-mod-updates.log` |
+| RISK D9-F1/2 dependency backlog | RISK | **PARTIALLY FIXED + TRIAGED** (highs reduced; residual lodash advisories remain) | `fbdd10e` | `/tmp/graphql-delta/d9-*-pnpm-audit-post-commit.log`, `/tmp/graphql-delta/d9-*-go-mod-updates.log` |
+| D4 follow-up stabilization | RISK | **PARTIALLY FIXED** (`event not found` class mitigated; full suite still red) | `a1a7bed` | `services/client/app/actions/tickets.ts`, `services/client/__tests__/actions-tickets.test.ts`, `/tmp/graphql-delta/d4-client-e2e-post-commit.log` |
 | RISK D10-F1 rollback runbook | RISK | **FIXED** | `8edd554` | `docs/16-session-progress-log.md`, `/tmp/graphql-delta/revert-dry-run.log` |
 
 ## Re-verdict by Dimension (D1–D10)
@@ -29,18 +30,18 @@
 | D1 | PASS | Ticket GraphQL now uses `WrapWithUserIDSignatureValidation`; explicit invalid-signature 401 test added and passing. |
 | D2 | PASS | No new migration-scope contract drift introduced beyond audited items; router drift defect resolved. |
 | D3 | PASS | Service build/test gates rerun on Node 24 baseline and passing. |
-| D4 | **FAIL** | Compose startup + seeded 7-step smoke flow pass, but full `pnpm test:e2e` remains red (`25 failed / 25 passed`) with repeated `event not found` failures in ticketing/attendance flows. |
+| D4 | **FAIL** | Compose startup + seeded 7-step smoke flow pass. Full `pnpm test:e2e` improved but remains red (`15 failed / 35 passed`): seated-plan lifecycle and several ticket/settings assertions still failing. |
 | D5 | PASS | No additional REST keep-list policy regressions detected; static keeplist Playwright spec passes. |
 | D6 | PASS | Fresh compose logs re-grepped with secret patterns: empty result set. |
 | D7 | PASS | Per-service metrics endpoints re-probed and returning metric payloads. |
 | D8 | PASS | Node-24 CI hand-replay gates green: GraphQL validation, inline gql ban, keeplist test, Helm template + kubeconform, latest-tag grep. |
-| D9 | **RISK** | Node package audits still report multiple High vulnerabilities (client/auth/user/payment); Go module updates triaged but not fully remediated in this pass. |
+| D9 | **RISK** | High vulnerabilities reduced from 46 total highs to 3 residual highs (`lodash` advisory path in client/auth/payment); user-service highs cleared; Go modules triaged. |
 | D10 | PASS | Revert sequence documented and dry-run performed with cleanup sequence. |
 
 ## Final Verdict
 
 - **Delta verdict:** **HOLD**
-- **Reason:** D4 remains failing at full E2E suite level and D9 still has unresolved High vulnerability backlog.
+- **Reason:** D4 remains failing at full E2E suite level and D9 still has 3 unresolved high advisories with no currently published patched lodash line in audit output.
 
 ## Appendix — Proof-of-fix command tails
 
@@ -76,7 +77,7 @@
 - 7-step seeded smoke flow (signup/currentUser/ticketsConnection/createOrder/createPayment/cancelOrder/orders)
   - evidence: `/tmp/graphql-delta/d4-smoke.log` and `/tmp/graphql-delta/d4-step*.json`
 - `cd services/client && pnpm build && pnpm test:e2e`
-  - build pass; E2E fail, evidence: `/tmp/graphql-delta/d4-client-build.log`, `/tmp/graphql-delta/d4-client-e2e.log`
+  - build pass; E2E fail (latest: `15 failed / 35 passed`), evidence: `/tmp/graphql-delta/d4-client-build.log`, `/tmp/graphql-delta/d4-client-e2e.log`, `/tmp/graphql-delta/d4-client-e2e-post-commit.log`
 
 ### D6 (secret grep)
 
@@ -118,16 +119,16 @@
 
 - D7 per-service metrics: `/tmp/graphql-delta/d7-metrics-results.log`
 - D9 package/go triage evidence:
-  - `/tmp/graphql-delta/d9-client-pnpm-audit.log`
-  - `/tmp/graphql-delta/d9-auth-service-pnpm-audit.log`
-  - `/tmp/graphql-delta/d9-user-service-pnpm-audit.log`
-  - `/tmp/graphql-delta/d9-payment-service-pnpm-audit.log`
+  - `/tmp/graphql-delta/d9-client-pnpm-audit-post-commit.log`
+  - `/tmp/graphql-delta/d9-auth-service-pnpm-audit-post-commit.log`
+  - `/tmp/graphql-delta/d9-user-service-pnpm-audit-post-commit.log`
+  - `/tmp/graphql-delta/d9-payment-service-pnpm-audit-post-commit.log`
   - `/tmp/graphql-delta/d9-ticket-service-go-mod-updates.log`
   - `/tmp/graphql-delta/d9-venue-service-go-mod-updates.log`
   - `/tmp/graphql-delta/d9-attendance-service-go-mod-updates.log`
 
 ## Open questions for owner
 
-1. Should D4 stay as release-blocking while we open a follow-up workstream for the 25 failing ticketing/attendance Playwright cases, or do you want that fixed in this branch before sign-off?
-2. For D9, should we scope a dedicated dependency hardening sprint now (High vulns in multiple PNPM services), or accept risk with a dated mitigation plan?
+1. Should D4 stay release-blocking while we open a follow-up workstream for the remaining 15 Playwright failures, or do you want all 50 tests green in this branch before sign-off?
+2. For D9, should we accept temporary risk on the 3 residual lodash highs pending upstream patched line availability, or enforce alternative package replacement now?
 3. Do you want router health to be host-exposed (e.g., publish health port) to align operator runbooks with `curl localhost` checks, or keep container-internal health only?
