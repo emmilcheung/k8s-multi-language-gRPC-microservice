@@ -232,7 +232,7 @@ services:
   # All external HTTP traffic enters through Kong on port 8000.
   # kong.yml is rendered at container startup from services/kong-gateway/
   # using the values/local.yml overrides and KONG_RSA_PUBLIC_KEY from .env.
-  # Admin API is bound to 127.0.0.1:8001 only (not exposed publicly).
+  # Admin API must bind to 0.0.0.0 in-container so host 8001 probes work.
   kong:
     build:
       context: ./services/kong-gateway
@@ -247,7 +247,7 @@ services:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
       KONG_PROXY_LISTEN: "0.0.0.0:8000"
-      KONG_ADMIN_LISTEN: "127.0.0.1:8001"
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
       KONG_STATUS_LISTEN: "0.0.0.0:8100"
       KONG_LOG_LEVEL: info
       KONG_PROXY_ACCESS_LOG: /dev/stdout

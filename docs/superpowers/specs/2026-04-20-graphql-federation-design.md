@@ -770,7 +770,7 @@ apollo-router:
   networks:
     - microservices-net
   healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:4001/health"]
+    test: ["CMD", "bash", "-lc", "exec 3<>/dev/tcp/127.0.0.1/8088 && printf 'GET /health HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q '200 OK'"]
     interval: 10s
     timeout: 5s
     retries: 3

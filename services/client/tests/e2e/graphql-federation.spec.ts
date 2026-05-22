@@ -158,6 +158,13 @@ async function graphqlRequest(
 // ---------------------------------------------------------------------------
 
 test.describe("GraphQL Federation — Auth Propagation", () => {
+  test("kong admin status endpoint responds on port 8001", async ({ request }) => {
+    const response = await request.get("http://localhost:8001/status");
+    expect(response.status()).toBe(200);
+    const body = await response.json();
+    expect(body.server).toBeTruthy();
+  });
+
   test("authenticated user can query currentUser via GraphQL", async ({ page, request }) => {
     const email = uniqueEmail("gql-auth");
     await signup(page, email);
