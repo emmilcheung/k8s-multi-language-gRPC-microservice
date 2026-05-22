@@ -1,7 +1,7 @@
 # GraphQL Migration Delta Audit — 2026-05-22
 
 - **Branch:** `feat/client-graphql-foundation`
-- **HEAD:** `fbdd10e6d76fca2e32b6840d7538f7a841f7f835`
+- **HEAD:** `06a85b17133546f1cf35ec9a5f50bb0dbf6056fc`
 - **Delta auditor model:** GPT-5.3-Codex
 - **Original verdict:** HOLD (10 defects: 4 P0 / 3 P1 / 1 P2 / 3 RISK)
 
@@ -20,7 +20,7 @@
 | RISK D1-F1 | RISK | **FIXED via P1-003** | `b4e0672` | Same as P1-003 |
 | RISK D7-F1 metrics coverage | RISK | **RE-PROVED on Node 24** | n/a | `/tmp/graphql-delta/d7-metrics-results.log` |
 | RISK D9-F1/2 dependency backlog | RISK | **PARTIALLY FIXED + TRIAGED** (highs reduced; residual lodash advisories remain) | `fbdd10e` | `/tmp/graphql-delta/d9-*-pnpm-audit-post-commit.log`, `/tmp/graphql-delta/d9-*-go-mod-updates.log` |
-| D4 follow-up stabilization | RISK | **PARTIALLY FIXED** (`event not found` class mitigated; full suite still red) | `a1a7bed` | `services/client/app/actions/tickets.ts`, `services/client/__tests__/actions-tickets.test.ts`, `/tmp/graphql-delta/d4-client-e2e-post-commit.log` |
+| D4 follow-up stabilization | RISK | **PARTIALLY FIXED** (`event not found` class mitigated; projection-lag retries added for attendance + seating plan; full suite still red) | `a1a7bed`, `06a85b1` | `services/client/app/actions/tickets.ts`, `services/client/app/actions/venues.ts`, `services/client/__tests__/actions-tickets.test.ts`, `/tmp/graphql-delta/d4-client-e2e-after-seated-retry.log` |
 | RISK D10-F1 rollback runbook | RISK | **FIXED** | `8edd554` | `docs/16-session-progress-log.md`, `/tmp/graphql-delta/revert-dry-run.log` |
 
 ## Re-verdict by Dimension (D1–D10)
