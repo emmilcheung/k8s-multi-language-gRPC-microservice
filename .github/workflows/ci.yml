@@ -52,6 +52,7 @@ jobs:
       client:     ${{ steps.filter.outputs.client }}
       expiration: ${{ steps.filter.outputs.expiration }}
       graphql:    ${{ steps.filter.outputs.graphql }}
+      helm:       ${{ steps.filter.outputs.helm }}
       kong:       ${{ steps.filter.outputs.kong }}
       order:      ${{ steps.filter.outputs.order }}
       payment:    ${{ steps.filter.outputs.payment }}
@@ -83,6 +84,9 @@ jobs:
               - 'services/apollo-router/supergraph-config.yaml'
               - 'services/apollo-router/supergraph.graphql'
               - 'services/client/lib/graphql/operations/**'
+            helm:
+              - 'infra/helm/**'
+              - '.github/workflows/ci.yml'
             kong:
               - 'services/kong-gateway/**'
               - '.github/workflows/ci.yml'
@@ -407,6 +411,49 @@ jobs:
             echo "Supergraph composed successfully"
         env:
           APOLLO_ELV2_LICENSE: accept
+
+  # ── helm (rendered manifest lint) ────────────────────────────────────────────
+  helm-validate:
+    name: Helm rendered-manifest validation
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.helm == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL -o /tmp/kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform
+          kubeconform -v
+
+      - name: Enforce no latest tags in infra Helm values
+        run: |
+          if grep -RE "tag:\s*latest" infra/helm; then
+            echo "FAIL: tag: latest is not allowed under infra/helm"
+            exit 1
+          fi
+          echo "OK: no tag: latest found under infra/helm"
+
+      - name: Validate rendered service charts with kubeconform
+        run: |
+          set -euo pipefail
+          for chart in infra/helm/charts/*; do
+            [ -d "${chart}" ] || continue
+            chart_name="$(basename "${chart}")"
+            echo "Validating ${chart_name}"
+            helm template "${chart_name}" "${chart}" \
+              --set global.serviceMesh.enabled=false \
+              --set global.imageRegistry='' \
+              | kubeconform -summary -strict -ignore-missing-schemas
+          done
 
   # ── order-service (Java 21 / Spring Boot / Maven) ──────────────────────────
   # Build context is the REPO ROOT — Dockerfile reads ../../proto/ for protobuf codegen.
@@ -1303,7 +1350,7 @@ jobs:
     name: CI
     runs-on: ubuntu-24.04
     if: always()
-    needs: [changes, auth, client, expiration, graphql, kong, order, payment, proto, ticket, user, venue, e2e]
+    needs: [changes, auth, client, expiration, graphql, helm-validate, kong, order, payment, proto, ticket, user, venue, e2e]
     steps:
       - name: Check all jobs passed (or skip if only markdown changed)
         run: |
