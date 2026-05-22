@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/acme/venue-service/internal/repository"
 )
@@ -148,6 +149,10 @@ func (r *mutationResolver) UpdateSection(ctx context.Context, id string, input U
 	return mapVenueSectionToGQL(existing), nil
 }
 
+func normalizeAssignmentMode(mode AssignmentMode) string {
+	return strings.ToLower(string(mode))
+}
+
 // CreateSeatingPlan is the resolver for the createSeatingPlan field.
 func (r *mutationResolver) CreateSeatingPlan(ctx context.Context, input CreateSeatingPlanInput) (*SeatingPlan, error) {
 	organizerID := userIDFromContext(ctx)
@@ -168,7 +173,7 @@ func (r *mutationResolver) CreateSeatingPlan(ctx context.Context, input CreateSe
 		OrganizerID:      organizerID,
 		Name:             input.Name,
 		MaxSeatsPerOrder: maxSeats,
-		AssignmentMode:   string(input.AssignmentMode),
+		AssignmentMode:   normalizeAssignmentMode(input.AssignmentMode),
 		PricingMode:      pricingMode,
 	}
 	if err := r.PlanRepo.Create(ctx, p); err != nil {
@@ -206,7 +211,7 @@ func (r *mutationResolver) UpdateSeatingPlan(ctx context.Context, id string, inp
 		existing.MaxSeatsPerOrder = *input.MaxSeatsPerOrder
 	}
 	if input.AssignmentMode != nil {
-		existing.AssignmentMode = string(*input.AssignmentMode)
+		existing.AssignmentMode = normalizeAssignmentMode(*input.AssignmentMode)
 	}
 	if input.PricingMode != nil {
 		existing.PricingMode = *input.PricingMode

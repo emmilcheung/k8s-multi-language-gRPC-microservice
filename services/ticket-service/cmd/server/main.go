@@ -201,6 +201,7 @@ func main() {
 	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		loader := gqlgraph.NewTicketLoader(svc)
 		ctx := gqlgraph.WithTicketLoader(r.Context(), loader)
+		ctx = gqlgraph.WithUserID(ctx, r.Header.Get("X-User-Id"))
 		gqlSrv.ServeHTTP(w, r.WithContext(ctx))
 	})
 	e.POST("/graphql", echo.WrapHandler(gqlgraph.WrapWithUserIDSignatureValidation(gqlHandler, signatureValidator)))

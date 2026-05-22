@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -16,14 +17,24 @@ import (
 	"github.com/acme/ticket-service/internal/service"
 )
 
+func intPriceToDecimalString(price int) string {
+	value := float64(price) / 100.0
+	return strconv.FormatFloat(math.Round(value*100)/100, 'f', 2, 64)
+}
+
 // CreateTicket is the resolver for the createTicket field.
 func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketInput) (*Ticket, error) {
-	price := strconv.Itoa(input.Price)
+	userID := userIDFromContext(ctx)
+	if userID == "" {
+		return nil, fmt.Errorf("createTicket: unauthorized: user identity required")
+	}
+	price := intPriceToDecimalString(input.Price)
 
 	svcInput := service.CreateTicketInput{
 		Title: input.Title,
 		Price: price,
 		Quota: input.Quota,
+		UserID: userID,
 	}
 	if input.MaxPerUser != nil {
 		svcInput.MaxPerUser = *input.MaxPerUser
@@ -45,6 +56,10 @@ func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketI
 
 // UpdateTicket is the resolver for the updateTicket field.
 func (r *mutationResolver) UpdateTicket(ctx context.Context, id string, input UpdateTicketInput) (*Ticket, error) {
+	userID := userIDFromContext(ctx)
+	if userID == "" {
+		return nil, fmt.Errorf("updateTicket: unauthorized: user identity required")
+	}
 	// Fetch the current ticket so we can fill fields the caller didn't change.
 	existing, err := r.TicketService.GetTicketByID(ctx, id)
 	if err != nil {
@@ -55,13 +70,14 @@ func (r *mutationResolver) UpdateTicket(ctx context.Context, id string, input Up
 		ID:    id,
 		Title: existing.Title,
 		Price: existing.Price,
+		UserID: userID,
 	}
 
 	if input.Title != nil {
 		svcInput.Title = *input.Title
 	}
 	if input.Price != nil {
-		svcInput.Price = strconv.Itoa(*input.Price)
+		svcInput.Price = intPriceToDecimalString(*input.Price)
 	}
 	if input.Event != nil {
 		ev, err := mapEventInput(input.Event)
