@@ -69,16 +69,21 @@ export async function submitPayment(
   formData: FormData
 ): Promise<OrderState> {
   void prev;
-  void formData;
-
-  const token = process.env.STRIPE_TEST_TOKEN ?? "pm_card_visa";
+  const paymentMethodId = String(formData.get("paymentMethodId") ?? "").trim();
+  const savedPaymentMethodId = String(formData.get("savedPaymentMethodId") ?? "").trim();
+  if (!paymentMethodId && !savedPaymentMethodId) {
+    return { error: "Payment method is required." };
+  }
 
   try {
+    const input = savedPaymentMethodId
+      ? { orderId, savedPaymentMethodId }
+      : { orderId, token: paymentMethodId };
     await executeMutation(CreatePaymentDocument, {
-      input: { orderId, token },
+      input,
     });
     revalidatePath(`/orders/${orderId}`);
-    redirect(`/orders/${orderId}`);
+    return {};
   } catch (error) {
     if (isRedirectError(error)) throw error;
     return { error: error instanceof Error ? error.message : "Payment failed." };
@@ -161,4 +166,3 @@ export async function createAutoAssignSeatedOrder(
     return { error: error instanceof Error ? error.message : "Failed to create auto-assign order." };
   }
 }
-

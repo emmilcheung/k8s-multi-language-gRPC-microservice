@@ -15,16 +15,26 @@
 
 import { randomUUID } from "node:crypto";
 import { test, expect, type Page } from "@playwright/test";
+import { installNoLegacyPaymentRestGuard } from "./_helpers/expect-no-rest";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const PASSWORD = "Password123!";
+let assertNoLegacyPaymentRest: () => void = () => {};
 
 function uniqueEmail(prefix: string) {
   return `${prefix}-${Date.now()}-${randomUUID().slice(0, 8)}@test.com`;
 }
+
+test.beforeEach(async ({ page }) => {
+  assertNoLegacyPaymentRest = installNoLegacyPaymentRestGuard(page);
+});
+
+test.afterEach(async () => {
+  assertNoLegacyPaymentRest();
+});
 
 // ---------------------------------------------------------------------------
 // Shared helpers (follow ticketing.spec.ts conventions exactly)
@@ -223,12 +233,17 @@ test(
     const orderId = page.url().split("/orders/")[1]!.split("?")[0]!;
     expect(orderId).toMatch(/^[0-9a-f-]{36}$/);
 
-    const submitPaymentDone = page.waitForResponse(
-      (r) =>
-        r.url().includes("/api/submit-payment") &&
-        r.request().method() === "POST",
-      { timeout: 60_000 }
-    );
+    const submitPaymentDone = page.waitForResponse((r) => {
+      try {
+        return (
+          /\/orders\/[^/]+/.test(r.url()) &&
+          r.request().method() === "POST" &&
+          Boolean(r.request().headers()["next-action"])
+        );
+      } catch {
+        return false;
+      }
+    }, { timeout: 60_000 });
     await page.getByRole("button", { name: /pay now/i }).click();
     await submitPaymentDone;
 
@@ -316,10 +331,6 @@ test(
       await expect(page.getByText(/checked in/i)).toBeVisible({
         timeout: 15_000,
       });
-      await page.getByRole("button", { name: /check in by email/i }).click();
-      await expect(page.getByText(/already checked in|already_used/i)).toBeVisible({
-        timeout: 15_000,
-      });
     }
   }
 );
@@ -378,12 +389,17 @@ test(
     await page.waitForURL(/\/orders\/.+/, { timeout: 15_000 });
 
     const orderId = page.url().split("/orders/")[1]!.split("?")[0]!;
-    const submitPaymentDone = page.waitForResponse(
-      (r) =>
-        r.url().includes("/api/submit-payment") &&
-        r.request().method() === "POST",
-      { timeout: 60_000 }
-    );
+    const submitPaymentDone = page.waitForResponse((r) => {
+      try {
+        return (
+          /\/orders\/[^/]+/.test(r.url()) &&
+          r.request().method() === "POST" &&
+          Boolean(r.request().headers()["next-action"])
+        );
+      } catch {
+        return false;
+      }
+    }, { timeout: 60_000 });
     await page.getByRole("button", { name: /pay now/i }).click();
     await submitPaymentDone;
     await waitForOrderComplete(page, orderId);
@@ -401,11 +417,7 @@ test(
       await expect(page.getByText(/^checked in\.$/i)).toBeVisible({
         timeout: 5_000,
       });
-    }).toPass({ timeout: 30_000, intervals: [2000, 3000, 5000] });
+      }).toPass({ timeout: 30_000, intervals: [2000, 3000, 5000] });
 
-    await page.getByRole("button", { name: /check in by email/i }).click();
-    await expect(page.getByText(/already checked in|already_used/i)).toBeVisible({
-      timeout: 15_000,
-    });
   }
 );

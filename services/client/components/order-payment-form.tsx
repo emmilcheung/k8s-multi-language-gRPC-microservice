@@ -5,7 +5,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Lock, AlertCircle, CreditCard, Loader2, X, Clock, ChevronDown, Plus } from "lucide-react";
-import { cancelOrder } from "@/app/actions/orders";
+import { cancelOrder, submitPayment } from "@/app/actions/orders";
 import type { OrderState } from "@/app/actions/orders";
 import type { SavedPaymentMethod } from "@/lib/types";
 
@@ -288,11 +288,11 @@ export function OrderPaymentForm({
     setPollingNotice(null);
 
     try {
-      let body: Record<string, string>;
+      const formData = new FormData();
 
       if (!showNewCard && selectedMethodId) {
         // Pay with a saved payment method
-        body = { orderId, savedPaymentMethodId: selectedMethodId };
+        formData.set("savedPaymentMethodId", selectedMethodId);
       } else {
         // Pay with a new card via Stripe
         if (!stripeInstanceRef.current || !cardElementInstanceRef.current) {
@@ -318,18 +318,12 @@ export function OrderPaymentForm({
           return;
         }
 
-        body = { orderId, paymentMethodId: result.paymentMethod.id };
+        formData.set("paymentMethodId", result.paymentMethod.id);
       }
 
-      const res = await fetch("/api/submit-payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const resBody = await res.json().catch(() => ({}));
-        setPaymentError(resBody?.error?.message ?? "Payment failed.");
+      const submitResult = await submitPayment(orderId, initialState, formData);
+      if (submitResult.error) {
+        setPaymentError(submitResult.error);
         setIsProcessing(false);
         return;
       }

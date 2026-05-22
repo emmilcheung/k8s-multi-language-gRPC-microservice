@@ -63,10 +63,6 @@ async function getTicket(ticketId: string): Promise<Ticket> {
   for (let attempt = 0; attempt <= TICKET_LOAD_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
       const cookieStore = await cookies();
-      const token = cookieStore.get("token")?.value;
-      if (!token) {
-        return await serverApi<Ticket>(`/api/tickets/${ticketId}`);
-      }
       const cookieHeader = cookieStore.toString();
 
       const data = await executeQuery(TicketDetailDocument, { id: ticketId }, { cookie: cookieHeader });

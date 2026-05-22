@@ -276,7 +276,7 @@ describe("TicketDetailPage", () => {
 
   it("shows ticket title and price", async () => {
     const ticket = makeTicket();
-    serverApiMock.mockResolvedValue(ticket);
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
 
     const { default: TicketDetailPage } = await import(
       "@/app/tickets/[ticketId]/page"
@@ -423,7 +423,7 @@ describe("TicketDetailPage", () => {
 
   it("shows 'Sign in to Purchase' link for an unauthenticated buyer", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    serverApiMock.mockResolvedValue(ticket);
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue(undefined);
 
     const { default: TicketDetailPage } = await import(

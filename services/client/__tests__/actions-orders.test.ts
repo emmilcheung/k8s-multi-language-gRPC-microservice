@@ -79,15 +79,34 @@ describe("order server actions", () => {
     expect(redirectMock).toHaveBeenCalledWith("/orders");
   });
 
-  it("submitPayment uses the GraphQL payment mutation with order id and token", async () => {
+  it("submitPayment uses paymentMethodId from formData in GraphQL payment mutation", async () => {
     executeMutationMock.mockResolvedValue({
       createPayment: { id: "pay-1", orderId: "order-3" },
     });
+    const formData = new FormData();
+    formData.set("paymentMethodId", "pm_new_123");
 
-    await submitPayment("order-3", {}, new FormData());
+    const result = await submitPayment("order-3", {}, formData);
 
-    expect(executeMutationMock).toHaveBeenCalledTimes(1);
-    expect(redirectMock).toHaveBeenCalledWith("/orders/order-3");
+    expect(result).toEqual({});
+    expect(executeMutationMock).toHaveBeenCalledWith(expect.anything(), {
+      input: { orderId: "order-3", token: "pm_new_123" },
+    });
+  });
+
+  it("submitPayment uses savedPaymentMethodId from formData in GraphQL payment mutation", async () => {
+    executeMutationMock.mockResolvedValue({
+      createPayment: { id: "pay-2", orderId: "order-4" },
+    });
+    const formData = new FormData();
+    formData.set("savedPaymentMethodId", "saved-pm-456");
+
+    const result = await submitPayment("order-4", {}, formData);
+
+    expect(result).toEqual({});
+    expect(executeMutationMock).toHaveBeenCalledWith(expect.anything(), {
+      input: { orderId: "order-4", savedPaymentMethodId: "saved-pm-456" },
+    });
   });
 
   it("createManualSeatedOrder uses the GraphQL seated-order mutation", async () => {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import { installNoLegacyPaymentRestGuard } from "./_helpers/expect-no-rest";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -8,9 +9,18 @@ import { test, expect, type Page, type APIRequestContext } from "@playwright/tes
 const PASSWORD = "Password123!";
 const KONG_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const GRAPHQL_URL = `${KONG_URL}/graphql`;
+let assertNoLegacyPaymentRest: () => void = () => {};
 function uniqueEmail(prefix: string) {
   return `${prefix}-${Date.now()}-${randomUUID().slice(0, 8)}@test.com`;
 }
+
+test.beforeEach(async ({ page }) => {
+  assertNoLegacyPaymentRest = installNoLegacyPaymentRestGuard(page);
+});
+
+test.afterEach(async () => {
+  assertNoLegacyPaymentRest();
+});
 
 async function signup(page: Page, email: string) {
   await page.goto("/auth/signup");

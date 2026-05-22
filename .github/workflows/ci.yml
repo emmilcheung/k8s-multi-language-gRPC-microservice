@@ -248,6 +248,14 @@ jobs:
           fi
           echo "OK: no inline gql strings"
 
+      - name: Enforce Stage-5 REST migration gate
+        run: |
+          if grep -rEn '/api/submit-payment|/api/payment-methods/register|/api/payments' app/ components/ __tests__/ tests/ 2>/dev/null; then
+            echo "FAIL: Stage-5 REST migration gate matched forbidden payment REST paths"
+            exit 1
+          fi
+          echo "OK: Stage-5 REST migration gate clean"
+
       - name: Lint
         run: pnpm lint
 
