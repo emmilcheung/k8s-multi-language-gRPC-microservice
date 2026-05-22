@@ -19,12 +19,6 @@ headers:
           named: traceparent
       - propagate:
           named: tracestate
-  subgraphs:
-    auth:
-      request:
-        - propagate:
-            named: cookie
-
 telemetry:
   exporters:
     tracing:
