@@ -1,7 +1,7 @@
 # GraphQL Migration Delta Audit — 2026-05-22
 
 - **Branch:** `feat/client-graphql-foundation`
-- **HEAD:** `e48af62a41131ef64513102195f99e0fbfe9011f`
+- **HEAD:** `5efeba0273d0cc3083c16488a9a7ead7a205a089`
 - **Delta auditor model:** GPT-5.3-Codex
 - **Original verdict:** HOLD (10 defects: 4 P0 / 3 P1 / 1 P2 / 3 RISK)
 
@@ -19,8 +19,8 @@
 | P2-001 kubeconform CI step | REAL | **FIXED** | `9838b18` | `.github/workflows/ci.yml`, `/tmp/graphql-delta/d8-helm-kubeconform.log` |
 | RISK D1-F1 | RISK | **FIXED via P1-003** | `b4e0672` | Same as P1-003 |
 | RISK D7-F1 metrics coverage | RISK | **RE-PROVED on Node 24** | n/a | `/tmp/graphql-delta/d7-metrics-results.log` |
-| RISK D9-F1/2 dependency backlog | RISK | **WAIVED** (residual highs are transitive `lodash` in upstream CLI/codegen paths; no patched version currently published) | `fbdd10e` | `/tmp/graphql-delta/audit-client-final.log`, `/tmp/graphql-delta/audit-auth-final.log`, `/tmp/graphql-delta/audit-payment-final.log`, `/tmp/graphql-delta/audit-user-final.log` |
-| D4 follow-up stabilization | RISK | **FIXED** (all client E2E specs green after ticket identity/price fixes, assignment-mode normalization, and attendance fallback hardening) | `a1a7bed`, `06a85b1`, `6a26873` | `services/client/tests/e2e/attendance.spec.ts`, `services/ticket-service/internal/graphql/schema.resolvers.go`, `services/venue-service/internal/graphql/schema.resolvers.go`, `/tmp/graphql-delta/e2e-full-after-cleanup.log` |
+| RISK D9-F1/2 dependency backlog | RISK | **FIXED** (`lodash` override to patched line `^4.18.1` in client/auth/payment; high severity now 0) | `ab5b02c` | `services/client/package.json`, `services/auth-service/package.json`, `services/payment-service/package.json`, `/tmp/graphql-delta/audit-client-postoverride.log`, `/tmp/graphql-delta/audit-auth-postoverride.log`, `/tmp/graphql-delta/audit-payment-postoverride.log` |
+| D4 follow-up stabilization | RISK | **FIXED** (all client E2E specs green after ticket identity/price fixes, assignment-mode normalization, and attendance fallback hardening) | `a1a7bed`, `06a85b1`, `6a26873` | `services/client/tests/e2e/attendance.spec.ts`, `services/ticket-service/internal/graphql/schema.resolvers.go`, `services/venue-service/internal/graphql/schema.resolvers.go`, `/tmp/graphql-delta/e2e-full-final.log` |
 | RISK D10-F1 rollback runbook | RISK | **FIXED** | `8edd554` | `docs/16-session-progress-log.md`, `/tmp/graphql-delta/revert-dry-run.log` |
 
 ## Re-verdict by Dimension (D1–D10)
@@ -35,13 +35,13 @@
 | D6 | PASS | Fresh compose logs re-grepped with secret patterns: empty result set. |
 | D7 | PASS | Per-service metrics endpoints re-probed and returning metric payloads. |
 | D8 | PASS | Node-24 CI hand-replay gates green: GraphQL validation, inline gql ban, keeplist test, Helm template + kubeconform, latest-tag grep. |
-| D9 | **RISK** | High vulnerabilities reduced from 46 total highs to 3 residual highs (`lodash` in transitive upstream toolchain paths for client/auth/payment); user-service highs cleared; risk waived pending upstream patched release. |
+| D9 | PASS | `pnpm` override enforced `lodash@^4.18.1` across affected JS services; post-override high audit count is 0 in client/auth/payment. |
 | D10 | PASS | Revert sequence documented and dry-run performed with cleanup sequence. |
 
 ## Final Verdict
 
-- **Delta verdict:** **SHIP-WITH-FIXES**
-- **Reason:** All REAL defects are fixed and re-proved on Node 24. Remaining D9 risk is explicitly waived because only upstream-unpatched transitive lodash advisories remain.
+- **Delta verdict:** **SHIP**
+- **Reason:** All audited REAL defects and risk items are fixed or re-proved on Node 24 with no remaining waivers.
 
 ## Appendix — Proof-of-fix command tails
 
@@ -77,7 +77,7 @@
 - 7-step seeded smoke flow (signup/currentUser/ticketsConnection/createOrder/createPayment/cancelOrder/orders)
   - evidence: `/tmp/graphql-delta/d4-smoke.log` and `/tmp/graphql-delta/d4-step*.json`
 - `cd services/client && pnpm build && pnpm test:e2e`
-  - build pass; E2E pass (`50 passed / 0 failed`), evidence: `/tmp/graphql-delta/d4-client-build.log`, `/tmp/graphql-delta/e2e-full-after-cleanup.log`
+  - build pass; E2E pass (`50 passed / 0 failed`), evidence: `/tmp/graphql-delta/d4-client-build.log`, `/tmp/graphql-delta/e2e-full-final.log`
 
 ### D6 (secret grep)
 
@@ -119,16 +119,17 @@
 
 - D7 per-service metrics: `/tmp/graphql-delta/d7-metrics-results.log`
 - D9 package/go triage evidence:
-  - `/tmp/graphql-delta/audit-client-final.log`
-  - `/tmp/graphql-delta/audit-auth-final.log`
+  - `/tmp/graphql-delta/audit-client-postoverride.log`
+  - `/tmp/graphql-delta/audit-auth-postoverride.log`
+  - `/tmp/graphql-delta/audit-payment-postoverride.log`
   - `/tmp/graphql-delta/audit-user-final.log`
-  - `/tmp/graphql-delta/audit-payment-final.log`
+  - `/tmp/graphql-delta/gates-client-postoverride.log`
+  - `/tmp/graphql-delta/gates-auth-postoverride.log`
+  - `/tmp/graphql-delta/gates-payment-postoverride.log`
   - `/tmp/graphql-delta/d9-ticket-service-go-mod-updates.log`
   - `/tmp/graphql-delta/d9-venue-service-go-mod-updates.log`
   - `/tmp/graphql-delta/d9-attendance-service-go-mod-updates.log`
 
 ## Open questions for owner
 
-1. Confirm acceptance of the D9 waiver for the three residual transitive lodash highs (client/auth/payment) until upstream patched releases are available.
-2. Should we add a scheduled dependency-watch ticket to auto-recheck GHSA-r5fr-rjxr-66jc weekly and drop the waiver immediately when a patched upstream line lands?
-3. Do you want router health to be host-exposed (e.g., publish health port) to align operator runbooks with `curl localhost` checks, or keep container-internal health only?
+1. Do you want router health to be host-exposed (e.g., publish health port) to align operator runbooks with `curl localhost` checks, or keep container-internal health only?
