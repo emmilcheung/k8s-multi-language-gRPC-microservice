@@ -10,8 +10,11 @@
     "overrides": {
       "yaml": "2.8.3",
       "picomatch": "2.3.2",
-      "protobufjs": "7.5.5",
-      "uuid": "14.0.0"
+      "protobufjs": "7.5.6",
+      "uuid": "14.0.0",
+      "vite": "8.0.5",
+      "fast-uri": "3.1.2",
+      "undici": "6.24.0"
     }
   },
   "engines": {
@@ -46,10 +49,10 @@
     "@nestjs/platform-express": "^11.1.18",
     "@nestjs/schedule": "^6.1.1",
     "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/auto-instrumentations-node": "^0.72.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.75.0",
     "@opentelemetry/exporter-trace-otlp-grpc": "^0.214.0",
     "@opentelemetry/resources": "^2.6.1",
-    "@opentelemetry/sdk-node": "^0.214.0",
+    "@opentelemetry/sdk-node": "^0.217.0",
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "@willsoto/nestjs-prometheus": "^6.0.2",
     "class-transformer": "^0.5.1",
