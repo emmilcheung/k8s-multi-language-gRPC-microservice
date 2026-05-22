@@ -602,6 +602,7 @@ input UpdateTicketInput
   quota: Int
   maxPerUser: Int
   event: TicketEventInput
+  seatingPlanId: ID
 }
 
 input UpdateVenueInput

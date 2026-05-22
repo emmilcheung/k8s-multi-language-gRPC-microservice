@@ -92,11 +92,12 @@ type TicketFilter struct {
 }
 
 type UpdateTicketInput struct {
-	Title      *string           `json:"title,omitempty"`
-	Price      *int              `json:"price,omitempty"`
-	Quota      *int              `json:"quota,omitempty"`
-	MaxPerUser *int              `json:"maxPerUser,omitempty"`
-	Event      *TicketEventInput `json:"event,omitempty"`
+	Title         *string           `json:"title,omitempty"`
+	Price         *int              `json:"price,omitempty"`
+	Quota         *int              `json:"quota,omitempty"`
+	MaxPerUser    *int              `json:"maxPerUser,omitempty"`
+	Event         *TicketEventInput `json:"event,omitempty"`
+	SeatingPlanID *string           `json:"seatingPlanId,omitempty"`
 }
 
 type TicketType string

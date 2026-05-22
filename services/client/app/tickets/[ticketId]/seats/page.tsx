@@ -6,6 +6,8 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { ApiError, serverApi } from "@/lib/api";
+import { executeQuery } from "@/lib/graphql/execute";
+import { TicketDetailDocument } from "@/lib/graphql/generated";
 import type { Ticket, SeatingPlan, PriceTier } from "@/lib/types";
 import { fetchPriceTiers } from "@/app/actions/venues";
 import { UrqlProvider } from "@/app/_lib/urql-client";
@@ -20,12 +22,39 @@ interface Props {
 
 const TICKET_LOAD_RETRY_DELAYS_MS = [250, 500, 750, 1000, 1250, 1500];
 
-async function getTicket(ticketId: string): Promise<Ticket> {
+async function getTicket(ticketId: string, cookieHeader: string): Promise<Ticket> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= TICKET_LOAD_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
-      return await serverApi<Ticket>(`/api/tickets/${ticketId}`);
+      const data = await executeQuery(TicketDetailDocument, { id: ticketId }, { cookie: cookieHeader });
+      if (!data.ticket) throw new ApiError(404, "Ticket not found");
+      const gql = data.ticket;
+      return {
+        id: gql.id,
+        title: gql.title,
+        price: gql.priceDecimal,
+        userId: gql.userId,
+        orderId: gql.orderId ?? undefined,
+        quota: gql.quota,
+        reserved: gql.reserved,
+        sold: gql.sold,
+        available: gql.available,
+        maxPerUser: gql.maxPerUser ?? undefined,
+        ticketType: gql.ticketType,
+        seatingPlanId: gql.seatingPlan?.id ?? undefined,
+        event: gql.event
+          ? {
+              title: gql.event.title,
+              description: gql.event.description ?? undefined,
+              startsAt: gql.event.startsAt,
+              endsAt: gql.event.endsAt ?? undefined,
+              imageUrl: gql.event.imageUrl ?? undefined,
+              venueName: gql.event.venueName ?? undefined,
+              venueAddress: gql.event.venueAddress ?? undefined,
+            }
+          : undefined,
+      } as Ticket;
     } catch (error) {
       lastError = error;
       const status = error instanceof ApiError ? error.status : null;
@@ -56,10 +85,11 @@ export default async function SeatsPage({ params }: Props) {
   if (!token) {
     redirect("/auth/signin");
   }
+  const cookieHeader = `token=${token}`;
 
   let ticket: Ticket;
   try {
-    ticket = await getTicket(ticketId);
+    ticket = await getTicket(ticketId, cookieHeader);
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) {
       throw error;

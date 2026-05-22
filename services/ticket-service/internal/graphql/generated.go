@@ -3915,7 +3915,7 @@ func (ec *executionContext) unmarshalInputUpdateTicketInput(ctx context.Context,
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"title", "price", "quota", "maxPerUser", "event"}
+	fieldsInOrder := [...]string{"title", "price", "quota", "maxPerUser", "event", "seatingPlanId"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -3957,6 +3957,13 @@ func (ec *executionContext) unmarshalInputUpdateTicketInput(ctx context.Context,
 				return it, err
 			}
 			it.Event = data
+		case "seatingPlanId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("seatingPlanId"))
+			data, err := ec.unmarshalOID2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.SeatingPlanID = data
 		}
 	}
 	return it, nil

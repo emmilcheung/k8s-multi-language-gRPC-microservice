@@ -23,7 +23,7 @@ import {
   Users,
   Grid3X3,
 } from "lucide-react";
-import type { SeatingPlan, Section, PriceTier, Ticket } from "@/lib/types";
+import type { SeatingPlan, Section, PriceTier } from "@/lib/types";
 import type { PlanState } from "@/app/actions/venues";
 
 interface Props {
@@ -37,13 +37,12 @@ async function loadTicketAndPlan(ticketId: string, planId: string) {
 
   for (let attempt = 0; attempt <= TICKET_PLAN_LOAD_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
-      const [ticket, plan, sectionsData, tiers] = await Promise.all([
-        serverApi<Ticket>(`/api/tickets/${ticketId}`),
+      const [plan, sectionsData, tiers] = await Promise.all([
         serverApi<SeatingPlan>(`/api/seating-plans/${planId}`),
         serverApi<{ sections: Section[] }>(`/api/seating-plans/${planId}/sections`),
         fetchPriceTiers(planId),
       ]);
-      return { ticket, plan, sectionsData, tiers };
+      return { plan, sectionsData, tiers };
     } catch (error) {
       lastError = error;
       const status = error instanceof ApiError ? error.status : null;
@@ -76,12 +75,11 @@ export default async function TicketPlanDetailPage({ params }: Props) {
 
   const { ticketId, planId } = await params;
 
-  let ticket: Ticket;
   let plan: SeatingPlan;
   let sectionsData: { sections: Section[] };
   let tiers: PriceTier[] = [];
   try {
-    ({ ticket, plan, sectionsData, tiers } = await loadTicketAndPlan(ticketId, planId));
+    ({ plan, sectionsData, tiers } = await loadTicketAndPlan(ticketId, planId));
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) {
       throw error;
@@ -108,14 +106,7 @@ export default async function TicketPlanDetailPage({ params }: Props) {
     prev: PlanState,
     formData: FormData
   ) => Promise<PlanState>;
-  const replacePlanAction = replaceInactivePlan.bind(
-    null,
-    ticketId,
-    planId,
-    ticket.title,
-    ticket.price,
-    ticket.ticketType ?? (plan.assignmentMode === "auto" ? "SEATED_AUTO" : "SEATED_MANUAL")
-  );
+  const replacePlanAction = replaceInactivePlan.bind(null, ticketId, planId);
 
   const isDraft = plan.status === "draft";
   const isActive = plan.status === "active";

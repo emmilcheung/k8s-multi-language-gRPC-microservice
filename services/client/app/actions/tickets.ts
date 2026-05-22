@@ -123,26 +123,15 @@ function parseRequireQrForEntry(raw: string | null): boolean {
 
 async function linkSeatingPlanToTicket(
   ticketId: string,
-  title: string,
-  price: string,
-  seatingPlanId: string,
-  ticketType: string
+  seatingPlanId: string
 ): Promise<string | null> {
-  const updateRes = await fetch(`${base()}/api/tickets/${ticketId}`, {
-    method: "PUT",
-    headers: await authHeaders(),
-    body: JSON.stringify({
-      title,
-      price,
-      seatingPlanId,
-      ticketType,
-    }),
-  });
-
-  if (updateRes.ok) return null;
-
-  const errBody = await updateRes.json().catch(() => ({}));
-  return errBody?.error?.message ?? "Failed to attach seating plan to ticket.";
+  try {
+    await executeMutation(UpdateTicketDocument, { id: ticketId, input: { seatingPlanId } });
+    return null;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) redirect("/auth/signin");
+    return err instanceof Error ? err.message : "Failed to attach seating plan to ticket.";
+  }
 }
 
 async function upsertAttendanceSettings(eventId: string, requireQrForEntry: boolean): Promise<string | null> {
@@ -299,13 +288,7 @@ export async function createTicket(
       return { error: "Failed to create seating plan for this ticket." };
     }
 
-    const updateError = await linkSeatingPlanToTicket(
-      ticket.id,
-      ticket.title,
-      ticket.priceDecimal,
-      plan.id,
-      ticketType
-    );
+    const updateError = await linkSeatingPlanToTicket(ticket.id, plan.id);
 
     if (updateError) {
       return { error: updateError };
@@ -392,9 +375,6 @@ export async function updateTicket(
 export async function replaceInactivePlan(
   ticketId: string,
   currentPlanId: string,
-  title: string,
-  price: string,
-  fallbackTicketType: string,
   _prev: TicketState,
   _formData: FormData
 ): Promise<TicketState> {
@@ -425,12 +405,6 @@ export async function replaceInactivePlan(
   }
 
   const assignmentMode = currentPlan.assignmentMode === "auto" ? "auto" : "manual";
-  const ticketType =
-    assignmentMode === "auto"
-      ? "SEATED_AUTO"
-      : fallbackTicketType === "SEATED_AUTO"
-        ? "SEATED_AUTO"
-        : "SEATED_MANUAL";
   const replacementName = currentPlan.name.includes("Replacement")
     ? currentPlan.name
     : `${currentPlan.name} Replacement`;
@@ -448,13 +422,7 @@ export async function replaceInactivePlan(
     return { error: "Failed to create a replacement seating plan." };
   }
 
-  const updateError = await linkSeatingPlanToTicket(
-    ticketId,
-    title,
-    price,
-    replacementPlan.id,
-    ticketType
-  );
+  const updateError = await linkSeatingPlanToTicket(ticketId, replacementPlan.id);
   if (updateError) {
     return { error: updateError };
   }

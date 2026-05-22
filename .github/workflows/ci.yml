@@ -248,13 +248,19 @@ jobs:
           fi
           echo "OK: no inline gql strings"
 
-      - name: Enforce Stage-5 REST migration gate
+      - name: Enforce REST migration gate
         run: |
-          if grep -rEn '/api/submit-payment|/api/payment-methods/register|/api/payments' app/ components/ __tests__/ tests/ 2>/dev/null; then
-            echo "FAIL: Stage-5 REST migration gate matched forbidden payment REST paths"
+          # Matches outbound Kong calls (base()}/api/<domain>) for domains fully migrated to GraphQL.
+          # Keep-listed paths (seating-plans, venues, users, auth, attendance/events, payments/webhook,
+          # oauth) are intentionally excluded.
+          forbidden='/api/(tickets|attendance\/scan|orders\/[^s]|submit-payment|payment-methods\/register)'
+          if grep -rEn "base\(\)[^/]*/api/" app/ components/ __tests__/ tests/ lib/ 2>/dev/null \
+               | grep -Ev '(seating-plans|venues|users|auth|attendance/events|payments/webhook|oauth)' \
+               | grep -E "$forbidden"; then
+            echo "FAIL: REST migration gate matched forbidden service REST paths"
             exit 1
           fi
-          echo "OK: Stage-5 REST migration gate clean"
+          echo "OK: REST migration gate clean"
 
       - name: Lint
         run: pnpm lint

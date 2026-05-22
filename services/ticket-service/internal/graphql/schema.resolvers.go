@@ -9,18 +9,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
-	"strconv"
-	"time"
 
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
 )
-
-func intPriceToDecimalString(price int) string {
-	value := float64(price) / 100.0
-	return strconv.FormatFloat(math.Round(value*100)/100, 'f', 2, 64)
-}
 
 // CreateTicket is the resolver for the createTicket field.
 func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketInput) (*Ticket, error) {
@@ -31,9 +23,9 @@ func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketI
 	price := intPriceToDecimalString(input.Price)
 
 	svcInput := service.CreateTicketInput{
-		Title: input.Title,
-		Price: price,
-		Quota: input.Quota,
+		Title:  input.Title,
+		Price:  price,
+		Quota:  input.Quota,
 		UserID: userID,
 	}
 	if input.MaxPerUser != nil {
@@ -67,9 +59,9 @@ func (r *mutationResolver) UpdateTicket(ctx context.Context, id string, input Up
 	}
 
 	svcInput := service.UpdateTicketInput{
-		ID:    id,
-		Title: existing.Title,
-		Price: existing.Price,
+		ID:     id,
+		Title:  existing.Title,
+		Price:  existing.Price,
 		UserID: userID,
 	}
 
@@ -86,44 +78,15 @@ func (r *mutationResolver) UpdateTicket(ctx context.Context, id string, input Up
 		}
 		svcInput.Event = ev
 	}
+	if input.SeatingPlanID != nil {
+		svcInput.SeatingPlanID = *input.SeatingPlanID
+	}
 
 	t, err := r.TicketService.UpdateTicket(ctx, svcInput)
 	if err != nil {
 		return nil, fmt.Errorf("updateTicket: %w", err)
 	}
 	return mapTicketToGQL(t), nil
-}
-
-// mapEventInput converts the GraphQL TicketEventInput to the repository TicketEvent.
-func mapEventInput(in *TicketEventInput) (*repository.TicketEvent, error) {
-	startsAt, err := time.Parse(time.RFC3339, in.StartsAt)
-	if err != nil {
-		return nil, fmt.Errorf("invalid startsAt %q: %w", in.StartsAt, err)
-	}
-	ev := &repository.TicketEvent{StartsAt: startsAt}
-	if in.Title != nil {
-		ev.Title = *in.Title
-	}
-	if in.Description != nil {
-		ev.Description = *in.Description
-	}
-	if in.EndsAt != nil {
-		t, err := time.Parse(time.RFC3339, *in.EndsAt)
-		if err != nil {
-			return nil, fmt.Errorf("invalid endsAt %q: %w", *in.EndsAt, err)
-		}
-		ev.EndsAt = &t
-	}
-	if in.ImageURL != nil {
-		ev.ImageURL = *in.ImageURL
-	}
-	if in.VenueName != nil {
-		ev.VenueName = *in.VenueName
-	}
-	if in.VenueAddress != nil {
-		ev.VenueAddress = *in.VenueAddress
-	}
-	return ev, nil
 }
 
 // Tickets is the resolver for the tickets field.
@@ -218,3 +181,4 @@ func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+
