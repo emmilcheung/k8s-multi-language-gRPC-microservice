@@ -63,15 +63,27 @@ export function createGraphQLClient(cookie?: string): Client {
             ...traceHeaders(),
             ...(cookie ? { Cookie: cookie } : {}),
           };
+          // Wrap fetch so we can inject a per-attempt timeout.
+          // context.fetch is called with the final fetchOptions (which include
+          // urql's own AbortController signal). We combine both so either
+          // urql cancellation OR our 5s wall-clock timeout aborts the request.
+          // NOTE: fetchOptions.signal is NOT the right place — urql overwrites
+          // it with its own AbortController after the exchange chain runs.
+          const upstreamFetch = operation.context.fetch ?? fetch;
           return {
             ...operation,
             context: {
               ...operation.context,
+              fetch: (url: RequestInfo | URL, options?: RequestInit) => {
+                const timeout = AbortSignal.timeout(5_000);
+                const signal = options?.signal
+                  ? AbortSignal.any([options.signal, timeout])
+                  : timeout;
+                return upstreamFetch(url, { ...options, signal });
+              },
               fetchOptions: {
                 ...(typeof existing === "function" ? {} : (existing ?? {})),
                 headers: merged,
-                // Fresh signal per attempt so retries aren't pre-aborted.
-                signal: AbortSignal.timeout(5_000),
               },
             },
           };
