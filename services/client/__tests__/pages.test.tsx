@@ -324,7 +324,6 @@ describe("TicketDetailPage", () => {
 
   it("shows TicketForm when the viewer is the owner and ticket is not reserved", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    serverApiMock.mockResolvedValueOnce({ requireQrForEntry: true });
     executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
@@ -339,7 +338,6 @@ describe("TicketDetailPage", () => {
 
   it("shows an attendance settings link for owners", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    serverApiMock.mockResolvedValueOnce({ requireQrForEntry: true });
     executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
@@ -356,7 +354,6 @@ describe("TicketDetailPage", () => {
 
   it("shows 'cannot be edited' message when owner views reserved ticket", async () => {
     const ticket = makeTicket({ userId: "owner-uuid", orderId: "order-1" });
-    serverApiMock.mockResolvedValueOnce({ requireQrForEntry: true });
     executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
@@ -371,7 +368,6 @@ describe("TicketDetailPage", () => {
 
   it("keeps attendance navigation visible for owners on reserved tickets", async () => {
     const ticket = makeTicket({ userId: "owner-uuid", orderId: "order-1" });
-    serverApiMock.mockResolvedValueOnce({ requireQrForEntry: true });
     executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
@@ -472,7 +468,6 @@ describe("TicketDetailPage", () => {
 
   it("shows scanner entry point only for owner when attendance policy requires QR", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    serverApiMock.mockResolvedValueOnce({ requireQrForEntry: true });
     executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
@@ -489,8 +484,9 @@ describe("TicketDetailPage", () => {
 
   it("hides scanner entry point when attendance policy does not require QR", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    serverApiMock.mockResolvedValueOnce({ requireQrForEntry: false });
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
+    executeQueryMock
+      .mockResolvedValueOnce({ ticket: makeTicketDetailGraphql(ticket) })
+      .mockResolvedValueOnce({ attendancePolicy: { eventId: "ticket-uuid-1", requireQrForEntry: false, allowManualOverride: false } });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
     const { default: TicketDetailPage } = await import(

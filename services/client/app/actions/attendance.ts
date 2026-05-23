@@ -3,13 +3,13 @@
 // Called from scanner-client.tsx ("use client") — runs server-side so
 // cookies() / authHeaders() are available in the request context.
 
-import { base, authHeaders } from "@/lib/server-utils";
 import type { ScannerRequest, ScannerResponse, ScannerResultClass } from "@/lib/types";
-import { executeMutation } from "@/lib/graphql/execute";
+import { executeMutation, executeQuery } from "@/lib/graphql/execute";
 import {
   ValidateScanDocument,
   RecordCheckinDocument,
   RecordCheckinByUserIdDocument,
+  UserLookupDocument,
 } from "@/lib/graphql/generated";
 
 export async function scanCheckIn(
@@ -48,26 +48,10 @@ export async function scanCheckInByEmail(input: {
   email: string;
   deviceId: string;
 }): Promise<ScannerResponse> {
-  // Users/lookup stays REST — no GraphQL equivalent.
-  const lookupRes = await fetch(
-    `${base()}/api/users/lookup?email=${encodeURIComponent(input.email)}`,
-    {
-      method: "GET",
-      headers: await authHeaders(),
-      cache: "no-store",
-    }
-  );
-  if (!lookupRes.ok) {
-    const body = await lookupRes.json().catch(() => ({}));
-    throw new Error(
-      (body as { error?: { message?: string } })?.error?.message ??
-        "Buyer account not found for the provided email."
-    );
-  }
-  const lookupBody = (await lookupRes.json()) as { user?: { id?: string } };
-  const buyerUserId = lookupBody.user?.id;
+  const lookupData = await executeQuery(UserLookupDocument, { email: input.email });
+  const buyerUserId = lookupData.userLookup?.id;
   if (!buyerUserId) {
-    throw new Error("Buyer account lookup returned an invalid response.");
+    throw new Error("Buyer account not found for the provided email.");
   }
 
   const { recordCheckinByUserId: checkin } = await executeMutation(

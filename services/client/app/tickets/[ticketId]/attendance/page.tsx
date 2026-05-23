@@ -6,10 +6,8 @@ import { AttendanceSettingsForm } from "@/components/attendance-settings-form";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { executeQuery } from "@/lib/graphql/execute";
-import { AttendancePageDocument } from "@/lib/graphql/generated";
-import { serverApi } from "@/lib/api";
+import { AttendancePageDocument, UserLookupDocument } from "@/lib/graphql/generated";
 import { readCurrentUserIdFromToken } from "@/lib/server-utils";
-import type { UserLookupResponse } from "@/lib/types";
 import type { AttendanceCheckInItem } from "@/lib/types";
 
 interface Props {
@@ -77,8 +75,14 @@ export default async function AttendanceSettingsPage({ params }: Props) {
   await Promise.all(
     buyerUserIDs.map(async (buyerUserID) => {
       try {
-        const lookup = await serverApi<UserLookupResponse>(`/api/users/lookup?id=${encodeURIComponent(buyerUserID)}`);
-        buyerEmailsByUserID.set(buyerUserID, lookup.user.email);
+        const lookupData = await executeQuery(
+          UserLookupDocument,
+          { id: buyerUserID },
+          { cookie: cookieStore.toString() }
+        );
+        if (lookupData.userLookup?.email) {
+          buyerEmailsByUserID.set(buyerUserID, lookupData.userLookup.email);
+        }
       } catch {
         // Best-effort enrichment: keep user ID fallback in the UI.
       }

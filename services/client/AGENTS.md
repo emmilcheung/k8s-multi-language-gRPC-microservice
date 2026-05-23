@@ -120,9 +120,6 @@ Two categories:
 | `POST /api/seating-plans/:id/sections` | No per-plan `addPlanSection` mutation (existing `createSection` adds VenueSection templates, not plan sections) | Medium — needs SDL design |
 | `PATCH /api/seating-plans/:id/layout` | No `saveSeatingPlanLayout` mutation | Cheap — REST handler logic is portable |
 | `POST /api/seating-plans` (venue-context) | `createSeatingPlan` SDL requires `ticketId`; venue admin creates draft plans before a ticket exists | Needs design call — either nullable `ticketId` or new `createDraftSeatingPlan` mutation |
-| `GET /api/users/lookup` | `Query.userLookup(email, id): UserLookupResult` already exists and returns `{ id, email, displayName }` — the only consumer (`scanCheckInByEmail`) reads `user.id`. **This entry is stale and can be migrated now.** | Cheap |
-| `GET /api/attendance/events/:id/settings` (proxy route only) | Read companion to `updateAttendancePolicy` mutation; no `attendancePolicy(eventId:)` query field — actually exists in `Query.attendancePolicy`. **This entry is stale and can be migrated now.** | Cheap |
-
 Use `lib/api.ts:serverApi` for all keep-list REST calls. Do **not** add new domain-specific wrapper functions to `lib/api.ts` — call `serverApi` inline with the typed response.
 
 ---

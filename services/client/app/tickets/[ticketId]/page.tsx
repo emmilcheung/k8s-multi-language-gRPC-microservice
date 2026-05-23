@@ -6,7 +6,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ApiError, serverApi } from "@/lib/api";
 import { executeQuery } from "@/lib/graphql/execute";
-import { TicketDetailDocument } from "@/lib/graphql/generated";
+import { TicketDetailDocument, AttendancePolicyDocument } from "@/lib/graphql/generated";
 import type { Ticket, SeatingPlan, PriceTier, AvailabilitySnapshot } from "@/lib/types";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
@@ -182,11 +182,16 @@ export default async function TicketDetailPage({ params }: Props) {
   }
 
   if (isOwner) {
-    const settings = await serverApi<{ requireQrForEntry?: boolean }>(
-      `/api/attendance/events/${ticketId}/settings`
+    const policyResult = await executeQuery(
+      AttendancePolicyDocument,
+      { eventId: ticketId },
+      { cookie: `token=${token}` }
     ).catch(() => null);
-    if (settings && typeof settings.requireQrForEntry === "boolean") {
-      defaultRequireQrForEntry = settings.requireQrForEntry;
+    if (
+      policyResult?.attendancePolicy?.requireQrForEntry === true ||
+      policyResult?.attendancePolicy?.requireQrForEntry === false
+    ) {
+      defaultRequireQrForEntry = policyResult.attendancePolicy.requireQrForEntry;
     }
   }
 

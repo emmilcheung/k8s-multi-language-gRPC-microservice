@@ -1,15 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const authHeadersMock = vi.fn();
 const executeMutationMock = vi.fn();
-
-vi.mock("@/lib/server-utils", () => ({
-  base: () => "http://localhost:8080",
-  authHeaders: () => authHeadersMock(),
-}));
+const executeQueryMock = vi.fn();
 
 vi.mock("@/lib/graphql/execute", () => ({
   executeMutation: (...args: unknown[]) => executeMutationMock(...args),
+  executeQuery: (...args: unknown[]) => executeQueryMock(...args),
 }));
 
 import { scanCheckIn, scanCheckInByEmail } from "@/app/actions/attendance";
@@ -17,7 +13,6 @@ import { scanCheckIn, scanCheckInByEmail } from "@/app/actions/attendance";
 describe("scanCheckIn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    authHeadersMock.mockResolvedValue({ "Content-Type": "application/json" });
   });
 
   it("returns valid result when validateScan succeeds and recordCheckin succeeds", async () => {
@@ -113,17 +108,12 @@ describe("scanCheckIn", () => {
 describe("scanCheckInByEmail", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    authHeadersMock.mockResolvedValue({ "Content-Type": "application/json" });
   });
 
   it("returns valid result when user lookup succeeds and recordCheckinByUserId succeeds", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
-      })
-    );
+    executeQueryMock.mockResolvedValueOnce({
+      userLookup: { id: "user-1", email: "buyer@example.com", displayName: null },
+    });
     executeMutationMock.mockResolvedValueOnce({
       recordCheckinByUserId: {
         id: "checkin-2",
@@ -142,33 +132,32 @@ describe("scanCheckInByEmail", () => {
     });
 
     expect(result).toEqual({ result: "valid", eventId: "event-1" });
+    expect(executeQueryMock.mock.calls[0]?.[1]).toEqual({ email: "buyer@example.com" });
     expect(executeMutationMock.mock.calls[0]?.[1]).toEqual({
       input: { eventId: "event-1", userId: "user-1" },
     });
   });
 
-  it("throws when user lookup returns 404", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: false,
-        json: vi.fn().mockResolvedValue({ error: { message: "User not found" } }),
-      })
-    );
+  it("throws when user lookup returns no result", async () => {
+    executeQueryMock.mockResolvedValueOnce({ userLookup: null });
 
     await expect(
       scanCheckInByEmail({ eventId: "event-1", email: "nobody@example.com", deviceId: "d-1" })
-    ).rejects.toThrow("User not found");
+    ).rejects.toThrow("Buyer account not found for the provided email.");
+  });
+
+  it("throws when executeQuery (userLookup) rejects", async () => {
+    executeQueryMock.mockRejectedValueOnce(new Error("Auth service unavailable"));
+
+    await expect(
+      scanCheckInByEmail({ eventId: "event-1", email: "buyer@example.com", deviceId: "d-1" })
+    ).rejects.toThrow("Auth service unavailable");
   });
 
   it("throws when executeMutation (recordCheckinByUserId) rejects", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
-      })
-    );
+    executeQueryMock.mockResolvedValueOnce({
+      userLookup: { id: "user-1", email: "buyer@example.com", displayName: null },
+    });
     executeMutationMock.mockRejectedValueOnce(new Error("Service unavailable"));
 
     await expect(
