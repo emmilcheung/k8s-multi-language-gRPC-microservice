@@ -50,6 +50,17 @@ function main(): void {
     );
   }
 
+  // Cache hit: when the cache file is already present in the build context
+  // (e.g. CI runs `pnpm codegen` on the runner before `docker build`, so the
+  // populated `.graphql-cache/` is COPY'd into the image), trust it and skip
+  // the monorepo-relative lookup — which would fail inside Docker because the
+  // build context is scoped to `services/client/`.
+  if (existsSync(cachePath)) {
+    const cached = readFileSync(cachePath, "utf8");
+    console.log(`[fetch-schema] cache hit at ${cachePath} (${cached.length} bytes); skipping fetch`);
+    return;
+  }
+
   const sdl = fetchFromLocal();
   mkdirSync(cacheDir, { recursive: true });
   writeFileSync(cachePath, sdl, "utf8");
