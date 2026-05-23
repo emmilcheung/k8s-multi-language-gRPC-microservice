@@ -92,27 +92,36 @@ The client uses **GraphQL as the primary data layer** via Apollo Router (supergr
 - Operations live in `lib/graphql/operations/<domain>/<OperationName>.graphql`. **Never** write inline `gql` template literals in `.ts` / `.tsx`.
 - After editing any `.graphql` file run `pnpm codegen` to regenerate `lib/graphql/generated/index.ts`.
 
-### REST keep-list (allowed, do not migrate without schema support)
+### REST keep-list
 
-| Endpoint pattern | Reason stays REST |
+Two categories:
+
+**Permanent** — these will not move to GraphQL. Federation spec forbids it, or the wire format is fixed.
+
+| Endpoint pattern | Why permanent |
 |---|---|
-| `POST /api/auth/signin` | Auth token exchange |
+| `POST /api/auth/signin` | Auth token exchange — sets refresh cookie, must be REST |
 | `POST /api/auth/signup` | Auth token exchange |
-| `POST /api/auth/signout` | Session teardown |
-| `GET /api/auth/refresh` | Token refresh |
-| `POST /api/payments/webhook` | Stripe webhook (raw body required) |
-| `GET /api/oauth/consent` | OAuth consent redirect |
-| `GET /api/seating-plans/:id` | SeatingPlan.name not in GraphQL schema |
-| `GET /api/seating-plans/:id/availability` | AvailabilitySnapshot.counts not in GraphQL schema |
-| `GET /api/seating-plans` (list) | SeatingPlan list query absent from schema |
-| `GET /api/seating-plans/:id/price-tiers` | PriceTier list query absent |
-| `GET /api/venues/:id/sections` | Venue sections list absent |
-| `DELETE /api/venues/:id/sections/:sid` | deleteSection mutation absent |
-| `POST /api/seating-plans` (venue-context) | GraphQL createSeatingPlan requires ticketId |
-| `POST /api/seating-plans/:id/sections` | createSection mutation absent |
-| `PATCH /api/seating-plans/:id/layout` | saveLayout mutation absent |
-| `GET /api/users/lookup` | User lookup by ID/email (no GraphQL equivalent) |
-| `GET /api/attendance/events/:id/settings` | TicketDetailPage: inline serverApi call |
+| `POST /api/auth/signout` | Session teardown — cookie clear |
+| `GET /api/auth/refresh` | Token refresh — cookie-bound |
+| `POST /api/payments/webhook` | Stripe webhook — raw body + signature verification |
+| `GET /api/oauth/consent` | OAuth redirect flow — browser navigation, not data fetch |
+
+**Deferred** — schema gaps the venue-service migration (Stage R2) did not close. Each is migratable; none is architecturally necessary. Tracked for a follow-up SDL extension.
+
+| Endpoint pattern | SDL gap | Closure cost |
+|---|---|---|
+| `GET /api/seating-plans/:id` | `SeatingPlan` missing `name`, `maxSeatsPerOrder`, `ticketId` fields | Cheap — extend type + resolver |
+| `GET /api/seating-plans?venueId=` | Closes automatically once the above fields land (`seatingPlans(venueId:)` query already exists) | Cheap — same change |
+| `GET /api/seating-plans/:id/availability` | No `AvailabilitySnapshot` aggregate type | Medium — new type + resolver |
+| `GET /api/seating-plans/:id/price-tiers` | No `SeatingPlan.priceTiers` field / `priceTiers(planId:)` query | Cheap — add field + DataLoader |
+| `GET /api/venues/:id/sections` | No `Venue.sections` field | Cheap — add field + DataLoader |
+| `DELETE /api/venues/:id/sections/:sid` | No `deleteSection` mutation | Cheap — single mutation, service-layer delete exists |
+| `POST /api/seating-plans/:id/sections` | No per-plan `addPlanSection` mutation (existing `createSection` adds VenueSection templates, not plan sections) | Medium — needs SDL design |
+| `PATCH /api/seating-plans/:id/layout` | No `saveSeatingPlanLayout` mutation | Cheap — REST handler logic is portable |
+| `POST /api/seating-plans` (venue-context) | `createSeatingPlan` SDL requires `ticketId`; venue admin creates draft plans before a ticket exists | Needs design call — either nullable `ticketId` or new `createDraftSeatingPlan` mutation |
+| `GET /api/users/lookup` | `Query.userLookup(email, id): UserLookupResult` already exists and returns `{ id, email, displayName }` — the only consumer (`scanCheckInByEmail`) reads `user.id`. **This entry is stale and can be migrated now.** | Cheap |
+| `GET /api/attendance/events/:id/settings` (proxy route only) | Read companion to `updateAttendancePolicy` mutation; no `attendancePolicy(eventId:)` query field — actually exists in `Query.attendancePolicy`. **This entry is stale and can be migrated now.** | Cheap |
 
 Use `lib/api.ts:serverApi` for all keep-list REST calls. Do **not** add new domain-specific wrapper functions to `lib/api.ts` — call `serverApi` inline with the typed response.
 
