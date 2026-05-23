@@ -70,6 +70,8 @@ export function createGraphQLClient(cookie?: string): Client {
               fetchOptions: {
                 ...(typeof existing === "function" ? {} : (existing ?? {})),
                 headers: merged,
+                // Fresh signal per attempt so retries aren't pre-aborted.
+                signal: AbortSignal.timeout(5_000),
               },
             },
           };
