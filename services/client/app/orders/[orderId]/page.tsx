@@ -12,6 +12,8 @@ import { calculateOrderTotal } from "@/lib/order-utils";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { OrderPaymentForm } from "@/components/order-payment-form";
+import { Card, CardContent } from "@/components/ui/card";
+import { HoldTimerRibbon, Divider } from "@/components/system";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -98,10 +100,10 @@ export default async function OrderDetailPage({ params }: Props) {
     notFound();
   }
 
-  const canPay = order.status === "awaiting_payment" || order.status === "created";
   const currentStep = STEP_ORDER[order.status];
   const isCancelled = order.status === "cancelled";
   const amount = calculateOrderTotal(order);
+  const showHoldTimer = (order.status === "created" || order.status === "awaiting_payment") && order.expiresAt && new Date(order.expiresAt) > new Date();
 
   return (
     <div className="flex flex-col gap-8 max-w-4xl mx-auto">
@@ -110,16 +112,21 @@ export default async function OrderDetailPage({ params }: Props) {
         href="/orders"
         className={cn(
           buttonVariants({ variant: "ghost", size: "sm" }),
-          "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2"
+          "gap-1.5 text-mute hover:text-ink self-start -ml-2"
         )}
       >
         <ArrowLeft className="w-3.5 h-3.5" />
         My Orders
       </Link>
 
+      {/* Hold Timer Ribbon (top-mounted for created/awaiting_payment) */}
+      {showHoldTimer && (
+        <HoldTimerRibbon expiresAt={order.expiresAt} tone="accent" />
+      )}
+
       {/* Stepper */}
       {!isCancelled ? (
-        <div className="bg-card border border-border rounded px-8 py-5">
+        <div className="bg-card border border-line rounded px-8 py-5">
           <ol className="flex items-center gap-0">
             {STEPS.map((step, idx) => {
               const done = currentStep > idx;
@@ -129,12 +136,12 @@ export default async function OrderDetailPage({ params }: Props) {
                   <div className="flex flex-col items-center gap-1.5">
                     <div
                       className={cn(
-                        "flex items-center justify-center w-8 h-8 rounded-full ring-1 transition-colors",
+                        "flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-colors",
                         done
-                          ? "bg-primary/20 ring-primary/40 text-primary"
+                          ? "bg-accent text-on-accent"
                           : active
-                          ? "bg-primary/15 ring-primary/60 text-primary"
-                          : "bg-white/5 ring-white/10 text-muted-foreground"
+                          ? "bg-accent text-on-accent"
+                          : "bg-subtle text-mute"
                       )}
                     >
                       {done ? <CheckCircle2 className="w-4 h-4" /> : step.icon}
@@ -142,7 +149,7 @@ export default async function OrderDetailPage({ params }: Props) {
                     <span
                       className={cn(
                         "text-xs font-medium text-center whitespace-nowrap",
-                        active ? "text-foreground" : done ? "text-primary/70" : "text-muted-foreground"
+                        active || done ? "text-ink" : "text-mute"
                       )}
                     >
                       {step.label}
@@ -152,7 +159,7 @@ export default async function OrderDetailPage({ params }: Props) {
                     <div
                       className={cn(
                         "h-px flex-1 mx-3 mb-5 transition-colors",
-                        currentStep > idx ? "bg-primary/40" : "bg-white/8"
+                        currentStep > idx ? "bg-accent" : "bg-line"
                       )}
                     />
                   )}
@@ -162,13 +169,13 @@ export default async function OrderDetailPage({ params }: Props) {
           </ol>
         </div>
       ) : (
-        <div className="bg-card border border-border rounded px-6 py-4 flex items-center gap-3 border-l-4 border-l-destructive/60">
-          <XCircle className="w-5 h-5 text-destructive shrink-0" />
+        <div className="bg-card border border-line rounded px-6 py-4 flex items-center gap-3 border-l-4 border-l-bad-soft">
+          <XCircle className="w-5 h-5 text-bad shrink-0" />
           <div>
             <p className="font-semibold text-sm">Order Cancelled</p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-mute">
               This order has been cancelled.{" "}
-              <Link href="/" className="underline text-primary/80">
+              <Link href="/" className="underline text-accent">
                 Browse tickets
               </Link>
               .
@@ -180,76 +187,97 @@ export default async function OrderDetailPage({ params }: Props) {
       {/* Main panels */}
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         {/* Left — order summary */}
-        <div className="bg-card border border-border rounded p-8 flex flex-col gap-6">
-          <h2 className="font-bold text-lg tracking-tight">Order Summary</h2>
+        <Card>
+          <CardContent className="flex flex-col gap-6 pt-4">
+            <h2 className="font-semibold text-lg tracking-tight text-ink">Order Summary</h2>
 
-          <div className="flex flex-col gap-4">
-            {/* Ticket name */}
-            <div className="flex items-start gap-3">
-              <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-primary/10 ring-1 ring-primary/20 shrink-0 mt-0.5">
-                <Ticket className="w-4 h-4 text-primary" />
+            <div className="flex flex-col gap-4">
+              {/* Ticket name */}
+              <div className="flex items-start gap-3">
+                <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-accent/10 shrink-0 mt-0.5">
+                  <Ticket className="w-4 h-4 text-accent" />
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <p className="text-xs text-mute uppercase tracking-wider">Ticket</p>
+                  <p className="font-medium leading-snug text-ink">{order.ticket.title}</p>
+                </div>
               </div>
-              <div className="flex flex-col gap-0.5">
-                <p className="text-xs text-muted-foreground uppercase tracking-wider">Ticket</p>
-                <p className="font-semibold leading-snug">{order.ticket.title}</p>
+
+              {/* Price */}
+              <div className="flex items-start gap-3">
+                <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-accent/10 shrink-0 mt-0.5">
+                  <DollarSign className="w-4 h-4 text-accent" />
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <p className="text-xs text-mute uppercase tracking-wider">Amount</p>
+                  <p className="font-semibold text-2xl text-ink font-mono tabular-nums">
+                    ${amount.toFixed(2)}
+                  </p>
+                </div>
               </div>
             </div>
 
-            {/* Price */}
-            <div className="flex items-start gap-3">
-              <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-primary/10 ring-1 ring-primary/20 shrink-0 mt-0.5">
-                <DollarSign className="w-4 h-4 text-primary" />
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <p className="text-xs text-muted-foreground uppercase tracking-wider">Amount</p>
-                <p className="font-display font-extrabold text-2xl text-foreground">
-                  ${amount.toFixed(2)}
-                </p>
-              </div>
+            <Divider />
+
+            {/* Status row */}
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-mute">Status</span>
+              <Badge className={cn("inline-flex items-center gap-1.5 text-xs", STATUS_BADGE[order.status])}>
+                {STATUS_LABEL[order.status]}
+              </Badge>
             </div>
-          </div>
 
-          <div className="h-px bg-white/6" />
-
-          {/* Status row */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Status</span>
-            <Badge className={cn("inline-flex items-center gap-1.5 text-xs", STATUS_BADGE[order.status])}>
-              {STATUS_LABEL[order.status]}
-            </Badge>
-          </div>
-
-          {/* Order ID */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Order ID</span>
-            <span className="text-xs font-mono text-muted-foreground">{orderId.slice(0, 8)}…</span>
-          </div>
-
-          {/* Success message */}
-          {order.status === "complete" && (
-            <div className="flex flex-col gap-3 bg-emerald-400/8 border border-emerald-400/20 rounded-xl px-4 py-3 text-sm text-emerald-400">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
-                Payment received — enjoy the event!
-              </div>
-              <Link
-                href={`/tickets/${order.ticket.id}/admission?orderId=${order.id}`}
-                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
-              >
-                Open Admission Pass
-              </Link>
+            {/* Order ID */}
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-mute">Order ID</span>
+              <span className="text-xs font-mono tabular-nums text-mute">{orderId.slice(0, 8)}…</span>
             </div>
-          )}
-        </div>
 
-        {/* Right — payment form (only shown for payable orders) */}
-        {canPay && (
+            {/* Success message */}
+            {order.status === "complete" && (
+              <div className="flex flex-col gap-3 bg-ok-soft rounded-xl px-4 py-3 text-sm text-ok">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  Payment received — enjoy the event!
+                </div>
+                <Link
+                  href={`/tickets/${order.ticket.id}/admission?orderId=${order.id}`}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
+                >
+                  Open Admission Pass
+                </Link>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Right — step-dependent content */}
+        {(order.status === "created" || order.status === "awaiting_payment") && order.expiresAt && (
           <OrderPaymentForm
             orderId={order.id}
             amount={amount}
             expiresAt={order.expiresAt}
             savedPaymentMethods={savedPaymentMethods}
           />
+        )}
+
+        {order.status === "complete" && (
+          <Card>
+            <CardContent className="flex flex-col gap-4 pt-4">
+              <div className="flex items-center gap-2 text-ok">
+                <CheckCircle2 className="w-5 h-5 shrink-0" />
+                <h3 className="font-semibold text-ok">Payment Complete</h3>
+              </div>
+              <p className="text-sm text-mute">Your order is confirmed. Access your admission pass below.</p>
+              <div className="flex-1" />
+              <Link
+                href={`/tickets/${order.ticket.id}/admission?orderId=${order.id}`}
+                className={cn(buttonVariants({ variant: "primary", size: "default" }), "w-full")}
+              >
+                View Admission Pass
+              </Link>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>
