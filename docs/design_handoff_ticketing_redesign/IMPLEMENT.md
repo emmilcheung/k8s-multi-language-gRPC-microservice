@@ -48,7 +48,7 @@ Implement in order. Each row is one phase = one commit boundary. Mark a phase do
 | # | Phase | Status | SDL change? | Reference artboards |
 |---|---|---|---|---|
 | 0 | Foundation — tokens, fonts, atoms | DONE | no | `14 · system-ref` |
-| 1 | Browse + event detail | TODO | no | `01`, `02` |
+| 1 | Browse + event detail | DONE | no | `01`, `02` |
 | 2 | Seat picker + checkout + countdown | TODO | no | `03`, `04` |
 | 3 | Admission pass | TODO | no | `05` |
 | 4 | Orders list + hold-expired + payment-failed + states | TODO | no | `06`, `07` (partial), `08` |

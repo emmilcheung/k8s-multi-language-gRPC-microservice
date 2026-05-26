@@ -10,6 +10,11 @@ query TicketsBrowse($first: Int, $after: String) {
         seatingPlan {
           id
         }
+        event {
+          title
+          startsAt
+          venueName
+        }
       }
       cursor
     }

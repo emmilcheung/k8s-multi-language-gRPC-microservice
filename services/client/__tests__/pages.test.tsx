@@ -30,6 +30,8 @@ vi.mock("next/link", () => ({
 vi.mock("next/navigation", () => ({
   notFound: vi.fn(() => { throw new Error("NEXT_NOT_FOUND"); }),
   redirect: vi.fn(),
+  useRouter: vi.fn(() => ({ push: vi.fn() })),
+  useSearchParams: vi.fn(() => new URLSearchParams()),
 }));
 
 // cookies() returns a store-like object; tests override per-case via cookieStoreMock
@@ -88,11 +90,69 @@ vi.mock("@/components/purchase-button", () => ({
   ),
 }));
 
+// Note: isReserved is computed in the real page but passed implicitly via purchaseGate/token logic
+vi.mock("@/app/tickets/[ticketId]/_components/purchase-panel", () => ({
+  PurchasePanel: (props: {
+    ticket: { id: string; price: string; orderId?: string | null; reserved?: number };
+    token?: string;
+    isOwner: boolean;
+    isSeated: boolean;
+    gaMaxQuantity: number;
+    purchaseGate?: { label: string };
+  }) => {
+    const { ticket, token, purchaseGate, isSeated } = props;
+    const isReserved = Boolean(ticket.orderId) || (ticket.reserved != null && ticket.reserved > 0);
+
+    // Calculate price in dollars
+    const priceCents = Math.round(parseFloat(ticket.price) * 100);
+    const priceStr = `$${(priceCents / 100).toFixed(2)}`;
+
+    // Render relevant content for testing
+    return (
+      <div data-testid="purchase-panel">
+        <div>{priceStr}</div>
+        {purchaseGate && (
+          <button disabled>{purchaseGate.label}</button>
+        )}
+        {!purchaseGate && isReserved && (
+          <button disabled>Already Reserved</button>
+        )}
+        {!purchaseGate && !isReserved && !isSeated && !token && (
+          <a href="/auth/signin">Sign in to Purchase</a>
+        )}
+        {token && !purchaseGate && !isReserved && !isSeated && (
+          <button data-testid="purchase-button" data-ticket-id={ticket.id}>
+            Purchase
+          </button>
+        )}
+        {token && !purchaseGate && !isReserved && isSeated && (
+          <>
+            <button>Pick seats</button>
+            <button>Auto-assign</button>
+          </>
+        )}
+      </div>
+    );
+  },
+}));
+
+vi.mock("@/app/tickets/[ticketId]/_components/quick-facts", () => ({
+  QuickFacts: () => <div data-testid="quick-facts" />,
+}));
+
+vi.mock("@/app/tickets/[ticketId]/_components/event-countdown", () => ({
+  EventCountdown: () => <div data-testid="event-countdown" />,
+}));
+
 // lucide-react icons — render as bare spans to avoid SVG parse overhead
 vi.mock("@/components/scanner-client", () => ({
   ScannerClient: ({ eventId }: { eventId: string }) => (
     <div data-testid="scanner-client" data-event-id={eventId} />
   ),
+}));
+
+vi.mock("@/app/_components/browse-filters", () => ({
+  default: () => <div data-testid="browse-filters">Filters</div>,
 }));
 
 vi.mock("lucide-react", () => ({
@@ -111,6 +171,9 @@ vi.mock("lucide-react", () => ({
   User: () => <span />,
   ShieldCheck: () => <span />,
   MapPin: () => <span />,
+  Search: () => <span />,
+  Calendar: () => <span />,
+  CalendarDays: () => <span />,
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -163,47 +226,46 @@ describe("HomePage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the hero heading", async () => {
+  it("renders the search header", async () => {
     fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets: [], cursor: null, hasMore: false });
 
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
 
-    expect(screen.getByRole("heading", { level: 1, name: /find your/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: /next show/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/search events/i)).toBeInTheDocument();
   });
 
-  it("renders TicketGrid with the fetched tickets", async () => {
+  it("renders category filter buttons when tickets exist", async () => {
     const tickets = [makeTicket(), makeTicket({ id: "ticket-uuid-2" })];
     fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets, cursor: null, hasMore: false });
 
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
 
-    const grid = screen.getByTestId("ticket-grid");
-    expect(grid).toBeInTheDocument();
-    expect(grid.getAttribute("data-count")).toBe("2");
+    // New design has category cards for Concerts, Sports, etc.
+    expect(screen.getByRole("button", { name: /concerts/i })).toBeInTheDocument();
   });
 
-  it("shows available ticket count when tickets exist", async () => {
+  it("shows event count when tickets exist", async () => {
     const tickets = [makeTicket(), makeTicket({ id: "t2" })];
     fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets, cursor: null, hasMore: false });
 
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
 
-    // availableCount = 2 (all tickets returned by GraphQL are available)
-    expect(screen.getByText(/2\s*listings/)).toBeInTheDocument();
+    // Hero card takes first ticket; grid has 1 remaining event
+    expect(screen.getByText(/1\s*events/)).toBeInTheDocument();
   });
 
-  it("shows hasMore '+' indicator when there are more pages", async () => {
+  it("displays filter section with date, price, category, availability options", async () => {
     const tickets = [makeTicket()];
-    fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets, cursor: "cursor-abc", hasMore: true });
+    fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets, cursor: null, hasMore: false });
 
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
 
-    expect(screen.getByText(/1\s*\+\s*listings/)).toBeInTheDocument();
+    // New design includes filter sidebar (visible on desktop)
+    expect(screen.getByTestId("browse-filters")).toBeInTheDocument();
   });
 
   it("falls back gracefully when fetchTicketPageViaGraphQL rejects", async () => {
@@ -214,8 +276,7 @@ describe("HomePage", () => {
     const jsx = await HomePage();
     render(jsx);
 
-    const grid = screen.getByTestId("ticket-grid");
-    expect(grid.getAttribute("data-count")).toBe("0");
+    expect(screen.getByText(/no events available/i)).toBeInTheDocument();
   });
 });
 

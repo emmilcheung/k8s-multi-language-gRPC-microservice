@@ -78,6 +78,11 @@ export async function fetchTicketPageViaGraphQL(after: string | null): Promise<T
       available: edge.node.available,
       ticketType: edge.node.ticketType,
       seatingPlanId: edge.node.seatingPlan?.id ?? null,
+      event: edge.node.event ? {
+        title: edge.node.event.title,
+        startsAt: edge.node.event.startsAt,
+        venueName: edge.node.event.venueName,
+      } : undefined,
     }));
 
     const visibleTickets = (
