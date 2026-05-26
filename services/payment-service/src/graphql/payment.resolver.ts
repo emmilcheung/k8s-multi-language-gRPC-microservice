@@ -10,8 +10,23 @@ import {
 } from '@nestjs/graphql';
 import { NotFoundException, UseGuards, ForbiddenException } from '@nestjs/common';
 import { PaymentsService } from '../modules/payments/payments.service';
-import type { SavedPaymentMethod } from '../database/schema';
+import type { Payment, SavedPaymentMethod } from '../database/schema';
 import { UserIdSigGuard } from './guards/user-id-sig.guard';
+
+const DB_STATUS_TO_GRAPHQL: Record<string, 'PENDING' | 'CAPTURED' | 'FAILED' | 'REFUNDED'> = {
+  pending: 'PENDING',
+  completed: 'CAPTURED',
+  failed: 'FAILED',
+  refunded: 'REFUNDED',
+};
+
+function toPaymentResponse(payment: Payment) {
+  const status = DB_STATUS_TO_GRAPHQL[payment.status];
+  if (!status) {
+    throw new Error(`Unmapped payment status: ${payment.status}`);
+  }
+  return { ...payment, status };
+}
 
 interface GqlContext {
   req: {
@@ -92,7 +107,7 @@ export class PaymentResolver {
     try {
       const payment = await this.paymentsService.findById(id);
       if (payment.userId !== ctx.req.headers['x-user-id']) return null;
-      return payment;
+      return toPaymentResponse(payment);
     } catch (e) {
       if (e instanceof NotFoundException) return null;
       throw e;
@@ -110,7 +125,7 @@ export class PaymentResolver {
           : null;
       const requesterId = ctx.req.headers['x-user-id'] as string;
       if (!payment || !requesterId || payment.userId !== requesterId) return null;
-      return payment;
+      return toPaymentResponse(payment);
     } catch (e) {
       if (e instanceof NotFoundException) return null;
       throw e;
@@ -145,13 +160,14 @@ export class PaymentMethodMutationResolver {
     if (!userId) {
       throw new ForbiddenException('Missing X-User-Id');
     }
-    return this.paymentsService.charge({
+    const payment = await this.paymentsService.charge({
       orderId: input.orderId as string,
       userId,
       token: input.token as string | undefined,
       savedPaymentMethodId: input.savedPaymentMethodId as string | undefined,
       userIdSig: extractUserIdSig(ctx),
     });
+    return toPaymentResponse(payment);
   }
 
   @Mutation('setDefaultPaymentMethod')

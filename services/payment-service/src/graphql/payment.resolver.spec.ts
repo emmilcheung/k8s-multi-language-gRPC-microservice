@@ -28,7 +28,7 @@ describe('PaymentResolver', () => {
         orderId: 'ord-1',
         amount: 5000,
         currency: 'usd',
-        status: 'CAPTURED',
+        status: 'completed',
         createdAt: new Date(),
       };
       mockPaymentsService.findById.mockResolvedValue(payment);
@@ -36,7 +36,7 @@ describe('PaymentResolver', () => {
       const ctx = { req: { headers: { 'x-user-id': 'user-123' } } };
       const result = await resolver.payment('pay-1', ctx);
 
-      expect(result).toEqual(payment);
+      expect(result).toEqual({ ...payment, status: 'CAPTURED' });
     });
 
     it('returns null when requester does not own the payment', async () => {
@@ -46,7 +46,7 @@ describe('PaymentResolver', () => {
         orderId: 'ord-1',
         amount: 5000,
         currency: 'usd',
-        status: 'CAPTURED',
+        status: 'completed',
         createdAt: new Date(),
       };
       mockPaymentsService.findById.mockResolvedValue(payment);
@@ -70,12 +70,12 @@ describe('PaymentResolver', () => {
 
   describe('resolveReference', () => {
     it('resolves a Payment entity by id', async () => {
-      const payment = { id: 'pay-1', userId: 'user-123', amount: 5000 };
+      const payment = { id: 'pay-1', userId: 'user-123', amount: 5000, status: 'completed' };
       mockPaymentsService.findById.mockResolvedValue(payment);
 
       const ctx = { req: { headers: { 'x-user-id': 'user-123' } } };
       const result = await resolver.resolveReference({ __typename: 'Payment', id: 'pay-1' }, ctx);
-      expect(result).toEqual(payment);
+      expect(result).toEqual({ ...payment, status: 'CAPTURED' });
     });
 
     it('resolves Payment reference by orderId', async () => {
@@ -85,7 +85,7 @@ describe('PaymentResolver', () => {
         userId: 'user_123',
         amount: 1200,
         currency: 'usd',
-        status: 'CAPTURED',
+        status: 'completed',
         createdAt: new Date().toISOString(),
       });
 
@@ -107,7 +107,7 @@ describe('PaymentResolver', () => {
         userId: 'user_123',
         amount: 1200,
         currency: 'usd',
-        status: 'CAPTURED',
+        status: 'completed',
         createdAt: new Date().toISOString(),
       });
 
@@ -147,7 +147,7 @@ describe('PaymentResolver', () => {
     });
 
     it('returns null when requester identity is missing', async () => {
-      const payment = { id: 'pay-1', userId: 'user-123', amount: 5000 };
+      const payment = { id: 'pay-1', userId: 'user-123', amount: 5000, status: 'completed' };
       mockPaymentsService.findById.mockResolvedValue(payment);
 
       const ctx: PaymentContext = { req: { headers: {} } };
@@ -157,7 +157,7 @@ describe('PaymentResolver', () => {
     });
 
     it('resolveReference — returns null for payment owned by different user', async () => {
-      const payment = { id: 'pay-1', userId: 'user-1', amount: 100 };
+      const payment = { id: 'pay-1', userId: 'user-1', amount: 100, status: 'completed' };
       mockPaymentsService.findById.mockResolvedValue(payment as any);
 
       const ctx: PaymentContext = { req: { headers: { 'x-user-id': 'user-2' } } };
@@ -325,7 +325,7 @@ describe('PaymentMethodMutationResolver', () => {
         userId: 'user-123',
         amount: 5000,
         currency: 'usd',
-        status: 'CAPTURED',
+        status: 'completed',
         createdAt: new Date().toISOString(),
       };
       mockPaymentsService.charge.mockResolvedValue(payment);
@@ -351,7 +351,7 @@ describe('PaymentMethodMutationResolver', () => {
         savedPaymentMethodId: undefined,
         userIdSig: 'sig-123',
       });
-      expect(result).toEqual(payment);
+      expect(result).toEqual({ ...payment, status: 'CAPTURED' });
     });
 
     it('delegates saved-payment-method charges to the service', async () => {
@@ -361,7 +361,7 @@ describe('PaymentMethodMutationResolver', () => {
         userId: 'user-123',
         amount: 4200,
         currency: 'usd',
-        status: 'CAPTURED',
+        status: 'completed',
         createdAt: new Date().toISOString(),
       };
       mockPaymentsService.charge.mockResolvedValue(payment);
@@ -390,7 +390,7 @@ describe('PaymentMethodMutationResolver', () => {
         savedPaymentMethodId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
         userIdSig: 'sig-456',
       });
-      expect(result).toEqual(payment);
+      expect(result).toEqual({ ...payment, status: 'CAPTURED' });
     });
 
     it('throws ForbiddenException when requester identity is missing', async () => {
