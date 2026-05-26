@@ -1,0 +1,10 @@
+query VenueDetail($id: ID!) {
+  venue(id: $id) {
+    id
+    organizerId
+    name
+    capacity
+    timezone
+    address
+  }
+}

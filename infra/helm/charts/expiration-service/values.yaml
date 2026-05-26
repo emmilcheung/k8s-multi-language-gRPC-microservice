@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: expiration-service
-  tag: latest
+  tag: SET_BY_CI
   pullPolicy: IfNotPresent
 
 service:

@@ -33,7 +33,7 @@ auth-service:
   replicaCount: 1
   image:
     repository: auth-service
-    tag: latest
+    tag: SET_BY_CI
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
     OTEL_EXPORTER_OTLP_PROTOCOL: grpc
@@ -52,7 +52,7 @@ ticket-service:
   replicaCount: 1
   image:
     repository: ticket-service
-    tag: latest
+    tag: SET_BY_CI
   env:
     REDIS_URL: redis://ticketing-redis-master.ticketing.svc.cluster.local:6379
     VENUE_SERVICE_ADDR: ticketing-venue-service.ticketing.svc.cluster.local:50052
@@ -73,7 +73,7 @@ order-service:
   replicaCount: 1
   image:
     repository: order-service
-    tag: latest
+    tag: SET_BY_CI
   env:
     REDIS_URL: redis://ticketing-redis-master.ticketing.svc.cluster.local:6379
     # Override the default short name with the FQDN for the minikube release.
@@ -121,7 +121,7 @@ payment-service:
   replicaCount: 1
   image:
     repository: payment-service
-    tag: latest
+    tag: SET_BY_CI
   env:
     ORDER_SERVICE_URL: "http://ticketing-order-service:8082"
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
@@ -141,7 +141,7 @@ expiration-service:
   replicaCount: 1
   image:
     repository: expiration-service
-    tag: latest
+    tag: SET_BY_CI
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
     OTEL_EXPORTER_OTLP_PROTOCOL: grpc
@@ -160,7 +160,7 @@ venue-service:
   replicaCount: 1
   image:
     repository: venue-service
-    tag: latest
+    tag: SET_BY_CI
   env:
     REDIS_URL: redis://ticketing-redis-master.ticketing.svc.cluster.local:6379
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
@@ -180,7 +180,7 @@ attendance-service:
   replicaCount: 1
   image:
     repository: attendance-service
-    tag: latest
+    tag: SET_BY_CI
   env:
     APP_ENV: development
     HTTP_PORT: "3007"
@@ -201,7 +201,7 @@ user-service:
   replicaCount: 1
   image:
     repository: user-service
-    tag: latest
+    tag: SET_BY_CI
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
     OTEL_EXPORTER_OTLP_PROTOCOL: grpc
@@ -232,7 +232,7 @@ client:
   replicaCount: 1
   image:
     repository: client
-    tag: latest
+    tag: SET_BY_CI
   env:
     NEXT_PUBLIC_API_URL: "http://localhost:8000"
     INTERNAL_API_URL: "http://ticketing-kong-proxy:8000"

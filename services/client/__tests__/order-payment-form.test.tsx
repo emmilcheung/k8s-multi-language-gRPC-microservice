@@ -4,6 +4,7 @@ import { OrderPaymentForm } from "@/components/order-payment-form";
 
 // Module-level mock for router.refresh so we can assert it from tests
 const routerRefreshMock = vi.fn();
+const submitPaymentMock = vi.fn();
 
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
@@ -12,9 +13,15 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/app/actions/orders", () => ({
+  cancelOrder: vi.fn(),
+  submitPayment: (...args: unknown[]) => submitPaymentMock(...args),
+}));
+
 describe("OrderPaymentForm", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    submitPaymentMock.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -163,24 +170,12 @@ describe("OrderPaymentForm", () => {
     }
   });
 
-  it("displays payment error when submit-payment returns error", async () => {
+  it("displays payment error when submitPayment action returns error", async () => {
     const originalPublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
     process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_mock";
 
     let changeHandler: ((event: { error?: { message?: string }; complete: boolean }) => void) | null = null;
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ error: { message: "Payment declined" } }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          }
-        )
-      )
-    );
+    submitPaymentMock.mockResolvedValue({ error: "Payment declined" });
 
     Object.defineProperty(window, "Stripe", {
       configurable: true,
@@ -255,7 +250,7 @@ describe("OrderPaymentForm", () => {
     }
   });
 
-  it("polls order status after successful payment submission and calls router.refresh", async () => {
+  it("polls order status after successful submitPayment action and calls router.refresh", async () => {
     const originalPublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
     process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_mock";
 
@@ -263,17 +258,6 @@ describe("OrderPaymentForm", () => {
     let statusPollCount = 0;
 
     const fetchSpy = vi.fn((url: string) => {
-      // First call: submit-payment
-      if (url === "/api/submit-payment") {
-        return Promise.resolve(
-          new Response(JSON.stringify({}), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          })
-        );
-      }
-
-      // Subsequent calls: status endpoint
       if (url === "/api/orders/ord-1/status") {
         statusPollCount++;
         // Return "processing" on first poll, then "complete" on second
@@ -354,12 +338,13 @@ describe("OrderPaymentForm", () => {
         payButton.click();
       });
 
-      // Wait for the submit-payment call
+      // Wait for submitPayment server action call
       await waitFor(() => {
-        const submitPaymentCalls = fetchSpy.mock.calls.filter(
-          (call) => call[0] === "/api/submit-payment"
+        expect(submitPaymentMock).toHaveBeenCalledWith(
+          "ord-1",
+          {},
+          expect.any(FormData)
         );
-        expect(submitPaymentCalls.length).toBeGreaterThan(0);
       });
 
       // Wait for polling to complete (verify we polled at least twice)

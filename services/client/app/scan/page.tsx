@@ -1,24 +1,12 @@
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { ApiError, getAttendanceSettings, serverApi } from "@/lib/api";
-import type { Ticket } from "@/lib/types";
+import { executeQuery } from "@/lib/graphql/execute";
+import { AttendancePolicyDocument, TicketDetailDocument } from "@/lib/graphql/generated";
+import { readCurrentUserIdFromToken } from "@/lib/server-utils";
 import { ScannerClient } from "@/components/scanner-client";
 
 interface Props {
   searchParams: Promise<{ eventId?: string }>;
-}
-
-function readCurrentUserIdFromToken(token?: string): string | null {
-  if (!token) return null;
-  try {
-    const payloadB64 = token.split(".")[1];
-    if (!payloadB64) return null;
-    const json = Buffer.from(payloadB64, "base64url").toString("utf-8");
-    const payload = JSON.parse(json) as { sub?: string };
-    return payload.sub ?? null;
-  } catch {
-    return null;
-  }
 }
 
 export default async function ScanPage({ searchParams }: Props) {
@@ -38,23 +26,20 @@ export default async function ScanPage({ searchParams }: Props) {
     redirect("/auth/signin");
   }
 
-  const ticket = await serverApi<Ticket>(`/api/tickets/${eventId}`).catch((error) => {
-    if (error instanceof ApiError && error.status === 404) {
-      notFound();
-    }
-    throw error;
-  });
-  if (ticket.userId !== currentUserId) {
+  const cookie = cookieStore.toString();
+
+  const [ticketData, policyData] = await Promise.all([
+    executeQuery(TicketDetailDocument, { id: eventId }, { cookie }).catch(() => null),
+    executeQuery(AttendancePolicyDocument, { eventId }, { cookie }).catch(() => null),
+  ]);
+
+  if (!ticketData?.ticket) {
     notFound();
   }
-
-  const settings = await getAttendanceSettings(eventId).catch((error) => {
-    if (error instanceof ApiError && error.status === 404) {
-      notFound();
-    }
-    throw error;
-  });
-  if (!settings.requireQrForEntry) {
+  if (ticketData.ticket.userId !== currentUserId) {
+    notFound();
+  }
+  if (!policyData?.attendancePolicy?.requireQrForEntry) {
     notFound();
   }
 

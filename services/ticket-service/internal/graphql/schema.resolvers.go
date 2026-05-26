@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
@@ -17,16 +16,27 @@ import (
 
 // CreateTicket is the resolver for the createTicket field.
 func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketInput) (*Ticket, error) {
-	price := strconv.Itoa(input.Price)
+	userID := userIDFromContext(ctx)
+	if userID == "" {
+		return nil, fmt.Errorf("createTicket: unauthorized: user identity required")
+	}
+	price := intPriceToDecimalString(input.Price)
 
-	// TicketType is set when seatingPlanId is attached to the ticket via the update path.
 	svcInput := service.CreateTicketInput{
-		Title: input.Title,
-		Price: price,
-		Quota: input.Quota,
+		Title:  input.Title,
+		Price:  price,
+		Quota:  input.Quota,
+		UserID: userID,
 	}
 	if input.MaxPerUser != nil {
 		svcInput.MaxPerUser = *input.MaxPerUser
+	}
+	if input.Event != nil {
+		ev, err := mapEventInput(input.Event)
+		if err != nil {
+			return nil, fmt.Errorf("createTicket: %w", err)
+		}
+		svcInput.Event = ev
 	}
 
 	t, err := r.TicketService.CreateTicket(ctx, svcInput)
@@ -38,6 +48,10 @@ func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketI
 
 // UpdateTicket is the resolver for the updateTicket field.
 func (r *mutationResolver) UpdateTicket(ctx context.Context, id string, input UpdateTicketInput) (*Ticket, error) {
+	userID := userIDFromContext(ctx)
+	if userID == "" {
+		return nil, fmt.Errorf("updateTicket: unauthorized: user identity required")
+	}
 	// Fetch the current ticket so we can fill fields the caller didn't change.
 	existing, err := r.TicketService.GetTicketByID(ctx, id)
 	if err != nil {
@@ -45,16 +59,27 @@ func (r *mutationResolver) UpdateTicket(ctx context.Context, id string, input Up
 	}
 
 	svcInput := service.UpdateTicketInput{
-		ID:    id,
-		Title: existing.Title,
-		Price: existing.Price,
+		ID:     id,
+		Title:  existing.Title,
+		Price:  existing.Price,
+		UserID: userID,
 	}
 
 	if input.Title != nil {
 		svcInput.Title = *input.Title
 	}
 	if input.Price != nil {
-		svcInput.Price = strconv.Itoa(*input.Price)
+		svcInput.Price = intPriceToDecimalString(*input.Price)
+	}
+	if input.Event != nil {
+		ev, err := mapEventInput(input.Event)
+		if err != nil {
+			return nil, fmt.Errorf("updateTicket: %w", err)
+		}
+		svcInput.Event = ev
+	}
+	if input.SeatingPlanID != nil {
+		svcInput.SeatingPlanID = *input.SeatingPlanID
 	}
 
 	t, err := r.TicketService.UpdateTicket(ctx, svcInput)
@@ -77,6 +102,65 @@ func (r *queryResolver) Tickets(ctx context.Context) ([]*Ticket, error) {
 	return result, nil
 }
 
+// TicketsConnection is the resolver for the ticketsConnection field.
+func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFilter, first *int, after *string) (*TicketConnection, error) {
+	limit := 20
+	if first != nil && *first > 0 {
+		limit = *first
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	params := repository.PaginationParams{Limit: limit + 1}
+	if after != nil {
+		params.After = *after
+	}
+	if filter != nil && filter.AvailableOnly != nil {
+		params.AvailableOnly = *filter.AvailableOnly
+	}
+
+	tickets, err := r.TicketService.ListTickets(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("ticketsConnection: %w", err)
+	}
+
+	// Apply ticketType filter in-memory (repo doesn't accept it yet).
+	if filter != nil && filter.TicketType != nil {
+		filtered := tickets[:0]
+		for _, t := range tickets {
+			if string(t.TicketType) == string(*filter.TicketType) {
+				filtered = append(filtered, t)
+			}
+		}
+		tickets = filtered
+	}
+
+	hasNext := len(tickets) > limit
+	if hasNext {
+		tickets = tickets[:limit]
+	}
+
+	edges := make([]*TicketEdge, len(tickets))
+	for i, t := range tickets {
+		edges[i] = &TicketEdge{
+			Node:   mapTicketToGQL(t),
+			Cursor: fmt.Sprintf("%d:%s", t.CreatedAt.UnixMilli(), t.ID),
+		}
+	}
+
+	var endCursor *string
+	if len(edges) > 0 {
+		c := edges[len(edges)-1].Cursor
+		endCursor = &c
+	}
+
+	return &TicketConnection{
+		Edges:    edges,
+		PageInfo: &PageInfo{HasNextPage: hasNext, EndCursor: endCursor},
+	}, nil
+}
+
 // Ticket is the resolver for the ticket field.
 func (r *queryResolver) Ticket(ctx context.Context, id string) (*Ticket, error) {
 	t, err := r.TicketService.GetTicketByID(ctx, id)
@@ -97,3 +181,4 @@ func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+

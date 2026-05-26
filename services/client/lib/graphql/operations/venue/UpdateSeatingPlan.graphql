@@ -1,0 +1,7 @@
+mutation UpdateSeatingPlan($id: ID!, $input: UpdateSeatingPlanInput!) {
+  updateSeatingPlan(id: $id, input: $input) {
+    id
+    status
+    assignmentMode
+  }
+}

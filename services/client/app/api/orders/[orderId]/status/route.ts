@@ -1,20 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { base, authHeaders } from "@/lib/server-utils";
+import { ApiError } from "@/lib/api";
+import { OrderDetailDocument } from "@/lib/graphql/generated";
+import { executeQuery } from "@/lib/graphql/execute";
+import { coerceOrderStatus } from "@/lib/order-status";
 import { traceResponseHeaders } from "@/lib/tracing";
-import type { Order } from "@/lib/types";
-
-async function readJsonBody(response: Response): Promise<unknown> {
-  const rawBody = await response.text();
-  if (!rawBody) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(rawBody) as unknown;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * GET /api/orders/[orderId]/status
@@ -35,26 +24,42 @@ export async function GET(
       );
     }
 
-    const res = await fetch(`${base()}/api/orders/${orderId}`, {
-      method: "GET",
-      headers: await authHeaders(request),
-    });
-
-    if (!res.ok) {
-      const body = (await readJsonBody(res)) as { error?: unknown } | null;
-      return NextResponse.json(
-        { error: body?.error ?? { message: "Failed to fetch order status." } },
-        { status: res.status, headers: traceResponseHeaders() }
-      );
-    }
-
-    const order = (await readJsonBody(res)) as Order | null;
+    const data = await executeQuery(
+      OrderDetailDocument,
+      { id: orderId },
+      { cookie: request.headers.get("cookie") ?? undefined },
+    );
+    const order = data.order
+      ? {
+          id: data.order.id,
+          userId: data.order.userId,
+          status: coerceOrderStatus(data.order.status),
+          expiresAt: data.order.expiresAt ?? "",
+          ticket: {
+            id: data.order.ticket.id,
+            title: data.order.ticket.title,
+            price: data.order.ticket.price,
+          },
+          quantity: data.order.quantity,
+          version: 0,
+        }
+      : null;
 
     return NextResponse.json(
       { order },
       { status: 200, headers: traceResponseHeaders() }
     );
   } catch (error) {
+    if (error instanceof ApiError) {
+      const body =
+        error.body && typeof error.body === "object" && "error" in error.body
+          ? (error.body as { error: unknown })
+          : { error: { code: "ORDER_STATUS_FAILED", message: error.message } };
+      return NextResponse.json(body, {
+        status: error.status,
+        headers: traceResponseHeaders(),
+      });
+    }
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error("Order status fetch error:", errorMessage);
     return NextResponse.json(

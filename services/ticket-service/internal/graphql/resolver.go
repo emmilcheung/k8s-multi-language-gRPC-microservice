@@ -31,7 +31,11 @@ func mapTicketToGQL(t *repository.Ticket) *Ticket {
 		ID:         t.ID,
 		Title:      t.Title,
 		Price:      price,
+		PriceDecimal: t.Price,
+		UserID:     t.UserID,
 		Quota:      t.Quota,
+		Reserved:   t.Reserved,
+		Sold:       t.Sold,
 		Available:  available,
 		TicketType: ticketType,
 		CreatedAt:  t.CreatedAt.Format(time.RFC3339),
@@ -45,6 +49,37 @@ func mapTicketToGQL(t *repository.Ticket) *Ticket {
 
 	if t.SeatingPlanID != "" {
 		result.SeatingPlan = &SeatingPlan{ID: t.SeatingPlanID}
+	}
+	if t.OrderID != "" {
+		orderID := t.OrderID
+		result.OrderID = &orderID
+	}
+	if t.Event != nil {
+		event := &TicketEvent{
+			Title:    t.Event.Title,
+			StartsAt: t.Event.StartsAt.Format(time.RFC3339),
+		}
+		if t.Event.Description != "" {
+			description := t.Event.Description
+			event.Description = &description
+		}
+		if t.Event.EndsAt != nil {
+			endsAt := t.Event.EndsAt.Format(time.RFC3339)
+			event.EndsAt = &endsAt
+		}
+		if t.Event.ImageURL != "" {
+			imageURL := t.Event.ImageURL
+			event.ImageURL = &imageURL
+		}
+		if t.Event.VenueName != "" {
+			venueName := t.Event.VenueName
+			event.VenueName = &venueName
+		}
+		if t.Event.VenueAddress != "" {
+			venueAddress := t.Event.VenueAddress
+			event.VenueAddress = &venueAddress
+		}
+		result.Event = event
 	}
 
 	return result

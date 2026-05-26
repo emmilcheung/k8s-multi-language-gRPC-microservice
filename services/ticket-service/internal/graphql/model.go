@@ -10,14 +10,20 @@ import (
 )
 
 type CreateTicketInput struct {
-	Title      string     `json:"title"`
-	Price      int        `json:"price"`
-	Quota      int        `json:"quota"`
-	MaxPerUser *int       `json:"maxPerUser,omitempty"`
-	TicketType TicketType `json:"ticketType"`
+	Title      string            `json:"title"`
+	Price      int               `json:"price"`
+	Quota      int               `json:"quota"`
+	MaxPerUser *int              `json:"maxPerUser,omitempty"`
+	TicketType TicketType        `json:"ticketType"`
+	Event      *TicketEventInput `json:"event"`
 }
 
 type Mutation struct {
+}
+
+type PageInfo struct {
+	HasNextPage bool    `json:"hasNextPage"`
+	EndCursor   *string `json:"endCursor,omitempty"`
 }
 
 type Query struct {
@@ -30,25 +36,68 @@ type SeatingPlan struct {
 func (SeatingPlan) IsEntity() {}
 
 type Ticket struct {
-	ID          string       `json:"id"`
-	Title       string       `json:"title"`
-	Price       int          `json:"price"`
-	Quota       int          `json:"quota"`
-	Available   int          `json:"available"`
-	MaxPerUser  *int         `json:"maxPerUser,omitempty"`
-	TicketType  TicketType   `json:"ticketType"`
-	SeatingPlan *SeatingPlan `json:"seatingPlan,omitempty"`
-	CreatedAt   string       `json:"createdAt"`
-	UpdatedAt   string       `json:"updatedAt"`
+	ID           string       `json:"id"`
+	Title        string       `json:"title"`
+	Price        int          `json:"price"`
+	PriceDecimal string       `json:"priceDecimal"`
+	UserID       string       `json:"userId"`
+	OrderID      *string      `json:"orderId,omitempty"`
+	Quota        int          `json:"quota"`
+	Reserved     int          `json:"reserved"`
+	Sold         int          `json:"sold"`
+	Available    int          `json:"available"`
+	MaxPerUser   *int         `json:"maxPerUser,omitempty"`
+	TicketType   TicketType   `json:"ticketType"`
+	SeatingPlan  *SeatingPlan `json:"seatingPlan,omitempty"`
+	Event        *TicketEvent `json:"event,omitempty"`
+	CreatedAt    string       `json:"createdAt"`
+	UpdatedAt    string       `json:"updatedAt"`
 }
 
 func (Ticket) IsEntity() {}
 
+type TicketConnection struct {
+	Edges    []*TicketEdge `json:"edges"`
+	PageInfo *PageInfo     `json:"pageInfo"`
+}
+
+type TicketEdge struct {
+	Node   *Ticket `json:"node"`
+	Cursor string  `json:"cursor"`
+}
+
+type TicketEvent struct {
+	Title        string  `json:"title"`
+	Description  *string `json:"description,omitempty"`
+	StartsAt     string  `json:"startsAt"`
+	EndsAt       *string `json:"endsAt,omitempty"`
+	ImageURL     *string `json:"imageUrl,omitempty"`
+	VenueName    *string `json:"venueName,omitempty"`
+	VenueAddress *string `json:"venueAddress,omitempty"`
+}
+
+type TicketEventInput struct {
+	Title        *string `json:"title,omitempty"`
+	Description  *string `json:"description,omitempty"`
+	StartsAt     string  `json:"startsAt"`
+	EndsAt       *string `json:"endsAt,omitempty"`
+	ImageURL     *string `json:"imageUrl,omitempty"`
+	VenueName    *string `json:"venueName,omitempty"`
+	VenueAddress *string `json:"venueAddress,omitempty"`
+}
+
+type TicketFilter struct {
+	AvailableOnly *bool       `json:"availableOnly,omitempty"`
+	TicketType    *TicketType `json:"ticketType,omitempty"`
+}
+
 type UpdateTicketInput struct {
-	Title      *string `json:"title,omitempty"`
-	Price      *int    `json:"price,omitempty"`
-	Quota      *int    `json:"quota,omitempty"`
-	MaxPerUser *int    `json:"maxPerUser,omitempty"`
+	Title         *string           `json:"title,omitempty"`
+	Price         *int              `json:"price,omitempty"`
+	Quota         *int              `json:"quota,omitempty"`
+	MaxPerUser    *int              `json:"maxPerUser,omitempty"`
+	Event         *TicketEventInput `json:"event,omitempty"`
+	SeatingPlanID *string           `json:"seatingPlanId,omitempty"`
 }
 
 type TicketType string

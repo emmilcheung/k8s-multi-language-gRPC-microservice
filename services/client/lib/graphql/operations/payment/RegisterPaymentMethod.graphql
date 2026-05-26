@@ -1,0 +1,11 @@
+mutation RegisterPaymentMethod($input: RegisterPaymentMethodInput!) {
+  registerPaymentMethod(input: $input) {
+    id
+    brand
+    last4
+    expMonth
+    expYear
+    isDefault
+    label
+  }
+}

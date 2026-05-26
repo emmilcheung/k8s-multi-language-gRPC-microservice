@@ -17,6 +17,7 @@ type AdmissionPass struct {
 	Status   CredentialStatus `json:"status"`
 	IssuedAt string           `json:"issuedAt"`
 	UsedAt   *string          `json:"usedAt,omitempty"`
+	QRToken  *string          `json:"qrToken,omitempty"`
 }
 
 func (AdmissionPass) IsEntity() {}
@@ -34,7 +35,100 @@ type AttendanceSummary struct {
 	TotalCheckedIn int    `json:"totalCheckedIn"`
 }
 
+type EventCheckin struct {
+	ID          string        `json:"id"`
+	EventID     string        `json:"eventId"`
+	TicketID    string        `json:"ticketId"`
+	OrderID     string        `json:"orderId"`
+	UserID      *string       `json:"userId,omitempty"`
+	CheckedInAt string        `json:"checkedInAt"`
+	Source      CheckinSource `json:"source"`
+}
+
+type Mutation struct {
+}
+
 type Query struct {
+}
+
+type RecordCheckinByUserIDInput struct {
+	EventID string `json:"eventId"`
+	UserID  string `json:"userId"`
+}
+
+type RecordCheckinInput struct {
+	TicketID string        `json:"ticketId"`
+	Source   CheckinSource `json:"source"`
+}
+
+type ScanValidationResult struct {
+	Valid    bool    `json:"valid"`
+	Reason   *string `json:"reason,omitempty"`
+	TicketID *string `json:"ticketId,omitempty"`
+	OrderID  *string `json:"orderId,omitempty"`
+	EventID  *string `json:"eventId,omitempty"`
+}
+
+type UpdateAttendancePolicyInput struct {
+	RequireQRForEntry   *bool `json:"requireQrForEntry,omitempty"`
+	AllowManualOverride *bool `json:"allowManualOverride,omitempty"`
+}
+
+type CheckinSource string
+
+const (
+	CheckinSourceQRScan         CheckinSource = "QR_SCAN"
+	CheckinSourceManualOverride CheckinSource = "MANUAL_OVERRIDE"
+	CheckinSourceUserIDLookup   CheckinSource = "USER_ID_LOOKUP"
+)
+
+var AllCheckinSource = []CheckinSource{
+	CheckinSourceQRScan,
+	CheckinSourceManualOverride,
+	CheckinSourceUserIDLookup,
+}
+
+func (e CheckinSource) IsValid() bool {
+	switch e {
+	case CheckinSourceQRScan, CheckinSourceManualOverride, CheckinSourceUserIDLookup:
+		return true
+	}
+	return false
+}
+
+func (e CheckinSource) String() string {
+	return string(e)
+}
+
+func (e *CheckinSource) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = CheckinSource(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid CheckinSource", str)
+	}
+	return nil
+}
+
+func (e CheckinSource) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *CheckinSource) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e CheckinSource) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
 }
 
 type CredentialStatus string

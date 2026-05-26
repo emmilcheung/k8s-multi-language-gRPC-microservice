@@ -1,5 +1,6 @@
 package com.ticketing.orders.graphql;
 
+import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
 import com.ticketing.orders.exception.ForbiddenException;
 import com.ticketing.orders.service.OrderService;
@@ -9,8 +10,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -92,5 +95,57 @@ class OrderControllerTest {
         List<OrderResponse> result = controller.userOrders(userRef, ctxWithUserId(requesterId));
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    void payment_returnsFederatedReferenceForOwner() {
+        String userId = UUID.randomUUID().toString();
+        OrderResponse order = new OrderResponse();
+        ReflectionTestUtils.setField(order, "id", UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        ReflectionTestUtils.setField(order, "userId", UUID.fromString(userId));
+
+        Map<String, Object> result = controller.payment(order, ctxWithUserId(userId));
+
+        assertThat(result).containsEntry("__typename", "Payment");
+        assertThat(result).containsEntry("orderId", "11111111-1111-1111-1111-111111111111");
+    }
+
+    @Test
+    void payment_returnsNullForOtherUser() {
+        String userId = UUID.randomUUID().toString();
+        OrderResponse order = new OrderResponse();
+        ReflectionTestUtils.setField(order, "id", UUID.randomUUID());
+        ReflectionTestUtils.setField(order, "userId", UUID.fromString(userId));
+
+        Map<String, Object> result = controller.payment(order, ctxWithUserId(UUID.randomUUID().toString()));
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void createSeatedOrder_withAttendeeInvalidUuidSeatId_throwsIllegalArgumentException() {
+        String userId = UUID.randomUUID().toString();
+        when(orderService.createSeatedOrder(eq(UUID.fromString(userId)), any(CreateOrderRequest.class)))
+                .thenAnswer(invocation -> {
+                    CreateOrderRequest req = invocation.getArgument(1);
+                    req.validate();
+                    return null;
+                });
+
+        Map<String, Object> attendeeWithInvalidSeatId = Map.of(
+                "seatId", "not-a-uuid",
+                "name", "John Doe"
+        );
+        Map<String, Object> input = Map.of(
+                "ticketId", UUID.randomUUID().toString(),
+                "quantity", 1,
+                "planId", UUID.randomUUID().toString(),
+                "attendees", List.of(attendeeWithInvalidSeatId)
+        );
+
+        assertThatThrownBy(() -> controller.createSeatedOrder(input, ctxWithUserId(userId)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("attendee[0].seatId")
+                .hasMessageContaining("valid UUID");
     }
 }

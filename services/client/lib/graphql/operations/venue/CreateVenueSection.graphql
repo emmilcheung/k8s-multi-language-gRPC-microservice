@@ -1,0 +1,12 @@
+mutation CreateVenueSection($venueId: ID!, $input: CreateSectionInput!) {
+  createSection(venueId: $venueId, input: $input) {
+    id
+    venueId
+    name
+    type
+    rowCount
+    columnCount
+    displayOrder
+    capacity
+  }
+}

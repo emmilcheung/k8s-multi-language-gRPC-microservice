@@ -5,6 +5,7 @@ type User @key(fields: "id") {
   id: ID! @external
   profile: UserProfile @tag(name: "self-only")
   preferences: UserPreferences @tag(name: "self-only")
+  billingAddress: BillingAddress @tag(name: "pii")
 }
 
 type UserProfile {
@@ -27,4 +28,31 @@ type UserPreferences {
   marketingOptIn: Boolean
   orderUpdates: Boolean
   productUpdates: Boolean
+}
+
+input UpdateProfileInput {
+  displayName: String
+  locale: String
+  timezone: String
+}
+
+input UpdatePreferencesInput {
+  marketingOptIn: Boolean
+  orderUpdates: Boolean
+  productUpdates: Boolean
+}
+
+input BillingAddressInput {
+  line1: String!
+  line2: String
+  city: String!
+  state: String
+  postalCode: String!
+  country: String!
+}
+
+type Mutation {
+  updateProfile(input: UpdateProfileInput!): UserProfile!
+  updatePreferences(input: UpdatePreferencesInput!): UserPreferences!
+  updateBillingAddress(input: BillingAddressInput!): BillingAddress!
 }

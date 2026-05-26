@@ -1,0 +1,9 @@
+mutation ValidateScan($token: String!) {
+  validateScan(token: $token) {
+    valid
+    reason
+    ticketId
+    orderId
+    eventId
+  }
+}

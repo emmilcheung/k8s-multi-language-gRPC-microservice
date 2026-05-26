@@ -3,7 +3,16 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { base, authHeaders } from "@/lib/server-utils";
+import { executeQuery, executeMutation } from "@/lib/graphql/execute";
+import { ApiError } from "@/lib/api";
+import {
+  TicketsBrowseDocument,
+  CreateTicketDocument,
+  UpdateTicketDocument,
+  UpdateAttendancePolicyDocument,
+} from "@/lib/graphql/generated";
 import type { AvailabilitySnapshot, SeatingPlan, Ticket } from "@/lib/types";
 import { createSeatingPlanForTicket } from "./venues";
 
@@ -21,64 +30,82 @@ export interface TicketPage {
 
 const PAGE_SIZE = 20;
 
-async function isPubliclyAvailableTicket(ticket: Ticket): Promise<boolean> {
-  if (!ticket.seatingPlanId) {
-    return !ticket.orderId;
-  }
-
-  const [planRes, availabilityRes] = await Promise.all([
-    fetch(`${base()}/api/seating-plans/${ticket.seatingPlanId}`, { cache: "no-store" }),
-    fetch(`${base()}/api/seating-plans/${ticket.seatingPlanId}/availability`, { cache: "no-store" }),
-  ]);
-
-  if (!planRes.ok || !availabilityRes.ok) {
-    return false;
-  }
+async function isPubliclyAvailableSeatedTicket(planId: string): Promise<boolean> {
+  const planRes = await fetch(`${base()}/api/seating-plans/${planId}`, {
+    cache: "no-store",
+  });
+  if (!planRes.ok) return false;
 
   const plan = await planRes.json() as SeatingPlan;
-  const availability = await availabilityRes.json() as AvailabilitySnapshot;
+  if (plan.status !== "active") return false;
 
-  return plan.status === "active" && availability.counts.available > 0;
+  const availabilityRes = await fetch(`${base()}/api/seating-plans/${planId}/availability`, {
+    cache: "no-store",
+  });
+  if (!availabilityRes.ok) return false;
+
+  const availability = await availabilityRes.json() as AvailabilitySnapshot;
+  return availability.counts.available > 0;
 }
 
 /**
  * Fetches one page of available (unreserved) tickets using cursor-based
- * pagination. Pass `after=null` for the first page; subsequent pages use the
+ * pagination via GraphQL. Pass `after=null` for the first page; subsequent pages use the
  * `cursor` returned from the previous call.
  *
  * This is a Server Action so it can be called from Client Components without
  * exposing the internal API URL or auth cookie logic to the browser.
  */
-export async function fetchTicketPage(after: string | null): Promise<TicketPage> {
-  const url = new URL(`${base()}/api/tickets`);
-  url.searchParams.set("limit", String(PAGE_SIZE));
-  url.searchParams.set("available", "true");
-  if (after) url.searchParams.set("after", after);
+export async function fetchTicketPageViaGraphQL(after: string | null): Promise<TicketPage> {
+  try {
+    const cookieStore = await cookies();
+    const cookieHeader = cookieStore.toString();
 
-  // Public endpoint — no auth cookie required.
-  const res = await fetch(url.toString(), { cache: "no-store" });
+    const data = await executeQuery(
+      TicketsBrowseDocument,
+      { first: PAGE_SIZE, after: after || undefined },
+      { cookie: cookieHeader }
+    );
 
-  if (!res.ok) {
+    if (!data.ticketsConnection) {
+      return { tickets: [], cursor: null, hasMore: false };
+    }
+
+    const gqlTickets = data.ticketsConnection.edges.map((edge) => ({
+      id: edge.node.id,
+      title: edge.node.title,
+      price: String(edge.node.price),
+      available: edge.node.available,
+      ticketType: edge.node.ticketType,
+      seatingPlanId: edge.node.seatingPlan?.id ?? null,
+    }));
+
+    const visibleTickets = (
+      await Promise.all(
+        gqlTickets.map(async (ticket) => {
+          if (!ticket.seatingPlanId) return ticket;
+          return (await isPubliclyAvailableSeatedTicket(ticket.seatingPlanId)) ? ticket : null;
+        })
+      )
+    ).filter((ticket): ticket is (typeof gqlTickets)[number] => ticket !== null);
+
+    const cursor = data.ticketsConnection.pageInfo.endCursor ?? null;
+    const hasMore = data.ticketsConnection.pageInfo.hasNextPage;
+
+    return {
+      tickets: visibleTickets as unknown as Ticket[],
+      cursor,
+      hasMore,
+    };
+  } catch {
     // Non-fatal: return empty page so the UI degrades gracefully.
     return { tickets: [], cursor: null, hasMore: false };
   }
-
-  const all: Ticket[] = await res.json();
-  const filtered = await Promise.all(
-    all.map(async (ticket) => ((await isPubliclyAvailableTicket(ticket)) ? ticket : null))
-  );
-  const tickets = filtered.filter((ticket): ticket is Ticket => ticket !== null);
-  // Compound cursor: "<createdAtUnixMilli>:<id>" matches the backend EncodeCursor format.
-  const lastTicket = all.length > 0 ? all[all.length - 1] : null;
-  const cursor = lastTicket?.createdAt
-    ? `${new Date(lastTicket.createdAt).getTime()}:${lastTicket.id}`
-    : (lastTicket?.id ?? null);
-  const hasMore = all.length === PAGE_SIZE;
-  return { tickets, cursor, hasMore };
 }
 
 export interface TicketState {
   error?: string;
+  refreshed?: true;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -98,39 +125,34 @@ function parseRequireQrForEntry(raw: string | null): boolean {
 
 async function linkSeatingPlanToTicket(
   ticketId: string,
-  title: string,
-  price: string,
-  seatingPlanId: string,
-  ticketType: string
+  seatingPlanId: string
 ): Promise<string | null> {
-  const updateRes = await fetch(`${base()}/api/tickets/${ticketId}`, {
-    method: "PUT",
-    headers: await authHeaders(),
-    body: JSON.stringify({
-      title,
-      price,
-      seatingPlanId,
-      ticketType,
-    }),
-  });
-
-  if (updateRes.ok) return null;
-
-  const errBody = await updateRes.json().catch(() => ({}));
-  return errBody?.error?.message ?? "Failed to attach seating plan to ticket.";
+  try {
+    await executeMutation(UpdateTicketDocument, { id: ticketId, input: { seatingPlanId } });
+    return null;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) redirect("/auth/signin");
+    return err instanceof Error ? err.message : "Failed to attach seating plan to ticket.";
+  }
 }
 
 async function upsertAttendanceSettings(eventId: string, requireQrForEntry: boolean): Promise<string | null> {
-  const response = await fetch(`${base()}/api/attendance/events/${eventId}/settings`, {
-    method: "PATCH",
-    headers: await authHeaders(),
-    body: JSON.stringify({ requireQrForEntry }),
-  });
-
-  if (response.ok) return null;
-
-  const errBody = await response.json().catch(() => ({}));
-  return errBody?.error?.message ?? "Failed to save attendance settings.";
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    try {
+      await executeMutation(UpdateAttendancePolicyDocument, {
+        eventId,
+        input: { requireQrForEntry },
+      });
+      return null;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save attendance settings.";
+      const isNotFound = String(message).toLowerCase().includes("event not found");
+      if (!isNotFound) return message;
+      if (attempt === 8) break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+  return null;
 }
 
 // ─── Mutations ────────────────────────────────────────────────────────────────
@@ -214,9 +236,10 @@ export async function createTicket(
     if (maxSeatsPerOrder !== undefined) reqBody.maxPerUser = maxSeatsPerOrder;
   }
 
-  // Attach event sub-document — backend TicketEvent struct already handles this
-  reqBody.event = {
-    startsAt,
+  const gqlTicketType = ticketType.startsWith("SEATED") ? "SEATED" : "GENERAL_ADMISSION";
+  const priceInCents = Math.round(parseFloat(effectivePrice) * 100);
+  const eventInput = {
+    startsAt: startsAt!,
     ...(eventTitle && { title: eventTitle }),
     ...(endsAt && { endsAt }),
     ...(eventDescription && { description: eventDescription }),
@@ -225,18 +248,23 @@ export async function createTicket(
     ...(venueAddress && { venueAddress }),
   };
 
-  const res = await fetch(`${base()}/api/tickets`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify(reqBody),
-  });
-
-  if (!res.ok) {
-    const errBody = await res.json().catch(() => ({}));
-    return { error: errBody?.error?.message ?? "Failed to create ticket." };
+  let ticket: { id: string; title: string; priceDecimal: string };
+  try {
+    const result = await executeMutation(CreateTicketDocument, {
+      input: {
+        title: title.trim(),
+        price: priceInCents,
+        quota: (reqBody.quota as number | undefined) ?? 0,
+        ...(reqBody.maxPerUser !== undefined && { maxPerUser: reqBody.maxPerUser as number }),
+        ticketType: gqlTicketType,
+        event: eventInput,
+      },
+    });
+    ticket = result.createTicket;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to create ticket.";
+    return { error: msg };
   }
-
-  const ticket = await res.json();
 
   // Phase 3: If seating plan, create it with ticketId (no separate attach)
   if (ticketType.startsWith("SEATED") && venueId) {
@@ -254,13 +282,7 @@ export async function createTicket(
       return { error: "Failed to create seating plan for this ticket." };
     }
 
-    const updateError = await linkSeatingPlanToTicket(
-      ticket.id,
-      ticket.title,
-      ticket.price,
-      plan.id,
-      ticketType
-    );
+    const updateError = await linkSeatingPlanToTicket(ticket.id, plan.id);
 
     if (updateError) {
       return { error: updateError };
@@ -310,32 +332,28 @@ export async function updateTicket(
     endsAt += ":00Z";
   }
 
-  const reqBody: Record<string, unknown> = { title: title.trim(), price: priceRaw };
-  if (quota !== undefined) reqBody.quota = quota;
-  if (maxPerUser !== undefined) reqBody.maxPerUser = maxPerUser;
-  reqBody.event = {
-    title: eventTitle,
-    description: eventDescription,
-    startsAt,
-    imageUrl: eventImageUrl,
-    venueName,
-    venueAddress,
-    ...(endsAt ? { endsAt } : {}),
+  const updateInput = {
+    title: title.trim(),
+    price: Math.round(priceNum * 100),
+    ...(quota !== undefined && { quota }),
+    ...(maxPerUser !== undefined && { maxPerUser }),
+    event: {
+      title: eventTitle || undefined,
+      description: eventDescription || undefined,
+      startsAt,
+      imageUrl: eventImageUrl || undefined,
+      venueName: venueName || undefined,
+      venueAddress: venueAddress || undefined,
+      ...(endsAt ? { endsAt } : {}),
+    },
   };
 
-  const res = await fetch(`${base()}/api/tickets/${ticketId}`, {
-    method: "PUT",
-    headers: await authHeaders(),
-    // ticket-service requires price as a decimal string (e.g. "25.00"), not a number
-    body: JSON.stringify(reqBody),
-  });
-
-  if (!res.ok) {
-    if (res.status === 401) redirect("/auth/signin");
-    const errBody = await res.json().catch(() => ({}));
-    // ticket-service: { error: { message: "..." } }; Kong: { message: "..." }
-    const errMsg = errBody?.error?.message ?? errBody?.message ?? "Failed to update ticket.";
-    return { error: errMsg };
+  try {
+    await executeMutation(UpdateTicketDocument, { id: ticketId, input: updateInput });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) redirect("/auth/signin");
+    const msg = err instanceof Error ? err.message : "Failed to update ticket.";
+    return { error: msg };
   }
 
   const attendanceError = await upsertAttendanceSettings(ticketId, requireQrForEntry);
@@ -345,15 +363,12 @@ export async function updateTicket(
 
   revalidatePath(`/tickets/${ticketId}`);
   revalidatePath("/");
-  redirect(`/tickets/${ticketId}`);
+  return { refreshed: true };
 }
 
 export async function replaceInactivePlan(
   ticketId: string,
   currentPlanId: string,
-  title: string,
-  price: string,
-  fallbackTicketType: string,
   _prev: TicketState,
   _formData: FormData
 ): Promise<TicketState> {
@@ -384,12 +399,6 @@ export async function replaceInactivePlan(
   }
 
   const assignmentMode = currentPlan.assignmentMode === "auto" ? "auto" : "manual";
-  const ticketType =
-    assignmentMode === "auto"
-      ? "SEATED_AUTO"
-      : fallbackTicketType === "SEATED_AUTO"
-        ? "SEATED_AUTO"
-        : "SEATED_MANUAL";
   const replacementName = currentPlan.name.includes("Replacement")
     ? currentPlan.name
     : `${currentPlan.name} Replacement`;
@@ -407,13 +416,7 @@ export async function replaceInactivePlan(
     return { error: "Failed to create a replacement seating plan." };
   }
 
-  const updateError = await linkSeatingPlanToTicket(
-    ticketId,
-    title,
-    price,
-    replacementPlan.id,
-    ticketType
-  );
+  const updateError = await linkSeatingPlanToTicket(ticketId, replacementPlan.id);
   if (updateError) {
     return { error: updateError };
   }

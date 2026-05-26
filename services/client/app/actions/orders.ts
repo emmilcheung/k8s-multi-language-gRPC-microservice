@@ -3,10 +3,23 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { base, authHeaders } from "@/lib/server-utils";
+import { executeMutation } from "@/lib/graphql/execute";
+import {
+  CancelOrderDocument,
+  CreateOrderDocument,
+  CreatePaymentDocument,
+  CreateSeatedOrderDocument,
+} from "@/lib/graphql/generated";
 
 export interface OrderState {
   error?: string;
+}
+
+function isRedirectError(error: unknown): error is Error & { digest?: string } {
+  if (!(error instanceof Error)) return false;
+  if (error.message === "NEXT_REDIRECT") return true;
+  const redirectError = error as Error & { digest?: string };
+  return typeof redirectError.digest === "string" && redirectError.digest.startsWith("NEXT_REDIRECT");
 }
 
 export async function createOrder(
@@ -20,20 +33,16 @@ export async function createOrder(
     return { error: "Quantity must be at least 1." };
   }
 
-  const res = await fetch(`${base()}/api/orders`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({ ticketId, quantity }),
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error?.message ?? "Failed to create order." };
+  try {
+    const data = await executeMutation(CreateOrderDocument, {
+      input: { ticketId, quantity },
+    });
+    revalidatePath("/orders");
+    redirect(`/orders/${data.createOrder.id}`);
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return { error: error instanceof Error ? error.message : "Failed to create order." };
   }
-
-  const order = await res.json();
-  revalidatePath("/orders");
-  redirect(`/orders/${order.id}`);
 }
 
 export async function cancelOrder(
@@ -44,18 +53,14 @@ export async function cancelOrder(
   void prev;
   void formData;
 
-  const res = await fetch(`${base()}/api/orders/${orderId}`, {
-    method: "DELETE",
-    headers: await authHeaders(),
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error?.message ?? "Failed to cancel order." };
+  try {
+    await executeMutation(CancelOrderDocument, { id: orderId });
+    revalidatePath("/orders");
+    redirect("/orders");
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return { error: error instanceof Error ? error.message : "Failed to cancel order." };
   }
-
-  revalidatePath("/orders");
-  redirect("/orders");
 }
 
 export async function submitPayment(
@@ -64,23 +69,25 @@ export async function submitPayment(
   formData: FormData
 ): Promise<OrderState> {
   void prev;
-  void formData;
-
-  const token = process.env.STRIPE_TEST_TOKEN ?? "pm_card_visa";
-
-  const res = await fetch(`${base()}/api/payments`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({ orderId, token }),
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error?.message ?? "Payment failed." };
+  const paymentMethodId = String(formData.get("paymentMethodId") ?? "").trim();
+  const savedPaymentMethodId = String(formData.get("savedPaymentMethodId") ?? "").trim();
+  if (!paymentMethodId && !savedPaymentMethodId) {
+    return { error: "Payment method is required." };
   }
 
-  revalidatePath(`/orders/${orderId}`);
-  redirect(`/orders/${orderId}`);
+  try {
+    const input = savedPaymentMethodId
+      ? { orderId, savedPaymentMethodId }
+      : { orderId, token: paymentMethodId };
+    await executeMutation(CreatePaymentDocument, {
+      input,
+    });
+    revalidatePath(`/orders/${orderId}`);
+    return {};
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return { error: error instanceof Error ? error.message : "Payment failed." };
+  }
 }
 
 // ─── Seated order actions ─────────────────────────────────────────────────────
@@ -93,7 +100,7 @@ export interface SeatedOrderState {
 
 /**
  * Creates a seated order for manually-selected seats.
- * Calls POST /api/orders/seated with ticketId, planId, seatIds (MANUAL_SEATED flow).
+ * Calls the GraphQL createSeatedOrder mutation with explicit seatIds.
  */
 export async function createManualSeatedOrder(
   ticketId: string,
@@ -114,30 +121,26 @@ export async function createManualSeatedOrder(
     return { error: "At least one seat must be selected." };
   }
 
-  const res = await fetch(`${base()}/api/orders/seated`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({
-      ticketId,
-      planId,
-      seatIds,
-      quantity: seatIds.length,
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error?.message ?? "Failed to create seated order." };
+  try {
+    const data = await executeMutation(CreateSeatedOrderDocument, {
+      input: {
+        ticketId,
+        planId,
+        seatIds,
+        quantity: seatIds.length,
+      },
+    });
+    revalidatePath("/orders");
+    redirect(`/orders/${data.createSeatedOrder.id}`);
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return { error: error instanceof Error ? error.message : "Failed to create seated order." };
   }
-
-  const order = await res.json();
-  revalidatePath("/orders");
-  redirect(`/orders/${order.id}`);
 }
 
 /**
  * Creates a seated order using auto-assign (best-available).
- * Calls POST /api/orders/seated with ticketId, planId, sectionId, quantity (AUTO_ASSIGN_SEATED flow).
+ * Calls the GraphQL createSeatedOrder mutation with sectionId + quantity.
  */
 export async function createAutoAssignSeatedOrder(
   ticketId: string,
@@ -152,80 +155,14 @@ export async function createAutoAssignSeatedOrder(
   if (!sectionId) return { error: "Section is required for auto-assign." };
   if (isNaN(quantity) || quantity < 1) return { error: "Quantity must be at least 1." };
 
-  const res = await fetch(`${base()}/api/orders/seated`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({ ticketId, planId, sectionId, quantity }),
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error?.message ?? "Failed to create auto-assign order." };
+  try {
+    const data = await executeMutation(CreateSeatedOrderDocument, {
+      input: { ticketId, planId, sectionId, quantity },
+    });
+    revalidatePath("/orders");
+    redirect(`/orders/${data.createSeatedOrder.id}`);
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return { error: error instanceof Error ? error.message : "Failed to create auto-assign order." };
   }
-
-  const order = await res.json();
-  revalidatePath("/orders");
-  redirect(`/orders/${order.id}`);
-}
-
-// ─── Seat hold actions ────────────────────────────────────────────────────────
-
-export interface SeatHoldState {
-  error?: string;
-  held?: string[];
-  expiresAt?: string;
-}
-
-/**
- * Holds seats via venue-service.
- * Calls POST /api/seating-plans/:planId/seats/hold.
- */
-export async function holdSeats(
-  planId: string,
-  seatIds: string[],
-  sessionId: string
-): Promise<SeatHoldState> {
-  const res = await fetch(
-    `${base()}/api/seating-plans/${planId}/seats/hold`,
-    {
-      method: "POST",
-      headers: await authHeaders(),
-      body: JSON.stringify({ seatIds, sessionId }),
-    }
-  );
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    // venue-service returns { error: "string" }, not { error: { message: "..." } }
-    const msg = typeof body?.error === "string" ? body.error : (body?.error?.message ?? "Failed to hold seats.");
-    return { error: msg };
-  }
-
-  const data = await res.json() as { held: string[]; expiresAt: string };
-  return { held: data.held, expiresAt: data.expiresAt };
-}
-
-/**
- * Releases held seats via venue-service.
- * Calls POST /api/seating-plans/:planId/seats/release.
- */
-export async function releaseSeats(
-  planId: string,
-  seatIds: string[]
-): Promise<{ error?: string }> {
-  const res = await fetch(
-    `${base()}/api/seating-plans/${planId}/seats/release`,
-    {
-      method: "POST",
-      headers: await authHeaders(),
-      body: JSON.stringify({ seatIds }),
-    }
-  );
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    return { error: body?.error?.message ?? "Failed to release seats." };
-  }
-
-  return {};
 }

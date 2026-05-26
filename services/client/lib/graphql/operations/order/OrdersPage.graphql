@@ -1,0 +1,15 @@
+query OrdersPage {
+  orders {
+    id
+    userId
+    status
+    quantity
+    expiresAt
+    createdAt
+    ticket {
+      id
+      title
+      price
+    }
+  }
+}

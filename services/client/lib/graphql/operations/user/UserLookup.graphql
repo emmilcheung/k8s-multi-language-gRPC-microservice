@@ -1,0 +1,3 @@
+query UserLookup($email: String, $id: ID) {
+  userLookup(email: $email, id: $id) { id email displayName }
+}

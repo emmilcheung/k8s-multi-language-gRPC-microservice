@@ -7,15 +7,15 @@
 //  - Selection sidebar: selected seats, total price, confirm / auto-assign CTA
 //  - Auto-assign panel: section + quantity selector for best-available flow
 //
-// Holds are managed server-side via the holdSeats / releaseSeats Server Actions.
-// The SSE stream (GET /api/seating-plans/:planId/events) refreshes the live seat
-// map so the buyer always sees up-to-date availability.
+// Availability is polled every 5 s via urql useQuery (network-only).
+// Hold/release mutations go through Kong's /graphql endpoint via useMutation.
 //
 // Security: userId is NEVER sent from this component — it is derived server-side
 // from the Kong-injected X-User-Id header.
 
-import { useState, useEffect, useCallback, useTransition, useRef, useMemo } from "react";
+import { useState, useEffect, useTransition, useRef, useMemo } from "react";
 import { useActionState } from "react";
+import { useQuery, useMutation } from "urql";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -27,10 +27,13 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { SeatingPlan, AvailabilitySnapshot, SeatStatus, Section, PriceTier } from "@/lib/types";
+import type { SeatingPlan, SeatStatus, Section, PriceTier } from "@/lib/types";
 import {
-  holdSeats,
-  releaseSeats,
+  SeatingPlanAvailabilityDocument,
+  HoldSeatsDocument,
+  ReleaseSeatsDocument,
+} from "@/lib/graphql/generated";
+import {
   createManualSeatedOrder,
   createAutoAssignSeatedOrder,
 } from "@/app/actions/orders";
@@ -71,7 +74,6 @@ interface Props {
   ticketId: string;
   planId: string;
   plan: SeatingPlan;
-  initialAvailability: AvailabilitySnapshot | null;
   basePrice: string;
   priceTiers?: PriceTier[];
   /** From the seating plan: "manual" or "auto" */
@@ -82,10 +84,32 @@ interface Props {
 
 const INITIAL_ORDER_STATE: SeatedOrderState = {};
 
-export function SeatMapClient({ ticketId, planId, plan, initialAvailability, basePrice, priceTiers = [], assignmentMode = "manual" }: Props) {
-  // Seat availability state.
-  const [availability, setAvailability] = useState<AvailabilitySnapshot | null>(initialAvailability);
-  const [loadError, setLoadError] = useState<string | null>(null);
+export function SeatMapClient({ ticketId, planId, plan, basePrice, priceTiers = [], assignmentMode = "manual" }: Props) {
+  // Availability via urql — network-only so every fetch bypasses cache.
+  const [{ data: availData, error: availError }, reexecute] = useQuery({
+    query: SeatingPlanAvailabilityDocument,
+    variables: { id: planId },
+    requestPolicy: "network-only",
+  });
+  const loadError = availError ? "Could not load seat availability. Please refresh." : null;
+
+  // Flat seatId → { status, sectionId } map built from the GraphQL response.
+  const seatMap = useMemo<Record<string, { status: SeatStatus; sectionId: string }>>(() => {
+    const map: Record<string, { status: SeatStatus; sectionId: string }> = {};
+    for (const section of availData?.seatingPlan?.sections ?? []) {
+      for (const seat of section.seats) {
+        map[seat.id] = {
+          status: seat.status.toLowerCase() as SeatStatus,
+          sectionId: section.id,
+        };
+      }
+    }
+    return map;
+  }, [availData]);
+
+  // Hold/release mutations through Kong /graphql.
+  const [, executeHoldSeats] = useMutation(HoldSeatsDocument);
+  const [, executeReleaseSeats] = useMutation(ReleaseSeatsDocument);
 
   // Currently selected seat IDs (manual selection mode).
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -106,11 +130,6 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
   const isAutoAssignMode = assignmentMode === "auto";
   const [autoQuantity, setAutoQuantity] = useState(1);
 
-  // Session ID — used by venue-service to correlate holds.
-  const sessionIdRef = useRef<string>(
-    typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)
-  );
-
   // Hold action state.
   const [holdError, setHoldError] = useState<string | null>(null);
   const [, startHoldTransition] = useTransition();
@@ -121,80 +140,14 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
   const [manualState, manualFormAction, manualPending] = useActionState(boundManual, INITIAL_ORDER_STATE);
   const [autoState, autoFormAction, autoPending] = useActionState(boundAutoAssign, INITIAL_ORDER_STATE);
 
-  // ── availability fetch & SSE ─────────────────────────────────────────────
+  // ── 5 s availability polling ──────────────────────────────────────────────
 
-  const fetchAvailability = useCallback(async () => {
-    try {
-      const kongUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-      const res = await fetch(`${kongUrl}/api/seating-plans/${planId}/availability`, {
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const snap = await res.json() as AvailabilitySnapshot;
-      setAvailability(snap);
-      setLoadError(null);
-    } catch (err) {
-      setLoadError("Could not load seat availability. Please refresh.");
-      console.error("availability fetch failed", err);
-    }
-  }, [planId]);
-
-  // Initial fetch if no server-side snapshot was available.
-  useEffect(() => {
-    if (!initialAvailability) {
-      void fetchAvailability();
-    }
-  }, [initialAvailability, fetchAvailability]);
-
-  // Safety-net polling in case SSE heartbeats/events are missed.
   useEffect(() => {
     const timer = setInterval(() => {
-      void fetchAvailability();
+      reexecute({ requestPolicy: "network-only" });
     }, 5000);
     return () => clearInterval(timer);
-  }, [fetchAvailability]);
-
-  // Subscribe to SSE stream for live updates with exponential-backoff reconnection.
-  useEffect(() => {
-    const kongUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-    let es: EventSource | null = null;
-    let retryDelay = 1000; // ms — doubles on each failure, capped at 30s
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let unmounted = false;
-
-    const connect = () => {
-      if (unmounted) return;
-      es = new EventSource(`${kongUrl}/api/seating-plans/${planId}/events`);
-
-      es.onmessage = () => {
-        retryDelay = 1000; // reset backoff on successful message
-        void fetchAvailability();
-      };
-
-      es.addEventListener("heartbeat", () => {
-        retryDelay = 1000; // reset backoff on heartbeat
-      });
-
-      es.onerror = () => {
-        es?.close();
-        es = null;
-        if (!unmounted) {
-          retryTimer = setTimeout(() => {
-            retryDelay = Math.min(retryDelay * 2, 30_000);
-            connect();
-          }, retryDelay);
-        }
-      };
-    };
-
-    connect();
-
-    return () => {
-      unmounted = true;
-      if (retryTimer) clearTimeout(retryTimer);
-      es?.close();
-    };
-  }, [planId, fetchAvailability]);
+  }, [reexecute]);
 
   // ── hold countdown timer ──────────────────────────────────────────────────
 
@@ -218,7 +171,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
 
   const seatStatus = (seatId: string): SeatStatus => {
     if (heldIds.has(seatId)) return "held"; // held by the current user
-    return availability?.seatMap[seatId]?.status ?? "available";
+    return seatMap[seatId]?.status ?? "available";
   };
 
   const isSeatSelectable = (seatId: string): boolean =>
@@ -255,9 +208,9 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
       setHeldIds(new Set());
       setHoldExpiresAt(null);
       prevSelectedRef.current = new Set();
-      void fetchAvailability();
+      reexecute({ requestPolicy: "network-only" });
     }
-  }, [holdExpiresAt, holdSecondsLeft, fetchAvailability]);
+  }, [holdExpiresAt, holdSecondsLeft, reexecute]);
 
   useEffect(() => {
     const prev = prevSelectedRef.current;
@@ -270,10 +223,10 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
 
     if (toHold.length > 0) {
       startHoldTransition(async () => {
-        const result = await holdSeats(planId, toHold, sessionIdRef.current);
-        if (result.error) {
-          setHoldError(result.error);
-          void fetchAvailability();
+        const { data: holdData, error: holdErr } = await executeHoldSeats({ planId, seatIds: toHold });
+        if (holdErr) {
+          setHoldError(holdErr.message);
+          reexecute({ requestPolicy: "network-only" });
           // Revert selection for seats that couldn't be held.
           setSelectedIds((prev) => {
             const next = new Set(prev);
@@ -283,10 +236,10 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
         } else {
           setHeldIds((prev) => {
             const next = new Set(prev);
-            (result.held ?? []).forEach((id) => next.add(id));
+            (holdData?.holdSeats.held ?? []).forEach((id) => next.add(id));
             return next;
           });
-          if (result.expiresAt) setHoldExpiresAt(result.expiresAt);
+          if (holdData?.holdSeats.expiresAt) setHoldExpiresAt(holdData.holdSeats.expiresAt);
           setHoldJustExpired(false);
           setHoldError(null);
         }
@@ -295,7 +248,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
 
     if (toRelease.length > 0) {
       startHoldTransition(async () => {
-        await releaseSeats(planId, toRelease);
+        await executeReleaseSeats({ planId, seatIds: toRelease });
         setHeldIds((prev) => {
           const next = new Set(prev);
           toRelease.forEach((id) => next.delete(id));
@@ -314,7 +267,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
 
     const rows: SeatCell[][] = [];
     // Filter availability entries to only those belonging to the active section.
-    const seatEntries = Object.entries(availability?.seatMap ?? {}).filter(
+    const seatEntries = Object.entries(seatMap).filter(
       ([, entry]) => entry.sectionId === activeSection.id
     );
 
@@ -334,7 +287,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
       for (let s = 0; s < columnCount; s++) {
         const idx = r * columnCount + s;
         if (idx >= relevantSeats.length) break;
-        const [id, entry] = relevantSeats[idx];
+        const [id, entry] = relevantSeats[idx] as [string, { status: SeatStatus; sectionId: string }];
         row.push({
           id,
           label: isGA ? `GA${idx + 1}` : `R${r + 1}S${s + 1}`,
@@ -373,9 +326,9 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
     : parseFloat(basePrice);
 
   const selectedArray = [...selectedIds];
-  // Total price: per-seat price from its section (look up sectionId via availability map).
+  // Total price: per-seat price from its section (look up sectionId via seat map).
   const totalPrice = selectedArray.reduce((sum, seatId) => {
-    const sectionId = availability?.seatMap[seatId]?.sectionId;
+    const sectionId = seatMap[seatId]?.sectionId;
     const price = sectionId
       ? parseFloat(sectionPriceMap[sectionId] ?? basePrice)
       : parseFloat(basePrice);
@@ -449,7 +402,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{loadError}</span>
               <button
-                onClick={fetchAvailability}
+                onClick={() => reexecute({ requestPolicy: "network-only" })}
                 className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
                 aria-label="Retry"
               >
@@ -475,7 +428,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
           </div>
 
           {/* Grid */}
-          {!availability ? (
+          {!availData ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-6 h-6 animate-spin text-primary" />
             </div>
@@ -620,7 +573,7 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
                       className="h-7 px-2 text-xs"
                       onClick={() => {
                         setHoldJustExpired(false);
-                        void fetchAvailability();
+                        reexecute({ requestPolicy: "network-only" });
                       }}
                     >
                       Refresh seats
@@ -721,22 +674,30 @@ export function SeatMapClient({ ticketId, planId, plan, initialAvailability, bas
                 <span className="text-muted-foreground">Max per order</span>
                 <span>{plan.maxSeatsPerOrder}</span>
               </div>
-              {availability && (
-                <>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Available</span>
-                    <span className="text-emerald-400">{availability.counts.available}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">On hold</span>
-                    <span className="text-amber-400">{availability.counts.held}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Sold</span>
-                    <span className="text-red-400">{availability.counts.sold}</span>
-                  </div>
-                </>
-              )}
+              {availData && (() => {
+                const counts = { available: 0, held: 0, sold: 0 };
+                for (const e of Object.values(seatMap)) {
+                  if (e.status === "available") counts.available += 1;
+                  else if (e.status === "held") counts.held += 1;
+                  else if (e.status === "sold") counts.sold += 1;
+                }
+                return (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Available</span>
+                      <span className="text-emerald-400">{counts.available}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">On hold</span>
+                      <span className="text-amber-400">{counts.held}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Sold</span>
+                      <span className="text-red-400">{counts.sold}</span>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

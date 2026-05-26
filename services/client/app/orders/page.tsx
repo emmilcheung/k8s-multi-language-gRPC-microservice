@@ -3,9 +3,10 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { serverApi } from "@/lib/api";
+import { OrdersPageDocument } from "@/lib/graphql/generated";
+import { executeQuery } from "@/lib/graphql/execute";
 import type { Order } from "@/lib/types";
-import { STATUS_LABEL, STATUS_BADGE, STATUS_BORDER } from "@/lib/order-status";
+import { STATUS_LABEL, STATUS_BADGE, STATUS_BORDER, coerceOrderStatus } from "@/lib/order-status";
 import { calculateOrderTotal } from "@/lib/order-utils";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
@@ -31,7 +32,20 @@ const STATUS_ICON: Record<Order["status"], React.ReactNode> = {
 
 async function getOrders(): Promise<Order[]> {
   try {
-    return await serverApi<Order[]>("/api/orders");
+    const data = await executeQuery(OrdersPageDocument, {}, { cookie: (await cookies()).toString() });
+    return data.orders.map((order) => ({
+      id: order.id,
+      userId: order.userId,
+      status: coerceOrderStatus(order.status),
+      quantity: order.quantity,
+      expiresAt: order.expiresAt ?? "",
+      ticket: {
+        id: order.ticket.id,
+        title: order.ticket.title,
+        price: order.ticket.price,
+      },
+      version: 0,
+    }));
   } catch {
     return [];
   }

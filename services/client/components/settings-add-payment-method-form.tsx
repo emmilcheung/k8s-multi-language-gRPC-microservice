@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  registerPaymentMethodFormAction,
+  type PaymentMethodActionResult,
+} from "@/app/actions/settings";
+import type { SavedPaymentMethod } from "@/lib/types";
 
 interface CardElement {
   mount(container: HTMLElement | string): void;
@@ -41,18 +45,30 @@ interface StripeConstructor {
 
 const CARD_SAVE_CONSENT_VERSION = "settings-card-save-v1";
 
-export function SettingsAddPaymentMethodForm() {
-  const router = useRouter();
+interface SettingsAddPaymentMethodFormProps {
+  onSaved?: (paymentMethod: SavedPaymentMethod) => void;
+}
+
+export function SettingsAddPaymentMethodForm({ onSaved }: SettingsAddPaymentMethodFormProps) {
+  void onSaved;
+  const [serverState, formAction, actionPending] = useActionState<PaymentMethodActionResult, FormData>(
+    registerPaymentMethodFormAction,
+    {}
+  );
   const [stripeScriptReady, setStripeScriptReady] = useState(false);
   const [stripeReady, setStripeReady] = useState(false);
   const [isCardComplete, setIsCardComplete] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPreparingSubmission, setIsPreparingSubmission] = useState(false);
   const [setAsDefault, setSetAsDefault] = useState(true);
   const [consentChecked, setConsentChecked] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [cardElementNode, setCardElementNode] = useState<HTMLDivElement | null>(null);
 
+  const serverActionFormRef = useRef<HTMLFormElement | null>(null);
+  const providerPaymentMethodIdRef = useRef<HTMLInputElement | null>(null);
+  const setAsDefaultRef = useRef<HTMLInputElement | null>(null);
+  const consentAcceptedRef = useRef<HTMLInputElement | null>(null);
+  const consentVersionRef = useRef<HTMLInputElement | null>(null);
   const stripeInstanceRef = useRef<StripeInstance | null>(null);
   const cardElementInstanceRef = useRef<CardElement | null>(null);
   const stripeMountedRef = useRef(false);
@@ -182,7 +198,6 @@ export function SettingsAddPaymentMethodForm() {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setSuccessMessage(null);
 
     if (!consentChecked) {
       setErrorMessage("Please consent to saving your payment method for future use.");
@@ -194,118 +209,120 @@ export function SettingsAddPaymentMethodForm() {
       return;
     }
 
-    setIsSubmitting(true);
+    setIsPreparingSubmission(true);
     setErrorMessage(null);
 
     try {
-      const result = await stripeInstanceRef.current.createPaymentMethod({
+      const stripeResult = await stripeInstanceRef.current.createPaymentMethod({
         type: "card",
         card: cardElementInstanceRef.current,
       });
 
-      if (result.error) {
-        setErrorMessage(result.error.message || "Card validation failed.");
-        setIsSubmitting(false);
+      if (stripeResult.error) {
+        setErrorMessage(stripeResult.error.message || "Card validation failed.");
+        setIsPreparingSubmission(false);
         return;
       }
 
-      if (!result.paymentMethod?.id) {
+      if (!stripeResult.paymentMethod?.id) {
         setErrorMessage("Failed to register card. Please try again.");
-        setIsSubmitting(false);
+        setIsPreparingSubmission(false);
         return;
       }
 
-      const response = await fetch("/api/payment-methods/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          paymentMethodId: result.paymentMethod.id,
-          setAsDefault,
-          consentAccepted: consentChecked,
-          consentVersion: CARD_SAVE_CONSENT_VERSION,
-        }),
-      });
-
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as
-          | { error?: { message?: string } }
-          | null;
-        setErrorMessage(body?.error?.message ?? "Failed to save payment method.");
-        setIsSubmitting(false);
+      if (
+        !providerPaymentMethodIdRef.current ||
+        !setAsDefaultRef.current ||
+        !consentAcceptedRef.current ||
+        !consentVersionRef.current
+      ) {
+        setErrorMessage("Failed to prepare payment method submission.");
+        setIsPreparingSubmission(false);
         return;
       }
 
-      setSuccessMessage("Payment method saved successfully.");
-      setIsSubmitting(false);
-      router.refresh();
+      providerPaymentMethodIdRef.current.value = stripeResult.paymentMethod.id;
+      setAsDefaultRef.current.value = String(setAsDefault);
+      consentAcceptedRef.current.value = String(consentChecked);
+      consentVersionRef.current.value = CARD_SAVE_CONSENT_VERSION;
+      serverActionFormRef.current?.requestSubmit();
+      setIsPreparingSubmission(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unexpected error occurred.";
       setErrorMessage(message);
-      setIsSubmitting(false);
+      setIsPreparingSubmission(false);
     }
   };
 
+  const isSubmitting = isPreparingSubmission || actionPending;
+  const displayedError = errorMessage ?? serverState.error ?? null;
+
   return (
-    <form onSubmit={handleSubmit} className="rounded border border-border p-3 space-y-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-        Add card
-      </p>
+    <>
+      <form onSubmit={handleSubmit} className="rounded border border-border p-3 space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          Add card
+        </p>
 
-      <div
-        ref={setCardElementNode}
-        className="rounded border border-input bg-background px-3 py-2 min-h-10"
-      />
-
-      <label
-        htmlFor="settings-default-method-checkbox"
-        className="flex items-center gap-2 text-sm text-muted-foreground"
-      >
-        <input
-          id="settings-default-method-checkbox"
-          type="checkbox"
-          checked={setAsDefault}
-          onChange={(event) => setSetAsDefault(event.target.checked)}
-          className="size-4 rounded border-border bg-background"
+        <div
+          ref={setCardElementNode}
+          className="rounded border border-input bg-background px-3 py-2 min-h-10"
         />
-        Set as default payment method
-      </label>
 
-      <label
-        htmlFor="settings-save-consent-checkbox"
-        className="flex items-start gap-2 text-sm text-muted-foreground"
-      >
-        <input
-          id="settings-save-consent-checkbox"
-          type="checkbox"
-          checked={consentChecked}
-          onChange={(event) => setConsentChecked(event.target.checked)}
-          className="size-4 rounded border-border bg-background mt-0.5"
-        />
-        <span>
-          I consent to saving this payment method for future charges in accordance with the
-          platform terms.
-        </span>
-      </label>
+        <label
+          htmlFor="settings-default-method-checkbox"
+          className="flex items-center gap-2 text-sm text-muted-foreground"
+        >
+          <input
+            id="settings-default-method-checkbox"
+            type="checkbox"
+            checked={setAsDefault}
+            onChange={(event) => setSetAsDefault(event.target.checked)}
+            className="size-4 rounded border-border bg-background"
+          />
+          Set as default payment method
+        </label>
 
-      {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
-      {successMessage ? <p className="text-sm text-emerald-600">{successMessage}</p> : null}
-
-      <Button
-        type="submit"
-        size="sm"
-        disabled={!stripeReady || !isCardComplete || isSubmitting || !consentChecked}
-      >
-        {isSubmitting ? (
-          <span className="inline-flex items-center gap-1.5">
-            <Loader2 className="size-4 animate-spin" />
-            Saving...
+        <label
+          htmlFor="settings-save-consent-checkbox"
+          className="flex items-start gap-2 text-sm text-muted-foreground"
+        >
+          <input
+            id="settings-save-consent-checkbox"
+            type="checkbox"
+            checked={consentChecked}
+            onChange={(event) => setConsentChecked(event.target.checked)}
+            className="size-4 rounded border-border bg-background mt-0.5"
+          />
+          <span>
+            I consent to saving this payment method for future charges in accordance with the
+            platform terms.
           </span>
-        ) : (
-          "Save payment method"
-        )}
-      </Button>
-    </form>
+        </label>
+
+        {displayedError ? <p className="text-sm text-destructive">{displayedError}</p> : null}
+        <Button
+          type="submit"
+          size="sm"
+          disabled={!stripeReady || !isCardComplete || isSubmitting || !consentChecked}
+        >
+          {isSubmitting ? (
+            <span className="inline-flex items-center gap-1.5">
+              <Loader2 className="size-4 animate-spin" />
+              Saving...
+            </span>
+          ) : (
+            "Save payment method"
+          )}
+        </Button>
+      </form>
+
+      <form ref={serverActionFormRef} action={formAction} className="hidden" aria-hidden="true">
+        <input ref={providerPaymentMethodIdRef} type="hidden" name="providerPaymentMethodId" defaultValue="" />
+        <input ref={setAsDefaultRef} type="hidden" name="setAsDefault" defaultValue="false" />
+        <input ref={consentAcceptedRef} type="hidden" name="consentAccepted" defaultValue="false" />
+        <input ref={consentVersionRef} type="hidden" name="consentVersion" defaultValue="" />
+      </form>
+    </>
   );
 }

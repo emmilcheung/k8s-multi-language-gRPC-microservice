@@ -12,6 +12,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestGraphQL_AdmissionPass_RequiresBuyerIdentity verifies that querying
+// admissionPass without a user in context returns an unauthorized error.
+func TestGraphQL_AdmissionPass_RequiresBuyerIdentity(t *testing.T) {
+	svc := service.NewAttendanceService(
+		&stubCredentialRepo{},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+	)
+	resolver := &gqlgraph.Resolver{Svc: svc}
+	_, err := resolver.Query().AdmissionPass(context.Background(), "ticket-x", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unauthorized")
+}
+
+// TestGraphQL_AdmissionPass_ReturnsForbidden_WhenBuyerDoesNotOwnPass verifies
+// that a buyer cannot read another buyer's pass.
+func TestGraphQL_AdmissionPass_ReturnsForbidden_WhenBuyerDoesNotOwnPass(t *testing.T) {
+	otherBuyerID := "buyer-other"
+	now := time.Now()
+	cred := &repository.AdmissionCredential{
+		ID:          "cred-1",
+		TicketID:    "ticket-1",
+		OrderID:     "order-1",
+		EventID:     "event-1",
+		BuyerUserID: &otherBuyerID,
+		Status:      repository.CredentialStatusIssued,
+		IssuedAt:    now,
+	}
+	svc := service.NewAttendanceService(
+		&stubCredentialRepo{credential: cred},
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+	)
+	resolver := &gqlgraph.Resolver{Svc: svc}
+	_, err := resolver.Query().AdmissionPass(contextWithUserID("buyer-1"), "ticket-1", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "forbidden")
+}
+
 func TestGraphQL_AdmissionPass_ReturnsNil_WhenNotFound(t *testing.T) {
 	svc := service.NewAttendanceService(
 		&stubCredentialRepo{err: repository.ErrNotFound},
@@ -22,20 +61,24 @@ func TestGraphQL_AdmissionPass_ReturnsNil_WhenNotFound(t *testing.T) {
 	resolver := &gqlgraph.Resolver{Svc: svc}
 	qr := resolver.Query()
 
-	result, err := qr.AdmissionPass(context.Background(), "ticket-x", nil)
+	result, err := qr.AdmissionPass(contextWithUserID("buyer-1"), "ticket-x", nil)
 	require.NoError(t, err)
 	assert.Nil(t, result, "expected nil for not-found ticket")
 }
 
 func TestGraphQL_AdmissionPass_ReturnsPass_WhenFound(t *testing.T) {
 	now := time.Now()
+	qrToken := "signed-token"
+	buyerID := "buyer-gql-1"
 	cred := &repository.AdmissionCredential{
-		ID:       "cred-gql-1",
-		TicketID: "ticket-gql-1",
-		OrderID:  "order-gql-1",
-		EventID:  "event-gql-1",
-		Status:   repository.CredentialStatusIssued,
-		IssuedAt: now,
+		ID:          "cred-gql-1",
+		TicketID:    "ticket-gql-1",
+		OrderID:     "order-gql-1",
+		EventID:     "event-gql-1",
+		BuyerUserID: &buyerID,
+		Status:      repository.CredentialStatusIssued,
+		IssuedAt:    now,
+		QRToken:     &qrToken,
 	}
 
 	svc := service.NewAttendanceService(
@@ -47,27 +90,33 @@ func TestGraphQL_AdmissionPass_ReturnsPass_WhenFound(t *testing.T) {
 	resolver := &gqlgraph.Resolver{Svc: svc}
 	qr := resolver.Query()
 
-	result, err := qr.AdmissionPass(context.Background(), "ticket-gql-1", nil)
+	result, err := qr.AdmissionPass(contextWithUserID(buyerID), "ticket-gql-1", nil)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "cred-gql-1", result.ID)
 	assert.Equal(t, gqlgraph.CredentialStatusIssued, result.Status)
 	assert.Equal(t, "ticket-gql-1", result.TicketID)
+	require.NotNil(t, result.QRToken)
+	assert.Equal(t, qrToken, *result.QRToken)
 }
 
-func TestGraphQL_AttendancePolicy_ReturnsNil_WhenNotFound(t *testing.T) {
-	svc := service.NewAttendanceService(
+func TestGraphQL_AttendancePolicy_ReturnsDefault_WhenNotFound(t *testing.T) {
+	svc := service.NewAttendanceServiceWithTicketLookup(
 		&stubCredentialRepo{},
 		&stubPolicyRepo{err: repository.ErrNotFound},
 		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-1"},
 	)
 
 	resolver := &gqlgraph.Resolver{Svc: svc}
 	qr := resolver.Query()
 
-	result, err := qr.AttendancePolicy(context.Background(), "event-missing")
+	result, err := qr.AttendancePolicy(contextWithUserID("organizer-1"), "event-missing")
 	require.NoError(t, err)
-	assert.Nil(t, result)
+	require.NotNil(t, result)
+	assert.Equal(t, "event-missing", result.EventID)
+	assert.True(t, result.RequireQRForEntry)
+	assert.False(t, result.AllowManualOverride)
 }
 
 func TestGraphQL_AttendancePolicy_ReturnsPolicy_WhenFound(t *testing.T) {
@@ -77,16 +126,17 @@ func TestGraphQL_AttendancePolicy_ReturnsPolicy_WhenFound(t *testing.T) {
 		AllowManualOverride: false,
 	}
 
-	svc := service.NewAttendanceService(
+	svc := service.NewAttendanceServiceWithTicketLookup(
 		&stubCredentialRepo{},
 		&stubPolicyRepo{policy: policy},
 		&stubScanRepo{},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-1"},
 	)
 
 	resolver := &gqlgraph.Resolver{Svc: svc}
 	qr := resolver.Query()
 
-	result, err := qr.AttendancePolicy(context.Background(), "event-gql-2")
+	result, err := qr.AttendancePolicy(contextWithUserID("organizer-1"), "event-gql-2")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "event-gql-2", result.EventID)
@@ -101,16 +151,17 @@ func TestGraphQL_AttendanceSummary_ReturnsSummary(t *testing.T) {
 		TotalCheckedIn: 100,
 	}
 
-	svc := service.NewAttendanceService(
+	svc := service.NewAttendanceServiceWithTicketLookup(
 		&stubCredentialRepo{},
 		&stubPolicyRepo{},
 		&stubScanRepo{summary: summary},
+		&stubTicketOwnerLookupSvc{ownerID: "organizer-1"},
 	)
 
 	resolver := &gqlgraph.Resolver{Svc: svc}
 	qr := resolver.Query()
 
-	result, err := qr.AttendanceSummary(context.Background(), "event-gql-3")
+	result, err := qr.AttendanceSummary(contextWithUserID("organizer-1"), "event-gql-3")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "event-gql-3", result.EventID)

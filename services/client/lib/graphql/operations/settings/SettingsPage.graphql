@@ -1,0 +1,46 @@
+query SettingsPage {
+  currentUser {
+    id
+    profile {
+      displayName
+      locale
+      timezone
+    }
+    preferences {
+      marketingOptIn
+      orderUpdates
+      productUpdates
+    }
+    billingAddress {
+      line1
+      line2
+      city
+      state
+      postalCode
+      country
+    }
+    paymentMethods {
+      id
+      brand
+      label
+      last4
+      expMonth
+      expYear
+      isDefault
+    }
+  }
+  sessions {
+    id
+    userAgent
+    ipAddress
+    createdAt
+    lastUsedAt
+    current
+  }
+  orders {
+    id
+    status
+    createdAt
+  }
+}
+

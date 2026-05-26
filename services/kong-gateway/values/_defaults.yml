@@ -32,6 +32,18 @@ SSE_READ_TIMEOUT_MS: 300000
 # ── JWT ────────────────────────────────────────────────────────────────────────
 JWT_COOKIE_NAME: token
 
+# ── Anonymous GraphQL credential ───────────────────────────────────────────────
+# Synthetic JWT injected on /graphql when no client credential is present.
+# Purpose: lets the JWT plugin stay in strict mode (rejects malformed tokens with
+# 401) while still allowing public queries (ticket browse) through without a
+# real user token. The token carries no `sub`/`roles` claims, so jwt-sub.lua
+# emits no X-User-Id; resolvers requiring auth still reject unauthenticated
+# requests. The "secret" is intentionally a non-secret — even if leaked, the
+# token grants no access (no claims that grant identity).
+# Signed HS256 with payload {"iss":"anonymous-graphql","exp":4102444800}.
+ANONYMOUS_GRAPHQL_JWT_SECRET: "anonymous-graphql-not-a-secret-grants-no-access"
+ANONYMOUS_GRAPHQL_JWT: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhbm9ueW1vdXMtZ3JhcGhxbCIsImV4cCI6NDEwMjQ0NDgwMH0.vr2WMhDQhVsv4m45UWn_Nnwif1r6LXIlRRip2PM3mKE"
+
 # ── Rate limiting ──────────────────────────────────────────────────────────────
 # policy: local  — in-process counter per Kong node (suitable for dev/local)
 # policy: redis  — shared counter across all Kong nodes (required in production)

@@ -6,10 +6,11 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { ApiError, serverApi } from "@/lib/api";
-import { base } from "@/lib/server-utils";
-import { traceHeaders } from "@/lib/tracing";
-import type { Ticket, SeatingPlan, AvailabilitySnapshot, PriceTier } from "@/lib/types";
+import { executeQuery } from "@/lib/graphql/execute";
+import { TicketDetailDocument } from "@/lib/graphql/generated";
+import type { Ticket, SeatingPlan, PriceTier } from "@/lib/types";
 import { fetchPriceTiers } from "@/app/actions/venues";
+import { UrqlProvider } from "@/app/_lib/urql-client";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import { ArrowLeft } from "lucide-react";
@@ -21,12 +22,39 @@ interface Props {
 
 const TICKET_LOAD_RETRY_DELAYS_MS = [250, 500, 750, 1000, 1250, 1500];
 
-async function getTicket(ticketId: string): Promise<Ticket> {
+async function getTicket(ticketId: string, cookieHeader: string): Promise<Ticket> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= TICKET_LOAD_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
-      return await serverApi<Ticket>(`/api/tickets/${ticketId}`);
+      const data = await executeQuery(TicketDetailDocument, { id: ticketId }, { cookie: cookieHeader });
+      if (!data.ticket) throw new ApiError(404, "Ticket not found");
+      const gql = data.ticket;
+      return {
+        id: gql.id,
+        title: gql.title,
+        price: gql.priceDecimal,
+        userId: gql.userId,
+        orderId: gql.orderId ?? undefined,
+        quota: gql.quota,
+        reserved: gql.reserved,
+        sold: gql.sold,
+        available: gql.available,
+        maxPerUser: gql.maxPerUser ?? undefined,
+        ticketType: gql.ticketType,
+        seatingPlanId: gql.seatingPlan?.id ?? undefined,
+        event: gql.event
+          ? {
+              title: gql.event.title,
+              description: gql.event.description ?? undefined,
+              startsAt: gql.event.startsAt,
+              endsAt: gql.event.endsAt ?? undefined,
+              imageUrl: gql.event.imageUrl ?? undefined,
+              venueName: gql.event.venueName ?? undefined,
+              venueAddress: gql.event.venueAddress ?? undefined,
+            }
+          : undefined,
+      } as Ticket;
     } catch (error) {
       lastError = error;
       const status = error instanceof ApiError ? error.status : null;
@@ -57,10 +85,11 @@ export default async function SeatsPage({ params }: Props) {
   if (!token) {
     redirect("/auth/signin");
   }
+  const cookieHeader = `token=${token}`;
 
   let ticket: Ticket;
   try {
-    ticket = await getTicket(ticketId);
+    ticket = await getTicket(ticketId, cookieHeader);
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) {
       throw error;
@@ -126,46 +155,11 @@ export default async function SeatsPage({ params }: Props) {
     );
   }
 
-  // Fetch initial availability snapshot + price tiers (server-side for first paint).
-  let initialAvailability: AvailabilitySnapshot | null = null;
   let priceTiers: PriceTier[] = [];
   try {
-    const apiBase = base();
-    const [availRes] = await Promise.all([
-      fetch(`${apiBase}/api/seating-plans/${planId}/availability`, {
-        cache: "no-store",
-        headers: traceHeaders(),
-      }),
-    ]);
-    if (availRes.ok) {
-      initialAvailability = await availRes.json() as AvailabilitySnapshot;
-    }
     priceTiers = await fetchPriceTiers(planId);
   } catch {
-    // Non-fatal — client will re-fetch.
-  }
-
-  if (initialAvailability && initialAvailability.counts.available === 0) {
-    return (
-      <div className="flex flex-col gap-8 max-w-4xl mx-auto">
-        <Link
-          href={`/tickets/${ticketId}`}
-          className={cn(
-            buttonVariants({ variant: "ghost", size: "sm" }),
-            "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2"
-          )}
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Back to ticket
-        </Link>
-        <div className="glass rounded-2xl p-8 text-center">
-          <p className="text-destructive font-semibold">Sold out</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            No seats are currently available for this ticket.
-          </p>
-        </div>
-      </div>
-    );
+    // Non-fatal — client will load price tiers separately.
   }
 
   return (
@@ -188,15 +182,16 @@ export default async function SeatsPage({ params }: Props) {
         </p>
       </div>
 
-      <SeatMapClient
-        ticketId={ticketId}
-        planId={planId}
-        plan={plan}
-        initialAvailability={initialAvailability}
-        basePrice={ticket.price}
-        priceTiers={priceTiers}
-        assignmentMode={plan.assignmentMode ?? "manual"}
-      />
+      <UrqlProvider>
+        <SeatMapClient
+          ticketId={ticketId}
+          planId={planId}
+          plan={plan}
+          basePrice={ticket.price}
+          priceTiers={priceTiers}
+          assignmentMode={plan.assignmentMode ?? "manual"}
+        />
+      </UrqlProvider>
     </div>
   );
 }

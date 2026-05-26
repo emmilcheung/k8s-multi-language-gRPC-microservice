@@ -1,0 +1,8 @@
+mutation CreateTicket($input: CreateTicketInput!) {
+  createTicket(input: $input) {
+    id
+    title
+    price
+    priceDecimal
+  }
+}

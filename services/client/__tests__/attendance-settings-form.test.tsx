@@ -3,22 +3,25 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AttendanceSettingsForm } from "@/components/attendance-settings-form";
 
+const updateAttendancePolicyMock = vi.fn();
+vi.mock("@/app/actions/attendance-policy", () => ({
+  updateAttendancePolicyAction: (...args: unknown[]) => updateAttendancePolicyMock(...args),
+}));
+
 describe("AttendanceSettingsForm", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("submits updated policy values", async () => {
+  it("submits updated policy values via server action", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: vi.fn().mockResolvedValue({
+    updateAttendancePolicyMock.mockResolvedValue({
+      policy: {
         eventId: "ticket-1",
         requireQrForEntry: false,
         allowManualOverride: true,
-      }),
+      },
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <AttendanceSettingsForm
@@ -41,14 +44,8 @@ describe("AttendanceSettingsForm", () => {
     await user.click(screen.getByLabelText(/allow manual override/i));
     await user.click(screen.getByRole("button", { name: /save settings/i }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/attendance/events/ticket-1/settings",
-      expect.objectContaining({
-        method: "PATCH",
-      })
-    );
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+    await waitFor(() => expect(updateAttendancePolicyMock).toHaveBeenCalledTimes(1));
+    expect(updateAttendancePolicyMock).toHaveBeenCalledWith("ticket-1", {
       requireQrForEntry: false,
       allowManualOverride: true,
     });

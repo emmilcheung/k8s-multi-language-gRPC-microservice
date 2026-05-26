@@ -2,7 +2,7 @@ replicaCount: 2
 
 image:
   repository: payment-service
-  tag: latest
+  tag: SET_BY_CI
   pullPolicy: IfNotPresent
 
 service:

@@ -1,0 +1,7 @@
+mutation UpdateAttendancePolicy($eventId: ID!, $input: UpdateAttendancePolicyInput!) {
+  updateAttendancePolicy(eventId: $eventId, input: $input) {
+    eventId
+    requireQrForEntry
+    allowManualOverride
+  }
+}

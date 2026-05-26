@@ -1,0 +1,3 @@
+mutation ReleaseSeats($planId: ID!, $seatIds: [ID!]!) {
+  releaseSeats(planId: $planId, seatIds: $seatIds)
+}

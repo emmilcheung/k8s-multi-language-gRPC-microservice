@@ -58,6 +58,20 @@ function decodeJwtExpiryEpochSeconds(token: string): number | null {
   }
 }
 
+export function readCurrentUserIdFromToken(token?: string): string | null {
+  if (!token) return null;
+  try {
+    const payloadB64 = token.split(".")[1];
+    if (!payloadB64) return null;
+    const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8")) as {
+      sub?: string;
+    };
+    return payload.sub ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function isTokenExpiringSoon(token: string): boolean {
   const exp = decodeJwtExpiryEpochSeconds(token);
   if (!exp) return true;
@@ -203,7 +217,7 @@ export async function authHeaders(request?: RequestWithCookies): Promise<Headers
  * Returns fetch headers for auth session APIs that require both access and
  * refresh cookies to compute current-session state and clear cookies on revoke.
  */
-export async function authSessionHeaders(request?: RequestWithCookies): Promise<HeadersInit> {
+export async function authSessionHeaders(request?: RequestWithCookies): Promise<Record<string, string>> {
   const token = await getValidAccessToken(request);
 
   // Prefer cookie values from the mutable server cookie store after refresh.

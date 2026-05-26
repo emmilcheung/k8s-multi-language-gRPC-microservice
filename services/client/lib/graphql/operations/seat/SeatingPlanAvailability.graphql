@@ -1,0 +1,13 @@
+query SeatingPlanAvailability($id: ID!) {
+  seatingPlan(id: $id) {
+    sections {
+      id
+      availableSeats
+      seats {
+        id
+        label
+        status
+      }
+    }
+  }
+}

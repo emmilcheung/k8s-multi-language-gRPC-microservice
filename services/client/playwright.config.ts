@@ -7,13 +7,22 @@ export default defineConfig({
   fullyParallel: true,
   retries: 0,
   workers: 2,  // minikube is resource-constrained; cap concurrency to avoid OOMKill
+  reporter: process.env.CI
+    ? [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]]
+    : "list",
   use: {
     baseURL,
-    trace: "on-first-retry",
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+    video: "retain-on-failure",
   },
-  webServer: {
+  // In CI, the server is started and pre-warmed by the workflow step; Playwright must not
+  // attempt to spawn its own instance (causes EADDRINUSE when the port is already bound).
+  webServer: process.env.CI
+    ? undefined
+    : {
     command: "pnpm dev --port 4000",
-    url: baseURL,
+    url: "http://127.0.0.1:4000/api/health",
     reuseExistingServer: true,
     timeout: 120000,
     env: {

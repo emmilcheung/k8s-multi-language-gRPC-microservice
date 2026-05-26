@@ -15,7 +15,17 @@ function makeHost(jsonFn = vi.fn(), statusFn?: ReturnType<typeof vi.fn>) {
   const status = statusFn ?? vi.fn().mockReturnValue({ json: jsonFn });
   const response = { status };
   return {
+    getType: () => 'http',
     switchToHttp: () => ({ getResponse: () => response }),
+  } as unknown as ArgumentsHost;
+}
+
+function makeGraphqlHost() {
+  return {
+    getType: () => 'graphql',
+    switchToHttp: () => ({
+      getResponse: () => ({}), // no .status() — would TypeError if reached
+    }),
   } as unknown as ArgumentsHost;
 }
 
@@ -94,6 +104,39 @@ describe('GlobalExceptionFilter', () => {
       filter.catch(exception, host);
 
       expect(statusFn).toHaveBeenCalledWith(HttpStatus.FORBIDDEN);
+    });
+
+    it('should map HttpException to GraphQLError with structured message for graphql context', () => {
+      const host = makeGraphqlHost();
+      const exception = new ConflictException({
+        error: { code: 'EMAIL_IN_USE', message: 'Already exists' },
+      });
+
+      let thrown: unknown;
+      try {
+        filter.catch(exception, host);
+      } catch (e) {
+        thrown = e;
+      }
+      expect((thrown as Error).message).toBe('Already exists');
+      expect((thrown as { extensions: Record<string, unknown> }).extensions.code).toBe(
+        'EMAIL_IN_USE',
+      );
+    });
+
+    it('should map non-HttpException to a generic GraphQLError without leaking internals', () => {
+      const host = makeGraphqlHost();
+
+      let thrown: unknown;
+      try {
+        filter.catch(new Error('internal boom: db conn refused'), host);
+      } catch (e) {
+        thrown = e;
+      }
+      expect((thrown as Error).message).toBe('An unexpected error occurred');
+      expect((thrown as { extensions: Record<string, unknown> }).extensions.code).toBe(
+        'INTERNAL_ERROR',
+      );
     });
 
     it('should return 500 for programmer errors (non-HttpException)', () => {

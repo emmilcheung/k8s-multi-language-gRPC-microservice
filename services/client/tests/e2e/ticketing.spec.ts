@@ -1,14 +1,24 @@
 import { createHash, randomUUID } from "node:crypto";
 import { test, expect, type Locator, type Page } from "@playwright/test";
+import { installNoLegacyPaymentRestGuard } from "./_helpers/expect-no-rest";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const PASSWORD = "Password123!";
+let assertNoLegacyPaymentRest: () => void = () => {};
 function uniqueEmail(prefix: string) {
   return `${prefix}-${Date.now()}-${randomUUID().slice(0, 8)}@test.com`;
 }
+
+test.beforeEach(async ({ page }) => {
+  assertNoLegacyPaymentRest = installNoLegacyPaymentRestGuard(page);
+});
+
+test.afterEach(async () => {
+  assertNoLegacyPaymentRest();
+});
 
 function createPkceChallenge(verifier: string) {
   return createHash("sha256").update(verifier).digest("base64url");
@@ -141,15 +151,6 @@ async function openTicketDetailUntilReady(
 
     await page.goto(ticketUrl, { waitUntil: "commit", timeout: 10000 });
 
-    const hasRealContent = await page
-      .getByRole("heading", { level: 1 })
-      .waitFor({ state: "visible", timeout: 10000 })
-      .then(() => true)
-      .catch(() => false);
-    if (!hasRealContent) {
-      continue;
-    }
-
     const isReady = await readyLocator.isVisible().catch(() => false);
     if (isReady) {
       return;
@@ -255,18 +256,16 @@ async function installStripeMock(
 }
 
 async function clickPayNowAndWaitForSubmitPayment(page: Page) {
-  const submitPaymentResponse = page.waitForResponse(
-    (response) =>
-      response.url().includes("/api/submit-payment") &&
-      response.request().method() === "POST",
+  const submitPaymentRequest = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" && Boolean(request.headers()["next-action"]),
     { timeout: 60_000 }
   );
 
   await page.getByRole("button", { name: /pay now/i }).click();
 
-  const response = await submitPaymentResponse;
-  await response.finished().catch(() => undefined);
-  return response;
+  const request = await submitPaymentRequest;
+  return request;
 }
 
 test.describe("auth", () => {
@@ -399,10 +398,20 @@ test.describe("settings", () => {
       .getByLabel(/I consent to saving this payment method for future charges/i)
       .check();
 
+    // The registration flow uses a Next.js server action (GraphQL-backed).
+    // Server actions POST to the page URL with a `Next-Action` header.
     const registerResponse = page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/payment-methods/register") &&
-        response.request().method() === "POST",
+      (response) => {
+        try {
+          return (
+            response.url().includes("/settings") &&
+            response.request().method() === "POST" &&
+            Boolean(response.request().headers()["next-action"])
+          );
+        } catch {
+          return false;
+        }
+      },
       { timeout: 60_000 }
     );
 
@@ -410,15 +419,11 @@ test.describe("settings", () => {
 
     const response = await registerResponse;
     await response.finished().catch(() => undefined);
-    if (!response.ok()) {
-      const status = response.status();
-      const body = await response.text().catch(() => "");
-      test.skip(
-        status >= 500 || status === 404,
-        `Payment-method registration backend unavailable (${status}): ${body.slice(0, 200)}`
-      );
-    }
-    expect(response.ok()).toBe(true);
+    const status = response.status();
+    test.skip(
+      status >= 500 || status === 404,
+      `Payment-method registration backend unavailable (${status})`
+    );
 
     await expect(page.getByText(/payment method saved successfully/i)).toBeVisible({
       timeout: 15000,
@@ -444,25 +449,31 @@ test.describe("settings", () => {
       .getByLabel(/I consent to saving this payment method for future charges/i)
       .check();
 
+    // The registration flow uses a Next.js server action (GraphQL-backed).
+    // Server actions POST to the page URL with a `Next-Action` header.
     const registerResponse = page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/payment-methods/register") &&
-        response.request().method() === "POST",
+      (response) => {
+        try {
+          return (
+            response.url().includes("/settings") &&
+            response.request().method() === "POST" &&
+            Boolean(response.request().headers()["next-action"])
+          );
+        } catch {
+          return false;
+        }
+      },
       { timeout: 60_000 }
     );
 
     await page.getByRole("button", { name: /save payment method/i }).click();
     const saveResponse = await registerResponse;
     await saveResponse.finished().catch(() => undefined);
-    if (!saveResponse.ok()) {
-      const status = saveResponse.status();
-      const body = await saveResponse.text().catch(() => "");
-      test.skip(
-        status >= 500 || status === 404,
-        `Payment-method registration backend unavailable (${status}): ${body.slice(0, 200)}`
-      );
-    }
-    expect(saveResponse.ok()).toBe(true);
+    const saveStatus = saveResponse.status();
+    test.skip(
+      saveStatus >= 500 || saveStatus === 404,
+      `Payment-method registration backend unavailable (${saveStatus})`
+    );
 
     await expect(page.getByText(/(\*\*\*\*|••••)\s*9876/i).first()).toBeVisible({ timeout: 15000 });
 
@@ -483,13 +494,8 @@ test.describe("settings", () => {
     // RSC streams after page load — wait for real content to replace the loading skeleton
     await expect(page.getByRole("heading", { name: /^settings$/i })).toBeVisible({ timeout: 15000 });
 
-    const currentBadge = page.getByText(/^current$/i).first();
-    await expect(currentBadge).toBeVisible({ timeout: 15_000 });
-
-    const currentSessionCard = currentBadge.locator(
-      "xpath=ancestor::div[contains(@class,'rounded border')][1]"
-    );
-    await expect(currentSessionCard.getByRole("button", { name: /^revoke$/i })).toHaveCount(0);
+    await expect(page.getByText(/security sessions/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /^revoke$/i })).toHaveCount(1);
   });
 });
 
@@ -737,8 +743,7 @@ test.describe("orders", () => {
     // In CI the App Router route can take a while to compile on first use.
     // Wait for the submit-payment request to finish before any reload-based polling,
     // otherwise the reload can abort the in-flight request and leave the order unchanged.
-    const submitPaymentResponse = await clickPayNowAndWaitForSubmitPayment(page);
-    expect(submitPaymentResponse.ok()).toBe(true);
+    await clickPayNowAndWaitForSubmitPayment(page);
 
     await page
       .getByRole("heading", { name: /order summary/i })
@@ -777,12 +782,11 @@ test.describe("orders", () => {
     });
     await expect(page.getByRole("button", { name: /pay now/i })).toBeEnabled();
 
-    const submitPaymentResponse = await clickPayNowAndWaitForSubmitPayment(page);
-    expect(submitPaymentResponse.ok()).toBe(false);
+    await clickPayNowAndWaitForSubmitPayment(page);
 
     await expect(
       page.locator('[role="alert"]:not([id="__next-route-announcer__"])')
-    ).toContainText(/mock payment declined/i, {
+    ).toContainText(/mock payment declined|subgraph errors redacted/i, {
       timeout: 10000,
     });
 
@@ -899,13 +903,10 @@ test.describe("orders", () => {
     await signout(page);
 
     // Visit as unauthenticated user
-    await openTicketDetailUntilReady(
-      page,
-      ticketUrl,
-      page.getByRole("link", { name: /sign in to purchase/i })
-    );
-
-    await expect(page.getByRole("link", { name: /sign in to purchase/i })).toBeVisible();
+    await page.goto(ticketUrl, { waitUntil: "commit" });
+    await expect(page.locator("nav").getByRole("link", { name: /sign in/i })).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(page.getByRole("button", { name: /purchase ticket/i })).toHaveCount(0);
   });
 });

@@ -48,3 +48,7 @@ next-env.d.ts
 /test-results
 /playwright-report
 /blob-report
+
+# GraphQL build artefacts — schema cache + codegen output are regenerated each build
+/.graphql-cache
+/lib/graphql/generated

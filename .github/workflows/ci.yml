@@ -52,6 +52,7 @@ jobs:
       client:     ${{ steps.filter.outputs.client }}
       expiration: ${{ steps.filter.outputs.expiration }}
       graphql:    ${{ steps.filter.outputs.graphql }}
+      helm:       ${{ steps.filter.outputs.helm }}
       kong:       ${{ steps.filter.outputs.kong }}
       order:      ${{ steps.filter.outputs.order }}
       payment:    ${{ steps.filter.outputs.payment }}
@@ -82,6 +83,10 @@ jobs:
               - 'services/*/src/main/resources/schema/**'
               - 'services/apollo-router/supergraph-config.yaml'
               - 'services/apollo-router/supergraph.graphql'
+              - 'services/client/lib/graphql/operations/**'
+            helm:
+              - 'infra/helm/**'
+              - '.github/workflows/ci.yml'
             kong:
               - 'services/kong-gateway/**'
               - '.github/workflows/ci.yml'
@@ -231,6 +236,30 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --silent
+
+      - name: Validate GraphQL operations
+        run: pnpm codegen
+
+      - name: Enforce no inline GraphQL strings
+        run: |
+          if grep -rEn 'gql`|'"'"'[[:space:]]*(query|mutation|subscription|fragment)[[:space:]]'"'"'|"[[:space:]]*(query|mutation|subscription|fragment)[[:space:]]"' lib/ app/ 2>/dev/null; then
+            echo "FAIL: inline gql strings found — move operations to lib/graphql/operations/"
+            exit 1
+          fi
+          echo "OK: no inline gql strings"
+
+      - name: Enforce REST migration gate
+        run: |
+          # Matches outbound Kong calls (base()}/api/<domain>) for domains fully migrated to GraphQL.
+          # Keep-listed paths (seating-plans, venues, users, auth, payments/webhook, oauth) excluded.
+          forbidden='/api/(tickets|attendance\/(scan|events)|orders\/[^s]|submit-payment|payment-methods\/register)'
+          if grep -rEn "base\(\)[^/]*/api/" app/ components/ __tests__/ tests/ lib/ 2>/dev/null \
+               | grep -Ev '(seating-plans|venues|users|auth|payments/webhook|oauth)' \
+               | grep -E "$forbidden"; then
+            echo "FAIL: REST migration gate matched forbidden service REST paths"
+            exit 1
+          fi
+          echo "OK: REST migration gate clean"
 
       - name: Lint
         run: pnpm lint
@@ -395,6 +424,49 @@ jobs:
             echo "Supergraph composed successfully"
         env:
           APOLLO_ELV2_LICENSE: accept
+
+  # ── helm (rendered manifest lint) ────────────────────────────────────────────
+  helm-validate:
+    name: Helm rendered-manifest validation
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.helm == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL -o /tmp/kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform
+          kubeconform -v
+
+      - name: Enforce no latest tags in infra Helm values
+        run: |
+          if grep -RE "tag:\s*latest" infra/helm; then
+            echo "FAIL: tag: latest is not allowed under infra/helm"
+            exit 1
+          fi
+          echo "OK: no tag: latest found under infra/helm"
+
+      - name: Validate rendered service charts with kubeconform
+        run: |
+          set -euo pipefail
+          for chart in infra/helm/charts/*; do
+            [ -d "${chart}" ] || continue
+            chart_name="$(basename "${chart}")"
+            echo "Validating ${chart_name}"
+            helm template "${chart_name}" "${chart}" \
+              --set global.serviceMesh.enabled=false \
+              --set global.imageRegistry='' \
+              | kubeconform -summary -strict -ignore-missing-schemas
+          done
 
   # ── order-service (Java 21 / Spring Boot / Maven) ──────────────────────────
   # Build context is the REPO ROOT — Dockerfile reads ../../proto/ for protobuf codegen.
@@ -1001,22 +1073,52 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
         working-directory: services/client
 
-      - name: Start Next.js dev server
-        run: pnpm dev --port 4000 --hostname 0.0.0.0 &
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: services/client/.next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('services/client/pnpm-lock.yaml') }}-${{ hashFiles('services/client/app/**', 'services/client/components/**', 'services/client/lib/**') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('services/client/pnpm-lock.yaml') }}-
+
+      - name: Build client (production)
+        # Production build eliminates the hydration race + lazy-compile flakes
+        # that plague `next dev` in CI. Pre-warming and per-action timeout
+        # padding become unnecessary because all chunks ship pre-built.
+        # `prebuild` already runs `pnpm codegen` so generated/ is populated.
+        run: pnpm build
         working-directory: services/client
         env:
-          # NEXT_PUBLIC_API_URL: used by browser-side code to reach Kong
           NEXT_PUBLIC_API_URL: http://localhost:8000
-          # INTERNAL_API_URL: used by Next.js Server Actions (server-side fetch)
-          # to reach Kong from the host runner. Without this it falls back to
-          # localhost:8080 which doesn't exist, causing all Server Actions to fail.
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_placeholder
           INTERNAL_API_URL: http://localhost:8000
-          # NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: services/client/.env is gitignored;
-          # E2E tests use a Stripe mock so any non-empty pk_test_ value works here.
+          GRAPHQL_SCHEMA_LOCAL: "1"
+
+      - name: Assemble Next.js standalone bundle
+        # next.config.ts sets output: "standalone". `next start` is incompatible
+        # with that mode (Next prints a warning and runs a degraded server that
+        # wedges Server Action streaming). Mirror what the production Dockerfile
+        # does: copy .next/static and public/ into the standalone tree.
+        run: |
+          cp -r .next/static .next/standalone/.next/static
+          cp -r public .next/standalone/public
+        working-directory: services/client
+
+      - name: Start Next.js production server
+        # Redirect stdout/stderr to a file so we can inspect Server Action streaming
+        # behaviour after the fact — the standalone server runs outside docker compose,
+        # so its logs are otherwise invisible in CI artifacts.
+        run: node .next/standalone/server.js >/tmp/nextjs.log 2>&1 &
+        working-directory: services/client
+        env:
+          PORT: "4000"
+          HOSTNAME: 0.0.0.0
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+          INTERNAL_API_URL: http://localhost:8000
           NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_placeholder
 
       - name: Wait for Next.js to be ready
-        run: timeout 60 bash -c "until curl -sf http://localhost:4000; do sleep 2; done"
+        run: timeout 60 bash -c "until curl -sf http://localhost:4000/api/health; do sleep 2; done"
 
       - name: Run GraphQL federation security suite
         run: pnpm exec playwright test tests/e2e/graphql-federation.spec.ts
@@ -1035,12 +1137,29 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: services/client/playwright-report/
+          path: |
+            services/client/playwright-report/
+            services/client/test-results/
+          if-no-files-found: warn
           retention-days: 7
 
-      - name: Dump docker compose logs on failure
-        if: failure()
-        run: docker compose logs --no-color > /tmp/compose-logs.txt && cat /tmp/compose-logs.txt
+      - name: Capture docker compose logs
+        if: always()
+        run: docker compose logs --no-color > /tmp/compose-logs.raw.txt
+
+      - name: Enforce secret-free compose logs
+        if: always()
+        run: |
+          SECRET_PATTERN='STRIPE_SECRET|DATABASE_URL|SIGNING_KEY|REFRESH_TOKEN|JWT_SECRET|RSA_PRIVATE_KEY'
+          if grep -qiE "$SECRET_PATTERN" /tmp/compose-logs.raw.txt; then
+            echo "FAIL: secret-like pattern detected in compose logs"
+            exit 1
+          fi
+          echo "OK: no secret-like patterns detected in compose logs"
+
+      - name: Scrub compose logs for artifact upload
+        if: always()
+        run: bash audit/scripts/scrub-secrets.sh < /tmp/compose-logs.raw.txt > /tmp/compose-logs.txt
 
       - name: Upload compose logs on failure
         if: failure()
@@ -1048,6 +1167,15 @@ jobs:
         with:
           name: compose-logs
           path: /tmp/compose-logs.txt
+          retention-days: 3
+
+      - name: Upload Next.js server logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextjs-server-log
+          path: /tmp/nextjs.log
+          if-no-files-found: warn
           retention-days: 3
 
   # ── deploy-dev (I-11) ────────────────────────────────────────────────────────
@@ -1277,7 +1405,7 @@ jobs:
     name: CI
     runs-on: ubuntu-24.04
     if: always()
-    needs: [changes, auth, client, expiration, graphql, kong, order, payment, proto, ticket, user, venue, e2e]
+    needs: [changes, auth, client, expiration, graphql, helm-validate, kong, order, payment, proto, ticket, user, venue, e2e]
     steps:
       - name: Check all jobs passed (or skip if only markdown changed)
         run: |

@@ -1,0 +1,11 @@
+mutation SetDefaultPaymentMethod($id: ID!) {
+  setDefaultPaymentMethod(id: $id) {
+    id
+    brand
+    label
+    last4
+    expMonth
+    expYear
+    isDefault
+  }
+}

@@ -1,0 +1,8 @@
+query AttendanceSummary($eventId: ID!) {
+  attendanceSummary(eventId: $eventId) {
+    eventId
+    totalAdmitted
+    totalDenied
+    totalCheckedIn
+  }
+}

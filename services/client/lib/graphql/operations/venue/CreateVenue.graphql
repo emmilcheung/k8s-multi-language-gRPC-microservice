@@ -1,0 +1,10 @@
+mutation CreateVenue($input: CreateVenueInput!) {
+  createVenue(input: $input) {
+    id
+    organizerId
+    name
+    capacity
+    timezone
+    address
+  }
+}

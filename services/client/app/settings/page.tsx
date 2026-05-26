@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
@@ -12,11 +14,9 @@ import {
   updatePreferencesAction,
   updateBillingAddressAction,
   revokeSessionAction,
-  setDefaultPaymentMethodAction,
-  deletePaymentMethodAction,
 } from "@/app/actions/settings";
-import { SettingsAddPaymentMethodForm } from "@/components/settings-add-payment-method-form";
-import { ArrowRight, Clock, Shield, CreditCard, MapPinHouse, UserRound } from "lucide-react";
+import { SettingsPaymentMethods } from "@/components/settings-payment-methods";
+import { ArrowRight, Clock, Shield, CreditCard, MapPinHouse, UserRound, X } from "lucide-react";
 
 export const metadata = { title: "Settings — Marquee" };
 
@@ -26,7 +26,52 @@ function formatTimestamp(value?: string | null): string {
   return Number.isNaN(parsed.getTime()) ? "Unknown" : parsed.toLocaleString();
 }
 
-export default async function SettingsPage() {
+/** Wrapper for form action: delegates to updateProfileAction and redirects on error */
+async function handleUpdateProfile(formData: FormData): Promise<void> {
+  "use server";
+  const result = await updateProfileAction(formData);
+  if (result.error) {
+    redirect(`/settings?error=${encodeURIComponent(result.error)}`);
+  }
+}
+
+/** Wrapper for form action: delegates to updatePreferencesAction and redirects on error */
+async function handleUpdatePreferences(formData: FormData): Promise<void> {
+  "use server";
+  const result = await updatePreferencesAction(formData);
+  if (result.error) {
+    redirect(`/settings?error=${encodeURIComponent(result.error)}`);
+  }
+}
+
+/** Wrapper for form action: delegates to updateBillingAddressAction and redirects on error */
+async function handleUpdateBillingAddress(formData: FormData): Promise<void> {
+  "use server";
+  const result = await updateBillingAddressAction(formData);
+  if (result.error) {
+    redirect(`/settings?error=${encodeURIComponent(result.error)}`);
+  }
+}
+
+/** Wrapper for form action: delegates to revokeSessionAction and redirects on error */
+async function handleRevokeSession(formData: FormData): Promise<void> {
+  "use server";
+  const result = await revokeSessionAction(formData);
+  if (result.error) {
+    redirect(`/settings?error=${encodeURIComponent(result.error)}`);
+  }
+}
+
+interface SettingsPageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function SettingsPage(props: SettingsPageProps) {
+  const searchParams = await props.searchParams;
+  const errorParam = searchParams.error;
+  const error = typeof errorParam === "string" ? errorParam : undefined;
+  const paymentMethodSaved = searchParams.paymentMethodSaved === "1";
+
   const cookieStore = await cookies();
   const token = cookieStore.get("token")?.value;
   if (!token) {
@@ -54,6 +99,19 @@ export default async function SettingsPage() {
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8">
+      {error && (
+        <div className="rounded border border-destructive/50 bg-destructive/5 p-3 flex items-start gap-3">
+          <X className="size-4 text-destructive mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-destructive">{error}</p>
+          </div>
+        </div>
+      )}
+      {paymentMethodSaved && (
+        <div className="rounded border border-emerald-500/40 bg-emerald-500/5 p-3">
+          <p className="text-sm font-medium text-emerald-600">Payment method saved successfully.</p>
+        </div>
+      )}
       <header className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <span className="inline-block h-px w-6 bg-primary" />
@@ -80,7 +138,7 @@ export default async function SettingsPage() {
             <CardDescription>Update personal information used for your account.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            <form action={updateProfileAction} className="grid gap-3">
+            <form action={handleUpdateProfile} className="grid gap-3">
               <div className="grid gap-1.5">
                 <label htmlFor="displayName" className="text-xs font-medium text-muted-foreground">
                   Display name
@@ -106,7 +164,7 @@ export default async function SettingsPage() {
               <button type="submit" className={cn(buttonVariants(), "w-fit")}>Save profile</button>
             </form>
 
-            <form action={updatePreferencesAction} className="grid gap-3 rounded border border-border p-3">
+            <form action={handleUpdatePreferences} className="grid gap-3 rounded border border-border p-3">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                 Preferences
               </p>
@@ -179,7 +237,7 @@ export default async function SettingsPage() {
                   </div>
 
                   {!session.current && (
-                    <form action={revokeSessionAction}>
+                    <form action={handleRevokeSession}>
                       <input type="hidden" name="sessionId" value={session.sessionId} />
                       <button
                         type="submit"
@@ -204,60 +262,7 @@ export default async function SettingsPage() {
             <CardDescription>Manage your saved cards and choose a default payment method.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <SettingsAddPaymentMethodForm />
-
-            {paymentMethods.length === 0 ? (
-              <p className="rounded border border-dashed border-border p-4 text-sm text-muted-foreground">
-                No saved payment methods yet.
-              </p>
-            ) : (
-              paymentMethods.map((method) => (
-                <div
-                  key={method.id}
-                  className="flex flex-col gap-3 rounded border border-border p-3 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold">
-                        {method.label ??
-                          (method.last4
-                            ? `${method.brand?.toUpperCase() ?? "Saved method"} •••• ${method.last4}`
-                            : method.brand?.toUpperCase() ?? "Saved method")}
-                      </p>
-                      {method.isDefault && <Badge className="text-xs">Default</Badge>}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {method.expMonth && method.expYear
-                        ? `Expires ${String(method.expMonth).padStart(2, "0")}/${method.expYear}`
-                        : "Expiry not available"}
-                    </p>
-                  </div>
-
-                  <div className="flex gap-2">
-                    {!method.isDefault && (
-                      <form action={setDefaultPaymentMethodAction}>
-                        <input type="hidden" name="methodId" value={method.id} />
-                        <button
-                          type="submit"
-                          className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-                        >
-                          Set default
-                        </button>
-                      </form>
-                    )}
-                    <form action={deletePaymentMethodAction}>
-                      <input type="hidden" name="methodId" value={method.id} />
-                      <button
-                        type="submit"
-                        className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-destructive")}
-                      >
-                        Delete
-                      </button>
-                    </form>
-                  </div>
-                </div>
-              ))
-            )}
+            <SettingsPaymentMethods initialPaymentMethods={paymentMethods} />
           </CardContent>
         </Card>
 
@@ -270,7 +275,7 @@ export default async function SettingsPage() {
             <CardDescription>Keep your billing details up to date for invoices and receipts.</CardDescription>
           </CardHeader>
           <CardContent>
-            <form action={updateBillingAddressAction} className="grid gap-3">
+            <form action={handleUpdateBillingAddress} className="grid gap-3">
               <div className="grid gap-1.5">
                 <label htmlFor="line1" className="text-xs font-medium text-muted-foreground">
                   Address line 1

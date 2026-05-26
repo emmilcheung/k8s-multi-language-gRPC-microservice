@@ -36,7 +36,7 @@ export interface BillingAddress {
 export interface SessionInfo {
   sessionId: string;
   createdAt: string;
-  lastRotatedAt: string;
+  lastRotatedAt?: string;
   userAgent?: string | null;
   ipAddress?: string | null;
   current: boolean;
@@ -62,6 +62,7 @@ export interface Ticket {
   /** GA quota fields — number of units currently reserved (active reservations) */
   reserved?: number;
   quota?: number;
+  available?: number;
   sold?: number;
   /** Maximum units a single buyer can reserve per order */
   maxPerUser?: number;

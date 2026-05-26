@@ -52,6 +52,18 @@ consumers:
           fault_tolerant: true
           hide_client_headers: false
 
+  # Anonymous-graphql consumer — owns the HS256 jwt_secret used to sign the
+  # synthetic anonymous JWT injected on /graphql when no client credential is
+  # present. See `ANONYMOUS_GRAPHQL_JWT` in values/_defaults.yml for the why.
+  # The token carries no `sub`, so jwt-sub.lua emits no X-User-Id and resolvers
+  # requiring auth still reject. Keeps the JWT plugin strict (rejects malformed
+  # tokens with 401) while enabling public browse queries.
+  - username: anonymous-graphql
+    jwt_secrets:
+      - key: anonymous-graphql
+        algorithm: HS256
+        secret: "{{ANONYMOUS_GRAPHQL_JWT_SECRET}}"
+
 # ── Upstream services ─────────────────────────────────────────────────────────
 services:
 
@@ -822,6 +834,31 @@ services:
         methods: [POST, OPTIONS]
         strip_path: false
         plugins:
+          # Pre-function runs BEFORE the jwt plugin. Two jobs:
+          #   1. Strip any client-supplied identity headers — these must only
+          #      ever be set by jwt-sub.lua, never trusted from the wire.
+          #   2. If neither Authorization nor `{{JWT_COOKIE_NAME}}` cookie is
+          #      present, inject the synthetic anonymous JWT so the jwt plugin
+          #      validates it and lets the request through. The token carries
+          #      no `sub`, so jwt-sub.lua emits no X-User-Id — resolvers that
+          #      need auth still reject. Real-but-invalid tokens are unaffected
+          #      and the jwt plugin returns 401 as normal.
+          - name: pre-function
+            config:
+              access:
+                - |
+                  kong.service.request.clear_header("X-User-Id")
+                  kong.service.request.clear_header("X-User-Id-Sig")
+                  kong.service.request.clear_header("X-User-Roles")
+                  local auth = kong.request.get_header("Authorization")
+                  local cookie = kong.request.get_header("Cookie")
+                  local has_cookie_token = cookie and cookie:find("{{JWT_COOKIE_NAME}}=", 1, true) ~= nil
+                  if (not auth or auth == "") and not has_cookie_token then
+                    kong.service.request.set_header(
+                      "Authorization",
+                      "Bearer {{ANONYMOUS_GRAPHQL_JWT}}"
+                    )
+                  end
           - name: jwt
             config:
               key_claim_name: iss

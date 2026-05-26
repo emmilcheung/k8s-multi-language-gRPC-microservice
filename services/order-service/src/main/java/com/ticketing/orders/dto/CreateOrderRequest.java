@@ -49,12 +49,13 @@ public class CreateOrderRequest {
     public static class AttendeeInfo {
 
         @NotBlank(message = "attendee seatId is required")
+        @Pattern(regexp = UUID_PATTERN, message = "attendee seatId must be a valid UUID")
         private String seatId;
 
         @NotBlank(message = "attendee name is required")
         private String name;
 
-        protected AttendeeInfo() {}
+        public AttendeeInfo() {}
 
         public String getSeatId() { return seatId; }
         public void setSeatId(String seatId) { this.seatId = seatId; }
@@ -89,6 +90,8 @@ public class CreateOrderRequest {
      * @throws IllegalArgumentException if the request is semantically invalid
      */
     public void validate() {
+        validateAttendees();
+        
         OrderType orderType = determineOrderType();
         switch (orderType) {
             case MANUAL_SEATED:
@@ -115,6 +118,30 @@ public class CreateOrderRequest {
                 break;
             default:
                 break;
+        }
+    }
+
+    /**
+     * Validates nested attendee objects. Ensures that if attendees are present,
+     * each has a non-blank, valid-UUID seatId and non-blank name.
+     *
+     * @throws IllegalArgumentException if any attendee has null or blank seatId/name, or invalid UUID format
+     */
+    private void validateAttendees() {
+        if (attendees == null || attendees.isEmpty()) {
+            return;
+        }
+        for (int i = 0; i < attendees.size(); i++) {
+            AttendeeInfo attendee = attendees.get(i);
+            if (attendee.seatId == null || attendee.seatId.isBlank()) {
+                throw new IllegalArgumentException("attendee[" + i + "].seatId is required and must not be blank");
+            }
+            if (!attendee.seatId.matches(UUID_PATTERN)) {
+                throw new IllegalArgumentException("attendee[" + i + "].seatId must be a valid UUID");
+            }
+            if (attendee.name == null || attendee.name.isBlank()) {
+                throw new IllegalArgumentException("attendee[" + i + "].name is required and must not be blank");
+            }
         }
     }
 

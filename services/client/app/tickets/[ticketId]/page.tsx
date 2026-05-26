@@ -1,10 +1,14 @@
 // app/tickets/[ticketId]/page.tsx — Ticket detail page.
 // Split layout: info panel (left) + action panel (right). Owner sees edit form.
 
+export const dynamic = "force-dynamic";
+
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ApiError, serverApi } from "@/lib/api";
+import { executeQuery } from "@/lib/graphql/execute";
+import { TicketDetailDocument, AttendancePolicyDocument } from "@/lib/graphql/generated";
 import type { Ticket, SeatingPlan, PriceTier, AvailabilitySnapshot } from "@/lib/types";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
@@ -32,8 +36,6 @@ interface Props {
   params: Promise<{ ticketId: string }>;
 }
 
-const TICKET_LOAD_RETRY_DELAYS_MS = [250, 500, 750, 1000, 1250, 1500];
-
 function toDateTimeLocalInput(value?: string): string {
   if (!value) return "";
   const date = new Date(value);
@@ -42,27 +44,56 @@ function toDateTimeLocalInput(value?: string): string {
   return local.toISOString().slice(0, 16);
 }
 
-async function getTicket(ticketId: string): Promise<Ticket> {
-  let lastError: unknown;
+function toTicketFormType(
+  ticket: Ticket,
+  attachedPlan: SeatingPlan | null
+): "GA" | "SEATED_MANUAL" | "SEATED_AUTO" {
+  if (ticket.ticketType === "SEATED_AUTO" || attachedPlan?.assignmentMode === "auto") {
+    return "SEATED_AUTO";
+  }
+  if (ticket.ticketType === "SEATED_MANUAL" || attachedPlan?.assignmentMode === "manual" || ticket.seatingPlanId) {
+    return "SEATED_MANUAL";
+  }
+  return "GA";
+}
 
-  for (let attempt = 0; attempt <= TICKET_LOAD_RETRY_DELAYS_MS.length; attempt += 1) {
-    try {
-      return await serverApi<Ticket>(`/api/tickets/${ticketId}`);
-    } catch (error) {
-      lastError = error;
-      const status = error instanceof ApiError ? error.status : null;
-      const shouldRetry =
-        status === 404 ||
-        (status !== null && status >= 500) ||
-        !(error instanceof ApiError);
-      if (!shouldRetry || attempt === TICKET_LOAD_RETRY_DELAYS_MS.length) {
-        throw error;
-      }
-      await new Promise((resolve) => setTimeout(resolve, TICKET_LOAD_RETRY_DELAYS_MS[attempt]));
-    }
+async function getTicket(ticketId: string): Promise<Ticket> {
+  const cookieStore = await cookies();
+  const cookieHeader = cookieStore.toString();
+
+  const data = await executeQuery(TicketDetailDocument, { id: ticketId }, { cookie: cookieHeader });
+
+  if (!data.ticket) {
+    notFound();
   }
 
-  throw lastError ?? new Error("Failed to load ticket.");
+  const gql = data.ticket;
+
+  return {
+    id: gql.id,
+    title: gql.title,
+    price: gql.priceDecimal,
+    userId: gql.userId,
+    orderId: gql.orderId ?? undefined,
+    quota: gql.quota,
+    reserved: gql.reserved,
+    sold: gql.sold,
+    available: gql.available,
+    maxPerUser: gql.maxPerUser ?? undefined,
+    ticketType: gql.ticketType,
+    seatingPlanId: gql.seatingPlan?.id ?? undefined,
+    event: gql.event
+      ? {
+          title: gql.event.title,
+          description: gql.event.description ?? undefined,
+          startsAt: gql.event.startsAt,
+          endsAt: gql.event.endsAt ?? undefined,
+          imageUrl: gql.event.imageUrl ?? undefined,
+          venueName: gql.event.venueName ?? undefined,
+          venueAddress: gql.event.venueAddress ?? undefined,
+        }
+      : undefined,
+  } as Ticket;
 }
 
 export async function generateMetadata() {
@@ -136,11 +167,16 @@ export default async function TicketDetailPage({ params }: Props) {
   }
 
   if (isOwner) {
-    const settings = await serverApi<{ requireQrForEntry?: boolean }>(
-      `/api/attendance/events/${ticketId}/settings`
+    const policyResult = await executeQuery(
+      AttendancePolicyDocument,
+      { eventId: ticketId },
+      { cookie: `token=${token}` }
     ).catch(() => null);
-    if (settings && typeof settings.requireQrForEntry === "boolean") {
-      defaultRequireQrForEntry = settings.requireQrForEntry;
+    if (
+      policyResult?.attendancePolicy?.requireQrForEntry === true ||
+      policyResult?.attendancePolicy?.requireQrForEntry === false
+    ) {
+      defaultRequireQrForEntry = policyResult.attendancePolicy.requireQrForEntry;
     }
   }
 
@@ -363,7 +399,7 @@ export default async function TicketDetailPage({ params }: Props) {
                     defaultPrice={ticket.price}
                     defaultQuota={ticket.quota}
                     defaultMaxPerUser={ticket.maxPerUser}
-                    defaultTicketType={(ticket.ticketType as "GA" | "SEATED_MANUAL" | "SEATED_AUTO") ?? "GA"}
+                    defaultTicketType={toTicketFormType(ticket, attachedPlan)}
                     defaultVenueId={attachedPlan?.venueId ?? undefined}
                     defaultPricingMode={attachedPlan?.pricingMode}
                     defaultStartsAt={toDateTimeLocalInput(ticket.event?.startsAt)}

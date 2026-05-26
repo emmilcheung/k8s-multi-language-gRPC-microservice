@@ -2,14 +2,75 @@ package graph
 
 import (
 	"context"
+	"time"
 
+	"github.com/acme/venue-service/internal/hold"
 	"github.com/acme/venue-service/internal/repository"
 )
 
+// priceTierRepository is the subset of the price-tier repo used by GraphQL resolvers.
+type priceTierRepository interface {
+	Create(ctx context.Context, t *repository.PriceTier) error
+	ListByPlan(ctx context.Context, planID string) ([]*repository.PriceTier, error)
+}
+
+// holdManager is the subset of hold.Manager used by GraphQL resolvers.
+type holdManager interface {
+	HoldSeats(ctx context.Context, planID, userID, sessionID string, seatIDs []string) (*hold.HoldResult, error)
+	ReleaseHold(ctx context.Context, planID, userID string, seatIDs []string) error
+}
+
 // Resolver is the root resolver wired with data-access dependencies.
 type Resolver struct {
-	PlanRepo    repository.PlanRepository
-	SectionRepo repository.SectionRepository
+	PlanRepo         repository.PlanRepository
+	SectionRepo      repository.SectionRepository
+	VenueRepo        repository.VenueRepository
+	VenueSectionRepo repository.VenueSectionRepository
+	PriceTierRepo    priceTierRepository
+	HoldMgr          holdManager
+}
+
+// ── mapping helpers ───────────────────────────────────────────────────────────
+
+func mapVenueToGQL(v *repository.Venue) *Venue {
+	return &Venue{
+		ID:          v.ID,
+		OrganizerID: v.OrganizerID,
+		Name:        v.Name,
+		Capacity:    v.Capacity,
+		Timezone:    v.Timezone,
+		Address:     v.Address,
+	}
+}
+
+func mapVenueSectionToGQL(vs *repository.VenueSection) *VenueSection {
+	sectionType := SectionTypeSeated
+	if vs.Type == repository.SectionTypeGA {
+		sectionType = SectionTypeGa
+	}
+	capacity := vs.RowCount * vs.ColumnCount
+	if vs.Type == repository.SectionTypeGA {
+		capacity = vs.ColumnCount
+	}
+	return &VenueSection{
+		ID:           vs.ID,
+		VenueID:      vs.VenueID,
+		Name:         vs.Name,
+		Type:         sectionType,
+		RowCount:     vs.RowCount,
+		ColumnCount:  vs.ColumnCount,
+		DisplayOrder: vs.DisplayOrder,
+		Capacity:     capacity,
+	}
+}
+
+func mapPriceTierToGQL(t *repository.PriceTier) *PriceTier {
+	return &PriceTier{
+		ID:     t.ID,
+		PlanID: t.PlanID,
+		Name:   t.Name,
+		Price:  t.Price,
+	}
 }
 
 // mapPlanToGQL converts a domain SeatingPlan to the GraphQL model, eagerly
@@ -25,7 +86,6 @@ func mapPlanToGQL(plan *repository.SeatingPlan, sections []*Section) *SeatingPla
 	case repository.PlanStatusActive:
 		status = PlanStatusActive
 	case repository.PlanStatusInactive:
-		// Map inactive → archived for the GraphQL enum surface.
 		status = PlanStatusArchived
 	}
 
@@ -91,4 +151,25 @@ func loadSections(ctx context.Context, sectionRepo repository.SectionRepository,
 		result[i] = mapSectionToGQL(s, gqlSeats)
 	}
 	return result, nil
+}
+
+// loadPlanWithSections loads a plan and eagerly fetches its sections.
+func loadPlanWithSections(ctx context.Context, planRepo repository.PlanRepository, sectionRepo repository.SectionRepository, id string) (*SeatingPlan, error) {
+	plan, err := planRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	sections, err := loadSections(ctx, sectionRepo, plan.ID)
+	if err != nil {
+		return nil, err
+	}
+	return mapPlanToGQL(plan, sections), nil
+}
+
+// holdResultToGQL converts a hold.HoldResult to the GraphQL SeatHoldResult.
+func holdResultToGQL(r *hold.HoldResult) *SeatHoldResult {
+	return &SeatHoldResult{
+		Held:      r.Held,
+		ExpiresAt: r.ExpiresAt.Format(time.RFC3339),
+	}
 }

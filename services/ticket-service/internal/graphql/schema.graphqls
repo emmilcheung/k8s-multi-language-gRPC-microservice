@@ -5,13 +5,29 @@ type Ticket @key(fields: "id") {
   id: ID!
   title: String!
   price: Int!
+  priceDecimal: String!
+  userId: ID!
+  orderId: ID
   quota: Int!
+  reserved: Int!
+  sold: Int!
   available: Int!
   maxPerUser: Int
   ticketType: TicketType!
   seatingPlan: SeatingPlan
+  event: TicketEvent
   createdAt: String!
   updatedAt: String!
+}
+
+type TicketEvent {
+  title: String!
+  description: String
+  startsAt: String!
+  endsAt: String
+  imageUrl: String
+  venueName: String
+  venueAddress: String
 }
 
 type SeatingPlan @key(fields: "id", resolvable: false) {
@@ -23,8 +39,32 @@ enum TicketType {
   SEATED
 }
 
+input TicketFilter {
+  availableOnly: Boolean
+  ticketType: TicketType
+}
+
+type TicketEdge {
+  node: Ticket!
+  cursor: String!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
+
+type TicketConnection {
+  edges: [TicketEdge!]!
+  pageInfo: PageInfo!
+}
+
 type Query {
+  # Legacy: returns the full list, no filter. Kept for backward compatibility.
+  # Prefer `ticketsConnection` for new operations.
   tickets: [Ticket!]!
+  # Paginated + filterable list. Phase 2 addition.
+  ticketsConnection(filter: TicketFilter, first: Int, after: String): TicketConnection!
   ticket(id: ID!): Ticket
 }
 
@@ -33,12 +73,23 @@ type Mutation {
   updateTicket(id: ID!, input: UpdateTicketInput!): Ticket!
 }
 
+input TicketEventInput {
+  title: String
+  description: String
+  startsAt: String!
+  endsAt: String
+  imageUrl: String
+  venueName: String
+  venueAddress: String
+}
+
 input CreateTicketInput {
   title: String!
   price: Int!
   quota: Int!
   maxPerUser: Int
   ticketType: TicketType!
+  event: TicketEventInput!
 }
 
 input UpdateTicketInput {
@@ -46,4 +97,6 @@ input UpdateTicketInput {
   price: Int
   quota: Int
   maxPerUser: Int
+  event: TicketEventInput
+  seatingPlanId: ID
 }

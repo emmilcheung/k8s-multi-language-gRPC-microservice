@@ -1,0 +1,7 @@
+mutation CreateSeatingPlan($input: CreateSeatingPlanInput!) {
+  createSeatingPlan(input: $input) {
+    id
+    status
+    assignmentMode
+  }
+}

@@ -1,0 +1,12 @@
+query AdmissionPass($ticketId: ID!, $orderId: ID) {
+  admissionPass(ticketId: $ticketId, orderId: $orderId) {
+    id
+    ticketId
+    orderId
+    eventId
+    status
+    issuedAt
+    usedAt
+    qrToken
+  }
+}

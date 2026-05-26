@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api";
 
 const revalidatePathMock = vi.fn();
 const redirectMock = vi.fn();
-const authHeadersMock = vi.fn();
+const executeMutationMock = vi.fn();
 
 vi.mock("next/cache", () => ({
   revalidatePath: (...args: unknown[]) => revalidatePathMock(...args),
@@ -12,73 +13,126 @@ vi.mock("next/navigation", () => ({
   redirect: (...args: unknown[]) => redirectMock(...args),
 }));
 
-vi.mock("@/lib/server-utils", () => ({
-  base: () => "http://localhost:8080",
-  authHeaders: () => authHeadersMock(),
+vi.mock("@/lib/graphql/execute", () => ({
+  executeMutation: (...args: unknown[]) => executeMutationMock(...args),
 }));
 
-import { cancelOrder, createOrder, submitPayment } from "@/app/actions/orders";
+vi.mock("@/lib/server-utils", () => ({
+  base: () => "http://localhost:8080",
+  authHeaders: vi.fn().mockResolvedValue({ "Content-Type": "application/json" }),
+}));
+
+import {
+  cancelOrder,
+  createAutoAssignSeatedOrder,
+  createManualSeatedOrder,
+  createOrder,
+  submitPayment,
+} from "@/app/actions/orders";
 
 describe("order server actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    authHeadersMock.mockResolvedValue({ "Content-Type": "application/json" });
     process.env.STRIPE_TEST_TOKEN = "pm_card_visa";
   });
 
-  it("createOrder returns upstream failure message", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: false,
-        json: vi.fn().mockResolvedValue({ error: { message: "Ticket reserved" } }),
-      })
-    );
+  it("createOrder returns GraphQL failure message", async () => {
+    executeMutationMock.mockRejectedValue(new ApiError(409, "Ticket reserved"));
 
     const result = await createOrder("ticket-1", {}, new FormData());
     expect(result).toEqual({ error: "Ticket reserved" });
   });
 
-  it("createOrder revalidates and redirects on success", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ id: "order-1" }),
-      })
-    );
+  it("createOrder revalidates and redirects on GraphQL success", async () => {
+    executeMutationMock.mockResolvedValue({
+      createOrder: { id: "order-1" },
+    });
 
     await createOrder("ticket-1", {}, new FormData());
+    expect(executeMutationMock).toHaveBeenCalledTimes(1);
     expect(revalidatePathMock).toHaveBeenCalledWith("/orders");
     expect(redirectMock).toHaveBeenCalledWith("/orders/order-1");
   });
 
-  it("cancelOrder redirects to /orders on success", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue({}),
-      })
-    );
+  it("createOrder rethrows redirect after GraphQL success", async () => {
+    const redirectError = new Error("NEXT_REDIRECT");
+    executeMutationMock.mockResolvedValue({
+      createOrder: { id: "order-1" },
+    });
+    redirectMock.mockImplementationOnce(() => {
+      throw redirectError;
+    });
+
+    await expect(createOrder("ticket-1", {}, new FormData())).rejects.toBe(redirectError);
+    expect(revalidatePathMock).toHaveBeenCalledWith("/orders");
+    expect(redirectMock).toHaveBeenCalledWith("/orders/order-1");
+  });
+
+  it("cancelOrder redirects to /orders on GraphQL success", async () => {
+    executeMutationMock.mockResolvedValue({
+      cancelOrder: { id: "order-2" },
+    });
 
     await cancelOrder("order-2", {}, new FormData());
+    expect(executeMutationMock).toHaveBeenCalledTimes(1);
     expect(revalidatePathMock).toHaveBeenCalledWith("/orders");
     expect(redirectMock).toHaveBeenCalledWith("/orders");
   });
 
-  it("submitPayment sends only the order id and token", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) });
-    vi.stubGlobal("fetch", fetchMock);
+  it("submitPayment uses paymentMethodId from formData in GraphQL payment mutation", async () => {
+    executeMutationMock.mockResolvedValue({
+      createPayment: { id: "pay-1", orderId: "order-3" },
+    });
+    const formData = new FormData();
+    formData.set("paymentMethodId", "pm_new_123");
 
-    await submitPayment("order-3", {}, new FormData());
+    const result = await submitPayment("order-3", {}, formData);
 
-    const [, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(String(requestInit.body)) as { orderId: string; token: string };
-    expect(body.orderId).toBe("order-3");
-    expect(body.token).toBe("pm_card_visa");
-    expect(redirectMock).toHaveBeenCalledWith("/orders/order-3");
+    expect(result).toEqual({});
+    expect(executeMutationMock).toHaveBeenCalledWith(expect.anything(), {
+      input: { orderId: "order-3", token: "pm_new_123" },
+    });
+  });
+
+  it("submitPayment uses savedPaymentMethodId from formData in GraphQL payment mutation", async () => {
+    executeMutationMock.mockResolvedValue({
+      createPayment: { id: "pay-2", orderId: "order-4" },
+    });
+    const formData = new FormData();
+    formData.set("savedPaymentMethodId", "saved-pm-456");
+
+    const result = await submitPayment("order-4", {}, formData);
+
+    expect(result).toEqual({});
+    expect(executeMutationMock).toHaveBeenCalledWith(expect.anything(), {
+      input: { orderId: "order-4", savedPaymentMethodId: "saved-pm-456" },
+    });
+  });
+
+  it("createManualSeatedOrder uses the GraphQL seated-order mutation", async () => {
+    executeMutationMock.mockResolvedValue({
+      createSeatedOrder: { id: "order-4" },
+    });
+    const formData = new FormData();
+    formData.set("seatIds", JSON.stringify(["seat-a", "seat-b"]));
+
+    await createManualSeatedOrder("ticket-1", "plan-1", {}, formData);
+
+    expect(executeMutationMock).toHaveBeenCalledTimes(1);
+    expect(redirectMock).toHaveBeenCalledWith("/orders/order-4");
+  });
+
+  it("createAutoAssignSeatedOrder uses the GraphQL seated-order mutation", async () => {
+    executeMutationMock.mockResolvedValue({
+      createSeatedOrder: { id: "order-5" },
+    });
+    const formData = new FormData();
+    formData.set("sectionId", "section-a");
+    formData.set("quantity", "3");
+
+    await createAutoAssignSeatedOrder("ticket-1", "plan-1", {}, formData);
+
+    expect(executeMutationMock).toHaveBeenCalledTimes(1);
+    expect(redirectMock).toHaveBeenCalledWith("/orders/order-5");
   });
 });

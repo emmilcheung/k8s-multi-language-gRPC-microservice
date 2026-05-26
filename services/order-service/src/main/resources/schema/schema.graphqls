@@ -9,12 +9,20 @@ type Order @key(fields: "id") {
   status: OrderStatus!
   expiresAt: String
   createdAt: String!
+  # Federation edge: payment is owned by payment-service.
+  # Resolved by emitting Payment(__typename, orderId); router fetches the rest.
+  payment: Payment
 }
 
 type OrderTicket {
   id: ID!
   title: String!
   price: String!
+}
+
+# Stub for the federated Payment entity (owned by payment-service).
+type Payment @key(fields: "orderId", resolvable: false) {
+  orderId: ID!
 }
 
 type User @key(fields: "id") {
@@ -37,9 +45,24 @@ type Query {
 type Mutation {
   createOrder(input: CreateOrderInput!): Order!
   cancelOrder(id: ID!): Order!
+  createSeatedOrder(input: CreateSeatedOrderInput!): Order!
 }
 
 input CreateOrderInput {
   ticketId: ID!
   quantity: Int!
+}
+
+input CreateSeatedOrderInput {
+  ticketId: ID!
+  quantity: Int!
+  planId: ID!
+  seatIds: [ID!]
+  sectionId: ID
+  attendees: [AttendeeInput!]
+}
+
+input AttendeeInput {
+  seatId: ID!
+  name: String!
 }

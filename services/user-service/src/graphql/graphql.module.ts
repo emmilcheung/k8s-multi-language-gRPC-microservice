@@ -4,7 +4,11 @@ import {
   ApolloFederationDriver,
   ApolloFederationDriverConfig,
 } from "@nestjs/apollo";
-import { UserResolver } from "./user.resolver";
+import {
+  UserResolver,
+  UserSettingsMutationResolver,
+  UserProfileResolver,
+} from "./user.resolver";
 import { UserLoader } from "./users.loader";
 import { UserSettingsModule } from "../modules/user-settings/user-settings.module";
 import { SecurityModule } from "../common/security/security.module";
@@ -20,6 +24,12 @@ import { UserIdSigGuard } from "./guards/user-id-sig.guard";
     UserSettingsModule,
     SecurityModule,
   ],
-  providers: [UserResolver, UserLoader, UserIdSigGuard],
+  providers: [
+    UserResolver,
+    UserSettingsMutationResolver,
+    UserProfileResolver,
+    UserLoader,
+    UserIdSigGuard,
+  ],
 })
 export class UserGraphQLModule {}

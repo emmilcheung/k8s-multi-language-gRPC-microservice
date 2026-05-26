@@ -19,6 +19,7 @@ import (
 	"github.com/acme/attendance-service/internal/migrations"
 	"github.com/acme/attendance-service/internal/qr"
 	pgrepo "github.com/acme/attendance-service/internal/repository/postgres"
+	"github.com/acme/attendance-service/internal/security"
 	"github.com/acme/attendance-service/internal/service"
 	"github.com/acme/attendance-service/internal/tracing"
 	"github.com/acme/attendance-service/pkg/logger"
@@ -164,16 +165,20 @@ func main() {
 	e.Use(echoprometheus.NewMiddleware("http"))
 
 	// GraphQL (no auth at transport; auth via context in resolvers)
-	gqlResolver := &gqlgraph.Resolver{Svc: svc}
+	gqlResolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: scanSvc}
 	gqlServer := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{
 		Resolvers: gqlResolver,
 	}))
+	sigValidator := security.NewUserIDSignatureValidator(cfg.UserIDSigningKey)
+	gqlHandler := gqlgraph.WrapWithUserIDSignatureValidation(gqlServer, sigValidator)
 	e.POST("/graphql", func(c echo.Context) error {
-		gqlServer.ServeHTTP(c.Response(), c.Request())
+		ctx := gqlgraph.WithHTTPRequest(c.Request().Context(), c.Request())
+		gqlHandler.ServeHTTP(c.Response(), c.Request().WithContext(ctx))
 		return nil
 	})
 	e.GET("/graphql", func(c echo.Context) error {
-		gqlServer.ServeHTTP(c.Response(), c.Request())
+		ctx := gqlgraph.WithHTTPRequest(c.Request().Context(), c.Request())
+		gqlHandler.ServeHTTP(c.Response(), c.Request().WithContext(ctx))
 		return nil
 	})
 
