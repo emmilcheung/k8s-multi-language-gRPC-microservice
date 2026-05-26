@@ -9,8 +9,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
-  --font-display: var(--font-display);
-  --font-heading: var(--font-display);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -40,6 +38,23 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-bg: var(--bg);
+  --color-page: var(--page);
+  --color-subtle: var(--subtle);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-ink: var(--ink);
+  --color-text: var(--text);
+  --color-mute: var(--mute);
+  --color-fade: var(--fade);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -49,58 +64,72 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* ─── Warm editorial design system ─────────────────────────────────────────── */
+/* ─── Direction A "Quiet" — Linear-style indigo accent design system ─────────────── */
 
 :root {
-  /* Warm parchment canvas */
-  --background: oklch(0.97 0.008 75);
-  --foreground: oklch(0.13 0.012 50);
+  /* Colour */
+  --bg: oklch(0.985 0.002 250);
+  --page: oklch(0.975 0.003 255);
+  --card: #ffffff;
+  --subtle: oklch(0.965 0.003 260);
+  --line: oklch(0.91 0.004 260);
+  --line-soft: oklch(0.945 0.003 260);
+  --ink: oklch(0.18 0.012 260);
+  --text: oklch(0.22 0.012 260);
+  --mute: oklch(0.50 0.010 260);
+  --fade: oklch(0.68 0.008 260);
+  --accent: oklch(0.52 0.22 268);
+  --accent-ink: #ffffff;
+  --accent-soft: oklch(0.96 0.03 268);
+  --ok: oklch(0.58 0.13 158);
+  --ok-soft: oklch(0.94 0.06 158);
+  --warn: oklch(0.68 0.16 75);
+  --warn-soft: oklch(0.96 0.07 80);
+  --bad: oklch(0.58 0.22 28);
+  --bad-soft: oklch(0.96 0.06 28);
 
-  /* White cards on warm canvas */
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.13 0.012 50);
+  /* Structure */
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
 
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.13 0.012 50);
+  /* Type */
+  --font-sans: "Inter", ui-sans-serif, system-ui;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Coral-red primary */
-  --primary: oklch(0.60 0.20 30);
-  --primary-foreground: oklch(1 0 0);
-
-  /* Warm neutral secondary surface */
-  --secondary: oklch(0.93 0.012 70);
-  --secondary-foreground: oklch(0.13 0.012 50);
-
-  --muted: oklch(0.93 0.012 70);
-  --muted-foreground: oklch(0.55 0.018 55);
-
-  --accent: oklch(0.95 0.02 70);
-  --accent-foreground: oklch(0.13 0.012 50);
-
-  --destructive: oklch(0.56 0.22 25);
-
-  --border: oklch(0.89 0.012 70);
-  --input: oklch(0.93 0.012 70);
-  --ring: oklch(0.60 0.20 30);
-
-  /* Tighter radius — feels more editorial, less bubbly */
-  --radius: 0.375rem;
-
-  /* Charts */
-  --chart-1: oklch(0.60 0.20 30);
-  --chart-2: oklch(0.72 0.15 65);
-  --chart-3: oklch(0.55 0.18 200);
-  --chart-4: oklch(0.70 0.14 140);
-  --chart-5: oklch(0.65 0.16 290);
-
-  --sidebar: oklch(0.98 0.006 70);
-  --sidebar-foreground: oklch(0.13 0.012 50);
-  --sidebar-primary: oklch(0.60 0.20 30);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.93 0.012 70);
-  --sidebar-accent-foreground: oklch(0.13 0.012 50);
-  --sidebar-border: oklch(0.89 0.012 70);
-  --sidebar-ring: oklch(0.60 0.20 30);
+  /* Compat shims — keep existing shadcn primitives compiling until Phase-1+ purge.
+     These map old names onto the new palette. Do NOT add new usages. */
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card-foreground: var(--text);
+  --popover: var(--card);
+  --popover-foreground: var(--text);
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-ink);
+  --secondary: var(--subtle);
+  --secondary-foreground: var(--ink);
+  --muted: var(--subtle);
+  --muted-foreground: var(--mute);
+  --accent-foreground: var(--accent-ink);
+  --destructive: var(--bad);
+  --border: var(--line);
+  --input: var(--subtle);
+  --ring: var(--accent);
+  --chart-1: var(--accent);
+  --chart-2: var(--ok);
+  --chart-3: var(--warn);
+  --chart-4: var(--bad);
+  --chart-5: var(--mute);
+  --sidebar: var(--page);
+  --sidebar-foreground: var(--text);
+  --sidebar-primary: var(--accent);
+  --sidebar-primary-foreground: var(--accent-ink);
+  --sidebar-accent: var(--subtle);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--accent);
 }
 
 @layer base {
@@ -118,43 +147,12 @@
     @apply font-sans;
   }
   h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-display, var(--font-sans));
+    font-family: var(--font-sans);
+    font-weight: 640;
     letter-spacing: -0.02em;
+  }
+  code, kbd, samp, .font-mono {
+    font-variant-numeric: tabular-nums;
   }
 }
 
-/* ─── Utility: white card surface ──────────────────────────────────────────── */
-.glass {
-  background: oklch(1 0 0);
-  border: 1px solid oklch(0.89 0.012 70);
-  box-shadow: 0 1px 3px oklch(0 0 0 / 5%), 0 4px 16px oklch(0 0 0 / 4%);
-}
-
-/* ─── Utility: ticket-stub left accent ─────────────────────────────────────── */
-.ticket-stub {
-  border-left: 3px solid var(--primary);
-}
-
-/* ─── Utility: gradient text (coral → amber) ───────────────────────────────── */
-.gradient-text {
-  background: linear-gradient(135deg, oklch(0.60 0.20 30), oklch(0.72 0.16 55));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-/* ─── Utility: coral glow (replaces glow-violet) ───────────────────────────── */
-.glow-violet {
-  box-shadow: 0 2px 12px oklch(0.60 0.20 30 / 30%);
-}
-
-/* ─── Noise texture overlay for depth ─────────────────────────────────────── */
-.noise-bg::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  pointer-events: none;
-  z-index: 0;
-}

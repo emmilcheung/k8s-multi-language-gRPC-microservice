@@ -1,19 +1,18 @@
 import type { Metadata } from "next";
-import { Syne, DM_Sans } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { cookies } from "next/headers";
 import { NavBar } from "@/components/nav-bar";
 import { currentTraceId } from "@/lib/tracing";
 
-const syne = Syne({
-  variable: "--font-display",
+const inter = Inter({
+  variable: "--font-sans",
   subsets: ["latin"],
-  weight: ["400", "600", "700", "800"],
   display: "swap",
 });
 
-const dmSans = DM_Sans({
-  variable: "--font-sans",
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-mono",
   subsets: ["latin"],
   display: "swap",
 });
@@ -35,7 +34,7 @@ export default async function RootLayout({
   return (
     <html
       lang="en"
-      className={`${syne.variable} ${dmSans.variable} h-full antialiased`}
+      className={`${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <head>
         {traceId ? <meta name="x-trace-id" content={traceId} /> : null}
@@ -48,7 +47,7 @@ export default async function RootLayout({
 
         <footer className="border-t border-border py-8">
           <div className="container mx-auto px-4 max-w-6xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
-            <span className="font-display font-700 text-foreground text-sm tracking-tight">
+            <span className="font-sans font-semibold text-foreground text-sm tracking-tight">
               MARQUEE
             </span>
             <span>© {new Date().getFullYear()} Ticketing Platform · All events welcome</span>
