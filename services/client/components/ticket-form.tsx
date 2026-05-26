@@ -283,7 +283,13 @@ export function TicketForm({
       if (result.error) {
         setError(result.error);
         setPending(false);
+        return;
       }
+      if (result.refreshed) {
+        location.reload();
+        return;
+      }
+      setPending(false);
     } catch (err) {
       if (isRedirectError(err)) return;
       setError(err instanceof Error ? err.message : "An error occurred");

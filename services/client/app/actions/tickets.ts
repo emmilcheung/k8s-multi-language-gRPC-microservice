@@ -105,6 +105,7 @@ export async function fetchTicketPageViaGraphQL(after: string | null): Promise<T
 
 export interface TicketState {
   error?: string;
+  refreshed?: true;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -362,7 +363,7 @@ export async function updateTicket(
 
   revalidatePath(`/tickets/${ticketId}`);
   revalidatePath("/");
-  redirect(`/tickets/${ticketId}`);
+  return { refreshed: true };
 }
 
 export async function replaceInactivePlan(

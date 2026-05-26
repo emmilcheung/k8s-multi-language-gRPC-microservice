@@ -303,6 +303,17 @@ describe("TicketDetailPage", () => {
     expect(notFound).toHaveBeenCalled();
   }, 10000);
 
+  it("does not add page-level retries when ticket detail GraphQL fails transiently", async () => {
+    executeQueryMock.mockRejectedValue(new Error("upstream timeout"));
+
+    const { default: TicketDetailPage } = await import(
+      "@/app/tickets/[ticketId]/page"
+    );
+
+    await expect(TicketDetailPage({ params })).rejects.toThrow("upstream timeout");
+    expect(executeQueryMock).toHaveBeenCalledTimes(1);
+  });
+
   it("uses ticket detail GraphQL parity fields without REST fallback", async () => {
     executeQueryMock.mockResolvedValue({
       ticket: makeTicketDetailGraphql(

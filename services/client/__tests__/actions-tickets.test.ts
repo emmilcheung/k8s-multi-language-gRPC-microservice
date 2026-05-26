@@ -329,7 +329,7 @@ describe("ticket server actions", () => {
     expect(page.tickets).toEqual([]);
   });
 
-  it("updateTicket sends event metadata via GraphQL, revalidates paths, and redirects on success", async () => {
+  it("updateTicket sends event metadata via GraphQL and returns a refresh signal on success", async () => {
     executeMutationMock.mockResolvedValueOnce({
       updateTicket: { id: "ticket-2", title: "Updated", price: 2000, priceDecimal: "20.00" },
     });
@@ -338,7 +338,7 @@ describe("ticket server actions", () => {
       vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
     );
 
-    await updateTicket("ticket-2", {}, ticketUpdateForm("Updated", "20"));
+    const result = await updateTicket("ticket-2", {}, ticketUpdateForm("Updated", "20"));
 
     expect(executeMutationMock.mock.calls[0]?.[1]).toMatchObject({
       id: "ticket-2",
@@ -356,7 +356,8 @@ describe("ticket server actions", () => {
     });
     expect(revalidatePathMock).toHaveBeenCalledWith("/tickets/ticket-2");
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
-    expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-2");
+    expect(result).toEqual({ refreshed: true });
+    expect(redirectMock).not.toHaveBeenCalled();
   });
 
   it("replaceInactivePlan creates a replacement plan and re-links the ticket", async () => {

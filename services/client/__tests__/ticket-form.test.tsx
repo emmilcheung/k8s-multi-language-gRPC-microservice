@@ -66,4 +66,31 @@ describe("TicketForm", () => {
       expect(screen.getByLabelText(/require qr admission/i)).toBeDisabled();
     });
   });
+
+  it("reloads the current page after a successful same-page update", async () => {
+    const reloadMock = vi.fn();
+    vi.stubGlobal("location", { reload: reloadMock });
+
+    const user = userEvent.setup();
+    const action = vi.fn(async (prev: TicketState, formData: FormData): Promise<TicketState> => {
+      void prev;
+      void formData;
+      return { refreshed: true };
+    });
+
+    render(
+      <TicketForm
+        action={action}
+        defaultTitle="Reload Test"
+        defaultPrice={15}
+        defaultTicketType="GA"
+        submitLabel="Update Ticket"
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: /update ticket/i }));
+
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(reloadMock).toHaveBeenCalledTimes(1));
+  });
 });

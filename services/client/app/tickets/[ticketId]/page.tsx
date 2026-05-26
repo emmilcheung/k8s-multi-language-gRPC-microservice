@@ -1,6 +1,8 @@
 // app/tickets/[ticketId]/page.tsx — Ticket detail page.
 // Split layout: info panel (left) + action panel (right). Owner sees edit form.
 
+export const dynamic = "force-dynamic";
+
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -34,8 +36,6 @@ interface Props {
   params: Promise<{ ticketId: string }>;
 }
 
-const TICKET_LOAD_RETRY_DELAYS_MS = [250, 500, 750, 1000, 1250, 1500];
-
 function toDateTimeLocalInput(value?: string): string {
   if (!value) return "";
   const date = new Date(value);
@@ -58,57 +58,42 @@ function toTicketFormType(
 }
 
 async function getTicket(ticketId: string): Promise<Ticket> {
-  let lastError: unknown;
+  const cookieStore = await cookies();
+  const cookieHeader = cookieStore.toString();
 
-  for (let attempt = 0; attempt <= TICKET_LOAD_RETRY_DELAYS_MS.length; attempt += 1) {
-    try {
-      const cookieStore = await cookies();
-      const cookieHeader = cookieStore.toString();
+  const data = await executeQuery(TicketDetailDocument, { id: ticketId }, { cookie: cookieHeader });
 
-      const data = await executeQuery(TicketDetailDocument, { id: ticketId }, { cookie: cookieHeader });
-
-      if (!data.ticket) {
-        notFound();
-      }
-
-      const gql = data.ticket;
-
-      return {
-        id: gql.id,
-        title: gql.title,
-        price: gql.priceDecimal,
-        userId: gql.userId,
-        orderId: gql.orderId ?? undefined,
-        quota: gql.quota,
-        reserved: gql.reserved,
-        sold: gql.sold,
-        available: gql.available,
-        maxPerUser: gql.maxPerUser ?? undefined,
-        ticketType: gql.ticketType,
-        seatingPlanId: gql.seatingPlan?.id ?? undefined,
-        event: gql.event
-          ? {
-              title: gql.event.title,
-              description: gql.event.description ?? undefined,
-              startsAt: gql.event.startsAt,
-              endsAt: gql.event.endsAt ?? undefined,
-              imageUrl: gql.event.imageUrl ?? undefined,
-              venueName: gql.event.venueName ?? undefined,
-              venueAddress: gql.event.venueAddress ?? undefined,
-            }
-          : undefined,
-      } as Ticket;
-    } catch (error) {
-      lastError = error;
-      const shouldRetry = attempt < TICKET_LOAD_RETRY_DELAYS_MS.length;
-      if (!shouldRetry) {
-        throw error;
-      }
-      await new Promise((resolve) => setTimeout(resolve, TICKET_LOAD_RETRY_DELAYS_MS[attempt]));
-    }
+  if (!data.ticket) {
+    notFound();
   }
 
-  throw lastError ?? new Error("Failed to load ticket.");
+  const gql = data.ticket;
+
+  return {
+    id: gql.id,
+    title: gql.title,
+    price: gql.priceDecimal,
+    userId: gql.userId,
+    orderId: gql.orderId ?? undefined,
+    quota: gql.quota,
+    reserved: gql.reserved,
+    sold: gql.sold,
+    available: gql.available,
+    maxPerUser: gql.maxPerUser ?? undefined,
+    ticketType: gql.ticketType,
+    seatingPlanId: gql.seatingPlan?.id ?? undefined,
+    event: gql.event
+      ? {
+          title: gql.event.title,
+          description: gql.event.description ?? undefined,
+          startsAt: gql.event.startsAt,
+          endsAt: gql.event.endsAt ?? undefined,
+          imageUrl: gql.event.imageUrl ?? undefined,
+          venueName: gql.event.venueName ?? undefined,
+          venueAddress: gql.event.venueAddress ?? undefined,
+        }
+      : undefined,
+  } as Ticket;
 }
 
 export async function generateMetadata() {
