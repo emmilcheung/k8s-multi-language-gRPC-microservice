@@ -2,11 +2,13 @@
 // Shows plan info, sections, and allows adding sections + activating.
 // Draft plans get the full interactive SeatingPlanCanvas editor.
 
+export const dynamic = "force-dynamic";
+
 import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ApiError, serverApi } from "@/lib/api";
-import { activatePlan, deactivatePlan, createPriceTier, fetchPriceTiers } from "@/app/actions/venues";
+import { createPriceTier, fetchPriceTiers } from "@/app/actions/venues";
 import { replaceInactivePlan } from "@/app/actions/tickets";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
@@ -98,14 +100,6 @@ export default async function TicketPlanDetailPage({ params }: Props) {
     prev: PlanState,
     formData: FormData
   ) => Promise<PlanState>;
-  const activatePlanAction = activatePlan.bind(null, planId, "", ticketId) as (
-    prev: PlanState,
-    formData: FormData
-  ) => Promise<PlanState>;
-  const deactivatePlanAction = deactivatePlan.bind(null, planId, "", ticketId) as (
-    prev: PlanState,
-    formData: FormData
-  ) => Promise<PlanState>;
   const replacePlanAction = replaceInactivePlan.bind(null, ticketId, planId);
 
   const isDraft = plan.status === "draft";
@@ -157,12 +151,12 @@ export default async function TicketPlanDetailPage({ params }: Props) {
         <div className="flex gap-3 pt-2">
           {canActivate && (
             <ActivatePlanButton
-              action={activatePlanAction}
+              planId={planId}
               label={isInactive ? "Reactivate Plan" : "Activate Plan"}
             />
           )}
           {isActive && (
-            <DeactivatePlanButton action={deactivatePlanAction} />
+            <DeactivatePlanButton planId={planId} />
           )}
           {isInactive && (
             <ReplacePlanButton action={replacePlanAction} />

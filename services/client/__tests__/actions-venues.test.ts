@@ -23,7 +23,13 @@ vi.mock("@/lib/graphql/execute", () => ({
   executeQuery: vi.fn(),
 }));
 
-import { createVenue, createSeatingPlan, saveLayout } from "@/app/actions/venues";
+import {
+  activatePlan,
+  createVenue,
+  createSeatingPlan,
+  deactivatePlan,
+  saveLayout,
+} from "@/app/actions/venues";
 
 function venueForm(name: string, capacity: string, timezone: string): FormData {
   const fd = new FormData();
@@ -153,6 +159,61 @@ describe("venue server actions", () => {
           body: JSON.stringify({ layoutJson }),
         })
       );
+    });
+  });
+
+  describe("activatePlan", () => {
+    it("revalidates and redirects ticket plan pages on success", async () => {
+      executeMutationMock.mockResolvedValue({ activateSeatingPlan: { id: "plan-1" } });
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: vi.fn().mockResolvedValue({ status: "draft" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: vi.fn().mockResolvedValue({ status: "active" }),
+        });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await activatePlan("plan-1", "venue-1", "ticket-1", {}, new FormData());
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        1,
+        "http://localhost:8080/api/seating-plans/plan-1",
+        expect.objectContaining({
+          cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+      expect(revalidatePathMock).toHaveBeenCalledWith("/tickets/ticket-1/plans/plan-1", "layout");
+      expect(revalidatePathMock).toHaveBeenCalledWith("/tickets/ticket-1");
+      expect(revalidatePathMock).toHaveBeenCalledWith("/");
+      expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1/plans/plan-1");
+    });
+  });
+
+  describe("deactivatePlan", () => {
+    it("revalidates and redirects venue plan pages on success", async () => {
+      executeMutationMock.mockResolvedValue({ deactivateSeatingPlan: { id: "plan-2" } });
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: vi.fn().mockResolvedValue({ status: "active" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: vi.fn().mockResolvedValue({ status: "inactive" }),
+        });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await deactivatePlan("plan-2", "venue-2", "", {}, new FormData());
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(revalidatePathMock).toHaveBeenCalledWith("/venues/venue-2/plans/plan-2", "layout");
+      expect(revalidatePathMock).toHaveBeenCalledWith("/venues/venue-2");
+      expect(redirectMock).toHaveBeenCalledWith("/venues/venue-2/plans/plan-2");
     });
   });
 });

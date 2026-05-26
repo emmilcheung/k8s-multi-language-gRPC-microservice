@@ -3,6 +3,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { executeQuery, executeMutation } from "@/lib/graphql/execute";
 import { base, authHeaders } from "@/lib/server-utils";
 import type { SeatingPlan, PriceTier, VenueSection, Section } from "@/lib/types";
@@ -37,15 +38,40 @@ export interface VenueState {
 
 export interface PlanState {
   error?: string;
+  refreshed?: true;
 }
+
+const PLAN_STATUS_RETRY_DELAYS_MS = [100, 200, 400, 800];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function isRedirectError(error: unknown): error is Error & { digest?: string } {
-  if (!(error instanceof Error)) return false;
-  if (error.message === "NEXT_REDIRECT") return true;
-  const e = error as Error & { digest?: string };
-  return typeof e.digest === "string" && e.digest.startsWith("NEXT_REDIRECT");
+async function waitForPlanStatus(planId: string, expectedStatus: SeatingPlan["status"]): Promise<void> {
+  const headers = await authHeaders();
+
+  for (let attempt = 0; attempt <= PLAN_STATUS_RETRY_DELAYS_MS.length; attempt += 1) {
+    const res = await fetch(`${base()}/api/seating-plans/${planId}`, {
+      method: "GET",
+      cache: "no-store",
+      headers,
+    });
+
+    if (!res.ok) {
+      throw new Error(`Failed to verify seating plan state (${res.status}).`);
+    }
+
+    const plan = await res.json() as SeatingPlan;
+    if (plan.status === expectedStatus) {
+      return;
+    }
+
+    if (attempt === PLAN_STATUS_RETRY_DELAYS_MS.length) {
+      break;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, PLAN_STATUS_RETRY_DELAYS_MS[attempt]));
+  }
+
+  throw new Error(`Seating plan did not reach ${expectedStatus} state in time.`);
 }
 
 // ─── Venue queries ────────────────────────────────────────────────────────────
@@ -474,14 +500,17 @@ export async function deactivatePlan(
 
   try {
     await executeMutation(DeactivateSeatingPlanDocument, { id: planId });
-
+    await waitForPlanStatus(planId, "inactive");
     if (ticketId) {
-      revalidatePath(`/tickets/${ticketId}/plans/${planId}`);
+      revalidatePath(`/tickets/${ticketId}/plans/${planId}`, "layout");
+      revalidatePath(`/tickets/${ticketId}`);
+      revalidatePath("/");
       redirect(`/tickets/${ticketId}/plans/${planId}`);
-    } else {
-      revalidatePath(`/venues/${venueId}/plans/${planId}`);
-      redirect(`/venues/${venueId}/plans/${planId}`);
     }
+
+    revalidatePath(`/venues/${venueId}/plans/${planId}`, "layout");
+    revalidatePath(`/venues/${venueId}`);
+    redirect(`/venues/${venueId}/plans/${planId}`);
   } catch (error) {
     if (isRedirectError(error)) throw error;
     return { error: error instanceof Error ? error.message : "Failed to deactivate plan." };
@@ -512,14 +541,17 @@ export async function activatePlan(
 
   try {
     await executeMutation(ActivateSeatingPlanDocument, { id: planId });
-
+    await waitForPlanStatus(planId, "active");
     if (ticketId) {
-      revalidatePath(`/tickets/${ticketId}/plans/${planId}`);
+      revalidatePath(`/tickets/${ticketId}/plans/${planId}`, "layout");
+      revalidatePath(`/tickets/${ticketId}`);
+      revalidatePath("/");
       redirect(`/tickets/${ticketId}/plans/${planId}`);
-    } else {
-      revalidatePath(`/venues/${venueId}/plans/${planId}`);
-      redirect(`/venues/${venueId}/plans/${planId}`);
     }
+
+    revalidatePath(`/venues/${venueId}/plans/${planId}`, "layout");
+    revalidatePath(`/venues/${venueId}`);
+    redirect(`/venues/${venueId}/plans/${planId}`);
   } catch (error) {
     if (isRedirectError(error)) throw error;
     return { error: error instanceof Error ? error.message : "Failed to activate plan." };

@@ -2,11 +2,13 @@
 // Shows plan info, sections, and allows adding sections + activating.
 // Draft plans get the full interactive SeatingPlanCanvas editor.
 
+export const dynamic = "force-dynamic";
+
 import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { serverApi } from "@/lib/api";
-import { activatePlan, deactivatePlan, createPriceTier, fetchPriceTiers } from "@/app/actions/venues";
+import { createPriceTier, fetchPriceTiers } from "@/app/actions/venues";
 import type { PlanState } from "@/app/actions/venues";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
@@ -64,14 +66,6 @@ export default async function PlanDetailPage({ params }: Props) {
   // Wrapper actions that bind the venue context (no ticketId for backward compat)
   const addTierAction = async (_prev: PlanState, formData: FormData) => {
     return createPriceTier(planId, venueId, "", _prev, formData);
-  };
-
-  const activatePlanAction = async (_prev: PlanState, formData: FormData) => {
-    return activatePlan(planId, venueId, "", _prev, formData);
-  };
-
-  const deactivatePlanAction = async (_prev: PlanState, formData: FormData) => {
-    return deactivatePlan(planId, venueId, "", _prev, formData);
   };
 
   const isDraft = plan.status === "draft";
@@ -218,7 +212,7 @@ export default async function PlanDetailPage({ params }: Props) {
               Once activated, the layout is locked and the plan can be attached to tickets for purchase.
             </p>
           </div>
-          <ActivatePlanButton action={activatePlanAction} />
+          <ActivatePlanButton planId={planId} />
         </div>
       )}
       {isActive && (
@@ -229,7 +223,7 @@ export default async function PlanDetailPage({ params }: Props) {
               Stops new seat holds and purchases. Existing confirmed orders are unaffected.
             </p>
           </div>
-          <DeactivatePlanButton action={deactivatePlanAction} />
+          <DeactivatePlanButton planId={planId} />
         </div>
       )}
     </div>

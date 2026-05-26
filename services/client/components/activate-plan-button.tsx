@@ -1,30 +1,58 @@
 "use client";
-// components/activate-plan-button.tsx — Client Component that submits the
-// activatePlan Server Action via useActionState, displaying inline errors and a
-// loading state while the request is in-flight.
+// components/activate-plan-button.tsx — Client Component that activates a seating
+// plan through a same-origin route handler and reloads the page on success.
 
-import { useActionState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, Loader2, Zap } from "lucide-react";
-import type { PlanState } from "@/app/actions/venues";
 
 interface ActivatePlanButtonProps {
-  action: (_prev: PlanState, formData: FormData) => Promise<PlanState>;
+  planId: string;
   label?: string;
 }
 
-export function ActivatePlanButton({ action, label = "Activate Plan" }: ActivatePlanButtonProps) {
-  const [state, formAction, pending] = useActionState(action, {});
+interface RouteErrorBody {
+  error?: {
+    message?: string;
+  };
+}
+
+export function ActivatePlanButton({ planId, label = "Activate Plan" }: ActivatePlanButtonProps) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  const handleClick = async () => {
+    setPending(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/seating-plans/${planId}/activate`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as RouteErrorBody | null;
+        setError(body?.error?.message ?? "Failed to activate plan.");
+        setPending(false);
+        return;
+      }
+
+      location.reload();
+    } catch {
+      setError("Failed to activate plan.");
+      setPending(false);
+    }
+  };
 
   return (
-    <form action={formAction} className="flex flex-col gap-2">
-      {state?.error && (
+    <div className="flex flex-col gap-2">
+      {error && (
         <p className="text-sm text-destructive flex items-center gap-1.5">
           <AlertCircle className="w-4 h-4 shrink-0" />
-          {state.error}
+          {error}
         </p>
       )}
-      <Button type="submit" disabled={pending} className="gap-2 self-start">
+      <Button type="button" disabled={pending} className="gap-2 self-start" onClick={() => void handleClick()}>
         {pending ? (
           <Loader2 className="w-4 h-4 animate-spin" />
         ) : (
@@ -32,6 +60,6 @@ export function ActivatePlanButton({ action, label = "Activate Plan" }: Activate
         )}
         {pending ? "Activating…" : label}
       </Button>
-    </form>
+    </div>
   );
 }
