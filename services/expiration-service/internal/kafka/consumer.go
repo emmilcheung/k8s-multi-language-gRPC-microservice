@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	confluent "github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -25,6 +26,7 @@ type Consumer struct {
 	c        *confluent.Consumer
 	producer *Producer
 	log      *zap.Logger
+	closeOnce sync.Once
 }
 
 // NewConsumer creates a Kafka consumer subscribed to TopicOrderCreated.
@@ -69,6 +71,7 @@ func (c *Consumer) Start(ctx context.Context, handler OrderCreatedHandler) {
 		select {
 		case <-ctx.Done():
 			c.log.Info("kafka consumer stopping")
+			c.Close()
 			return
 		default:
 		}
@@ -176,7 +179,9 @@ func exponentialBackoffWithJitter(attempt int, base, max time.Duration) time.Dur
 
 // Close closes the underlying Kafka consumer.
 func (c *Consumer) Close() {
-	if err := c.c.Close(); err != nil {
-		c.log.Error("failed to close kafka consumer", zap.Error(err))
-	}
+	c.closeOnce.Do(func() {
+		if err := c.c.Close(); err != nil {
+			c.log.Error("failed to close kafka consumer", zap.Error(err))
+		}
+	})
 }

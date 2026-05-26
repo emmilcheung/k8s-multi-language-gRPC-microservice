@@ -134,12 +134,23 @@ func TestConsumer_FailedMessageRoutedToDLQ(t *testing.T) {
 
 	// Run the consumer with a handler that always fails — drives retries to exhaustion.
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
 	alwaysFail := func(_ context.Context, data appkafka.OrderCreatedData) error {
 		return fmt.Errorf("simulated scheduler failure for order %s", data.OrderID)
 	}
-	go consumer.Start(ctx, alwaysFail)
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		consumer.Start(ctx, alwaysFail)
+	}()
+	defer func() {
+		cancel()
+
+		select {
+		case <-consumerDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("consumer goroutine did not stop before Kafka teardown")
+		}
+	}()
 
 	// Poll the DLQ topic until the message arrives or timeout.
 	deadline := time.Now().Add(30 * time.Second)
