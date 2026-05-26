@@ -44,12 +44,14 @@ export function QuickFacts({ ticket, gaRemaining }: QuickFactsProps) {
         </div>
       </div>
 
-      {/* Age rating */}
+      {/* Price */}
       <div className="flex flex-col gap-2">
         <div className="text-xs text-mute uppercase tracking-wider font-medium">
-          Age
+          Price
         </div>
-        <span className="text-sm font-semibold text-ink">All ages</span>
+        <span className="text-sm font-semibold text-ink font-mono tabular-nums">
+          ${parseFloat(ticket.price).toFixed(2)}
+        </span>
       </div>
 
       {/* Status / Availability */}

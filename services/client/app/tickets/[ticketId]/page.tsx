@@ -219,6 +219,13 @@ export default async function TicketDetailPage({ params }: Props) {
               ? "This ticket is sold out."
               : "All remaining tickets are currently reserved or unavailable.",
         }
+      : isReserved
+      ? {
+          label: "Already Reserved",
+          badge: "Already Reserved",
+          badgeClass: "bg-muted/40 text-muted-foreground border-muted/20",
+          message: "You already have an active reservation for this ticket.",
+        }
       : null;
 
   return (
@@ -244,7 +251,7 @@ export default async function TicketDetailPage({ params }: Props) {
 
           {/* Title */}
           <h1 className="text-3xl font-semibold text-ink leading-tight -mt-4">
-            {ticket.event?.title ?? ticket.title ?? "Event"}
+            {ticket.event?.title || ticket.title || "Event"}
           </h1>
 
           {/* Chips row */}
@@ -253,6 +260,7 @@ export default async function TicketDetailPage({ params }: Props) {
             <Badge tone="neutral" dot>
               {(ticket.available ?? 0) > 0 ? "On sale" : "Sold out"}
             </Badge>
+            {isOwner && <Badge tone="ink">Your listing</Badge>}
           </div>
 
           {/* Quick facts strip */}
