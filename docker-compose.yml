@@ -290,7 +290,12 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3000
+      # argon2 is libuv-bound; default 4 threads saturates under E2E load and
+      # starves the pg socket reader, surfacing as "Connection terminated".
+      UV_THREADPOOL_SIZE: 16
       DATABASE_URL: postgresql://auth_user:auth_pass@postgres-auth:5432/auth_db
+      DB_POOL_MAX: 40
+      DB_CONNECTION_TIMEOUT_MS: 15000
       JWT_SECRET: "dev-jwt-secret-change-in-production"
       JWT_COOKIE_NAME: ${JWT_COOKIE_NAME:-token}
       REFRESH_COOKIE_NAME: ${REFRESH_COOKIE_NAME:-refreshToken}

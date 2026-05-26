@@ -2,6 +2,13 @@ supergraph:
   listen: 0.0.0.0:4001
   path: /graphql
 
+# Surface subgraph errors verbatim in CI/local. In production this should be
+# scoped to specific subgraphs (or off) so internal stack traces don't leak,
+# but for the local docker-compose + CI stack the error masking blocks
+# E2E debugging completely. Re-evaluate before promoting to staging.
+include_subgraph_errors:
+  all: true
+
 # limits (max_depth, max_height, etc.) require a GraphOS Enterprise license.
 # They are configured in the Helm chart (infra/helm/charts/apollo-router/files/router.yaml)
 # for staging/production deployments connected to GraphOS.

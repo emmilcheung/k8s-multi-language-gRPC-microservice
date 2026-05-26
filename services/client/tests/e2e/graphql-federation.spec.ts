@@ -14,6 +14,10 @@ function uniqueEmail(prefix: string) {
   return `${prefix}-${Date.now()}-${randomUUID().slice(0, 8)}@test.com`;
 }
 
+// graphql-federation runs first in CI on a cold Next.js dev server — lazy
+// compilation on first page hit can take 30–60 s on the GitHub Actions runner.
+test.setTimeout(120_000);
+
 test.beforeEach(async ({ page }) => {
   assertNoLegacyPaymentRest = installNoLegacyPaymentRestGuard(page);
 });
@@ -106,10 +110,10 @@ async function createAttachedSeatedTicket(page: Page) {
   }
 
   const form = page.locator("form", { has: page.locator("#title") });
-  await form.waitFor({ state: "visible", timeout: 5000 });
+  await form.waitFor({ state: "visible", timeout: 30_000 });
 
   const submitButton = form.getByRole("button", { name: /create ticket/i });
-  await submitButton.waitFor({ state: "visible", timeout: 5000 });
+  await submitButton.waitFor({ state: "visible", timeout: 30_000 });
   await submitButton.click();
 
   try {
@@ -282,6 +286,9 @@ test.describe("GraphQL Federation — Cross-Subgraph Resolution", () => {
   });
 
   test("ticket query resolves seatingPlan across ticket and venue subgraphs", async ({ page, request }) => {
+    // This test drives 5+ cold-compiled pages sequentially; needs a larger budget than the
+    // 120 s file-level default when graphql-federation runs first on a cold CI runner.
+    test.setTimeout(300_000);
     const email = uniqueEmail("gql-venue");
     await signupAsCreator(page, email);
     const { planId, ticketId } = await createAttachedSeatedTicket(page);
@@ -346,8 +353,8 @@ test.describe("GraphQL Federation — SSR Path", () => {
     // Attempt to access orders page without auth
     await page.goto("/orders");
 
-    // Should redirect to signin
-    await page.waitForURL(/\/auth\/signin/, { timeout: 10000 });
+    // Should redirect to signin (allow time for SSR cold-compile on CI)
+    await page.waitForURL(/\/auth\/signin/, { timeout: 30_000 });
   });
 });
 
