@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const revalidatePathMock = vi.fn();
+const redirectMock = vi.fn();
 const executeQueryMock = vi.fn();
 const executeMutationMock = vi.fn();
 const authSessionHeadersMock = vi.fn();
 
 vi.mock("next/cache", () => ({
   revalidatePath: (...args: unknown[]) => revalidatePathMock(...args),
+}));
+
+vi.mock("next/navigation", () => ({
+  redirect: (...args: unknown[]) => redirectMock(...args),
 }));
 
 vi.mock("@/lib/graphql/execute", () => ({
@@ -22,6 +27,7 @@ import {
   deletePaymentMethodAction,
   getSettingsData,
   registerPaymentMethodAction,
+  registerPaymentMethodFormAction,
   revokeSessionAction,
   setDefaultPaymentMethodAction,
   updateProfileAction,
@@ -177,7 +183,88 @@ describe("settings server actions", () => {
     await deletePaymentMethodAction(deleteForm);
 
     expect(executeMutationMock).toHaveBeenCalledTimes(3);
-    expect(revalidatePathMock).toHaveBeenCalledTimes(3);
+    expect(revalidatePathMock).toHaveBeenCalledTimes(1);
+    expect(revalidatePathMock).toHaveBeenCalledWith("/settings");
+  });
+
+  it("returns the saved payment method after registration", async () => {
+    executeMutationMock.mockResolvedValueOnce({
+      registerPaymentMethod: {
+        id: "pm-1",
+        brand: "visa",
+        label: "Visa •••• 4242",
+        last4: "4242",
+        expMonth: 12,
+        expYear: 2030,
+        isDefault: true,
+      },
+    });
+
+    const result = await registerPaymentMethodAction({
+      providerPaymentMethodId: "pm_provider_4242",
+      setAsDefault: true,
+      consentAccepted: true,
+      consentVersion: "settings-card-save-v1",
+    });
+
+    expect(result).toEqual({
+      paymentMethod: {
+        id: "pm-1",
+        brand: "visa",
+        label: "Visa •••• 4242",
+        last4: "4242",
+        expMonth: 12,
+        expYear: 2030,
+        isDefault: true,
+      },
+    });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("returns the newly default payment method", async () => {
+    executeMutationMock.mockResolvedValueOnce({
+      setDefaultPaymentMethod: {
+        id: "pm-2",
+        brand: "mastercard",
+        label: "Mastercard •••• 5555",
+        last4: "5555",
+        expMonth: 10,
+        expYear: 2031,
+        isDefault: true,
+      },
+    });
+
+    const formData = new FormData();
+    formData.set("methodId", "pm-2");
+
+    const result = await setDefaultPaymentMethodAction(formData);
+
+    expect(result).toEqual({
+      paymentMethod: {
+        id: "pm-2",
+        brand: "mastercard",
+        label: "Mastercard •••• 5555",
+        last4: "5555",
+        expMonth: 10,
+        expYear: 2031,
+        isDefault: true,
+      },
+    });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("returns the deleted payment method id", async () => {
+    executeMutationMock.mockResolvedValueOnce({
+      deletePaymentMethod: true,
+    });
+
+    const formData = new FormData();
+    formData.set("methodId", "pm-3");
+
+    const result = await deletePaymentMethodAction(formData);
+
+    expect(result).toEqual({ deletedMethodId: "pm-3" });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
   describe("error path tests", () => {
@@ -398,7 +485,17 @@ describe("settings server actions", () => {
         consentVersion: "settings-card-save-v1",
       });
 
-      expect(result).toEqual({});
+      expect(result).toEqual({
+        paymentMethod: {
+          id: "pm-new",
+          brand: "visa",
+          label: undefined,
+          last4: "4242",
+          expMonth: 12,
+          expYear: 2028,
+          isDefault: true,
+        },
+      });
       expect(executeMutationMock).toHaveBeenCalledOnce();
       const [document, variables] = executeMutationMock.mock.calls[0];
       expect(document).toBe(RegisterPaymentMethodDocument);
@@ -410,10 +507,10 @@ describe("settings server actions", () => {
           consentVersion: "settings-card-save-v1",
         },
       });
-      expect(revalidatePathMock).toHaveBeenCalledWith("/settings");
+      expect(revalidatePathMock).not.toHaveBeenCalled();
     });
 
-    it("revalidates /settings on success", async () => {
+    it("does not revalidate /settings on success", async () => {
       executeMutationMock.mockResolvedValueOnce({
         registerPaymentMethod: { id: "pm-new", brand: "visa", last4: "4242", expMonth: 12, expYear: 2028, isDefault: false, label: null },
       });
@@ -425,7 +522,7 @@ describe("settings server actions", () => {
         consentVersion: "settings-card-save-v1",
       });
 
-      expect(revalidatePathMock).toHaveBeenCalledWith("/settings");
+      expect(revalidatePathMock).not.toHaveBeenCalled();
     });
 
     it("returns error when mutation rejects", async () => {
@@ -532,6 +629,56 @@ describe("settings server actions", () => {
       expect(result).toEqual({ error: "Consent version is required" });
       expect(executeMutationMock).not.toHaveBeenCalled();
       expect(revalidatePathMock).not.toHaveBeenCalled();
+    });
+
+    describe("registerPaymentMethodFormAction", () => {
+      it("registers the payment method then revalidates and redirects settings", async () => {
+        executeMutationMock.mockResolvedValueOnce({
+          registerPaymentMethod: {
+            id: "pm-form",
+            brand: "visa",
+            last4: "4242",
+            expMonth: 12,
+            expYear: 2028,
+            isDefault: true,
+            label: null,
+          },
+        });
+
+        const formData = new FormData();
+        formData.set("providerPaymentMethodId", "pm_stripe_form");
+        formData.set("setAsDefault", "true");
+        formData.set("consentAccepted", "true");
+        formData.set("consentVersion", "settings-card-save-v1");
+
+        await registerPaymentMethodFormAction({}, formData);
+
+        expect(executeMutationMock).toHaveBeenCalledWith(
+          RegisterPaymentMethodDocument,
+          {
+            input: {
+              providerPaymentMethodId: "pm_stripe_form",
+              setAsDefault: true,
+              consentAccepted: true,
+              consentVersion: "settings-card-save-v1",
+            },
+          }
+        );
+        expect(revalidatePathMock).toHaveBeenCalledWith("/settings");
+        expect(redirectMock).toHaveBeenCalledWith("/settings?paymentMethodSaved=1");
+      });
+
+      it("returns consent error when the hidden form omits consentAccepted", async () => {
+        const formData = new FormData();
+        formData.set("providerPaymentMethodId", "pm_stripe_form");
+        formData.set("setAsDefault", "false");
+        formData.set("consentVersion", "settings-card-save-v1");
+
+        const result = await registerPaymentMethodFormAction({}, formData);
+
+        expect(result).toEqual({ error: "Please consent to saving your payment method for future use." });
+        expect(executeMutationMock).not.toHaveBeenCalled();
+      });
     });
   });
 });

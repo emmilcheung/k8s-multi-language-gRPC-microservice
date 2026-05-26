@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
@@ -12,10 +14,8 @@ import {
   updatePreferencesAction,
   updateBillingAddressAction,
   revokeSessionAction,
-  setDefaultPaymentMethodAction,
-  deletePaymentMethodAction,
 } from "@/app/actions/settings";
-import { SettingsAddPaymentMethodForm } from "@/components/settings-add-payment-method-form";
+import { SettingsPaymentMethods } from "@/components/settings-payment-methods";
 import { ArrowRight, Clock, Shield, CreditCard, MapPinHouse, UserRound, X } from "lucide-react";
 
 export const metadata = { title: "Settings — Marquee" };
@@ -62,24 +62,6 @@ async function handleRevokeSession(formData: FormData): Promise<void> {
   }
 }
 
-/** Wrapper for form action: delegates to setDefaultPaymentMethodAction and redirects on error */
-async function handleSetDefaultPaymentMethod(formData: FormData): Promise<void> {
-  "use server";
-  const result = await setDefaultPaymentMethodAction(formData);
-  if (result.error) {
-    redirect(`/settings?error=${encodeURIComponent(result.error)}`);
-  }
-}
-
-/** Wrapper for form action: delegates to deletePaymentMethodAction and redirects on error */
-async function handleDeletePaymentMethod(formData: FormData): Promise<void> {
-  "use server";
-  const result = await deletePaymentMethodAction(formData);
-  if (result.error) {
-    redirect(`/settings?error=${encodeURIComponent(result.error)}`);
-  }
-}
-
 interface SettingsPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
@@ -88,6 +70,7 @@ export default async function SettingsPage(props: SettingsPageProps) {
   const searchParams = await props.searchParams;
   const errorParam = searchParams.error;
   const error = typeof errorParam === "string" ? errorParam : undefined;
+  const paymentMethodSaved = searchParams.paymentMethodSaved === "1";
 
   const cookieStore = await cookies();
   const token = cookieStore.get("token")?.value;
@@ -122,6 +105,11 @@ export default async function SettingsPage(props: SettingsPageProps) {
           <div className="flex-1">
             <p className="text-sm font-medium text-destructive">{error}</p>
           </div>
+        </div>
+      )}
+      {paymentMethodSaved && (
+        <div className="rounded border border-emerald-500/40 bg-emerald-500/5 p-3">
+          <p className="text-sm font-medium text-emerald-600">Payment method saved successfully.</p>
         </div>
       )}
       <header className="flex flex-col gap-2">
@@ -274,60 +262,7 @@ export default async function SettingsPage(props: SettingsPageProps) {
             <CardDescription>Manage your saved cards and choose a default payment method.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <SettingsAddPaymentMethodForm />
-
-            {paymentMethods.length === 0 ? (
-              <p className="rounded border border-dashed border-border p-4 text-sm text-muted-foreground">
-                No saved payment methods yet.
-              </p>
-            ) : (
-              paymentMethods.map((method) => (
-                <div
-                  key={method.id}
-                  className="flex flex-col gap-3 rounded border border-border p-3 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold">
-                        {method.label ??
-                          (method.last4
-                            ? `${method.brand?.toUpperCase() ?? "Saved method"} •••• ${method.last4}`
-                            : method.brand?.toUpperCase() ?? "Saved method")}
-                      </p>
-                      {method.isDefault && <Badge className="text-xs">Default</Badge>}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {method.expMonth && method.expYear
-                        ? `Expires ${String(method.expMonth).padStart(2, "0")}/${method.expYear}`
-                        : "Expiry not available"}
-                    </p>
-                  </div>
-
-                  <div className="flex gap-2">
-                    {!method.isDefault && (
-                      <form action={handleSetDefaultPaymentMethod}>
-                        <input type="hidden" name="methodId" value={method.id} />
-                        <button
-                          type="submit"
-                          className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-                        >
-                          Set default
-                        </button>
-                      </form>
-                    )}
-                    <form action={handleDeletePaymentMethod}>
-                      <input type="hidden" name="methodId" value={method.id} />
-                      <button
-                        type="submit"
-                        className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-destructive")}
-                      >
-                        Delete
-                      </button>
-                    </form>
-                  </div>
-                </div>
-              ))
-            )}
+            <SettingsPaymentMethods initialPaymentMethods={paymentMethods} />
           </CardContent>
         </Card>
 

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { executeMutation, executeQuery } from "@/lib/graphql/execute";
 import { authSessionHeaders } from "@/lib/server-utils";
 import {
@@ -39,6 +40,12 @@ export interface SettingsData {
   orders: OrderSummary[];
 }
 
+export interface PaymentMethodActionResult {
+  error?: string;
+  paymentMethod?: SavedPaymentMethod;
+  deletedMethodId?: string;
+}
+
 function asString(value: FormDataEntryValue | null): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -49,6 +56,26 @@ function compactObject<T extends Record<string, unknown>>(value: T): Partial<T> 
   return Object.fromEntries(
     Object.entries(value).filter(([, entry]) => entry !== undefined)
   ) as Partial<T>;
+}
+
+function mapSavedPaymentMethod(method: {
+  id: string;
+  brand?: string | null;
+  label?: string | null;
+  last4?: string | null;
+  expMonth?: number | null;
+  expYear?: number | null;
+  isDefault?: boolean | null;
+}): SavedPaymentMethod {
+  return {
+    id: method.id,
+    brand: method.brand ?? undefined,
+    label: method.label ?? undefined,
+    last4: method.last4 ?? undefined,
+    expMonth: method.expMonth ?? undefined,
+    expYear: method.expYear ?? undefined,
+    isDefault: method.isDefault ?? undefined,
+  };
 }
 
 export async function getSettingsData(): Promise<SettingsData> {
@@ -86,15 +113,7 @@ export async function getSettingsData(): Promise<SettingsData> {
       ipAddress: s.ipAddress,
       current: s.current,
     })),
-    paymentMethods: (user?.paymentMethods ?? []).map((pm) => ({
-      id: pm.id,
-      brand: pm.brand ?? undefined,
-      label: pm.label ?? undefined,
-      last4: pm.last4 ?? undefined,
-      expMonth: pm.expMonth ?? undefined,
-      expYear: pm.expYear ?? undefined,
-      isDefault: pm.isDefault ?? undefined,
-    })),
+    paymentMethods: (user?.paymentMethods ?? []).map((pm) => mapSavedPaymentMethod(pm)),
     orders: (orders ?? []).map((o) => ({
       id: o.id,
       status: coerceOrderStatus(o.status),
@@ -182,27 +201,25 @@ export async function revokeSessionAction(formData: FormData): Promise<{ error?:
 
 export async function setDefaultPaymentMethodAction(
   formData: FormData
-): Promise<{ error?: string }> {
+): Promise<PaymentMethodActionResult> {
   try {
     const methodId = asString(formData.get("methodId"));
     if (!methodId) return { error: "Payment method ID is required" };
 
-    await executeMutation(SetDefaultPaymentMethodDocument, { id: methodId });
-    revalidatePath("/settings");
-    return {};
+    const result = await executeMutation(SetDefaultPaymentMethodDocument, { id: methodId });
+    return { paymentMethod: mapSavedPaymentMethod(result.setDefaultPaymentMethod) };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Failed to set default payment method" };
   }
 }
 
-export async function deletePaymentMethodAction(formData: FormData): Promise<{ error?: string }> {
+export async function deletePaymentMethodAction(formData: FormData): Promise<PaymentMethodActionResult> {
   try {
     const methodId = asString(formData.get("methodId"));
     if (!methodId) return { error: "Payment method ID is required" };
 
     await executeMutation(DeletePaymentMethodDocument, { id: methodId });
-    revalidatePath("/settings");
-    return {};
+    return { deletedMethodId: methodId };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Failed to delete payment method" };
   }
@@ -213,7 +230,7 @@ export async function registerPaymentMethodAction(input: {
   setAsDefault: boolean;
   consentAccepted: boolean;
   consentVersion: string;
-}): Promise<{ error?: string }> {
+}): Promise<PaymentMethodActionResult> {
   try {
     if (!input.providerPaymentMethodId.trim()) {
       return { error: "Provider payment method ID is required" };
@@ -227,10 +244,28 @@ export async function registerPaymentMethodAction(input: {
       return { error: "Consent version is required" };
     }
 
-    await executeMutation(RegisterPaymentMethodDocument, { input });
-    revalidatePath("/settings");
-    return {};
+    const result = await executeMutation(RegisterPaymentMethodDocument, { input });
+    return { paymentMethod: mapSavedPaymentMethod(result.registerPaymentMethod) };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Failed to register payment method" };
   }
+}
+
+export async function registerPaymentMethodFormAction(
+  _prev: PaymentMethodActionResult,
+  formData: FormData
+): Promise<PaymentMethodActionResult> {
+  const result = await registerPaymentMethodAction({
+    providerPaymentMethodId: asString(formData.get("providerPaymentMethodId")) ?? "",
+    setAsDefault: formData.get("setAsDefault") === "true",
+    consentAccepted: formData.get("consentAccepted") === "true",
+    consentVersion: asString(formData.get("consentVersion")) ?? "",
+  });
+
+  if (result.error) {
+    return result;
+  }
+
+  revalidatePath("/settings");
+  redirect("/settings?paymentMethodSaved=1");
 }
