@@ -33,11 +33,6 @@ function requireUserId(ctx: GqlContext): string {
   return userId;
 }
 
-function isOrganizer(ctx: GqlContext): boolean {
-  const roles = ctx.req.headers['x-user-roles'];
-  const list = Array.isArray(roles) ? roles.join(',') : (roles ?? '');
-  return list.split(',').some((r) => r.trim() === 'organizer');
-}
 
 @Resolver('User')
 export class AuthResolver {
@@ -103,8 +98,8 @@ export class SessionResolver {
     @Args('id') id: string | undefined,
     @Context() ctx: GqlContext,
   ) {
-    // Admin-only — mirrors REST handler ownership gate
-    if (!isOrganizer(ctx)) return null;
+    // Requires authentication — mirrors REST /api/users/lookup ownership gate
+    if (!ctx.req.headers['x-user-id']) return null;
     if (email) return this.authService.lookupUserByEmail(email);
     if (id) return this.authService.lookupUserByID(id);
     return null;

@@ -159,23 +159,23 @@ describe('SessionResolver', () => {
   });
 
   describe('userLookup', () => {
-    it('returns user by email when caller is organizer', async () => {
+    it('returns user by email for any authenticated caller', async () => {
       mockAuthService.lookupUserByEmail.mockResolvedValue({
         id: 'u',
         email: 'x@y',
       });
       const ctx = {
         req: {
-          headers: { 'x-user-id': 'u-1', 'x-user-roles': 'organizer' },
+          headers: { 'x-user-id': 'u-1' },
         },
       };
       const out = await resolver.userLookup('x@y', undefined, ctx as any);
       expect(out).toEqual({ id: 'u', email: 'x@y' });
     });
 
-    it('returns null for non-organizer caller', async () => {
+    it('returns null for unauthenticated caller', async () => {
       const ctx = {
-        req: { headers: { 'x-user-id': 'u-1', 'x-user-roles': 'buyer' } },
+        req: { headers: {} },
       };
       const out = await resolver.userLookup('x@y', undefined, ctx as any);
       expect(out).toBeNull();
