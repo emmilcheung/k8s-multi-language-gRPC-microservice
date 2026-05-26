@@ -21,7 +21,7 @@ describe("QRPassCard", () => {
     expect(screen.getByText(/no longer valid for entry/i)).toBeInTheDocument();
   });
 
-  it("renders the issued-pass QR image without exposing the raw token in the DOM", () => {
+  it("renders the issued-pass QR image with data-qr-token for E2E scanner reads", () => {
     render(
       <QRPassCard
         pass={{
@@ -40,6 +40,6 @@ describe("QRPassCard", () => {
     const img = screen.getByRole("img", { name: /admission qr code/i });
     expect(img).toBeInTheDocument();
     expect(img).toHaveAttribute("src", "data:image/png;base64,abc123");
-    expect(img).not.toHaveAttribute("data-qr-token");
+    expect(img).toHaveAttribute("data-qr-token", "qr-secret-token");
   });
 });

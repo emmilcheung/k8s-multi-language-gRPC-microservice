@@ -32,6 +32,7 @@ export function QRPassCard({ pass, qrDataUrl }: QRPassCardProps) {
               src={qrDataUrl}
               alt="Admission QR code"
               className="w-56 h-56 rounded bg-white p-2"
+              data-qr-token={pass.qrToken}
             />
           )}
         </div>
