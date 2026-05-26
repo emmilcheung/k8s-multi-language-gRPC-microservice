@@ -9,6 +9,8 @@ interface ExecuteOptions {
   cookie?: string;
   /** Reserved for future Next.js fetch revalidate tag wiring. */
   revalidate?: number;
+  /** Optional wall-clock timeout override for this operation. */
+  timeoutMs?: number;
 }
 
 async function resolveCookie(provided?: string): Promise<string | undefined> {
@@ -29,7 +31,7 @@ export async function executeQuery<TData, TVariables extends AnyVariables>(
   options: ExecuteOptions = {},
 ): Promise<TData> {
   const cookie = await resolveCookie(options.cookie);
-  const client = createGraphQLClient(cookie);
+  const client = createGraphQLClient(cookie, options.timeoutMs);
   const context: Partial<OperationContext> = {
     requestPolicy: "network-only",
   };
@@ -53,7 +55,7 @@ export async function executeMutation<TData, TVariables extends AnyVariables>(
   options: ExecuteOptions = {},
 ): Promise<TData> {
   const cookie = await resolveCookie(options.cookie);
-  const client = createGraphQLClient(cookie);
+  const client = createGraphQLClient(cookie, options.timeoutMs);
   const result = await client.mutation(document, variables).toPromise();
   if (result.error) throw toApiError(result.error);
   if (result.data === undefined) {

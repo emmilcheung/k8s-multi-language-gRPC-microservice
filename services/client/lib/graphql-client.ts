@@ -44,7 +44,7 @@ function resolveGraphqlUrl(): string {
  * Apollo GraphOS registry is provisioned — operations will then be sent as
  * sha256 hashes only and the router will enforce a safelist.
  */
-export function createGraphQLClient(cookie?: string): Client {
+export function createGraphQLClient(cookie?: string, timeoutMs = 5_000): Client {
   return createClient({
     url: resolveGraphqlUrl(),
     preferGetMethod: false,
@@ -75,7 +75,7 @@ export function createGraphQLClient(cookie?: string): Client {
             context: {
               ...operation.context,
               fetch: (url: RequestInfo | URL, options?: RequestInit) => {
-                const timeout = AbortSignal.timeout(5_000);
+                const timeout = AbortSignal.timeout(timeoutMs);
                 const signal = options?.signal
                   ? AbortSignal.any([options.signal, timeout])
                   : timeout;
@@ -102,14 +102,26 @@ export function createGraphQLClient(cookie?: string): Client {
       }),
       // Translate CombinedError to ApiError before it reaches callers.
       errorExchange({
-        onError(error) {
-          // Logged at the boundary so observability picks up the failure,
-          // even when the caller swallows the rethrown ApiError.
-          console.error("[graphql] operation failed", {
-            operationName: undefined,
+        onError(error, operation) {
+          // Serialize into the message string so it survives Next.js's dev
+          // overlay (the overlay strips structured second-arg objects).
+          const opName =
+            (operation.query.definitions.find(
+              (d): d is import("graphql").OperationDefinitionNode =>
+                d.kind === "OperationDefinition",
+            )?.name?.value) ?? "anonymous";
+          const payload = {
+            operationName: opName,
+            operationKind: operation.kind,
+            message: error.message,
             networkError: error.networkError?.message,
-            graphQLErrors: error.graphQLErrors.map((e) => e.message),
-          });
+            graphQLErrors: error.graphQLErrors.map((e) => ({
+              message: e.message,
+              path: e.path,
+              extensions: e.extensions,
+            })),
+          };
+          console.error(`[graphql] operation failed: ${JSON.stringify(payload)}`);
         },
       }),
       fetchExchange,
