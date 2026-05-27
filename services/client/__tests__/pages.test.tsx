@@ -208,6 +208,8 @@ vi.mock("lucide-react", () => ({
   Calendar: () => <span />,
   CalendarDays: () => <span />,
   Clock3: () => <span />,
+  Bookmark: () => <span />,
+  BookmarkCheck: () => <span />,
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -239,6 +241,7 @@ function makeTicketDetailGraphql(ticket: Ticket) {
       ticket.available ??
       Math.max((ticket.quota ?? 1) - (ticket.reserved ?? 0) - (ticket.sold ?? 0), 0),
     maxPerUser: ticket.maxPerUser ?? 1,
+    savedByMe: false,
     ticketType:
       ticket.ticketType === "SEATED_MANUAL" || ticket.ticketType === "SEATED_AUTO"
         ? "SEATED"
@@ -484,12 +487,15 @@ describe("OrdersPage", () => {
         seatingPlan: null,
       },
     });
+    executeQueryMock.mockResolvedValueOnce({
+      savedEvents: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } },
+    });
     serverApiMock.mockRejectedValue(new Error("OrdersPage should not use REST"));
 
     const { default: OrdersPage } = await import("@/app/orders/page");
     render(await OrdersPage());
 
-    expect(executeQueryMock).toHaveBeenCalledTimes(2);
+    expect(executeQueryMock).toHaveBeenCalledTimes(3);
     expect(serverApiMock).not.toHaveBeenCalledWith("/api/tickets/ticket-uuid-1");
     expect(screen.getByRole("heading", { level: 1, name: /my orders/i })).toBeInTheDocument();
     expect(screen.getByText(/1 order/i)).toBeInTheDocument();

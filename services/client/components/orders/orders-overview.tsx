@@ -29,10 +29,21 @@ export type OrdersOverviewOrder = Order & {
   seatingPlanId?: string | null;
 };
 
+export type SavedEventItem = {
+  id: string;
+  title: string;
+  priceDecimal: string;
+  startsAt?: string;
+  imageUrl?: string;
+  venueName?: string;
+  venueAddress?: string;
+};
+
 type OrdersTab = "upcoming" | "past" | "saved" | "refunded";
 
 type OrdersOverviewProps = {
   orders: OrdersOverviewOrder[];
+  savedEvents?: SavedEventItem[];
 };
 
 const TAB_LABELS: Record<OrdersTab, string> = {
@@ -236,7 +247,49 @@ function OrderRow({ order, tab }: { order: OrdersOverviewOrder; tab: OrdersTab }
   );
 }
 
-export function OrdersOverview({ orders }: OrdersOverviewProps) {
+function SavedEventRow({ item }: { item: SavedEventItem }) {
+  return (
+    <Card className="overflow-hidden py-0">
+      <div className="flex flex-col border-l border-l-transparent md:flex-row">
+        <div className="h-24 bg-gradient-to-br from-accent/80 to-accent md:h-auto md:w-28" />
+        <CardContent className="flex flex-1 flex-col gap-4 px-5 py-5 md:flex-row md:items-center md:justify-between">
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <div className="space-y-1">
+              <h3 className="truncate text-base font-semibold tracking-tight text-ink">
+                {item.title}
+              </h3>
+              <div className="flex flex-col gap-1 text-sm text-mute md:flex-row md:flex-wrap md:items-center md:gap-4">
+                <span className="inline-flex items-center gap-1.5">
+                  <Calendar className="size-3.5" />
+                  {item.startsAt ? formatEventDate(item.startsAt) : "Date to be confirmed"}
+                </span>
+                {item.venueName && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <MapPin className="size-3.5" />
+                    {item.venueName}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-col items-start gap-3 md:items-end">
+            <div className="font-mono text-xl font-semibold text-ink">
+              {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
+                parseFloat(item.priceDecimal)
+              )}
+            </div>
+            <Link href={`/tickets/${item.id}`} className={cn(buttonVariants({ variant: "primary", size: "sm" }), "gap-2")}>
+              <Ticket className="size-3.5" />
+              View event
+            </Link>
+          </div>
+        </CardContent>
+      </div>
+    </Card>
+  );
+}
+
+export function OrdersOverview({ orders, savedEvents = [] }: OrdersOverviewProps) {
   const [activeTab, setActiveTab] = useState<OrdersTab>("upcoming");
 
   const tabbedOrders = useMemo(() => {
@@ -304,7 +357,7 @@ export function OrdersOverview({ orders }: OrdersOverviewProps) {
         </Card>
         <Card size="sm">
           <CardContent>
-            <Stat label="Saved events" value="0" sub="coming in Phase 7" />
+            <Stat label="Saved events" value={String(savedEvents.length)} sub="bookmarked events" />
           </CardContent>
         </Card>
       </div>
@@ -326,7 +379,9 @@ export function OrdersOverview({ orders }: OrdersOverviewProps) {
               onClick={() => setActiveTab(tab)}
             >
               {TAB_LABELS[tab]}
-              <span className="font-mono text-xs text-mute">{tabbedOrders[tab].length}</span>
+              <span className="font-mono text-xs text-mute">
+                {tab === "saved" ? savedEvents.length : tabbedOrders[tab].length}
+              </span>
             </button>
           ))}
         </div>
@@ -334,12 +389,15 @@ export function OrdersOverview({ orders }: OrdersOverviewProps) {
 
       <div className="flex flex-col gap-3">
         {activeTab === "upcoming" && tabbedOrders.upcoming.length === 0 && <EmptyOrdersCard />}
-        {activeTab === "saved" && (
+        {activeTab === "saved" && savedEvents.length === 0 && (
           <PlaceholderTab
-            title="Saved events are on the way"
-            description="Save events to come back to them. This tab stays intentionally empty until Phase 7."
+            title="No saved events yet"
+            description="Browse events and tap 'Save event' on a ticket to bookmark it here."
           />
         )}
+        {activeTab === "saved" && savedEvents.length > 0 && savedEvents.map((item) => (
+          <SavedEventRow key={item.id} item={item} />
+        ))}
         {activeTab === "refunded" && (
           <PlaceholderTab
             title="No refunded orders yet"

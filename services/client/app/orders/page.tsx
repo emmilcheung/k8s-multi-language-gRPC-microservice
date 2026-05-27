@@ -1,9 +1,9 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { OrdersPageDocument, TicketDetailDocument } from "@/lib/graphql/generated";
+import { OrdersPageDocument, TicketDetailDocument, SavedEventsDocument } from "@/lib/graphql/generated";
 import { executeQuery } from "@/lib/graphql/execute";
 import { coerceOrderStatus } from "@/lib/order-status";
-import { OrdersOverview, type OrdersOverviewOrder } from "@/components/orders/orders-overview";
+import { OrdersOverview, type OrdersOverviewOrder, type SavedEventItem } from "@/components/orders/orders-overview";
 
 export const metadata = { title: "My Orders — Marquee" };
 
@@ -54,13 +54,34 @@ async function getOrders(cookieHeader: string): Promise<OrdersOverviewOrder[]> {
   }
 }
 
+async function getSavedEvents(cookieHeader: string): Promise<SavedEventItem[]> {
+  try {
+    const data = await executeQuery(SavedEventsDocument, { first: 50 }, { cookie: cookieHeader });
+    return data.savedEvents.edges.map((edge) => ({
+      id: edge.node.id,
+      title: edge.node.event?.title ?? edge.node.title,
+      priceDecimal: edge.node.priceDecimal,
+      startsAt: edge.node.event?.startsAt,
+      imageUrl: edge.node.event?.imageUrl ?? undefined,
+      venueName: edge.node.event?.venueName ?? undefined,
+      venueAddress: edge.node.event?.venueAddress ?? undefined,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export default async function OrdersPage() {
   const cookieStore = await cookies();
   if (!cookieStore.get("token")?.value) {
     redirect("/auth/signin");
   }
 
-  const orders = await getOrders(cookieStore.toString());
+  const cookieHeader = cookieStore.toString();
+  const [orders, savedEvents] = await Promise.all([
+    getOrders(cookieHeader),
+    getSavedEvents(cookieHeader),
+  ]);
 
-  return <OrdersOverview orders={orders} />;
+  return <OrdersOverview orders={orders} savedEvents={savedEvents} />;
 }

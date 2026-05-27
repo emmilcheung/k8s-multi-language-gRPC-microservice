@@ -19,8 +19,10 @@ import { TicketForm } from "@/components/ticket-form";
 import { SeatingPlanPreview } from "@/components/seating-plan-preview";
 import { updateTicket } from "@/app/actions/tickets";
 import { fetchPriceTiers } from "@/app/actions/venues";
+import { saveEvent, unsaveEvent } from "@/app/actions/saved-events";
 import { PurchasePanel } from "./_components/purchase-panel";
 import { QuickFacts } from "./_components/quick-facts";
+import { SaveEventButton } from "./_components/save-event-button";
 import { ArrowLeft } from "lucide-react";
 
 interface Props {
@@ -48,7 +50,7 @@ function toTicketFormType(
   return "GA";
 }
 
-async function getTicket(ticketId: string): Promise<Ticket> {
+async function getTicket(ticketId: string): Promise<Ticket & { savedByMe: boolean }> {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
 
@@ -73,6 +75,7 @@ async function getTicket(ticketId: string): Promise<Ticket> {
     maxPerUser: gql.maxPerUser ?? undefined,
     ticketType: gql.ticketType,
     seatingPlanId: gql.seatingPlan?.id ?? undefined,
+    savedByMe: gql.savedByMe,
     event: gql.event
       ? {
           title: gql.event.title,
@@ -84,7 +87,7 @@ async function getTicket(ticketId: string): Promise<Ticket> {
           venueAddress: gql.event.venueAddress ?? undefined,
         }
       : undefined,
-  } as Ticket;
+  } as Ticket & { savedByMe: boolean };
 }
 
 export async function generateMetadata() {
@@ -94,7 +97,7 @@ export async function generateMetadata() {
 export default async function TicketDetailPage({ params }: Props) {
   const { ticketId } = await params;
 
-  let ticket: Ticket;
+  let ticket: Ticket & { savedByMe: boolean };
   try {
     ticket = await getTicket(ticketId);
   } catch (error) {
@@ -354,14 +357,24 @@ export default async function TicketDetailPage({ params }: Props) {
 
         {/* Right column — sticky purchase panel */}
         {!isOwner && (
-          <PurchasePanel
-            ticket={ticket}
-            isOwner={isOwner}
-            isSeated={isSeated}
-            gaMaxQuantity={gaMaxQuantity}
-            purchaseGate={purchaseGate}
-            token={token}
-          />
+          <div className="flex flex-col gap-3">
+            {currentUserId && (
+              <SaveEventButton
+                eventId={ticketId}
+                initialSaved={ticket.savedByMe}
+                saveAction={saveEvent.bind(null, ticketId)}
+                unsaveAction={unsaveEvent.bind(null, ticketId)}
+              />
+            )}
+            <PurchasePanel
+              ticket={ticket}
+              isOwner={isOwner}
+              isSeated={isSeated}
+              gaMaxQuantity={gaMaxQuantity}
+              purchaseGate={purchaseGate}
+              token={token}
+            />
+          </div>
         )}
       </div>
     </div>
