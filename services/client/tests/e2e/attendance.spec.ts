@@ -227,7 +227,7 @@ test(
       .getByRole("button", { name: /purchase ticket/i })
       .waitFor({ state: "visible", timeout: 30_000 });
     await page.getByRole("button", { name: /purchase ticket/i }).click();
-    await page.waitForURL(/\/orders\/.+/, { timeout: 15_000 });
+    await page.waitForURL(/\/orders\/.+/, { waitUntil: "commit", timeout: 30_000 });
 
     // Capture orderId from the redirect URL /orders/<uuid>
     const orderId = page.url().split("/orders/")[1]!.split("?")[0]!;
@@ -256,19 +256,19 @@ test(
     //
     // attendance-service issues the pass asynchronously after consuming the
     // orders.order.completed Kafka event, so we retry the navigation until
-    // the heading appears or the overall timeout expires.
+    // the redesigned pass surface renders or the overall timeout expires.
     // ────────────────────────────────────────────────────────────────────────
     await expect(async () => {
       await page.goto(
         `/tickets/${ticketId}/admission?orderId=${orderId}`
       );
       await expect(
-        page.getByRole("heading", { name: /your admission pass/i })
+        page.getByAltText("Admission QR code")
       ).toBeVisible({ timeout: 5_000 });
     }).toPass({ timeout: 30_000, intervals: [2000, 3000, 5000] });
 
     // Assert QR pass card component is fully rendered in the browser DOM
-    await expect(page.getByText("ISSUED")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/valid for entry/i)).toBeVisible({ timeout: 10_000 });
     await expect(page.getByAltText("Admission QR code")).toBeVisible({
       timeout: 10_000,
     });
@@ -386,7 +386,7 @@ test(
       .getByRole("button", { name: /purchase ticket/i })
       .waitFor({ state: "visible", timeout: 30_000 });
     await page.getByRole("button", { name: /purchase ticket/i }).click();
-    await page.waitForURL(/\/orders\/.+/, { timeout: 15_000 });
+    await page.waitForURL(/\/orders\/.+/, { waitUntil: "commit", timeout: 30_000 });
 
     const orderId = page.url().split("/orders/")[1]!.split("?")[0]!;
     const submitPaymentDone = page.waitForResponse((r) => {

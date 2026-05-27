@@ -654,22 +654,81 @@ describe("AttendanceSettingsPage", () => {
 describe("AdmissionPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    executeQueryMock.mockResolvedValue({
-      admissionPass: {
-        id: "cred-1",
-        ticketId: "ticket-uuid-1",
-        orderId: "order-1",
-        eventId: "ticket-uuid-1",
-        status: "USED",
-        issuedAt: new Date().toISOString(),
-        usedAt: null,
-        qrToken: "signed-token",
-      },
-    });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
   });
 
-  it("shows non-admittable copy for used credentials", async () => {
+  it("renders the redesigned pass layout with event context and grouped passes", async () => {
+    serverApiMock.mockResolvedValueOnce({
+      id: "order-1",
+      userId: "buyer-uuid",
+      status: "COMPLETE",
+      expiresAt: null,
+      quantity: 2,
+      version: 1,
+      createdAt: "2026-07-26T00:00:00Z",
+      updatedAt: "2026-07-26T00:00:00Z",
+      orderType: "SEATED",
+      planId: "plan-1",
+      ticket: {
+        id: "ticket-uuid-1",
+        title: "Phoenix",
+        price: "48.00",
+      },
+      seats: [
+        {
+          seatId: "seat-1",
+          sectionId: "section-1",
+          seatLabel: "A-12",
+          price: "48.00",
+        },
+        {
+          seatId: "seat-2",
+          sectionId: "section-1",
+          seatLabel: "A-13",
+          price: "48.00",
+        },
+      ],
+    });
+
+    executeQueryMock
+      .mockResolvedValueOnce({
+        admissionPass: {
+          id: "cred-1",
+          ticketId: "ticket-uuid-1",
+          orderId: "order-1",
+          eventId: "event-uuid-1",
+          status: "USED",
+          issuedAt: "2026-07-26T00:00:00Z",
+          usedAt: "2026-08-09T20:42:00Z",
+          qrToken: "signed-token",
+        },
+      })
+      .mockResolvedValueOnce({
+        ticket: {
+          id: "ticket-uuid-1",
+          title: "Phoenix",
+          price: "4800",
+          userId: "owner-uuid",
+          orderId: "order-1",
+          quota: 3000,
+          reserved: 0,
+          sold: 1200,
+          available: 1800,
+          maxPerUser: 6,
+          ticketType: "SEATED_MANUAL",
+          seatingPlan: { id: "plan-1" },
+          event: {
+            title: "Phoenix",
+            description: "Alpha Zulu Tour",
+            startsAt: "2026-08-09T20:30:00Z",
+            endsAt: "2026-08-09T23:00:00Z",
+            imageUrl: null,
+            venueName: "The Greek Theatre",
+            venueAddress: "Berkeley, CA",
+          },
+        },
+      });
+
     const { default: AdmissionPage } = await import(
       "@/app/tickets/[ticketId]/admission/page"
     );
@@ -679,8 +738,12 @@ describe("AdmissionPage", () => {
       searchParams: Promise.resolve({ orderId: "order-1" }),
     }));
 
-    expect(screen.getByRole("heading", { name: /your admission pass/i })).toBeInTheDocument();
-    expect(screen.getByText(/already been used for entry/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Phoenix" })).toBeInTheDocument();
+    expect(screen.getAllByText(/the greek theatre/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/this order has 2 passes/i)).toBeInTheDocument();
+    expect(screen.getAllByText("A-12").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("A-13").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /transfer/i })).toHaveLength(2);
     expect(screen.queryByText(/qr token payload/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/signed-token/i)).not.toBeInTheDocument();
   });
