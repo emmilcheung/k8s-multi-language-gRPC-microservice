@@ -268,6 +268,23 @@ async function clickPayNowAndWaitForSubmitPayment(page: Page) {
   return request;
 }
 
+function waitForSettingsServerAction(page: Page) {
+  return page.waitForResponse(
+    (response) => {
+      try {
+        return (
+          response.url().includes("/settings") &&
+          response.request().method() === "POST" &&
+          Boolean(response.request().headers()["next-action"])
+        );
+      } catch {
+        return false;
+      }
+    },
+    { timeout: 60_000 }
+  );
+}
+
 test.describe("auth", () => {
   test("signup shows navbar as logged in", async ({ page }) => {
     const email = uniqueEmail("auth-signup");
@@ -398,32 +415,21 @@ test.describe("settings", () => {
       .getByLabel(/I consent to saving this payment method for future charges/i)
       .check();
 
-    // The registration flow uses a Next.js server action (GraphQL-backed).
-    // Server actions POST to the page URL with a `Next-Action` header.
-    const registerResponse = page.waitForResponse(
-      (response) => {
-        try {
-          return (
-            response.url().includes("/settings") &&
-            response.request().method() === "POST" &&
-            Boolean(response.request().headers()["next-action"])
-          );
-        } catch {
-          return false;
-        }
-      },
-      { timeout: 60_000 }
-    );
+    const registerResponse = waitForSettingsServerAction(page);
 
     await page.getByRole("button", { name: /save payment method/i }).click();
 
     const response = await registerResponse;
-    await response.finished().catch(() => undefined);
     const status = response.status();
     test.skip(
       status >= 500 || status === 404,
       `Payment-method registration backend unavailable (${status})`
     );
+
+    // Next server-action redirects can complete the UI update before the underlying
+    // streaming response is fully settled. Wait for the redirected settings state
+    // instead of transport-level completion to avoid CI-only hangs.
+    await page.waitForURL(/\/settings(?:\?paymentMethodSaved=1)?$/, { timeout: 15_000 });
 
     await expect(page.getByText(/payment method saved successfully/i)).toBeVisible({
       timeout: 15000,
@@ -449,35 +455,28 @@ test.describe("settings", () => {
       .getByLabel(/I consent to saving this payment method for future charges/i)
       .check();
 
-    // The registration flow uses a Next.js server action (GraphQL-backed).
-    // Server actions POST to the page URL with a `Next-Action` header.
-    const registerResponse = page.waitForResponse(
-      (response) => {
-        try {
-          return (
-            response.url().includes("/settings") &&
-            response.request().method() === "POST" &&
-            Boolean(response.request().headers()["next-action"])
-          );
-        } catch {
-          return false;
-        }
-      },
-      { timeout: 60_000 }
-    );
+    const registerResponse = waitForSettingsServerAction(page);
 
     await page.getByRole("button", { name: /save payment method/i }).click();
     const saveResponse = await registerResponse;
-    await saveResponse.finished().catch(() => undefined);
     const saveStatus = saveResponse.status();
     test.skip(
       saveStatus >= 500 || saveStatus === 404,
       `Payment-method registration backend unavailable (${saveStatus})`
     );
 
+    await page.waitForURL(/\/settings(?:\?paymentMethodSaved=1)?$/, { timeout: 15_000 });
+
     await expect(page.getByText(/(\*\*\*\*|••••)\s*9876/i).first()).toBeVisible({ timeout: 15000 });
 
+    const deleteResponse = waitForSettingsServerAction(page);
     await page.getByRole("button", { name: /^delete$/i }).first().click();
+    const response = await deleteResponse;
+    const deleteStatus = response.status();
+    test.skip(
+      deleteStatus >= 500 || deleteStatus === 404,
+      `Payment-method deletion backend unavailable (${deleteStatus})`
+    );
 
     await expect(page.getByText(/(\*\*\*\*|••••)\s*9876/i)).toHaveCount(0, {
       timeout: 15000,
