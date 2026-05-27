@@ -379,8 +379,8 @@ func (*mockVenueClientInactiveCurrent) GetSeatingPlan(_ context.Context, req *ve
 }
 
 func newSvc(repo repository.TicketRepository, pub service.EventPublisher) *service.TicketService {
-	// For tests, we provide a no-op venue client since most tests don't attach plans
-	return service.NewTicketService(repo, pub, zap.NewNop(), &mockVenueClient{})
+	// For tests, we provide a no-op venue client and empty saved event repo since most tests don't need them
+	return service.NewTicketService(repo, pub, zap.NewNop(), &mockVenueClient{}, newMockSavedEventRepo())
 }
 
 func TestCreateTicket_ShouldCreateTicketAndStoreOutboxEvent(t *testing.T) {
@@ -702,7 +702,7 @@ func TestUpdateTicket_ShouldAllowIdempotentSeatingPlanReattachment(t *testing.T)
 
 func TestUpdateTicket_ShouldAllowReplacingInactiveSeatingPlan(t *testing.T) {
 	repo := newMockRepo()
-	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientInactiveCurrent{})
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientInactiveCurrent{}, newMockSavedEventRepo())
 
 	repo.tickets["t1"] = &repository.Ticket{
 		ID:            "t1",
@@ -731,7 +731,7 @@ func TestUpdateTicket_ShouldAllowReplacingInactiveSeatingPlan(t *testing.T) {
 
 func TestUpdateTicket_ShouldReturnUnavailableWhenVenueServiceUnreachable(t *testing.T) {
 	repo := newMockRepo()
-	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientUnavailable{})
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientUnavailable{}, newMockSavedEventRepo())
 
 	// Create a ticket without seating plan
 	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "100.00", UserID: "user-1"})
@@ -751,7 +751,7 @@ func TestUpdateTicket_ShouldReturnUnavailableWhenVenueServiceUnreachable(t *test
 
 func TestUpdateTicket_ShouldReturnTimeoutWhenVenueServiceTimesOut(t *testing.T) {
 	repo := newMockRepo()
-	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientTimeout{})
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientTimeout{}, newMockSavedEventRepo())
 
 	// Create a ticket without seating plan
 	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "100.00", UserID: "user-1"})
@@ -771,7 +771,7 @@ func TestUpdateTicket_ShouldReturnTimeoutWhenVenueServiceTimesOut(t *testing.T) 
 
 func TestUpdateTicket_ShouldUseFallbackTicketTypeWhenVenueReturnsEmptyMode(t *testing.T) {
 	repo := newMockRepo()
-	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientEmptyMode{})
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientEmptyMode{}, newMockSavedEventRepo())
 
 	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "100.00", UserID: "user-1"})
 
@@ -792,7 +792,7 @@ func TestUpdateTicket_ShouldUseFallbackTicketTypeWhenVenueReturnsEmptyMode(t *te
 
 func TestUpdateTicket_ShouldUseEmptyTicketTypeWhenVenueReturnsEmptyModeAndNoFallback(t *testing.T) {
 	repo := newMockRepo()
-	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientEmptyMode{})
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClientEmptyMode{}, newMockSavedEventRepo())
 
 	_ = repo.Create(context.Background(), &repository.Ticket{ID: "t1", Title: "Concert", Price: "100.00", UserID: "user-1"})
 
@@ -808,4 +808,124 @@ func TestUpdateTicket_ShouldUseEmptyTicketTypeWhenVenueReturnsEmptyModeAndNoFall
 	assert.Equal(t, "plan-empty", ticket.SeatingPlanID)
 	assert.Equal(t, "", ticket.TicketType)
 	assert.Len(t, ticket.Outbox, 1)
+}
+
+// --- Mock saved event repository ---
+
+type mockSavedEventRepo struct {
+	savedEvents map[string]map[string]bool // userId -> eventId -> saved
+	err         error
+}
+
+func newMockSavedEventRepo() *mockSavedEventRepo {
+	return &mockSavedEventRepo{
+		savedEvents: make(map[string]map[string]bool),
+	}
+}
+
+func (m *mockSavedEventRepo) SaveEvent(ctx context.Context, userID, eventID string) error {
+	if m.err != nil {
+		return m.err
+	}
+	if m.savedEvents[userID] == nil {
+		m.savedEvents[userID] = make(map[string]bool)
+	}
+	m.savedEvents[userID][eventID] = true
+	return nil
+}
+
+func (m *mockSavedEventRepo) UnsaveEvent(ctx context.Context, userID, eventID string) error {
+	if m.err != nil {
+		return m.err
+	}
+	if m.savedEvents[userID] != nil {
+		delete(m.savedEvents[userID], eventID)
+	}
+	return nil
+}
+
+func (m *mockSavedEventRepo) IsSaved(ctx context.Context, userID, eventID string) (bool, error) {
+	if m.err != nil {
+		return false, m.err
+	}
+	if m.savedEvents[userID] == nil {
+		return false, nil
+	}
+	return m.savedEvents[userID][eventID], nil
+}
+
+// --- SaveEvent/UnsaveEvent tests ---
+
+func TestSaveEvent_ShouldSaveEventForUser(t *testing.T) {
+	savedEventRepo := newMockSavedEventRepo()
+	svc := service.NewTicketService(newMockRepo(), &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	err := svc.SaveEvent(context.Background(), "user-1", "ticket-1")
+
+	require.NoError(t, err)
+	saved, _ := savedEventRepo.IsSaved(context.Background(), "user-1", "ticket-1")
+	assert.True(t, saved)
+}
+
+func TestSaveEvent_ShouldBeIdempotent(t *testing.T) {
+	savedEventRepo := newMockSavedEventRepo()
+	svc := service.NewTicketService(newMockRepo(), &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	// Save twice
+	err := svc.SaveEvent(context.Background(), "user-1", "ticket-1")
+	require.NoError(t, err)
+	err = svc.SaveEvent(context.Background(), "user-1", "ticket-1")
+	require.NoError(t, err)
+
+	saved, _ := savedEventRepo.IsSaved(context.Background(), "user-1", "ticket-1")
+	assert.True(t, saved)
+}
+
+func TestSaveEvent_ShouldReturnErrorOnRepoFailure(t *testing.T) {
+	savedEventRepo := newMockSavedEventRepo()
+	savedEventRepo.err = errors.New("database error")
+	svc := service.NewTicketService(newMockRepo(), &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	err := svc.SaveEvent(context.Background(), "user-1", "ticket-1")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "save event")
+}
+
+func TestUnsaveEvent_ShouldRemoveSavedEvent(t *testing.T) {
+	savedEventRepo := newMockSavedEventRepo()
+	svc := service.NewTicketService(newMockRepo(), &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	// Save then unsave
+	_ = savedEventRepo.SaveEvent(context.Background(), "user-1", "ticket-1")
+	err := svc.UnsaveEvent(context.Background(), "user-1", "ticket-1")
+
+	require.NoError(t, err)
+	saved, _ := savedEventRepo.IsSaved(context.Background(), "user-1", "ticket-1")
+	assert.False(t, saved)
+}
+
+func TestUnsaveEvent_ShouldBeIdempotent(t *testing.T) {
+	savedEventRepo := newMockSavedEventRepo()
+	svc := service.NewTicketService(newMockRepo(), &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	// Unsave twice (without saving first)
+	err := svc.UnsaveEvent(context.Background(), "user-1", "ticket-1")
+	require.NoError(t, err)
+	err = svc.UnsaveEvent(context.Background(), "user-1", "ticket-1")
+	require.NoError(t, err)
+
+	saved, _ := savedEventRepo.IsSaved(context.Background(), "user-1", "ticket-1")
+	assert.False(t, saved)
+}
+
+func TestUnsaveEvent_ShouldReturnErrorOnRepoFailure(t *testing.T) {
+	savedEventRepo := newMockSavedEventRepo()
+	savedEventRepo.err = errors.New("database error")
+	svc := service.NewTicketService(newMockRepo(), &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	err := svc.UnsaveEvent(context.Background(), "user-1", "ticket-1")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsave event")
 }

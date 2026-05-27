@@ -70,11 +70,18 @@ type TicketService struct {
 	publisher          EventPublisher
 	log                *zap.Logger
 	venueServiceClient SeatingPlanLookupClient // WS3: fetch seating plan assignment mode
+	savedEventRepo     repository.SavedEventRepository
 }
 
 // NewTicketService creates a new TicketService with the given dependencies.
-func NewTicketService(repo repository.TicketRepository, publisher EventPublisher, log *zap.Logger, venueClient SeatingPlanLookupClient) *TicketService {
-	return &TicketService{repo: repo, publisher: publisher, log: log, venueServiceClient: venueClient}
+func NewTicketService(repo repository.TicketRepository, publisher EventPublisher, log *zap.Logger, venueClient SeatingPlanLookupClient, savedEventRepo repository.SavedEventRepository) *TicketService {
+	return &TicketService{
+		repo:               repo,
+		publisher:          publisher,
+		log:                log,
+		venueServiceClient: venueClient,
+		savedEventRepo:     savedEventRepo,
+	}
 }
 
 func buildOutboxPayload(ticket *repository.Ticket) repository.TicketOutboxPayload {
@@ -272,4 +279,24 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 	s.log.Info("ticket updated", zap.String("ticketId", ticket.ID), zap.String("userId", ticket.UserID))
 
 	return ticket, nil
+}
+
+// SaveEvent saves an event (ticket detail) for a user.
+// In v1, eventId maps to ticketId. Idempotent: re-saving updates the timestamp.
+func (s *TicketService) SaveEvent(ctx context.Context, userID, eventID string) error {
+	if err := s.savedEventRepo.SaveEvent(ctx, userID, eventID); err != nil {
+		return fmt.Errorf("save event: %w", err)
+	}
+	s.log.Info("event saved", zap.String("userId", userID), zap.String("eventId", eventID))
+	return nil
+}
+
+// UnsaveEvent removes a saved event for a user.
+// In v1, eventId maps to ticketId. Idempotent: unsaving a non-saved event is a no-op.
+func (s *TicketService) UnsaveEvent(ctx context.Context, userID, eventID string) error {
+	if err := s.savedEventRepo.UnsaveEvent(ctx, userID, eventID); err != nil {
+		return fmt.Errorf("unsave event: %w", err)
+	}
+	s.log.Info("event unsaved", zap.String("userId", userID), zap.String("eventId", eventID))
+	return nil
 }
