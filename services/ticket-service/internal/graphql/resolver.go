@@ -28,18 +28,19 @@ func mapTicketToGQL(t *repository.Ticket) *Ticket {
 	}
 
 	result := &Ticket{
-		ID:         t.ID,
-		Title:      t.Title,
-		Price:      price,
+		ID:           t.ID,
+		Title:        t.Title,
+		Price:        price,
 		PriceDecimal: t.Price,
-		UserID:     t.UserID,
-		Quota:      t.Quota,
-		Reserved:   t.Reserved,
-		Sold:       t.Sold,
-		Available:  available,
-		TicketType: ticketType,
-		CreatedAt:  t.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:  t.UpdatedAt.Format(time.RFC3339),
+		UserID:       t.UserID,
+		Quota:        t.Quota,
+		Reserved:     t.Reserved,
+		Sold:         t.Sold,
+		Available:    available,
+		TicketType:   ticketType,
+		SavedByMe:    false,
+		CreatedAt:    t.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:    t.UpdatedAt.Format(time.RFC3339),
 	}
 
 	if t.MaxPerUser > 0 {

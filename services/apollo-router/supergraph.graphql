@@ -254,6 +254,8 @@ type Mutation
   registerPaymentMethod(input: RegisterPaymentMethodInput!): PaymentMethod! @join__field(graph: PAYMENTS)
   createTicket(input: CreateTicketInput!): Ticket! @join__field(graph: TICKETS)
   updateTicket(id: ID!, input: UpdateTicketInput!): Ticket! @join__field(graph: TICKETS)
+  saveEvent(eventId: ID!): Ticket! @join__field(graph: TICKETS)
+  unsaveEvent(eventId: ID!): Ticket! @join__field(graph: TICKETS)
   updateProfile(input: UpdateProfileInput!): UserProfile! @join__field(graph: USERS)
   updatePreferences(input: UpdatePreferencesInput!): UserPreferences! @join__field(graph: USERS)
   updateBillingAddress(input: BillingAddressInput!): BillingAddress! @join__field(graph: USERS)
@@ -380,6 +382,7 @@ type Query
   tickets: [Ticket!]! @join__field(graph: TICKETS)
   ticketsConnection(filter: TicketFilter, first: Int, after: String): TicketConnection! @join__field(graph: TICKETS)
   ticket(id: ID!): Ticket @join__field(graph: TICKETS)
+  savedEvents(first: Int, after: String): SavedEventConnection! @join__field(graph: TICKETS)
   venues: [Venue!]! @join__field(graph: VENUES)
   venue(id: ID!): Venue @join__field(graph: VENUES)
   seatingPlans(venueId: ID!): [SeatingPlan!]! @join__field(graph: VENUES)
@@ -407,6 +410,20 @@ input RegisterPaymentMethodInput
   setAsDefault: Boolean
   consentAccepted: Boolean!
   consentVersion: String!
+}
+
+type SavedEventConnection
+  @join__type(graph: TICKETS)
+{
+  edges: [SavedEventEdge!]!
+  pageInfo: PageInfo!
+}
+
+type SavedEventEdge
+  @join__type(graph: TICKETS)
+{
+  node: Ticket!
+  cursor: String!
 }
 
 type ScanValidationResult
@@ -499,6 +516,7 @@ type Ticket
   event: TicketEvent
   createdAt: String!
   updatedAt: String!
+  savedByMe: Boolean!
 }
 
 type TicketConnection
