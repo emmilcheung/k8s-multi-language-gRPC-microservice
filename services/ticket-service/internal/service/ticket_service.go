@@ -305,3 +305,40 @@ func (s *TicketService) UnsaveEvent(ctx context.Context, userID, eventID string)
 	s.log.Info("event unsaved", zap.String("userId", userID), zap.String("eventId", eventID))
 	return nil
 }
+
+// ListSavedEvents returns saved events (tickets) for a user in saved order (newest first).
+// Enriches saved-event records with full ticket data. Skips tickets that no longer exist.
+// Supports cursor-based pagination; pass empty string for first page.
+func (s *TicketService) ListSavedEvents(ctx context.Context, userID, after string, limit int) ([]*repository.Ticket, error) {
+	// Get saved events from repository
+	savedEvents, err := s.savedEventRepo.ListSavedEvents(ctx, userID, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list saved events: %w", err)
+	}
+	
+	if len(savedEvents) == 0 {
+		return []*repository.Ticket{}, nil
+	}
+	
+	// Extract event IDs (ticket IDs in v1)
+	eventIDs := make([]string, len(savedEvents))
+	for i, se := range savedEvents {
+		eventIDs[i] = se.EventID
+	}
+	
+	// Batch-fetch tickets
+	tickets, err := s.repo.FindByIDs(ctx, eventIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list saved events: fetch tickets: %w", err)
+	}
+	
+	// Filter out nil tickets (deleted) and preserve saved order
+	result := make([]*repository.Ticket, 0, len(tickets))
+	for _, ticket := range tickets {
+		if ticket != nil {
+			result = append(result, ticket)
+		}
+	}
+	
+	return result, nil
+}

@@ -24,6 +24,7 @@ type SavedEventRepository interface {
 	SaveEvent(ctx context.Context, userID, eventID string) error
 	UnsaveEvent(ctx context.Context, userID, eventID string) error
 	IsSaved(ctx context.Context, userID, eventID string) (bool, error)
+	ListSavedEvents(ctx context.Context, userID string, after string, limit int) ([]*SavedEvent, error)
 }
 
 // MongoSavedEventRepository implements SavedEventRepository against MongoDB.
@@ -97,4 +98,47 @@ func (r *MongoSavedEventRepository) IsSaved(ctx context.Context, userID, eventID
 		return false, fmt.Errorf("mongo check saved: %w", err)
 	}
 	return count > 0, nil
+}
+
+// ListSavedEvents returns saved events for a user in newest-first order (by savedAt).
+// Supports cursor-based pagination via (savedAt, eventId) compound cursor.
+// Returns empty slice if user has no saved events or cursor is beyond the last record.
+func (r *MongoSavedEventRepository) ListSavedEvents(ctx context.Context, userID string, after string, limit int) ([]*SavedEvent, error) {
+	filter := bson.M{"userId": userID}
+	
+	// If cursor provided, filter for records before (savedAt, eventId)
+	if after != "" {
+		ms, id, ok := parseCursor(after)
+		if !ok {
+			return nil, fmt.Errorf("invalid cursor")
+		}
+		savedAt := time.UnixMilli(ms).UTC()
+		// MongoDB compound query: savedAt < cursor_savedAt OR (savedAt == cursor_savedAt AND eventId < cursor_eventId)
+		filter = bson.M{
+			"userId": userID,
+			"$or": []bson.M{
+				{"savedAt": bson.M{"$lt": savedAt}},
+				{
+					"savedAt": savedAt,
+					"eventId": bson.M{"$lt": id},
+				},
+			},
+		}
+	}
+	
+	// Sort by savedAt desc (newest first), then eventId desc for stable ordering
+	opts := options.Find().SetSort(bson.D{{Key: "savedAt", Value: -1}, {Key: "eventId", Value: -1}}).SetLimit(int64(limit))
+	
+	cursor, err := r.collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, fmt.Errorf("mongo list saved events: %w", err)
+	}
+	defer cursor.Close(ctx)
+	
+	var events []*SavedEvent
+	if err := cursor.All(ctx, &events); err != nil {
+		return nil, fmt.Errorf("mongo decode saved events: %w", err)
+	}
+	
+	return events, nil
 }

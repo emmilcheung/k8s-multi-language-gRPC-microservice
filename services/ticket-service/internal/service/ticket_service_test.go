@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/repository"
@@ -813,13 +814,15 @@ func TestUpdateTicket_ShouldUseEmptyTicketTypeWhenVenueReturnsEmptyModeAndNoFall
 // --- Mock saved event repository ---
 
 type mockSavedEventRepo struct {
-	savedEvents map[string]map[string]bool // userId -> eventId -> saved
-	err         error
+	savedEvents     map[string]map[string]bool     // userId -> eventId -> saved
+	savedEventsList map[string][]*repository.SavedEvent // userId -> ordered list
+	err             error
 }
 
 func newMockSavedEventRepo() *mockSavedEventRepo {
 	return &mockSavedEventRepo{
-		savedEvents: make(map[string]map[string]bool),
+		savedEvents:     make(map[string]map[string]bool),
+		savedEventsList: make(map[string][]*repository.SavedEvent),
 	}
 }
 
@@ -852,6 +855,45 @@ func (m *mockSavedEventRepo) IsSaved(ctx context.Context, userID, eventID string
 		return false, nil
 	}
 	return m.savedEvents[userID][eventID], nil
+}
+
+func (m *mockSavedEventRepo) ListSavedEvents(ctx context.Context, userID string, after string, limit int) ([]*repository.SavedEvent, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	events := m.savedEventsList[userID]
+	if events == nil {
+		return []*repository.SavedEvent{}, nil
+	}
+	
+	// Create a reversed copy (newest first) to match repository behavior
+	reversed := make([]*repository.SavedEvent, len(events))
+	for i := range events {
+		reversed[i] = events[len(events)-1-i]
+	}
+	
+	// Simple pagination: find the "after" cursor and return the next `limit` items
+	startIdx := 0
+	if after != "" {
+		for i, e := range reversed {
+			cursor := repository.EncodeCursor(e.SavedAt, e.EventID)
+			if cursor == after {
+				startIdx = i + 1
+				break
+			}
+		}
+	}
+	
+	endIdx := startIdx + limit
+	if endIdx > len(reversed) {
+		endIdx = len(reversed)
+	}
+	
+	if startIdx >= len(reversed) {
+		return []*repository.SavedEvent{}, nil
+	}
+	
+	return reversed[startIdx:endIdx], nil
 }
 
 // --- SaveEvent/UnsaveEvent tests ---
@@ -956,4 +998,120 @@ func TestUnsaveEvent_ShouldReturnErrorOnRepoFailure(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsave event")
+}
+
+// --- ListSavedEvents tests ---
+
+func TestListSavedEvents_ShouldReturnSavedEventsInNewestFirstOrder(t *testing.T) {
+	repo := newMockRepo()
+	savedEventRepo := newMockSavedEventRepo()
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	// Create tickets
+	repo.tickets["ticket-1"] = &repository.Ticket{ID: "ticket-1", Title: "Event A", Price: "10.00", UserID: "seller-1"}
+	repo.tickets["ticket-2"] = &repository.Ticket{ID: "ticket-2", Title: "Event B", Price: "20.00", UserID: "seller-1"}
+	repo.tickets["ticket-3"] = &repository.Ticket{ID: "ticket-3", Title: "Event C", Price: "30.00", UserID: "seller-1"}
+
+	// Seed saved events in chronological order (oldest to newest)
+	now := time.Now().UTC()
+	savedEventRepo.savedEventsList["user-1"] = []*repository.SavedEvent{
+		{UserID: "user-1", EventID: "ticket-3", SavedAt: now.Add(-10 * time.Second), UpdatedAt: now.Add(-10 * time.Second)},
+		{UserID: "user-1", EventID: "ticket-2", SavedAt: now.Add(-5 * time.Second), UpdatedAt: now.Add(-5 * time.Second)},
+		{UserID: "user-1", EventID: "ticket-1", SavedAt: now, UpdatedAt: now},
+	}
+
+	// List saved events
+	tickets, err := svc.ListSavedEvents(context.Background(), "user-1", "", 10)
+
+	require.NoError(t, err)
+	require.Len(t, tickets, 3)
+	// Should be in saved order (newest first)
+	assert.Equal(t, "ticket-1", tickets[0].ID)
+	assert.Equal(t, "Event A", tickets[0].Title)
+	assert.Equal(t, "ticket-2", tickets[1].ID)
+	assert.Equal(t, "Event B", tickets[1].Title)
+	assert.Equal(t, "ticket-3", tickets[2].ID)
+	assert.Equal(t, "Event C", tickets[2].Title)
+}
+
+func TestListSavedEvents_ShouldReturnEmptyListWhenNoSavedEvents(t *testing.T) {
+	repo := newMockRepo()
+	savedEventRepo := newMockSavedEventRepo()
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	tickets, err := svc.ListSavedEvents(context.Background(), "user-1", "", 10)
+
+	require.NoError(t, err)
+	assert.Empty(t, tickets)
+}
+
+func TestListSavedEvents_ShouldSupportCursorPagination(t *testing.T) {
+	repo := newMockRepo()
+	savedEventRepo := newMockSavedEventRepo()
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	// Create tickets
+	repo.tickets["ticket-1"] = &repository.Ticket{ID: "ticket-1", Title: "Event A", Price: "10.00", UserID: "seller-1"}
+	repo.tickets["ticket-2"] = &repository.Ticket{ID: "ticket-2", Title: "Event B", Price: "20.00", UserID: "seller-1"}
+	repo.tickets["ticket-3"] = &repository.Ticket{ID: "ticket-3", Title: "Event C", Price: "30.00", UserID: "seller-1"}
+
+	// Seed saved events
+	now := time.Now().UTC()
+	savedEventRepo.savedEventsList["user-1"] = []*repository.SavedEvent{
+		{UserID: "user-1", EventID: "ticket-3", SavedAt: now.Add(-10 * time.Second), UpdatedAt: now.Add(-10 * time.Second)},
+		{UserID: "user-1", EventID: "ticket-2", SavedAt: now.Add(-5 * time.Second), UpdatedAt: now.Add(-5 * time.Second)},
+		{UserID: "user-1", EventID: "ticket-1", SavedAt: now, UpdatedAt: now},
+	}
+
+	// First page: get first 2
+	tickets, err := svc.ListSavedEvents(context.Background(), "user-1", "", 2)
+	require.NoError(t, err)
+	require.Len(t, tickets, 2)
+	assert.Equal(t, "ticket-1", tickets[0].ID)
+	assert.Equal(t, "ticket-2", tickets[1].ID)
+
+	// Second page: use cursor from last item
+	cursor := repository.EncodeCursor(savedEventRepo.savedEventsList["user-1"][1].SavedAt, "ticket-2")
+	tickets, err = svc.ListSavedEvents(context.Background(), "user-1", cursor, 2)
+	require.NoError(t, err)
+	require.Len(t, tickets, 1)
+	assert.Equal(t, "ticket-3", tickets[0].ID)
+}
+
+func TestListSavedEvents_ShouldSkipDeletedTickets(t *testing.T) {
+	repo := newMockRepo()
+	savedEventRepo := newMockSavedEventRepo()
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	// Create only 2 of the 3 tickets
+	repo.tickets["ticket-1"] = &repository.Ticket{ID: "ticket-1", Title: "Event A", Price: "10.00", UserID: "seller-1"}
+	repo.tickets["ticket-3"] = &repository.Ticket{ID: "ticket-3", Title: "Event C", Price: "30.00", UserID: "seller-1"}
+	// ticket-2 is missing (deleted)
+
+	// Seed saved events for 3 tickets
+	now := time.Now().UTC()
+	savedEventRepo.savedEventsList["user-1"] = []*repository.SavedEvent{
+		{UserID: "user-1", EventID: "ticket-3", SavedAt: now.Add(-10 * time.Second), UpdatedAt: now.Add(-10 * time.Second)},
+		{UserID: "user-1", EventID: "ticket-2", SavedAt: now.Add(-5 * time.Second), UpdatedAt: now.Add(-5 * time.Second)},
+		{UserID: "user-1", EventID: "ticket-1", SavedAt: now, UpdatedAt: now},
+	}
+
+	tickets, err := svc.ListSavedEvents(context.Background(), "user-1", "", 10)
+
+	require.NoError(t, err)
+	require.Len(t, tickets, 2) // Should only return existing tickets
+	assert.Equal(t, "ticket-1", tickets[0].ID)
+	assert.Equal(t, "ticket-3", tickets[1].ID)
+}
+
+func TestListSavedEvents_ShouldReturnErrorOnRepoFailure(t *testing.T) {
+	repo := newMockRepo()
+	savedEventRepo := newMockSavedEventRepo()
+	savedEventRepo.err = errors.New("database error")
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	_, err := svc.ListSavedEvents(context.Background(), "user-1", "", 10)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list saved events")
 }
