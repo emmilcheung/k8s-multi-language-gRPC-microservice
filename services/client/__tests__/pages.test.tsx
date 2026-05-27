@@ -250,6 +250,71 @@ function makeJwt(sub: string): string {
 
 // ── HomePage ──────────────────────────────────────────────────────────────────
 
+describe("AuthPages", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cookieStoreMock.get.mockReturnValue(undefined);
+  });
+
+  it("renders the sign-in page inside the split auth shell", async () => {
+    const { default: SigninPage } = await import("@/app/auth/signin/page");
+    render(await SigninPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByText(/the ticketing platform/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: /welcome back/i })).toBeInTheDocument();
+  });
+
+  it("renders the signup page inside the same auth shell", async () => {
+    const { default: SignupPage } = await import("@/app/auth/signup/page");
+    render(<SignupPage />);
+
+    expect(screen.getByText(/the ticketing platform/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: /create your account/i })).toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+    getSettingsDataMock.mockResolvedValue({
+      profile: { displayName: "Jamie Stone", locale: "en-US", timezone: "UTC" },
+      preferences: { marketingOptIn: true, orderUpdates: true, productUpdates: false },
+      billingAddress: {
+        line1: "123 Main St",
+        line2: undefined,
+        city: "San Francisco",
+        state: "CA",
+        postalCode: "94105",
+        country: "US",
+      },
+      sessions: [
+        {
+          sessionId: "session-1",
+          createdAt: "2026-05-01T10:00:00Z",
+          lastRotatedAt: "2026-05-02T10:00:00Z",
+          userAgent: "Chrome",
+          ipAddress: "127.0.0.1",
+          current: true,
+        },
+      ],
+      paymentMethods: [{ id: "pm-1" }],
+      orders: [{ id: "order-1", status: "complete", createdAt: "2026-05-10T10:00:00Z" }],
+    });
+  });
+
+  it("renders the settings sidebar and hides unsupported reminder toggles", async () => {
+    const { default: SettingsPage } = await import("@/app/settings/page");
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByText(/^connected apps$/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/^security & sessions$/i)).not.toHaveLength(0);
+    expect(screen.getAllByText(/^payment methods$/i)).not.toHaveLength(0);
+    expect(screen.queryByText(/hold timer reminders/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/show reminders the day of/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("HomePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();

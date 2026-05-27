@@ -497,7 +497,9 @@ test.describe("settings", () => {
     // RSC streams after page load — wait for real content to replace the loading skeleton
     await expect(page.getByRole("heading", { name: /^settings$/i })).toBeVisible({ timeout: 15000 });
 
-    await expect(page.getByText(/security sessions/i)).toBeVisible();
+    await expect(
+      page.locator('[data-slot="card-title"]').filter({ hasText: /security\s*&\s*sessions/i })
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: /^revoke$/i })).toHaveCount(1);
   });
 });
