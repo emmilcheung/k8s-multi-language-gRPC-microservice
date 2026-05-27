@@ -857,8 +857,12 @@ func (m *mockSavedEventRepo) IsSaved(ctx context.Context, userID, eventID string
 // --- SaveEvent/UnsaveEvent tests ---
 
 func TestSaveEvent_ShouldSaveEventForUser(t *testing.T) {
+	repo := newMockRepo()
 	savedEventRepo := newMockSavedEventRepo()
-	svc := service.NewTicketService(newMockRepo(), &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	// Create a ticket first so it exists
+	repo.tickets["ticket-1"] = &repository.Ticket{ID: "ticket-1", Title: "Concert", Price: "50.00", UserID: "user-1"}
 
 	err := svc.SaveEvent(context.Background(), "user-1", "ticket-1")
 
@@ -868,8 +872,12 @@ func TestSaveEvent_ShouldSaveEventForUser(t *testing.T) {
 }
 
 func TestSaveEvent_ShouldBeIdempotent(t *testing.T) {
+	repo := newMockRepo()
 	savedEventRepo := newMockSavedEventRepo()
-	svc := service.NewTicketService(newMockRepo(), &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	// Create a ticket first so it exists
+	repo.tickets["ticket-1"] = &repository.Ticket{ID: "ticket-1", Title: "Concert", Price: "50.00", UserID: "user-1"}
 
 	// Save twice
 	err := svc.SaveEvent(context.Background(), "user-1", "ticket-1")
@@ -890,6 +898,21 @@ func TestSaveEvent_ShouldReturnErrorOnRepoFailure(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "save event")
+}
+
+func TestSaveEvent_ShouldFailForNonexistentTicket(t *testing.T) {
+	repo := newMockRepo()
+	savedEventRepo := newMockSavedEventRepo()
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	// Try to save an event for a ticket that doesn't exist
+	err := svc.SaveEvent(context.Background(), "user-1", "nonexistent-ticket-id")
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, repository.ErrTicketNotFound)
+	// Verify the saved event was not persisted
+	saved, _ := savedEventRepo.IsSaved(context.Background(), "user-1", "nonexistent-ticket-id")
+	assert.False(t, saved)
 }
 
 func TestUnsaveEvent_ShouldRemoveSavedEvent(t *testing.T) {

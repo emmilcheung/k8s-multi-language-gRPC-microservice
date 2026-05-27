@@ -283,7 +283,12 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 
 // SaveEvent saves an event (ticket detail) for a user.
 // In v1, eventId maps to ticketId. Idempotent: re-saving updates the timestamp.
+// Verifies the ticket exists before saving to prevent orphan saved-event rows.
 func (s *TicketService) SaveEvent(ctx context.Context, userID, eventID string) error {
+	// Verify ticket exists before persisting the saved-event row
+	if _, err := s.repo.FindByID(ctx, eventID); err != nil {
+		return fmt.Errorf("save event: %w", err)
+	}
 	if err := s.savedEventRepo.SaveEvent(ctx, userID, eventID); err != nil {
 		return fmt.Errorf("save event: %w", err)
 	}
