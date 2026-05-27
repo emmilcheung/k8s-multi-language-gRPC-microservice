@@ -957,6 +957,12 @@ test.describe("seating plan", () => {
       .poll(
         async () => {
           await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
+          const hasRealContent = await page
+            .getByRole("link", { name: /back to ticket/i })
+            .waitFor({ state: "visible", timeout: 10000 })
+            .then(() => true)
+            .catch(() => false);
+          if (!hasRealContent) return false;
           return page
             .getByRole("button", { name: /deactivate plan/i })
             .isVisible()

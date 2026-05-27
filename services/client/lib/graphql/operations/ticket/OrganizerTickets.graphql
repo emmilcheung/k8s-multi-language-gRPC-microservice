@@ -1,0 +1,17 @@
+query OrganizerTickets {
+  tickets {
+    id
+    title
+    userId
+    priceDecimal
+    sold
+    available
+    ticketType
+    event {
+      title
+      startsAt
+      venueName
+      venueAddress
+    }
+  }
+}

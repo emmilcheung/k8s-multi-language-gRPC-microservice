@@ -205,7 +205,7 @@ test(
     expect(ticketId).toMatch(/^[0-9a-f-]{36}$/);
 
     // Manual email fallback is policy-gated; enable it before purchase.
-    await page.goto(`/tickets/${ticketId}/attendance`);
+    await page.goto(`/organizer/events/${ticketId}/attendance`);
     const manualOverrideToggle = page.getByLabel(/allow manual override/i);
     await expect(manualOverrideToggle).toBeVisible({ timeout: 10_000 });
     await manualOverrideToggle.check();
@@ -308,27 +308,27 @@ test(
     await signin(page, organizerEmail);
 
     await page.goto(`/scan?eventId=${ticketId}`);
-    await expect(
-      page.getByRole("heading", { name: /scanner console/i })
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("button", { name: /start camera scan/i })).toBeVisible({
+      timeout: 10_000,
+    });
 
     if (qrToken) {
       // Token-based scanner path.
       await page.getByRole("button", { name: /enter token manually/i }).click();
       await page.locator("#scanner-token").fill(qrToken);
       await page.getByRole("button", { name: /check in attendee/i }).click();
-      await expect(page.getByText(/checked in/i)).toBeVisible({
+      await expect(page.locator("aside").getByText(/^admitted$/i)).toBeVisible({
         timeout: 15_000,
       });
       await page.getByRole("button", { name: /check in attendee/i }).click();
-      await expect(page.getByText(/already checked in|already_used/i)).toBeVisible({
+      await expect(page.locator("aside").getByText(/^already used$/i)).toBeVisible({
         timeout: 15_000,
       });
     } else {
       // Fallback when token is not exposed in current UI contract.
       await page.getByLabel(/buyer email/i).fill(buyerEmail);
       await page.getByRole("button", { name: /check in by email/i }).click();
-      await expect(page.getByText(/checked in/i)).toBeVisible({
+      await expect(page.locator("aside").getByText(/^admitted$/i)).toBeVisible({
         timeout: 15_000,
       });
     }
@@ -368,7 +368,7 @@ test(
     const ticketId = page.url().split("/tickets/")[1]!.split("/")[0]!;
 
     // Manual email fallback is policy-gated; enable it before any sale locks settings.
-    await page.goto(`/tickets/${ticketId}/attendance`);
+    await page.goto(`/organizer/events/${ticketId}/attendance`);
     const manualOverrideToggle = page.getByLabel(/allow manual override/i);
     await expect(manualOverrideToggle).toBeVisible({ timeout: 10_000 });
     await manualOverrideToggle.check();
@@ -407,14 +407,14 @@ test(
     await signout(page);
     await signin(page, organizerEmail);
     await page.goto(`/scan?eventId=${ticketId}`);
-    await expect(
-      page.getByRole("heading", { name: /scanner console/i })
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("button", { name: /start camera scan/i })).toBeVisible({
+      timeout: 10_000,
+    });
 
     await page.getByLabel(/buyer email/i).fill(buyerEmail);
     await expect(async () => {
       await page.getByRole("button", { name: /check in by email/i }).click();
-      await expect(page.getByText(/^checked in\.$/i)).toBeVisible({
+      await expect(page.locator("aside").getByText(/^admitted$/i)).toBeVisible({
         timeout: 5_000,
       });
       }).toPass({ timeout: 30_000, intervals: [2000, 3000, 5000] });

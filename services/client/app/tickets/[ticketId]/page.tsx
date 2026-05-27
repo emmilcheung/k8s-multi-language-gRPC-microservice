@@ -286,7 +286,7 @@ export default async function TicketDetailPage({ params }: Props) {
                   Open attendance settings to view checked-in attendees and manage QR policy for this ticket.
                 </p>
                 <Link
-                  href={`/tickets/${ticketId}/attendance`}
+                  href={`/organizer/events/${ticketId}/attendance`}
                   className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
                 >
                   Attendance settings
