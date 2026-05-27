@@ -906,9 +906,12 @@ func TestSaveEvent_ShouldSaveEventForUser(t *testing.T) {
 	// Create a ticket first so it exists
 	repo.tickets["ticket-1"] = &repository.Ticket{ID: "ticket-1", Title: "Concert", Price: "50.00", UserID: "user-1"}
 
-	err := svc.SaveEvent(context.Background(), "user-1", "ticket-1")
+	ticket, err := svc.SaveEvent(context.Background(), "user-1", "ticket-1")
 
 	require.NoError(t, err)
+	assert.NotNil(t, ticket)
+	assert.Equal(t, "ticket-1", ticket.ID)
+	assert.Equal(t, "Concert", ticket.Title)
 	saved, _ := savedEventRepo.IsSaved(context.Background(), "user-1", "ticket-1")
 	assert.True(t, saved)
 }
@@ -922,10 +925,12 @@ func TestSaveEvent_ShouldBeIdempotent(t *testing.T) {
 	repo.tickets["ticket-1"] = &repository.Ticket{ID: "ticket-1", Title: "Concert", Price: "50.00", UserID: "user-1"}
 
 	// Save twice
-	err := svc.SaveEvent(context.Background(), "user-1", "ticket-1")
+	ticket1, err := svc.SaveEvent(context.Background(), "user-1", "ticket-1")
 	require.NoError(t, err)
-	err = svc.SaveEvent(context.Background(), "user-1", "ticket-1")
+	assert.NotNil(t, ticket1)
+	ticket2, err := svc.SaveEvent(context.Background(), "user-1", "ticket-1")
 	require.NoError(t, err)
+	assert.NotNil(t, ticket2)
 
 	saved, _ := savedEventRepo.IsSaved(context.Background(), "user-1", "ticket-1")
 	assert.True(t, saved)
@@ -940,7 +945,7 @@ func TestSaveEvent_ShouldReturnErrorOnRepoFailure(t *testing.T) {
 	// Seed a valid ticket so FindByID succeeds and we exercise the savedEventRepo error path
 	repo.tickets["ticket-1"] = &repository.Ticket{ID: "ticket-1", Title: "Concert", Price: "50.00", UserID: "user-1"}
 
-	err := svc.SaveEvent(context.Background(), "user-1", "ticket-1")
+	_, err := svc.SaveEvent(context.Background(), "user-1", "ticket-1")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "save event")
@@ -953,7 +958,7 @@ func TestSaveEvent_ShouldFailForNonexistentTicket(t *testing.T) {
 	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
 
 	// Try to save an event for a ticket that doesn't exist
-	err := svc.SaveEvent(context.Background(), "user-1", "nonexistent-ticket-id")
+	_, err := svc.SaveEvent(context.Background(), "user-1", "nonexistent-ticket-id")
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, repository.ErrTicketNotFound)

@@ -78,6 +78,10 @@ func (*stubSavedEventRepo) IsSaved(_ context.Context, _, _ string) (bool, error)
 	return false, nil
 }
 
+func (*stubSavedEventRepo) ListSavedEvents(_ context.Context, _ string, _ string, _ int) ([]*repository.SavedEvent, error) {
+	return []*repository.SavedEvent{}, nil
+}
+
 // setupTestServer starts a real MongoDB via Testcontainers, wires the full Echo stack,
 // and returns a running httptest.Server plus a cleanup function.
 func setupTestServer(t *testing.T) (*httptest.Server, func()) {

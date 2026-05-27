@@ -66,7 +66,8 @@ func main() {
 	shutdownTracing := tracing.Init(context.Background(), "ticket-service", log)
 	defer shutdownTracing(context.Background())
 
-	// MongoDB connection — shared by ticket and saved-event repositories
+	// MongoDB connection — used by saved-event repository;
+	// ticket repository creates its own client internally.
 	clientOpts := options.Client().ApplyURI(cfg.MongoURI)
 	mongoClient, err := mongo.Connect(clientOpts)
 	if err != nil {
