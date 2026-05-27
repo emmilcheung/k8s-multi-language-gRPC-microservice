@@ -51,7 +51,7 @@ Implement in order. Each row is one phase = one commit boundary. Mark a phase do
 | 1 | Browse + event detail | DONE | no | `01`, `02` |
 | 2 | Seat picker + checkout + countdown | DONE | no | `03`, `04` |
 | 3 | Admission pass | DONE | no | `05` |
-| 4 | Orders list + hold-expired + payment-failed + states | TODO | no | `06`, `07` (partial), `08` |
+| 4 | Orders list + hold-expired + payment-failed + states | DONE | no | `06`, `07` (partial), `08` |
 | 5 | Auth + settings | TODO | no | `09`, `10` |
 | 6 | Organizer surfaces + scanner | TODO | maybe (see Phase 6 notes) | `11`, `12` |
 | 7 | Transfer + refund + saved events | TODO | **yes — blocks on backend** | `07` (rest) |

@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { Lock, AlertCircle, CreditCard, Loader2, X, ChevronDown, Plus } from "lucide-react";
 import { cancelOrder, submitPayment } from "@/app/actions/orders";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import type { OrderState } from "@/app/actions/orders";
 import type { SavedPaymentMethod } from "@/lib/types";
 
@@ -92,12 +93,14 @@ export function OrderPaymentForm({
 
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paymentFailure, setPaymentFailure] = useState<string | null>(null);
   const [pollingNotice, setPollingNotice] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [stripeReady, setStripeReady] = useState(false);
   const [stripeScriptReady, setStripeScriptReady] = useState(false);
   const [isCardComplete, setIsCardComplete] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [lastFailedMethodId, setLastFailedMethodId] = useState<string | null>(null);
   const [cardElementNode, setCardElementNode] = useState<HTMLDivElement | null>(null);
   const stripeInstanceRef = useRef<StripeInstance | null>(null);
   const cardElementInstanceRef = useRef<CardElement | null>(null);
@@ -106,6 +109,7 @@ export function OrderPaymentForm({
   const router = useRouter();
   const isTimeRunningOut = secondsRemaining !== null && secondsRemaining < 60;
   const isPending = isProcessing || isCancelling;
+  const showPaymentRecovery = Boolean(paymentFailure && hasSavedMethods);
   const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?.trim();
   const validPublishableKey = Boolean(publishableKey && publishableKey.startsWith("pk_"));
 
@@ -286,10 +290,13 @@ export function OrderPaymentForm({
     e.preventDefault();
     setIsProcessing(true);
     setPaymentError(null);
+    setPaymentFailure(null);
     setPollingNotice(null);
+    setLastFailedMethodId(null);
 
     try {
       const formData = new FormData();
+      const attemptedSavedMethodId = !showNewCard && selectedMethodId ? selectedMethodId : null;
 
       if (!showNewCard && selectedMethodId) {
         // Pay with a saved payment method
@@ -325,6 +332,8 @@ export function OrderPaymentForm({
       const submitResult = await submitPayment(orderId, initialState, formData);
       if (submitResult.error) {
         setPaymentError(submitResult.error);
+        setPaymentFailure(submitResult.error);
+        setLastFailedMethodId(attemptedSavedMethodId);
         setIsProcessing(false);
         return;
       }
@@ -400,7 +409,7 @@ export function OrderPaymentForm({
         </div>
 
         {/* Error */}
-        {paymentError && (
+        {paymentError && !showPaymentRecovery && (
           <div
             role="alert"
             className="flex items-start gap-2.5 text-sm text-bad bg-bad-soft rounded px-3 py-2.5"
@@ -421,8 +430,108 @@ export function OrderPaymentForm({
           </div>
         )}
 
+        {showPaymentRecovery && (
+          <div className="overflow-hidden rounded-md border border-line bg-card">
+            <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-4">
+              <span className="flex size-11 items-center justify-center rounded-full border border-bad/20 bg-bad-soft text-bad">
+                <AlertCircle className="size-5" />
+              </span>
+              <div className="space-y-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-mute">
+                  Card declined
+                </p>
+                <p className="text-lg font-semibold tracking-tight text-ink">
+                  We couldn&apos;t charge your card
+                </p>
+              </div>
+              {secondsRemaining !== null && (
+                <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-warn/25 bg-warn-soft px-3 py-1 text-xs font-mono font-semibold text-warn">
+                  <AlertCircle className="size-3.5" />
+                  {formatTimeRemaining(secondsRemaining)} hold
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-4 px-4 py-4">
+              <p className="text-sm leading-6 text-ink">
+                Your bank declined the charge. Your seats are still held, so try a different card
+                before the timer runs out.
+              </p>
+              <p className="font-mono text-xs text-mute">{paymentFailure}</p>
+
+              <div className="overflow-hidden rounded-md border border-line">
+                {savedPaymentMethods.map((method, index) => {
+                  const isFailedMethod = lastFailedMethodId === method.id;
+                  return (
+                    <div
+                      key={method.id}
+                      className={`flex items-center gap-3 px-4 py-3 ${
+                        isFailedMethod ? "bg-bad-soft" : "bg-card"
+                      } ${index < savedPaymentMethods.length - 1 ? "border-b border-line" : ""}`}
+                    >
+                      <span className="inline-flex min-w-9 items-center justify-center rounded bg-subtle px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-ink">
+                        {cardBrandIcon(method.brand)}
+                      </span>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-ink">
+                          {method.label ?? `•••• ${method.last4}`}
+                        </p>
+                        {method.expMonth && method.expYear && (
+                          <p className="font-mono text-xs text-mute">
+                            Exp {method.expMonth}/{method.expYear}
+                          </p>
+                        )}
+                      </div>
+                      {isFailedMethod ? (
+                        <Badge tone="bad" dot>
+                          declined
+                        </Badge>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedMethodId(method.id);
+                            setShowNewCard(false);
+                            setPaymentError(null);
+                            setPaymentFailure(null);
+                            setLastFailedMethodId(null);
+                            setPollingNotice(null);
+                          }}
+                          className="rounded-md bg-accent px-3 py-2 text-xs font-medium text-on-accent transition-colors hover:bg-accent/90"
+                        >
+                          Try this one
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewCard(true);
+                    setSelectedMethodId(null);
+                    setPaymentError(null);
+                    setPaymentFailure(null);
+                    setLastFailedMethodId(null);
+                    setPollingNotice(null);
+                  }}
+                  className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-ink transition-colors hover:bg-subtle"
+                >
+                  <Plus className="size-4 text-mute" />
+                  Add a new card
+                </button>
+              </div>
+
+              <p className="text-xs text-mute">
+                If this keeps failing, call your bank — most blocks clear within minutes.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ── Saved payment methods ── */}
-        {hasSavedMethods && !showNewCard && (
+        {hasSavedMethods && !showNewCard && !showPaymentRecovery && (
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium text-ink">Payment Method</label>
             <div className="flex flex-col gap-2">
@@ -430,7 +539,12 @@ export function OrderPaymentForm({
                 <button
                   key={method.id}
                   type="button"
-                  onClick={() => setSelectedMethodId(method.id)}
+                  onClick={() => {
+                    setSelectedMethodId(method.id);
+                    setPaymentError(null);
+                    setPaymentFailure(null);
+                    setLastFailedMethodId(null);
+                  }}
                   className={`flex items-center gap-3 rounded border px-4 py-3 text-left transition-colors ${
                     selectedMethodId === method.id
                       ? "border-accent bg-accent/10 text-ink"
@@ -470,6 +584,9 @@ export function OrderPaymentForm({
               onClick={() => {
                 setShowNewCard(true);
                 setSelectedMethodId(null);
+                setPaymentError(null);
+                setPaymentFailure(null);
+                setLastFailedMethodId(null);
                 setPollingNotice(null);
               }}
               className="flex items-center gap-1.5 text-xs text-mute hover:text-ink transition-colors mt-1 self-start"
@@ -493,6 +610,9 @@ export function OrderPaymentForm({
                   onClick={() => {
                     setShowNewCard(false);
                     setSelectedMethodId(defaultMethod?.id ?? savedPaymentMethods[0]?.id ?? null);
+                    setPaymentError(null);
+                    setPaymentFailure(null);
+                    setLastFailedMethodId(null);
                     setPollingNotice(null);
                   }}
                   className="flex items-center gap-1 text-xs text-mute hover:text-ink transition-colors"

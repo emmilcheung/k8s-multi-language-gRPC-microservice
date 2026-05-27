@@ -4,11 +4,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function OrderDetailLoading() {
   return (
-    <div className="flex flex-col gap-8 max-w-4xl mx-auto">
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 py-2">
       <Skeleton className="h-8 w-28" />
 
-      {/* Stepper */}
-      <div className="glass rounded-2xl px-8 py-5">
+      <div className="rounded-md border border-line bg-card px-8 py-5">
         <div className="flex items-center gap-4">
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex items-center flex-1 last:flex-none">
@@ -22,9 +21,8 @@ export default function OrderDetailLoading() {
         </div>
       </div>
 
-      {/* Main panels */}
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-        <div className="glass rounded-2xl p-8 flex flex-col gap-6">
+        <div className="rounded-md border border-line bg-card p-8 flex flex-col gap-6">
           <Skeleton className="h-6 w-36" />
           <div className="flex flex-col gap-4">
             <div className="flex items-start gap-3">
@@ -49,9 +47,9 @@ export default function OrderDetailLoading() {
           </div>
         </div>
 
-        {/* Payment panel */}
-        <div className="glass rounded-2xl p-6 flex flex-col gap-4">
+        <div className="rounded-md border border-line bg-card p-6 flex flex-col gap-4">
           <Skeleton className="h-6 w-32" />
+          <Skeleton className="h-16 w-full rounded-md" />
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full rounded-lg" />

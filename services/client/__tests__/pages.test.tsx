@@ -59,6 +59,19 @@ vi.mock("@/lib/graphql/execute", () => ({
   executeQuery: (...args: unknown[]) => executeQueryMock(...args),
 }));
 
+const getSettingsDataMock = vi.fn();
+const updateProfileActionMock = vi.fn();
+const updatePreferencesActionMock = vi.fn();
+const updateBillingAddressActionMock = vi.fn();
+const revokeSessionActionMock = vi.fn();
+vi.mock("@/app/actions/settings", () => ({
+  getSettingsData: (...args: unknown[]) => getSettingsDataMock(...args),
+  updateProfileAction: (...args: unknown[]) => updateProfileActionMock(...args),
+  updatePreferencesAction: (...args: unknown[]) => updatePreferencesActionMock(...args),
+  updateBillingAddressAction: (...args: unknown[]) => updateBillingAddressActionMock(...args),
+  revokeSessionAction: (...args: unknown[]) => revokeSessionActionMock(...args),
+}));
+
 const serverApiMock = vi.fn<() => Promise<unknown>>();
 const lookupUserMock = vi.fn();
 vi.mock("@/lib/api", () => ({
@@ -80,6 +93,12 @@ vi.mock("@/components/ticket-grid", () => ({
 
 vi.mock("@/components/ticket-form", () => ({
   TicketForm: () => <div data-testid="ticket-form" />,
+}));
+
+vi.mock("@/components/settings-payment-methods", () => ({
+  SettingsPaymentMethods: ({ initialPaymentMethods }: { initialPaymentMethods: Array<{ id: string }> }) => (
+    <div data-testid="settings-payment-methods" data-count={initialPaymentMethods.length} />
+  ),
 }));
 
 vi.mock("@/components/purchase-button", () => ({
@@ -156,6 +175,7 @@ vi.mock("@/app/_components/browse-filters", () => ({
 }));
 
 vi.mock("lucide-react", () => ({
+  AlertCircle: () => <span />,
   Ticket: () => <span />,
   ArrowRight: () => <span />,
   Tag: () => <span />,
@@ -168,12 +188,21 @@ vi.mock("lucide-react", () => ({
   ShoppingBag: () => <span />,
   Globe: () => <span />,
   ArrowLeft: () => <span />,
+  CreditCard: () => <span />,
+  DollarSign: () => <span />,
   User: () => <span />,
   ShieldCheck: () => <span />,
   MapPin: () => <span />,
+  MapPinHouse: () => <span />,
+  UserRound: () => <span />,
+  X: () => <span />,
+  Mail: () => <span />,
+  Lock: () => <span />,
+  Loader2: () => <span />,
   Search: () => <span />,
   Calendar: () => <span />,
   CalendarDays: () => <span />,
+  Clock3: () => <span />,
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -291,7 +320,7 @@ describe("OrdersPage", () => {
   });
 
   it("renders the authenticated order list from GraphQL", async () => {
-    executeQueryMock.mockResolvedValue({
+    executeQueryMock.mockResolvedValueOnce({
       orders: [
         {
           id: "order-uuid-1",
@@ -308,18 +337,66 @@ describe("OrdersPage", () => {
         },
       ],
     });
+    executeQueryMock.mockResolvedValueOnce({
+      ticket: {
+        event: {
+          title: "Concert Night",
+          startsAt: "2026-12-10T20:00:00Z",
+          venueName: "Greek Theatre",
+          venueAddress: null,
+        },
+        seatingPlan: null,
+      },
+    });
     serverApiMock.mockRejectedValue(new Error("OrdersPage should not use REST"));
 
     const { default: OrdersPage } = await import("@/app/orders/page");
     render(await OrdersPage());
 
-    expect(executeQueryMock).toHaveBeenCalledTimes(1);
+    expect(executeQueryMock).toHaveBeenCalledTimes(2);
     expect(serverApiMock).not.toHaveBeenCalledWith("/api/tickets/ticket-uuid-1");
     expect(screen.getByRole("heading", { level: 1, name: /my orders/i })).toBeInTheDocument();
     expect(screen.getByText(/1 order/i)).toBeInTheDocument();
     expect(screen.getByText("Concert Night")).toBeInTheDocument();
     expect(screen.getByText("$99.98")).toBeInTheDocument();
-    expect(screen.getByText(/awaiting payment/i)).toBeInTheDocument();
+    expect(screen.getByText(/pay now/i)).toBeInTheDocument();
+  });
+});
+
+describe("OrderDetailPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    executeQueryMock.mockReset();
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+    cookieStoreMock.toString = vi.fn(() => "token=buyer");
+  });
+
+  it("redirects expired created orders to the recovery route", async () => {
+    executeQueryMock.mockResolvedValue({
+      order: {
+        id: "order-uuid-1",
+        userId: "buyer-uuid",
+        status: "CREATED",
+        quantity: 2,
+        expiresAt: "2020-01-01T00:00:00Z",
+        createdAt: "2019-12-31T23:50:00Z",
+        ticket: {
+          id: "ticket-uuid-1",
+          title: "Concert Night",
+          price: "49.99",
+        },
+      },
+      currentUser: {
+        id: "buyer-uuid",
+        paymentMethods: [],
+      },
+    });
+
+    const { redirect } = await import("next/navigation");
+    const { default: OrderDetailPage } = await import("@/app/orders/[orderId]/page");
+    await OrderDetailPage({ params: Promise.resolve({ orderId: "order-uuid-1" }) });
+
+    expect(redirect).toHaveBeenCalledWith("/checkout/recover?orderId=order-uuid-1");
   });
 });
 

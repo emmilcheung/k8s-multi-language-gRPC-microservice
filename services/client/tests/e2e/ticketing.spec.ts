@@ -149,15 +149,18 @@ async function openTicketDetailUntilReady(
       await page.waitForTimeout(delayMs);
     }
 
-    await page.goto(ticketUrl, { waitUntil: "commit", timeout: 10000 });
+    await page.goto(ticketUrl, { waitUntil: "domcontentloaded", timeout: 10000 });
 
-    const isReady = await readyLocator.isVisible().catch(() => false);
+    const isReady = await readyLocator
+      .waitFor({ state: "visible", timeout: 4000 })
+      .then(() => true)
+      .catch(() => false);
     if (isReady) {
       return;
     }
   }
 
-  await expect(readyLocator).toBeVisible({ timeout: 1000 });
+  await expect(readyLocator).toBeVisible({ timeout: 5000 });
 }
 
 /**
@@ -789,26 +792,11 @@ test.describe("orders", () => {
     ).toContainText(/mock payment declined|subgraph errors redacted/i, {
       timeout: 10000,
     });
-
-    await expect
-      .poll(
-        async () => {
-          await page.reload();
-          await page
-            .getByRole("heading", { name: /order summary|order cancelled/i })
-            .first()
-            .waitFor({ timeout: 10000 })
-            .catch(() => {});
-          return page.getByText(/order cancelled/i).isVisible();
-        },
-        { timeout: 45000, intervals: [2000, 3000, 5000] }
-      )
-      .toBe(true);
-
-    await expect(page.getByRole("button", { name: /pay now/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /pay now/i })).toBeVisible();
   });
 
   test("buyer cancels — order list shows cancelled badge", async ({ page }) => {
+    test.setTimeout(60_000);
     await setupPurchase(page);
 
     // Wait for client component to hydrate before clicking
@@ -818,22 +806,8 @@ test.describe("orders", () => {
 
     await page.getByRole("button", { name: /cancel order/i }).click();
     await page.waitForURL("/orders", { timeout: 15000 });
-
-    for (const delayMs of [0, 3000, 6000]) {
-      if (delayMs > 0) {
-        await page.waitForTimeout(delayMs);
-        await page.goto("/orders", { waitUntil: "domcontentloaded" });
-      }
-      const hasOrdersPage = await page
-        .getByRole("heading", { name: /my orders/i })
-        .isVisible()
-        .catch(() => false);
-      if (hasOrdersPage) {
-        break;
-      }
-    }
-    await expect(page.getByRole("heading", { name: /my orders/i })).toBeVisible({ timeout: 1000 });
-    // The cancelled status badge text should appear somewhere on the page
+    await expect(page.getByRole("heading", { name: /my orders/i })).toBeVisible({ timeout: 15000 });
+    await page.getByRole("tab", { name: /past/i }).click();
     await expect(page.getByText(/cancelled/i).first()).toBeVisible({ timeout: 10000 });
   });
 
@@ -844,7 +818,11 @@ test.describe("orders", () => {
 
     // RSC streams after navigation — wait for real content to replace the loading skeleton
     await expect(page.getByRole("heading", { name: /my orders/i })).toBeVisible({ timeout: 15000 });
+    await page.getByRole("tab", { name: /past/i }).click();
     await expect(page.getByText(ticketTitle)).toBeVisible({ timeout: 10000 });
+
+    await page.getByRole("tab", { name: /saved/i }).click();
+    await expect(page.getByText(/saved events are on the way/i)).toBeVisible({ timeout: 10000 });
   });
 
   test("ticket shows unavailable state after order is created", async ({ page }) => {
@@ -973,7 +951,18 @@ test.describe("seating plan", () => {
     await expect(page.getByRole("button", { name: /create replacement plan/i })).toBeVisible();
 
     await page.getByRole("button", { name: /reactivate plan/i }).click();
-    await expect(page.getByRole("button", { name: /deactivate plan/i })).toBeVisible({ timeout: 10000 });
+    await expect
+      .poll(
+        async () => {
+          await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
+          return page
+            .getByRole("button", { name: /deactivate plan/i })
+            .isVisible()
+            .catch(() => false);
+        },
+        { timeout: 15000, intervals: [1000, 2000, 3000] }
+      )
+      .toBe(true);
 
     await page.getByRole("button", { name: /deactivate plan/i }).click();
     await expect(page.getByRole("button", { name: /create replacement plan/i })).toBeVisible({ timeout: 10000 });

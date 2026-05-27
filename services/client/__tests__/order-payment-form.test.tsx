@@ -250,6 +250,49 @@ describe("OrderPaymentForm", () => {
     }
   });
 
+  it("shows retry payment methods inline after a saved-card payment fails", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    submitPaymentMock.mockResolvedValue({ error: "code: do_not_honor" });
+
+    render(
+      <OrderPaymentForm
+        orderId="ord-1"
+        amount={25.5}
+        expiresAt="2099-12-31T23:59:59.000Z"
+        savedPaymentMethods={[
+          {
+            id: "pm_failed",
+            brand: "visa",
+            label: "Visa •••• 4242",
+            last4: "4242",
+            expMonth: 8,
+            expYear: 2027,
+            isDefault: true,
+          },
+          {
+            id: "pm_backup",
+            brand: "mastercard",
+            label: "Mastercard •••• 8821",
+            last4: "8821",
+            expMonth: 12,
+            expYear: 2026,
+          },
+        ]}
+      />
+    );
+
+    const payButton = screen.getByRole("button", { name: /pay now/i });
+    await user.click(payButton);
+
+    await waitFor(() => {
+      expect(screen.getByText(/we couldn't charge your card/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/code: do_not_honor/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/declined/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /try this one/i })).toBeInTheDocument();
+  });
+
   it("polls order status after successful submitPayment action and calls router.refresh", async () => {
     const originalPublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
     process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_mock";

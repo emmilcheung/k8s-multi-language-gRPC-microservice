@@ -103,7 +103,13 @@ export default async function OrderDetailPage({ params }: Props) {
   const currentStep = STEP_ORDER[order.status];
   const isCancelled = order.status === "cancelled";
   const amount = calculateOrderTotal(order);
+  const isExpiredCreatedOrder =
+    order.status === "created" && Boolean(order.expiresAt) && new Date(order.expiresAt) < new Date();
   const showHoldTimer = (order.status === "created" || order.status === "awaiting_payment") && order.expiresAt && new Date(order.expiresAt) > new Date();
+
+  if (isExpiredCreatedOrder) {
+    redirect(`/checkout/recover?orderId=${order.id}`);
+  }
 
   return (
     <div className="flex flex-col gap-8 max-w-4xl mx-auto">
