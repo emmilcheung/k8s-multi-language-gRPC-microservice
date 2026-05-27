@@ -24,9 +24,9 @@ COPY services/venue-service /app/services/venue-service
 RUN CGO_ENABLED=1 GOOS=linux go build -o /venue-service ./cmd/server
 
 # Stage 2: runtime
-FROM debian:bookworm-slim@sha256:0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb AS runtime
+FROM debian:bookworm-slim@sha256:4724b8cc51e33e398f0e2e15e18d5ec2851ff0c2280647e1310bc1642182655d AS runtime
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget openssl libssl3 && \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ca-certificates wget openssl libssl3 && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd -r app && useradd -r -g app app
 
