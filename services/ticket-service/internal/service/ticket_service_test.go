@@ -890,14 +890,19 @@ func TestSaveEvent_ShouldBeIdempotent(t *testing.T) {
 }
 
 func TestSaveEvent_ShouldReturnErrorOnRepoFailure(t *testing.T) {
+	repo := newMockRepo()
 	savedEventRepo := newMockSavedEventRepo()
 	savedEventRepo.err = errors.New("database error")
-	svc := service.NewTicketService(newMockRepo(), &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+	svc := service.NewTicketService(repo, &mockPublisher{}, zap.NewNop(), &mockVenueClient{}, savedEventRepo)
+
+	// Seed a valid ticket so FindByID succeeds and we exercise the savedEventRepo error path
+	repo.tickets["ticket-1"] = &repository.Ticket{ID: "ticket-1", Title: "Concert", Price: "50.00", UserID: "user-1"}
 
 	err := svc.SaveEvent(context.Background(), "user-1", "ticket-1")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "save event")
+	assert.Contains(t, err.Error(), "database error")
 }
 
 func TestSaveEvent_ShouldFailForNonexistentTicket(t *testing.T) {
