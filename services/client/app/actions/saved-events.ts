@@ -15,6 +15,8 @@ export async function saveEvent(
   _prev: SavedEventState,
   _formData: FormData
 ): Promise<SavedEventState> {
+  void _prev;
+  void _formData;
   try {
     const data = await executeMutation(SaveEventDocument, { eventId });
     revalidatePath("/orders");
@@ -30,6 +32,8 @@ export async function unsaveEvent(
   _prev: SavedEventState,
   _formData: FormData
 ): Promise<SavedEventState> {
+  void _prev;
+  void _formData;
   try {
     const data = await executeMutation(UnsaveEventDocument, { eventId });
     revalidatePath("/orders");

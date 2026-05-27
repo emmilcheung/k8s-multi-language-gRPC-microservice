@@ -824,7 +824,7 @@ test.describe("orders", () => {
     await expect(page.getByText(ticketTitle)).toBeVisible({ timeout: 10000 });
 
     await page.getByRole("tab", { name: /saved/i }).click();
-    await expect(page.getByText(/saved events are on the way/i)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/no saved events yet/i)).toBeVisible({ timeout: 10000 });
   });
 
   test("ticket shows unavailable state after order is created", async ({ page }) => {
@@ -1321,5 +1321,68 @@ test.describe("seating plan", () => {
     await expect(
       page.getByRole("button", { name: /already reserved/i })
     ).toBeVisible({ timeout: 15000 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Saved Events tests (Phase 7a)
+// ---------------------------------------------------------------------------
+
+test.describe("saved events", () => {
+  test("buyer can save a ticket, view it in Saved tab, and unsave it", async ({ page }) => {
+    test.setTimeout(90_000);
+
+    // Creator creates a ticket
+    const creatorEmail = uniqueEmail("saved-creator");
+    await signupAsCreator(page, creatorEmail);
+    const title = `Save Test ${Date.now()}`;
+    const ticketUrl = await createTicket(page, title, "25.00");
+    await signout(page);
+
+    // Buyer signs up and navigates to the ticket
+    const buyerEmail = uniqueEmail("saved-buyer");
+    await signup(page, buyerEmail);
+    await page.goto(ticketUrl);
+    await page.getByRole("heading", { level: 1 }).waitFor({ state: "attached", timeout: 10000 });
+
+    // Save event button should be visible for authenticated non-owner
+    const saveBtn = page.getByRole("button", { name: /save event/i });
+    await expect(saveBtn).toBeVisible({ timeout: 10000 });
+    await saveBtn.click();
+
+    // After saving, button should toggle to "Saved"
+    await expect(page.getByRole("button", { name: /^saved$/i })).toBeVisible({ timeout: 10000 });
+
+    // Navigate to orders page, check the Saved tab
+    await page.goto("/orders");
+    await expect(page.getByRole("heading", { level: 1, name: /my orders/i })).toBeVisible({
+      timeout: 15000,
+    });
+    const savedTab = page.getByRole("tab", { name: /saved/i });
+    await savedTab.click();
+
+    // Saved event should appear in the tab
+    await expect(page.getByText(title)).toBeVisible({ timeout: 15000 });
+
+    // Navigate back and unsave
+    await page.goto(ticketUrl);
+    await page.getByRole("heading", { level: 1 }).waitFor({ state: "attached", timeout: 10000 });
+    const savedBtn = page.getByRole("button", { name: /^saved$/i });
+    await expect(savedBtn).toBeVisible({ timeout: 10000 });
+    await savedBtn.click();
+
+    // After unsaving, button should return to "Save event"
+    await expect(page.getByRole("button", { name: /save event/i })).toBeVisible({
+      timeout: 10000,
+    });
+
+    // Saved tab should no longer list the event after unsave
+    await page.goto("/orders");
+    await expect(page.getByRole("heading", { level: 1, name: /my orders/i })).toBeVisible({
+      timeout: 15000,
+    });
+    await page.getByRole("tab", { name: /saved/i }).click();
+    await expect(page.getByText(/no saved events yet/i)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(title)).not.toBeVisible();
   });
 });

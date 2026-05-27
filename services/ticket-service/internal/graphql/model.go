@@ -29,6 +29,16 @@ type PageInfo struct {
 type Query struct {
 }
 
+type SavedEventConnection struct {
+	Edges    []*SavedEventEdge `json:"edges"`
+	PageInfo *PageInfo         `json:"pageInfo"`
+}
+
+type SavedEventEdge struct {
+	Node   *Ticket `json:"node"`
+	Cursor string  `json:"cursor"`
+}
+
 type SeatingPlan struct {
 	ID string `json:"id"`
 }
@@ -52,6 +62,7 @@ type Ticket struct {
 	Event        *TicketEvent `json:"event,omitempty"`
 	CreatedAt    string       `json:"createdAt"`
 	UpdatedAt    string       `json:"updatedAt"`
+	SavedByMe    bool         `json:"savedByMe"`
 }
 
 func (Ticket) IsEntity() {}

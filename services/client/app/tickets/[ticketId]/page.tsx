@@ -19,7 +19,6 @@ import { TicketForm } from "@/components/ticket-form";
 import { SeatingPlanPreview } from "@/components/seating-plan-preview";
 import { updateTicket } from "@/app/actions/tickets";
 import { fetchPriceTiers } from "@/app/actions/venues";
-import { saveEvent, unsaveEvent } from "@/app/actions/saved-events";
 import { PurchasePanel } from "./_components/purchase-panel";
 import { QuickFacts } from "./_components/quick-facts";
 import { SaveEventButton } from "./_components/save-event-button";
@@ -362,8 +361,6 @@ export default async function TicketDetailPage({ params }: Props) {
               <SaveEventButton
                 eventId={ticketId}
                 initialSaved={ticket.savedByMe}
-                saveAction={saveEvent.bind(null, ticketId)}
-                unsaveAction={unsaveEvent.bind(null, ticketId)}
               />
             )}
             <PurchasePanel

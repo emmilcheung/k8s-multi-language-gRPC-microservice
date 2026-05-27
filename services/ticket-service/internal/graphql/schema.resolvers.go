@@ -203,7 +203,17 @@ func (r *queryResolver) Ticket(ctx context.Context, id string) (*Ticket, error) 
 		}
 		return nil, fmt.Errorf("ticket: %w", err)
 	}
-	return mapTicketToGQL(t), nil
+	gqlTicket := mapTicketToGQL(t)
+	if userID := userIDFromContext(ctx); userID != "" {
+		saved, err := r.TicketService.IsSaved(ctx, userID, id)
+		if err != nil {
+			return nil, fmt.Errorf("ticket: resolve saved state: %w", err)
+		}
+		if saved {
+			gqlTicket.SavedByMe = true
+		}
+	}
+	return gqlTicket, nil
 }
 
 // SavedEvents is the resolver for the savedEvents field.

@@ -308,6 +308,15 @@ func (s *TicketService) UnsaveEvent(ctx context.Context, userID, eventID string)
 	return nil
 }
 
+// IsSaved reports whether the given user has saved the given event (ticket).
+func (s *TicketService) IsSaved(ctx context.Context, userID, eventID string) (bool, error) {
+	saved, err := s.savedEventRepo.IsSaved(ctx, userID, eventID)
+	if err != nil {
+		return false, fmt.Errorf("is saved: %w", err)
+	}
+	return saved, nil
+}
+
 // ListSavedEvents returns saved events (tickets) for a user in saved order (newest first).
 // Enriches saved-event records with full ticket data. Skips tickets that no longer exist.
 // Supports cursor-based pagination; pass empty string for first page.

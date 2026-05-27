@@ -59,7 +59,7 @@ async function getSavedEvents(cookieHeader: string): Promise<SavedEventItem[]> {
     const data = await executeQuery(SavedEventsDocument, { first: 50 }, { cookie: cookieHeader });
     return data.savedEvents.edges.map((edge) => ({
       id: edge.node.id,
-      title: edge.node.event?.title ?? edge.node.title,
+      title: edge.node.event?.title || edge.node.title,
       priceDecimal: edge.node.priceDecimal,
       startsAt: edge.node.event?.startsAt,
       imageUrl: edge.node.event?.imageUrl ?? undefined,
