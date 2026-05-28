@@ -339,9 +339,9 @@ export function TicketForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="w-full max-w-7xl grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)_360px]"
+      className="@container w-full max-w-7xl grid grid-cols-1 gap-5 @5xl:grid-cols-[200px_minmax(0,1fr)_320px]"
     >
-      <aside className="rounded-2xl border border-line/70 bg-subtle/70 p-4 md:p-5 h-fit">
+      <aside className="hidden @5xl:block rounded-2xl border border-line/70 bg-subtle/70 p-4 md:p-5 h-fit">
         <p className="text-[11px] uppercase tracking-[0.12em] font-semibold text-mute mb-3">Setup</p>
         <div className="flex flex-col gap-1.5">
           {[
@@ -372,7 +372,7 @@ export function TicketForm({
         </div>
       </aside>
 
-      <div className="rounded-3xl border border-line/70 bg-card/95 p-8 md:p-10 shadow-[0_20px_60px_-40px_rgba(0,0,0,0.65)] flex flex-col gap-6">
+      <div className="min-w-0 rounded-3xl border border-line/70 bg-card/95 p-8 md:p-10 shadow-[0_20px_60px_-40px_rgba(0,0,0,0.65)] flex flex-col gap-6">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
           <p className="text-[11px] uppercase tracking-[0.12em] font-semibold text-mute">
@@ -843,7 +843,7 @@ export function TicketForm({
       </div>
       </div>
 
-      <aside className="rounded-2xl border border-line/70 bg-subtle/60 p-5 md:p-6 h-fit">
+      <aside className="hidden @5xl:block rounded-2xl border border-line/70 bg-subtle/60 p-5 md:p-6 h-fit">
         <div className="flex items-center justify-between gap-2">
           <p className="text-[11px] uppercase tracking-[0.1em] font-semibold text-mute">Live preview</p>
           <span className="text-xs text-mute font-mono">Draft</span>
