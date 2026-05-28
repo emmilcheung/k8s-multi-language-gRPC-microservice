@@ -11,6 +11,12 @@ query OrderPage($id: ID!) {
       title
       price
     }
+    seats {
+      seatId
+      sectionId
+      seatLabel
+      price
+    }
   }
   currentUser {
     id

@@ -49,6 +49,12 @@ async function getOrderPageData(
           quantity: raw.quantity,
           expiresAt: raw.expiresAt ?? "",
           ticket: { id: raw.ticket.id, title: raw.ticket.title, price: raw.ticket.price },
+          seats: raw.seats?.map((s) => ({
+            seatId: s.seatId,
+            sectionId: s.sectionId,
+            seatLabel: s.seatLabel,
+            price: s.price,
+          })),
           version: 0,
         }
       : null,
@@ -77,6 +83,15 @@ const STEP_ORDER: Record<Order["status"], number> = {
   cancelled: -1,
   complete: 2,
 };
+
+// Seat labels come as "R12S5" (row 12, seat 5) or letter-row "A12".
+function parseSeatLabel(label: string): { row: string; seat: string } {
+  const rs = label.match(/^R(\d+)S(\d+)$/i);
+  if (rs) return { row: rs[1], seat: rs[2] };
+  const ls = label.match(/^([A-Za-z]+)(\d+)$/);
+  if (ls) return { row: ls[1], seat: ls[2] };
+  return { row: label, seat: "" };
+}
 
 export default async function OrderDetailPage({ params }: Props) {
   const { orderId } = await params;
@@ -230,6 +245,39 @@ export default async function OrderDetailPage({ params }: Props) {
                 </div>
               </div>
             </div>
+
+            {/* Seats (seated orders only) */}
+            {order.seats && order.seats.length > 0 && (
+              <>
+                <Divider />
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-ink">Tickets</h3>
+                    <span className="text-xs text-mute">
+                      {order.seats.length} {order.seats.length === 1 ? "seat" : "seats"}
+                    </span>
+                  </div>
+                  <div className="flex flex-col divide-y divide-line overflow-hidden rounded-xl border border-line">
+                    {order.seats.map((s) => {
+                      const { row, seat } = parseSeatLabel(s.seatLabel);
+                      return (
+                        <div key={s.seatId} className="flex items-center gap-3 px-4 py-3">
+                          <span className="inline-flex h-8 min-w-10 items-center justify-center rounded-md bg-accent-soft px-2 font-mono text-xs font-semibold tabular-nums text-accent">
+                            {s.seatLabel}
+                          </span>
+                          <span className="flex-1 text-sm font-medium text-ink">
+                            {seat ? `Row ${row} · Seat ${seat}` : row}
+                          </span>
+                          <span className="font-mono text-sm tabular-nums text-ink">
+                            ${parseFloat(s.price).toFixed(2)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
 
             <Divider />
 
