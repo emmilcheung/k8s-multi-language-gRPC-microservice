@@ -290,18 +290,28 @@ export default async function OrderDetailPage({ params }: Props) {
               >
                 View Admission Pass
               </Link>
-              <Link
-                href={`/orders/${order.id}/transfer`}
-                className={cn(buttonVariants({ variant: "outline", size: "default" }), "w-full")}
+              <button
+                type="button"
+                disabled
+                title="Transfer ships with Phase 7 backend"
+                className={cn(
+                  buttonVariants({ variant: "outline", size: "default" }),
+                  "w-full opacity-50 cursor-not-allowed"
+                )}
               >
-                Send to friend
-              </Link>
-              <Link
-                href={`/orders/${order.id}/refund`}
-                className={cn(buttonVariants({ variant: "ghost", size: "default" }), "w-full")}
+                Send to friend (coming soon)
+              </button>
+              <button
+                type="button"
+                disabled
+                title="Refund ships with Phase 7 backend"
+                className={cn(
+                  buttonVariants({ variant: "ghost", size: "default" }),
+                  "w-full opacity-50 cursor-not-allowed"
+                )}
               >
-                Request refund
-              </Link>
+                Request refund (coming soon)
+              </button>
             </CardContent>
           </Card>
         )}

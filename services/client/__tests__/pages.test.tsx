@@ -590,14 +590,12 @@ describe("OrderDetailPage", () => {
     const { default: OrderDetailPage } = await import("@/app/orders/[orderId]/page");
     render(await OrderDetailPage({ params: Promise.resolve({ orderId: "order-uuid-2" }) }));
 
-    expect(screen.getByRole("link", { name: /send to friend/i })).toHaveAttribute(
-      "href",
-      "/orders/order-uuid-2/transfer"
-    );
-    expect(screen.getByRole("link", { name: /request refund/i })).toHaveAttribute(
-      "href",
-      "/orders/order-uuid-2/refund"
-    );
+    const transferBtn = screen.getByRole("button", { name: /send to friend/i });
+    expect(transferBtn).toBeDisabled();
+    expect(transferBtn).toHaveAttribute("title", expect.stringMatching(/phase 7/i));
+    const refundBtn = screen.getByRole("button", { name: /request refund/i });
+    expect(refundBtn).toBeDisabled();
+    expect(refundBtn).toHaveAttribute("title", expect.stringMatching(/phase 7/i));
   });
 });
 
@@ -1146,7 +1144,9 @@ describe("AdmissionPage", () => {
     expect(screen.getByText(/this order has 2 passes/i)).toBeInTheDocument();
     expect(screen.getAllByText("A-12").length).toBeGreaterThan(0);
     expect(screen.getAllByText("A-13").length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: /transfer/i })).toHaveLength(2);
+    const transferBtns = screen.getAllByRole("button", { name: /transfer/i });
+    expect(transferBtns).toHaveLength(2);
+    transferBtns.forEach((btn) => expect(btn).toBeDisabled());
     expect(screen.queryByText(/qr token payload/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/signed-token/i)).not.toBeInTheDocument();
   });

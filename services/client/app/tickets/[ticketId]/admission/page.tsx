@@ -151,15 +151,20 @@ export default async function AdmissionPage({ params, searchParams }: Props) {
             >
               Download
             </a>
-            <Link
-              href={`/orders/${pass.orderId}/transfer`}
-              className={buttonVariants({ variant: "outline", size: "sm" })}
+            <button
+              type="button"
+              disabled
+              title="Native wallet passes ship with Phase 7 backend"
+              className={cn(
+                buttonVariants({ variant: "outline", size: "sm" }),
+                "opacity-50 cursor-not-allowed"
+              )}
             >
-              Add to Apple Wallet
-            </Link>
+              Add to Apple Wallet (coming soon)
+            </button>
           </div>
           <p className="text-right text-xs text-mute">
-            Wallet provisioning opens transfer handoff until native wallet passes are enabled.
+            Wallet provisioning lands with the Phase 7 transfer backend.
           </p>
         </div>
       </div>
@@ -256,13 +261,18 @@ export default async function AdmissionPage({ params, searchParams }: Props) {
                         {pass.status}
                       </Badge>
                     ) : null}
-                    <Link
-                      href={`/orders/${pass.orderId}/transfer?credentialId=${groupPass.id}`}
+                    <button
+                      type="button"
+                      disabled
                       aria-describedby={`transfer-note-${groupPass.id}`}
-                      className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-ink")}
+                      title="Transfer ships with Phase 7 backend"
+                      className={cn(
+                        buttonVariants({ variant: "ghost", size: "sm" }),
+                        "text-ink opacity-50 cursor-not-allowed"
+                      )}
                     >
                       Transfer
-                    </Link>
+                    </button>
                   </div>
                 ))}
               </div>
