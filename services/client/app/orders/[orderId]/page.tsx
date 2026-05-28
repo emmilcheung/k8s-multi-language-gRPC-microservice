@@ -113,6 +113,12 @@ export default async function OrderDetailPage({ params }: Props) {
 
   return (
     <div className="flex flex-col gap-8 max-w-4xl mx-auto">
+      {showHoldTimer && (
+        <div className="sticky top-14 z-30 md:hidden">
+          <HoldTimerRibbon expiresAt={order.expiresAt} tone="accent" />
+        </div>
+      )}
+
       {/* Back */}
       <Link
         href="/orders"
@@ -127,7 +133,9 @@ export default async function OrderDetailPage({ params }: Props) {
 
       {/* Hold Timer Ribbon (top-mounted for created/awaiting_payment) */}
       {showHoldTimer && (
-        <HoldTimerRibbon expiresAt={order.expiresAt} tone="accent" />
+        <div className="hidden md:block">
+          <HoldTimerRibbon expiresAt={order.expiresAt} tone="accent" />
+        </div>
       )}
 
       {/* Stepper */}

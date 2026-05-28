@@ -39,6 +39,13 @@ function resultTone(result?: ScannerResponse["result"]): string {
   return "border-bad/30 bg-bad-soft text-bad";
 }
 
+function shellTone(result?: ScannerResponse["result"]): string {
+  if (!result) return "bg-background";
+  if (result === "valid") return "bg-ok-soft/35";
+  if (result === "already_used" || result === "revoked") return "bg-warn-soft/35";
+  return "bg-bad-soft/30";
+}
+
 function resultMessage(result: ScannerResponse["result"]): string {
   switch (result) {
     case "valid":
@@ -269,7 +276,7 @@ export function ScannerClient({ eventId, eventTitle, venueName }: ScannerClientP
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-line bg-background">
+    <div className={cn("overflow-hidden rounded-2xl border border-line transition-colors", shellTone(result?.result))}>
       <div className="flex flex-col gap-3 border-b border-line bg-card px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -289,8 +296,8 @@ export function ScannerClient({ eventId, eventTitle, venueName }: ScannerClientP
       </div>
 
       <div className="grid lg:grid-cols-[minmax(0,1fr)_360px]">
-        <section className="flex flex-col items-center justify-center gap-6 bg-subtle/40 px-6 py-10">
-          <div className="flex h-[420px] w-full max-w-[520px] items-center justify-center rounded-[28px] border border-line bg-card p-8 shadow-[0_0_80px_rgba(58,79,255,0.08)]">
+        <section className="flex flex-col items-center justify-center gap-6 bg-subtle/40 px-4 py-6 sm:px-6 sm:py-10">
+          <div className="flex h-[280px] w-full max-w-[520px] items-center justify-center rounded-[28px] border border-line bg-card p-4 shadow-[0_0_80px_rgba(58,79,255,0.08)] sm:h-[420px] sm:p-8">
             <div className="relative h-full w-full overflow-hidden rounded-[22px] border border-line bg-ink">
               <video
                 ref={videoRef}

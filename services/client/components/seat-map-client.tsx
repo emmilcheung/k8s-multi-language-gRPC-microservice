@@ -334,7 +334,7 @@ export function SeatMapClient({ ticketId, planId, plan, basePrice, priceTiers = 
   // ── render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 pb-24 lg:pb-0">
       {/* Section tabs as filter chip row */}
       {sections.length > 1 && (
         <div className="flex gap-2 flex-wrap">
@@ -745,6 +745,43 @@ export function SeatMapClient({ ticketId, planId, plan, basePrice, priceTiers = 
                 </div>
               </CardContent>
             </Card>
+          )}
+        </div>
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-card/95 px-4 py-3 backdrop-blur lg:hidden">
+        <div className="mx-auto flex max-w-5xl items-center gap-3">
+          {isAutoAssignMode ? (
+            <>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] uppercase tracking-wider text-mute">Auto-assign</p>
+                <p className="text-sm text-ink">
+                  {autoQuantity} seat{autoQuantity > 1 ? "s" : ""} · ${(autoQuantity * activeSectionPrice).toFixed(2)}
+                </p>
+              </div>
+              <form action={autoFormAction}>
+                <input type="hidden" name="sectionId" value={activeSection?.id ?? ""} />
+                <input type="hidden" name="quantity" value={String(autoQuantity)} />
+                <Button type="submit" size="sm" disabled={autoPending || !activeSection}>
+                  {autoPending ? "Reserving…" : "Find seats"}
+                </Button>
+              </form>
+            </>
+          ) : (
+            <>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] uppercase tracking-wider text-mute">Selected</p>
+                <p className="text-sm text-ink">
+                  {selectedArray.length} seat{selectedArray.length === 1 ? "" : "s"} · ${totalPrice.toFixed(2)}
+                </p>
+              </div>
+              <form action={manualFormAction}>
+                <input type="hidden" name="seatIds" value={JSON.stringify(selectedArray)} />
+                <Button type="submit" size="sm" disabled={manualPending || selectedArray.length === 0}>
+                  {manualPending ? "Reserving…" : "Reserve"}
+                </Button>
+              </form>
+            </>
           )}
         </div>
       </div>

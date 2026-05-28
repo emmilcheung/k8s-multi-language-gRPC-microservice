@@ -37,9 +37,58 @@ export function PurchasePanel({
   }
 
   const priceCents = Math.round(parseFloat(ticket.price) * 100);
+  const renderPrimaryAction = () => {
+    if (purchaseGate) {
+      if (purchaseGate.label === "Already Reserved" && token) {
+        return (
+          <Link href="/orders" className="w-full">
+            <Button variant="outline" className="w-full">
+              View your orders
+            </Button>
+          </Link>
+        );
+      }
+      return (
+        <Button disabled variant="outline" className="w-full">
+          {purchaseGate.label}
+        </Button>
+      );
+    }
+
+    if (isSeated) {
+      if (token) {
+        return (
+          <Link href={`/tickets/${ticket.id}/seats`} className="w-full">
+            <Button variant="primary" className="w-full">
+              Pick seats
+            </Button>
+          </Link>
+        );
+      }
+      return (
+        <Link href="/auth/signin" className="w-full">
+          <Button variant="primary" className="w-full">
+            Sign in to Purchase
+          </Button>
+        </Link>
+      );
+    }
+
+    if (token) {
+      return <PurchaseButton ticketId={ticket.id} maxQuantity={gaMaxQuantity} />;
+    }
+    return (
+      <Link href="/auth/signin" className="w-full">
+        <Button variant="primary" className="w-full">
+          Sign in to Purchase
+        </Button>
+      </Link>
+    );
+  };
 
   return (
-    <aside className="lg:sticky lg:top-20 self-start">
+    <>
+      <aside className="hidden self-start lg:sticky lg:top-20 lg:block">
       <Card elev className="flex flex-col gap-4">
         {/* From price */}
         <div className="flex flex-col gap-1">
@@ -65,41 +114,7 @@ export function PurchasePanel({
 
         {/* Primary CTA */}
         <div className="flex flex-col gap-2">
-          {purchaseGate ? (
-            purchaseGate.label === "Already Reserved" && token ? (
-              <Link href="/orders" className="w-full">
-                <Button variant="outline" className="w-full">
-                  View your orders
-                </Button>
-              </Link>
-            ) : (
-              <Button disabled variant="outline" className="w-full">
-                {purchaseGate.label}
-              </Button>
-            )
-          ) : isSeated ? (
-            token ? (
-              <Link href={`/tickets/${ticket.id}/seats`} className="w-full">
-                <Button variant="primary" className="w-full">
-                  Pick seats
-                </Button>
-              </Link>
-            ) : (
-              <Link href="/auth/signin" className="w-full">
-                <Button variant="primary" className="w-full">
-                  Sign in to Purchase
-                </Button>
-              </Link>
-            )
-          ) : token ? (
-            <PurchaseButton ticketId={ticket.id} maxQuantity={gaMaxQuantity} />
-          ) : (
-            <Link href="/auth/signin" className="w-full">
-              <Button variant="primary" className="w-full">
-                Sign in to Purchase
-              </Button>
-            </Link>
-          )}
+          {renderPrimaryAction()}
 
           {purchaseGate && (
             <p className="text-xs text-mute text-center">
@@ -127,6 +142,19 @@ export function PurchasePanel({
           <span>Refund policy</span>
         </div>
       </Card>
-    </aside>
+      </aside>
+
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-card/95 px-4 py-3 backdrop-blur lg:hidden">
+        <div className="mx-auto flex max-w-6xl items-center gap-3">
+          <div className="shrink-0">
+            <div className="text-[11px] uppercase tracking-wider text-mute">From</div>
+            <div className="font-mono text-lg font-semibold text-ink tabular-nums">
+              ${(priceCents / 100).toFixed(2)}
+            </div>
+          </div>
+          <div className="min-w-0 flex-1">{renderPrimaryAction()}</div>
+        </div>
+      </div>
+    </>
   );
 }

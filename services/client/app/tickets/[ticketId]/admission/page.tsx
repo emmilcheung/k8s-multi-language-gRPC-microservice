@@ -15,6 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 import type { AdmissionPass, Order } from "@/lib/types";
+import { PassWakeLock } from "@/components/pass-wake-lock";
 
 interface Props {
   params: Promise<{ ticketId: string }>;
@@ -123,6 +124,8 @@ export default async function AdmissionPage({ params, searchParams }: Props) {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
+      <PassWakeLock />
+      {/* Browsers cannot set hardware brightness; keep pass contrast high via card styles only. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
           href={`/tickets/${ticketId}`}
@@ -163,6 +166,7 @@ export default async function AdmissionPage({ params, searchParams }: Props) {
 
       <div className="grid gap-6 lg:grid-cols-[440px_minmax(0,1fr)] lg:items-start">
         <PassCard
+          className="mx-auto w-full max-w-[440px]"
           pass={pass}
           qrDataUrl={qrDataUrl}
           eventDateLabel={eventDateLabel}

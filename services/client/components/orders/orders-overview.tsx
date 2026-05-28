@@ -198,7 +198,7 @@ function OrderRow({ order, tab }: { order: OrdersOverviewOrder; tab: OrdersTab }
   return (
     <Card className="overflow-hidden py-0">
       <div className="flex flex-col border-l border-l-transparent md:flex-row">
-        <div className="h-24 bg-[linear-gradient(135deg,oklch(0.35_0.08_280),oklch(0.58_0.18_285)_60%,oklch(0.69_0.16_330))] md:h-auto md:w-28" />
+        <div className="hidden h-24 bg-[linear-gradient(135deg,oklch(0.35_0.08_280),oklch(0.58_0.18_285)_60%,oklch(0.69_0.16_330))] md:block md:h-auto md:w-28" />
         <CardContent className="flex flex-1 flex-col gap-4 px-5 py-5 md:flex-row md:items-center md:justify-between">
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -251,7 +251,7 @@ function SavedEventRow({ item }: { item: SavedEventItem }) {
   return (
     <Card className="overflow-hidden py-0">
       <div className="flex flex-col border-l border-l-transparent md:flex-row">
-        <div className="h-24 bg-gradient-to-br from-accent/80 to-accent md:h-auto md:w-28" />
+        <div className="hidden h-24 bg-gradient-to-br from-accent/80 to-accent md:block md:h-auto md:w-28" />
         <CardContent className="flex flex-1 flex-col gap-4 px-5 py-5 md:flex-row md:items-center md:justify-between">
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <div className="space-y-1">
@@ -339,7 +339,7 @@ export function OrdersOverview({ orders, savedEvents = [] }: OrdersOverviewProps
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-4">
+      <div className="hidden gap-3 sm:grid lg:grid-cols-4">
         <Card size="sm">
           <CardContent>
             <Stat label="Upcoming" value={String(tabbedOrders.upcoming.length)} sub="active holds and ready passes" />
@@ -363,7 +363,7 @@ export function OrdersOverview({ orders, savedEvents = [] }: OrdersOverviewProps
       </div>
 
       <div className="border-b border-line">
-        <div role="tablist" aria-label="Orders tabs" className="flex flex-wrap gap-2">
+        <div role="tablist" aria-label="Orders tabs" className="flex gap-2 overflow-x-auto">
           {(["upcoming", "past", "saved", "refunded"] as OrdersTab[]).map((tab) => (
             <button
               key={tab}

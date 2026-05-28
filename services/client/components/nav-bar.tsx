@@ -14,6 +14,7 @@ import {
   LogIn,
   UserPlus,
   Settings,
+  Home,
 } from "lucide-react";
 
 interface NavBarProps {
@@ -43,8 +44,13 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
           </span>
         </Link>
 
-        {/* Nav */}
-        <nav className={cn("flex items-center gap-0.5 transition-opacity", mounted ? "opacity-100" : "opacity-0")}>
+        {/* Desktop nav */}
+        <nav
+          className={cn(
+            "hidden md:flex items-center gap-0.5 transition-opacity",
+            mounted ? "opacity-100" : "opacity-0"
+          )}
+        >
           {isLoggedIn ? (
             <>
               <Link
@@ -125,6 +131,47 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
           )}
         </nav>
       </div>
+
+      {/* Mobile bottom tab bar */}
+      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 backdrop-blur md:hidden">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-around px-2">
+          {isLoggedIn ? (
+            <>
+              <Link href="/" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+                <Home className="size-4" />
+                Browse
+              </Link>
+              <Link href="/tickets/new" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+                <Tag className="size-4" />
+                Sell
+              </Link>
+              <Link href="/orders" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+                <LayoutDashboard className="size-4" />
+                Orders
+              </Link>
+              <Link href="/settings" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+                <Settings className="size-4" />
+                Settings
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link href="/" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+                <Home className="size-4" />
+                Browse
+              </Link>
+              <Link href="/auth/signin" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+                <LogIn className="size-4" />
+                Sign in
+              </Link>
+              <Link href="/auth/signup" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+                <UserPlus className="size-4" />
+                Sign up
+              </Link>
+            </>
+          )}
+        </div>
+      </nav>
     </header>
   );
 }
