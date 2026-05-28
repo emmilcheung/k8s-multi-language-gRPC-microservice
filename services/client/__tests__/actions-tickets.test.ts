@@ -172,6 +172,24 @@ describe("ticket server actions", () => {
     expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1");
   });
 
+  it("createTicket allows empty price for deferred (section/seat) pricing", async () => {
+    executeMutationMock
+      .mockResolvedValueOnce({ createTicket: { id: "ticket-1", title: "Concert", price: 0, priceDecimal: "0.00" } })
+      .mockResolvedValueOnce({ createSeatingPlan: { id: "plan-1", status: "DRAFT", assignmentMode: "MANUAL" } })
+      .mockResolvedValueOnce({ updateTicket: { id: "ticket-1", title: "Concert", price: 0, priceDecimal: "0.00" } })
+      .mockResolvedValueOnce({ updateAttendancePolicy: { eventId: "ticket-1", requireQrForEntry: true, allowManualOverride: false } });
+
+    const fd = seatedTicketForm("Concert", "", "11111111-1111-1111-1111-111111111111");
+    fd.set("pricingMode", "section");
+
+    await createTicket({}, fd);
+
+    expect(executeMutationMock.mock.calls[0]?.[1]).toMatchObject({
+      input: { title: "Concert", price: 0, ticketType: "SEATED" },
+    });
+    expect(redirectMock).toHaveBeenCalledWith("/tickets/ticket-1");
+  });
+
   it("createTicket retries seated plan creation when ticket projection is delayed", async () => {
     executeMutationMock
       .mockResolvedValueOnce({ createTicket: { id: "ticket-1", title: "Concert", price: 1250, priceDecimal: "12.50" } })

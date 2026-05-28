@@ -11,6 +11,7 @@ import {
   TicketsBrowseDocument,
   CreateTicketDocument,
   UpdateTicketDocument,
+  UpdateSeatingPlanDocument,
   UpdateAttendancePolicyDocument,
 } from "@/lib/graphql/generated";
 import type { AvailabilitySnapshot, SeatingPlan, Ticket } from "@/lib/types";
@@ -199,9 +200,11 @@ export async function createTicket(
   const venueId = (formData.get("venueId") as string | null) ?? "";
   const maxSeatsPerOrder = parseOptionalPositiveInt(formData.get("maxSeatsPerOrder") as string | null);
 
+  // Section/seat pricing: price is configured in the plan editor, not on the ticket.
+  const deferredPricing = pricingMode === "seat" || pricingMode === "section";
+
   if (!title?.trim()) return { error: "Title is required." };
-  // Seat pricing: price is configured per-seat in the plan editor, not on the ticket.
-  if (pricingMode !== "seat") {
+  if (!deferredPricing) {
     if (!priceRaw || isNaN(priceNum) || priceNum <= 0) return { error: "Price must be a positive number." };
   }
 
@@ -239,8 +242,8 @@ export async function createTicket(
   }
 
   // Create the base ticket (without seatingPlanId initially)
-  // Seat pricing: send "0" as placeholder — actual price comes from per-seat plan configuration.
-  const effectivePrice = pricingMode === "seat" ? "0" : priceRaw;
+  // Deferred pricing (section/seat): send "0" placeholder — actual prices come from the plan editor.
+  const effectivePrice = deferredPricing ? "0" : priceRaw;
   const reqBody: Record<string, unknown> = { title: title.trim(), price: effectivePrice };
 
   if (ticketType === "GA") {
@@ -323,6 +326,10 @@ export async function updateTicket(
   const title = formData.get("title") as string;
   const priceRaw = (formData.get("price") as string)?.trim();
   const priceNum = parseFloat(priceRaw);
+  const pricingMode = (formData.get("pricingMode") as string | null) ?? "single";
+  const deferredPricing = pricingMode === "seat" || pricingMode === "section";
+  const seatingPlanId = (formData.get("seatingPlanId") as string | null)?.trim() || "";
+  const maxSeatsPerOrder = parseOptionalPositiveInt(formData.get("maxSeatsPerOrder") as string | null);
   const quota = parseOptionalPositiveInt(formData.get("quota") as string | null);
   const maxPerUser = parseOptionalPositiveInt(formData.get("maxPerUser") as string | null);
   let startsAt = (formData.get("startsAt") as string)?.trim() || "";
@@ -335,7 +342,9 @@ export async function updateTicket(
   const requireQrForEntry = parseRequireQrForEntry(formData.get("requireQrForEntry") as string | null);
 
   if (!title?.trim()) return { error: "Title is required." };
-  if (!priceRaw || isNaN(priceNum) || priceNum <= 0) return { error: "Price must be a positive number." };
+  if (!deferredPricing && (!priceRaw || isNaN(priceNum) || priceNum <= 0)) {
+    return { error: "Price must be a positive number." };
+  }
   if (maxPerUser !== undefined && quota !== undefined && maxPerUser > quota) {
     return { error: "Max per buyer cannot exceed the total capacity." };
   }
@@ -350,7 +359,7 @@ export async function updateTicket(
 
   const updateInput = {
     title: title.trim(),
-    price: Math.round(priceNum * 100),
+    ...(deferredPricing ? {} : { price: Math.round(priceNum * 100) }),
     ...(quota !== undefined && { quota }),
     ...(maxPerUser !== undefined && { maxPerUser }),
     event: {
@@ -370,6 +379,24 @@ export async function updateTicket(
     if (err instanceof ApiError && err.status === 401) redirect("/auth/signin");
     const msg = err instanceof Error ? err.message : "Failed to update ticket.";
     return { error: msg };
+  }
+
+  // pricingMode and maxSeatsPerOrder live on the SeatingPlan, not the Ticket — route them to the plan.
+  const planInput = {
+    ...(formData.get("pricingMode") ? { pricingMode } : {}),
+    ...(maxSeatsPerOrder !== undefined && { maxSeatsPerOrder }),
+  };
+  if (seatingPlanId && Object.keys(planInput).length > 0) {
+    try {
+      await executeMutation(UpdateSeatingPlanDocument, {
+        id: seatingPlanId,
+        input: planInput,
+      });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) redirect("/auth/signin");
+      const msg = err instanceof Error ? err.message : "Failed to update plan settings.";
+      return { error: msg };
+    }
   }
 
   const attendanceError = await upsertAttendanceSettings(ticketId, requireQrForEntry);

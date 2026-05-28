@@ -343,9 +343,10 @@ export default async function TicketDetailPage({ params }: Props) {
                       defaultTitle={ticket.title}
                       defaultPrice={ticket.price}
                       defaultQuota={ticket.quota}
-                      defaultMaxPerUser={ticket.maxPerUser}
+                      defaultMaxPerUser={attachedPlan?.maxSeatsPerOrder ?? ticket.maxPerUser}
                       defaultTicketType={toTicketFormType(ticket, attachedPlan)}
                       defaultVenueId={attachedPlan?.venueId ?? undefined}
+                      defaultSeatingPlanId={attachedPlan?.id ?? ticket.seatingPlanId ?? undefined}
                       defaultPricingMode={attachedPlan?.pricingMode}
                       defaultStartsAt={toDateTimeLocalInput(ticket.event?.startsAt)}
                       defaultEndsAt={toDateTimeLocalInput(ticket.event?.endsAt)}

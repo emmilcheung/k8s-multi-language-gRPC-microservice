@@ -8,11 +8,12 @@ import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ApiError, serverApi } from "@/lib/api";
-import { createPriceTier, fetchPriceTiers } from "@/app/actions/venues";
+import { createPriceTier, createSection, fetchPriceTiers } from "@/app/actions/venues";
 import { replaceInactivePlan } from "@/app/actions/tickets";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { SeatingPlanCanvas } from "@/components/seating-plan-canvas";
+import { SectionForm } from "@/components/section-form";
 import { ActivatePlanButton } from "@/components/activate-plan-button";
 import { DeactivatePlanButton } from "@/components/deactivate-plan-button";
 import { ReplacePlanButton } from "@/components/replace-plan-button";
@@ -100,6 +101,10 @@ export default async function TicketPlanDetailPage({ params }: Props) {
     prev: PlanState,
     formData: FormData
   ) => Promise<PlanState>;
+  const addSectionAction = createSection.bind(null, planId, "", ticketId) as (
+    prev: PlanState,
+    formData: FormData
+  ) => Promise<PlanState>;
   const replacePlanAction = replaceInactivePlan.bind(null, ticketId, planId);
 
   const isDraft = plan.status === "draft";
@@ -173,9 +178,25 @@ export default async function TicketPlanDetailPage({ params }: Props) {
         )}
       </div>
 
-      {/* Canvas for draft plans */}
+      {/* Canvas for draft plans — interactive once at least one section exists. */}
+      {isDraft && sections.length > 0 && (
+        <SeatingPlanCanvas planId={planId} sections={sections} isDraft={isDraft} tiers={tiers} />
+      )}
+
+      {/* Draft with no sections yet: prompt to add the first one. */}
+      {isDraft && sections.length === 0 && (
+        <div className="glass rounded-2xl p-8 flex flex-col items-center gap-2 text-center border border-line/70">
+          <Grid3X3 className="w-10 h-10 text-mute" />
+          <p className="font-semibold text-sm">No sections yet</p>
+          <p className="text-sm text-mute max-w-sm">
+            Add a section below to start arranging the seating canvas.
+          </p>
+        </div>
+      )}
+
+      {/* Add section form — draft plans only. */}
       {isDraft && (
-        <SeatingPlanCanvas planId={planId} sections={sections} isDraft={isDraft} />
+        <SectionForm action={addSectionAction} tiers={tiers} />
       )}
 
       {/* Sections */}

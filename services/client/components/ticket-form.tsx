@@ -49,6 +49,7 @@ interface TicketFormProps {
   defaultMaxPerUser?: number;
   defaultTicketType?: TicketType;
    defaultVenueId?: string;
+   defaultSeatingPlanId?: string;
    defaultPricingMode?: "single" | "section" | "seat";
    defaultStartsAt?: string;
    defaultEndsAt?: string;
@@ -71,6 +72,7 @@ interface FormState {
   quota?: number;
   maxPerUser?: number;
   venueId?: string; // Phase 3: use venueId instead of seatingPlanId
+  seatingPlanId?: string; // existing attached plan (edit mode) — target for pricingMode updates
   pricingMode?: "single" | "section" | "seat";
   sectionPrices?: Record<string, string>;
   totalCapacity?: number;
@@ -133,6 +135,7 @@ export function TicketForm({
   defaultMaxPerUser,
   defaultTicketType,
   defaultVenueId,
+  defaultSeatingPlanId,
   defaultPricingMode,
   defaultStartsAt = "",
   defaultEndsAt = "",
@@ -154,6 +157,7 @@ export function TicketForm({
     quota: defaultQuota,
     maxPerUser: defaultMaxPerUser,
     venueId: defaultVenueId,
+    seatingPlanId: defaultSeatingPlanId,
     pricingMode: defaultPricingMode,
     startsAt: defaultStartsAt,
     endsAt: defaultEndsAt,
@@ -263,6 +267,8 @@ export function TicketForm({
       } else if (ticketType?.startsWith("SEATED")) {
         // Phase 3: use venueId instead of seatingPlanId
         if (formData.venueId) formDataObj.append("venueId", formData.venueId);
+        // Existing attached plan (edit mode) — lets updateTicket route pricingMode to the plan.
+        if (formData.seatingPlanId) formDataObj.append("seatingPlanId", formData.seatingPlanId);
         if (formData.pricingMode) formDataObj.append("pricingMode", formData.pricingMode);
         if (formData.maxPerUser) formDataObj.append("maxSeatsPerOrder", String(formData.maxPerUser));
         if (formData.pricingMode === "section" && formData.sectionPrices) {
@@ -612,7 +618,7 @@ export function TicketForm({
             <Alert>
               <AlertCircle />
               <AlertDescription>
-                Section pricing will be configured after the plan is created. For now, use Single Price.
+                Section prices are set in the Seating Plan editor after the ticket is created.
               </AlertDescription>
             </Alert>
           )}
