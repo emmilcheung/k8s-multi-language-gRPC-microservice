@@ -82,6 +82,9 @@ export default async function AdmissionPage({ params, searchParams }: Props) {
     orderId: raw.orderId,
     eventId: raw.eventId,
     status: raw.status as "ISSUED" | "USED" | "REVOKED" | "EXPIRED",
+    transferState: "NONE",
+    transferredTo: undefined,
+    transferredAt: undefined,
     issuedAt: raw.issuedAt,
     usedAt: raw.usedAt ?? undefined,
     qrToken: raw.qrToken ?? undefined,
@@ -249,11 +252,10 @@ export default async function AdmissionPage({ params, searchParams }: Props) {
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-ink">{groupPass.label}</p>
                       <p className="text-xs text-mute">{groupPass.summary}</p>
-                      <p
-                        id={`transfer-note-${groupPass.id}`}
-                        className="mt-1 text-xs text-mute"
-                      >
-                        Transfer available in Phase 7.
+                      <p id={`transfer-note-${groupPass.id}`} className="mt-1 text-xs text-mute">
+                       {pass.transferState === "PENDING"
+                         ? "Transfer pending recipient acceptance."
+                         : "Send this pass to a friend."}
                       </p>
                     </div>
                     {groupPass.showStatus ? (
@@ -261,18 +263,13 @@ export default async function AdmissionPage({ params, searchParams }: Props) {
                         {pass.status}
                       </Badge>
                     ) : null}
-                    <button
-                      type="button"
-                      disabled
+                    <Link
+                      href={`/orders/${orderId ?? pass.orderId}/transfer`}
                       aria-describedby={`transfer-note-${groupPass.id}`}
-                      title="Transfer ships with Phase 7 backend"
-                      className={cn(
-                        buttonVariants({ variant: "ghost", size: "sm" }),
-                        "text-ink opacity-50 cursor-not-allowed"
-                      )}
+                      className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-ink")}
                     >
                       Transfer
-                    </button>
+                    </Link>
                   </div>
                 ))}
               </div>

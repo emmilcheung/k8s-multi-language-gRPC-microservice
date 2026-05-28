@@ -139,12 +139,43 @@ describe("order server actions", () => {
   });
 
   it("initiateTransfer requires recipient email", async () => {
-    const result = await initiateTransfer("order-9", {}, new FormData());
+    const formData = new FormData();
+    formData.set("credentialId", "cred-9");
+    const result = await initiateTransfer("order-9", {}, formData);
     expect(result).toEqual({ error: "Recipient email is required." });
+  });
+
+  it("initiateTransfer calls GraphQL transfer mutation", async () => {
+    executeMutationMock.mockResolvedValue({
+      transferAdmissionCredential: { pendingTransferId: "xfer-1" },
+    });
+    const formData = new FormData();
+    formData.set("credentialId", "cred-1");
+    formData.set("recipient", "friend@example.com");
+
+    const result = await initiateTransfer("order-9", {}, formData);
+    expect(result).toEqual({ success: "Transfer request sent." });
+    expect(executeMutationMock).toHaveBeenCalledWith(expect.anything(), {
+      input: { credentialId: "cred-1", recipientEmail: "friend@example.com" },
+    });
   });
 
   it("requestRefund requires reason", async () => {
     const result = await requestRefund("order-9", {}, new FormData());
     expect(result).toEqual({ error: "Refund reason is required." });
+  });
+
+  it("requestRefund calls GraphQL refund mutation", async () => {
+    executeMutationMock.mockResolvedValue({
+      requestRefund: { refundId: "refund-1", status: "REQUESTED" },
+    });
+    const formData = new FormData();
+    formData.set("reason", "Unable to attend");
+
+    const result = await requestRefund("order-9", {}, formData);
+    expect(result).toEqual({ success: "Refund request submitted." });
+    expect(executeMutationMock).toHaveBeenCalledWith(expect.anything(), {
+      input: { orderId: "order-9", reason: "Unable to attend" },
+    });
   });
 });

@@ -257,6 +257,9 @@ export interface AdmissionPass {
   orderId: string;
   eventId: string;
   status: "ISSUED" | "USED" | "REVOKED" | "EXPIRED";
+  transferState?: "NONE" | "PENDING" | "ACCEPTED" | "RECALLED";
+  transferredTo?: string;
+  transferredAt?: string;
   issuedAt: string;
   usedAt?: string;
   qrToken?: string;

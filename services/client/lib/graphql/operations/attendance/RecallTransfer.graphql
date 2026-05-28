@@ -1,0 +1,8 @@
+mutation RecallTransfer($credentialId: ID!) {
+  recallTransfer(credentialId: $credentialId) {
+    id
+    transferState
+    transferredTo
+    transferredAt
+  }
+}

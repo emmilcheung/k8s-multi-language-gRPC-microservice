@@ -36,6 +36,9 @@ type AdmissionPass
   issuedAt: String!
   usedAt: String
   qrToken: String
+  transferState: TransferState!
+  transferredTo: ID
+  transferredAt: String
 }
 
 enum AssignmentMode
@@ -244,11 +247,15 @@ type Mutation
   validateScan(token: String!): ScanValidationResult! @join__field(graph: ATTENDANCE)
   recordCheckin(input: RecordCheckinInput!): EventCheckin! @join__field(graph: ATTENDANCE)
   recordCheckinByUserId(input: RecordCheckinByUserIdInput!): EventCheckin! @join__field(graph: ATTENDANCE)
+  transferAdmissionCredential(input: TransferAdmissionCredentialInput!): TransferResult! @join__field(graph: ATTENDANCE)
+  recallTransfer(credentialId: ID!): AdmissionPass! @join__field(graph: ATTENDANCE)
+  acceptTransfer(pendingTransferId: ID!): AdmissionPass! @join__field(graph: ATTENDANCE)
   revokeSession(id: ID!): Boolean! @join__field(graph: AUTH)
   createOrder(input: CreateOrderInput!): Order! @join__field(graph: ORDERS)
   cancelOrder(id: ID!): Order! @join__field(graph: ORDERS)
   createSeatedOrder(input: CreateSeatedOrderInput!): Order! @join__field(graph: ORDERS)
   createPayment(input: CreatePaymentInput!): Payment! @join__field(graph: PAYMENTS)
+  requestRefund(input: RequestRefundInput!): RefundResult! @join__field(graph: PAYMENTS)
   setDefaultPaymentMethod(id: ID!): PaymentMethod! @join__field(graph: PAYMENTS)
   deletePaymentMethod(id: ID!): Boolean! @join__field(graph: PAYMENTS)
   registerPaymentMethod(input: RegisterPaymentMethodInput!): PaymentMethod! @join__field(graph: PAYMENTS)
@@ -378,6 +385,7 @@ type Query
   userLookup(email: String, id: ID): UserLookupResult @join__field(graph: AUTH)
   order(id: ID!): Order @join__field(graph: ORDERS)
   orders: [Order!]! @join__field(graph: ORDERS)
+  refundEligibility(orderId: ID!): RefundEligibility @join__field(graph: ORDERS)
   payment(id: ID!): Payment @join__field(graph: PAYMENTS)
   tickets: [Ticket!]! @join__field(graph: TICKETS)
   ticketsConnection(filter: TicketFilter, first: Int, after: String): TicketConnection! @join__field(graph: TICKETS)
@@ -403,6 +411,33 @@ input RecordCheckinInput
   source: CheckinSource!
 }
 
+type RefundEligibility
+  @join__type(graph: ORDERS)
+{
+  orderId: ID!
+  eligible: Boolean!
+  reason: String
+  refundableAmount: Int!
+  cutoffAt: String
+}
+
+type RefundResult
+  @join__type(graph: PAYMENTS)
+{
+  payment: Payment!
+  refundId: ID!
+  status: RefundStatus!
+}
+
+enum RefundStatus
+  @join__type(graph: PAYMENTS)
+{
+  REQUESTED @join__enumValue(graph: PAYMENTS)
+  PROCESSING @join__enumValue(graph: PAYMENTS)
+  COMPLETED @join__enumValue(graph: PAYMENTS)
+  FAILED @join__enumValue(graph: PAYMENTS)
+}
+
 input RegisterPaymentMethodInput
   @join__type(graph: PAYMENTS)
 {
@@ -410,6 +445,13 @@ input RegisterPaymentMethodInput
   setAsDefault: Boolean
   consentAccepted: Boolean!
   consentVersion: String!
+}
+
+input RequestRefundInput
+  @join__type(graph: PAYMENTS)
+{
+  orderId: ID!
+  reason: String!
 }
 
 type SavedEventConnection
@@ -569,6 +611,29 @@ enum TicketType
 {
   GENERAL_ADMISSION @join__enumValue(graph: TICKETS)
   SEATED @join__enumValue(graph: TICKETS)
+}
+
+input TransferAdmissionCredentialInput
+  @join__type(graph: ATTENDANCE)
+{
+  credentialId: ID!
+  recipientEmail: String!
+}
+
+type TransferResult
+  @join__type(graph: ATTENDANCE)
+{
+  credential: AdmissionPass!
+  pendingTransferId: ID!
+}
+
+enum TransferState
+  @join__type(graph: ATTENDANCE)
+{
+  NONE @join__enumValue(graph: ATTENDANCE)
+  PENDING @join__enumValue(graph: ATTENDANCE)
+  ACCEPTED @join__enumValue(graph: ATTENDANCE)
+  RECALLED @join__enumValue(graph: ATTENDANCE)
 }
 
 input UpdateAttendancePolicyInput

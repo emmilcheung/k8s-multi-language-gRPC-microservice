@@ -1,0 +1,12 @@
+mutation RequestRefund($input: RequestRefundInput!) {
+  requestRefund(input: $input) {
+    refundId
+    status
+    payment {
+      id
+      orderId
+      status
+      amount
+    }
+  }
+}

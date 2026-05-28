@@ -1,0 +1,8 @@
+mutation AcceptTransfer($pendingTransferId: ID!) {
+  acceptTransfer(pendingTransferId: $pendingTransferId) {
+    id
+    transferState
+    transferredTo
+    transferredAt
+  }
+}

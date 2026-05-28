@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PurchaseButton } from "@/components/purchase-button";
 import { EventCountdown } from "./event-countdown";
-import { MapPin } from "lucide-react";
+import { Check, MapPin } from "lucide-react";
 import type { Ticket } from "@/lib/types";
 
 interface PurchasePanelProps {
@@ -60,7 +60,7 @@ export function PurchasePanel({
         return (
           <Link href={`/tickets/${ticket.id}/seats`} className="w-full">
             <Button variant="primary" className="w-full">
-              Pick seats
+              Continue to seat map
             </Button>
           </Link>
         );
@@ -68,7 +68,7 @@ export function PurchasePanel({
       return (
         <Link href="/auth/signin" className="w-full">
           <Button variant="primary" className="w-full">
-            Sign in to Purchase
+            Sign in to continue
           </Button>
         </Link>
       );
@@ -92,10 +92,11 @@ export function PurchasePanel({
       <Card elev className="flex flex-col gap-4">
         {/* From price */}
         <div className="flex flex-col gap-1">
-          <div className="text-xs text-mute">from</div>
-          <div className="text-2xl font-mono tabular-nums text-ink font-medium">
+          <div className="text-[11px] uppercase tracking-[0.08em] text-mute">from</div>
+          <div className="text-3xl font-mono tabular-nums text-ink font-semibold">
             ${(priceCents / 100).toFixed(2)}
           </div>
+          <div className="text-xs text-mute">+ fees at checkout</div>
         </div>
 
         {/* Ticket type badges */}
@@ -109,6 +110,9 @@ export function PurchasePanel({
               <MapPin className="w-3 h-3 mr-1" />
               Seated
             </Badge>
+          )}
+          {(ticket.available ?? 0) > 0 && (
+            <Badge tone="warn" dot>{ticket.available} left</Badge>
           )}
         </div>
 
@@ -136,10 +140,10 @@ export function PurchasePanel({
         )}
 
         {/* Trust strip */}
-        <div className="text-xs text-mute flex flex-col gap-1 pt-4 border-t border-line">
-          <span>Secure checkout</span>
-          <span>Verified seller</span>
-          <span>Refund policy</span>
+        <div className="text-xs text-mute flex flex-col gap-1.5 pt-4 border-t border-line">
+          <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-ok" />Mobile entry</span>
+          <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-ok" />Refund-protected</span>
+          <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-ok" />Transferable</span>
         </div>
       </Card>
       </aside>

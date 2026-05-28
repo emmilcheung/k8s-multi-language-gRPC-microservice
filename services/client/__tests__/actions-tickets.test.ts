@@ -6,6 +6,7 @@ const authHeadersMock = vi.fn();
 const cookiesMock = vi.fn();
 const executeQueryMock = vi.fn();
 const executeMutationMock = vi.fn();
+const serverApiMock = vi.fn();
 
 vi.mock("next/cache", () => ({
   revalidatePath: (...args: unknown[]) => revalidatePathMock(...args),
@@ -28,6 +29,14 @@ vi.mock("@/lib/graphql/execute", () => ({
   executeQuery: (...args: unknown[]) => executeQueryMock(...args),
   executeMutation: (...args: unknown[]) => executeMutationMock(...args),
 }));
+
+vi.mock("@/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+  return {
+    ...actual,
+    serverApi: (...args: unknown[]) => serverApiMock(...args),
+  };
+});
 
 import {
   createTicket,
@@ -327,6 +336,33 @@ describe("ticket server actions", () => {
     const page = await fetchTicketPageViaGraphQL(null);
 
     expect(page.tickets).toEqual([]);
+  });
+
+  it("fetchTicketPageViaGraphQL falls back to public REST list when GraphQL requires auth", async () => {
+    executeQueryMock.mockRejectedValueOnce(new Error("UNAUTHENTICATED"));
+    serverApiMock.mockResolvedValueOnce([
+      {
+        id: "rest-1",
+        title: "Public Ticket",
+        price: "19.00",
+        available: 42,
+        ticketType: "GA",
+        seatingPlanId: "",
+        event: {
+          title: "Public Event",
+          startsAt: "2026-12-01T19:00:00Z",
+          venueName: "Main Hall",
+        },
+      },
+    ]);
+
+    const page = await fetchTicketPageViaGraphQL(null);
+
+    expect(serverApiMock).toHaveBeenCalledWith("/api/tickets?limit=20&available=true");
+    expect(page.tickets).toHaveLength(1);
+    expect(page.tickets[0]?.id).toBe("rest-1");
+    expect(page.hasMore).toBe(false);
+    expect(page.cursor).toBe("rest-1");
   });
 
   it("updateTicket sends event metadata via GraphQL and returns a refresh signal on success", async () => {

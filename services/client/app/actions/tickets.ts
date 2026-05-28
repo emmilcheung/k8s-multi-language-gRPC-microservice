@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { base, authHeaders } from "@/lib/server-utils";
 import { executeQuery, executeMutation } from "@/lib/graphql/execute";
-import { ApiError } from "@/lib/api";
+import { ApiError, serverApi } from "@/lib/api";
 import {
   TicketsBrowseDocument,
   CreateTicketDocument,
@@ -57,6 +57,16 @@ async function isPubliclyAvailableSeatedTicket(planId: string): Promise<boolean>
  * exposing the internal API URL or auth cookie logic to the browser.
  */
 export async function fetchTicketPageViaGraphQL(after: string | null): Promise<TicketPage> {
+  const applySeatedVisibility = async (tickets: Ticket[]): Promise<Ticket[]> => {
+    const visible = await Promise.all(
+      tickets.map(async (ticket) => {
+        if (!ticket.seatingPlanId) return ticket;
+        return (await isPubliclyAvailableSeatedTicket(ticket.seatingPlanId)) ? ticket : null;
+      })
+    );
+    return visible.filter((ticket): ticket is Ticket => ticket !== null);
+  };
+
   try {
     const cookieStore = await cookies();
     const cookieHeader = cookieStore.toString();
@@ -85,26 +95,27 @@ export async function fetchTicketPageViaGraphQL(after: string | null): Promise<T
       } : undefined,
     }));
 
-    const visibleTickets = (
-      await Promise.all(
-        gqlTickets.map(async (ticket) => {
-          if (!ticket.seatingPlanId) return ticket;
-          return (await isPubliclyAvailableSeatedTicket(ticket.seatingPlanId)) ? ticket : null;
-        })
-      )
-    ).filter((ticket): ticket is (typeof gqlTickets)[number] => ticket !== null);
-
-    const cursor = data.ticketsConnection.pageInfo.endCursor ?? null;
-    const hasMore = data.ticketsConnection.pageInfo.hasNextPage;
-
+    const visibleTickets = await applySeatedVisibility(gqlTickets as unknown as Ticket[]);
     return {
       tickets: visibleTickets as unknown as Ticket[],
-      cursor,
-      hasMore,
+      cursor: data.ticketsConnection.pageInfo.endCursor ?? null,
+      hasMore: data.ticketsConnection.pageInfo.hasNextPage,
     };
   } catch {
-    // Non-fatal: return empty page so the UI degrades gracefully.
-    return { tickets: [], cursor: null, hasMore: false };
+    try {
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE), available: "true" });
+      if (after) params.set("after", after);
+      const restTickets = await serverApi<Ticket[]>(`/api/tickets?${params.toString()}`);
+      const visibleTickets = await applySeatedVisibility(restTickets);
+      return {
+        tickets: visibleTickets,
+        cursor: restTickets.at(-1)?.id ?? null,
+        hasMore: restTickets.length === PAGE_SIZE,
+      };
+    } catch {
+      // Non-fatal: return empty page so the UI degrades gracefully.
+      return { tickets: [], cursor: null, hasMore: false };
+    }
   }
 }
 
