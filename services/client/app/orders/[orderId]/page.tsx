@@ -282,6 +282,18 @@ export default async function OrderDetailPage({ params }: Props) {
               >
                 View Admission Pass
               </Link>
+              <Link
+                href={`/orders/${order.id}/transfer`}
+                className={cn(buttonVariants({ variant: "outline", size: "default" }), "w-full")}
+              >
+                Send to friend
+              </Link>
+              <Link
+                href={`/orders/${order.id}/refund`}
+                className={cn(buttonVariants({ variant: "ghost", size: "default" }), "w-full")}
+              >
+                Request refund
+              </Link>
             </CardContent>
           </Card>
         )}

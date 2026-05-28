@@ -27,6 +27,8 @@ import {
   createAutoAssignSeatedOrder,
   createManualSeatedOrder,
   createOrder,
+  initiateTransfer,
+  requestRefund,
   submitPayment,
 } from "@/app/actions/orders";
 
@@ -134,5 +136,15 @@ describe("order server actions", () => {
 
     expect(executeMutationMock).toHaveBeenCalledTimes(1);
     expect(redirectMock).toHaveBeenCalledWith("/orders/order-5");
+  });
+
+  it("initiateTransfer requires recipient email", async () => {
+    const result = await initiateTransfer("order-9", {}, new FormData());
+    expect(result).toEqual({ error: "Recipient email is required." });
+  });
+
+  it("requestRefund requires reason", async () => {
+    const result = await requestRefund("order-9", {}, new FormData());
+    expect(result).toEqual({ error: "Refund reason is required." });
   });
 });

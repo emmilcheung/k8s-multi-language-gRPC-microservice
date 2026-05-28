@@ -137,23 +137,26 @@ export default async function AdmissionPage({ params, searchParams }: Props) {
 
         <div className="flex flex-col items-end gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              disabled
-              className={buttonVariants({ variant: "outline", size: "sm" })}
+            <a
+              href={qrDataUrl ?? undefined}
+              download={qrDataUrl ? `pass-${pass.id}.svg` : undefined}
+              aria-disabled={!qrDataUrl}
+              className={cn(
+                buttonVariants({ variant: "outline", size: "sm" }),
+                !qrDataUrl && "pointer-events-none opacity-50"
+              )}
             >
               Download
-            </button>
-            <button
-              type="button"
-              disabled
+            </a>
+            <Link
+              href={`/orders/${pass.orderId}/transfer`}
               className={buttonVariants({ variant: "outline", size: "sm" })}
             >
               Add to Apple Wallet
-            </button>
+            </Link>
           </div>
           <p className="text-right text-xs text-mute">
-            Wallet delivery and pass downloads are not enabled yet.
+            Wallet provisioning opens transfer handoff until native wallet passes are enabled.
           </p>
         </div>
       </div>
@@ -215,7 +218,7 @@ export default async function AdmissionPage({ params, searchParams }: Props) {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-base font-semibold text-ink">This order has {passCount} passes</h2>
-                  <p className="text-sm text-mute">Seat-level transfer status lands in Phase 7.</p>
+                  <p className="text-sm text-mute">Transfer each pass to a friend from this list.</p>
                 </div>
                 <Badge tone={statusTone(pass.status)} dot>
                   {pass.status}
@@ -249,14 +252,13 @@ export default async function AdmissionPage({ params, searchParams }: Props) {
                         {pass.status}
                       </Badge>
                     ) : null}
-                    <button
-                      type="button"
-                      disabled
+                    <Link
+                      href={`/orders/${pass.orderId}/transfer?credentialId=${groupPass.id}`}
                       aria-describedby={`transfer-note-${groupPass.id}`}
                       className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-ink")}
                     >
                       Transfer
-                    </button>
+                    </Link>
                   </div>
                 ))}
               </div>

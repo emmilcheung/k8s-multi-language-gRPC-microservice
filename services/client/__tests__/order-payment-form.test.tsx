@@ -43,6 +43,14 @@ describe("OrderPaymentForm", () => {
     expect(screen.getByText(/loading payment form/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /pay now/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /cancel order/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /send to friend instead/i })).toHaveAttribute(
+      "href",
+      "/orders/ord-1/transfer"
+    );
+    expect(screen.getByRole("link", { name: /request refund/i })).toHaveAttribute(
+      "href",
+      "/orders/ord-1/refund"
+    );
     expect(container.querySelector("#card-element")).not.toBeNull();
   });
 

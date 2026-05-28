@@ -3,6 +3,7 @@
 // Shows saved payment methods (default pre-selected) with a fallback to entering a new card.
 
 import { useEffect, useState, useRef } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Lock, AlertCircle, CreditCard, Loader2, X, ChevronDown, Plus } from "lucide-react";
 import { cancelOrder, submitPayment } from "@/app/actions/orders";
@@ -686,6 +687,18 @@ export function OrderPaymentForm({
               </>
             )}
           </button>
+          <Link
+            href={`/orders/${orderId}/transfer`}
+            className="w-full text-center text-xs text-mute underline-offset-2 hover:underline"
+          >
+            Send to friend instead
+          </Link>
+          <Link
+            href={`/orders/${orderId}/refund`}
+            className="w-full text-center text-xs text-mute underline-offset-2 hover:underline"
+          >
+            Request refund
+          </Link>
         </div>
       </CardContent>
     </Card>

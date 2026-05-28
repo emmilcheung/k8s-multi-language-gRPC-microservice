@@ -540,6 +540,91 @@ describe("OrderDetailPage", () => {
 
     expect(redirect).toHaveBeenCalledWith("/checkout/recover?orderId=order-uuid-1");
   });
+
+  it("shows transfer and refund links for completed orders", async () => {
+    executeQueryMock.mockResolvedValue({
+      order: {
+        id: "order-uuid-2",
+        userId: "buyer-uuid",
+        status: "COMPLETE",
+        quantity: 1,
+        expiresAt: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        ticket: {
+          id: "ticket-uuid-2",
+          title: "Concert Night",
+          price: "49.99",
+        },
+      },
+      currentUser: {
+        id: "buyer-uuid",
+        paymentMethods: [],
+      },
+    });
+
+    const { default: OrderDetailPage } = await import("@/app/orders/[orderId]/page");
+    render(await OrderDetailPage({ params: Promise.resolve({ orderId: "order-uuid-2" }) }));
+
+    expect(screen.getByRole("link", { name: /send to friend/i })).toHaveAttribute(
+      "href",
+      "/orders/order-uuid-2/transfer"
+    );
+    expect(screen.getByRole("link", { name: /request refund/i })).toHaveAttribute(
+      "href",
+      "/orders/order-uuid-2/refund"
+    );
+  });
+});
+
+describe("TransferRefundPages", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    executeQueryMock.mockReset();
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+    cookieStoreMock.toString = vi.fn(() => "token=buyer");
+  });
+
+  it("renders transfer page for authenticated users", async () => {
+    executeQueryMock.mockResolvedValue({
+      order: {
+        id: "order-uuid-3",
+        userId: "buyer-uuid",
+        status: "COMPLETE",
+        quantity: 1,
+        expiresAt: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        ticket: { id: "ticket-uuid-3", title: "Concert", price: "49.99" },
+      },
+      currentUser: { id: "buyer-uuid", paymentMethods: [] },
+    });
+
+    const { default: TransferPage } = await import("@/app/orders/[orderId]/transfer/page");
+    render(await TransferPage({ params: Promise.resolve({ orderId: "order-uuid-3" }) }));
+
+    expect(screen.getByRole("heading", { name: /transfer pass/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/recipient email/i)).toBeInTheDocument();
+  });
+
+  it("renders refund page for authenticated users", async () => {
+    executeQueryMock.mockResolvedValue({
+      order: {
+        id: "order-uuid-4",
+        userId: "buyer-uuid",
+        status: "COMPLETE",
+        quantity: 1,
+        expiresAt: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        ticket: { id: "ticket-uuid-4", title: "Concert", price: "49.99" },
+      },
+      currentUser: { id: "buyer-uuid", paymentMethods: [] },
+    });
+
+    const { default: RefundPage } = await import("@/app/orders/[orderId]/refund/page");
+    render(await RefundPage({ params: Promise.resolve({ orderId: "order-uuid-4" }) }));
+
+    expect(screen.getByRole("heading", { name: /request refund/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/refund reason/i)).toBeInTheDocument();
+  });
 });
 
 // ── TicketDetailPage ──────────────────────────────────────────────────────────
@@ -997,7 +1082,7 @@ describe("AdmissionPage", () => {
     expect(screen.getByText(/this order has 2 passes/i)).toBeInTheDocument();
     expect(screen.getAllByText("A-12").length).toBeGreaterThan(0);
     expect(screen.getAllByText("A-13").length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("button", { name: /transfer/i })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: /transfer/i })).toHaveLength(2);
     expect(screen.queryByText(/qr token payload/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/signed-token/i)).not.toBeInTheDocument();
   });

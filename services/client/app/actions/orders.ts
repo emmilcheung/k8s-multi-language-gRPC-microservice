@@ -166,3 +166,35 @@ export async function createAutoAssignSeatedOrder(
     return { error: error instanceof Error ? error.message : "Failed to create auto-assign order." };
   }
 }
+
+export async function initiateTransfer(
+  orderId: string,
+  _prev: OrderState,
+  formData: FormData
+): Promise<OrderState> {
+  void orderId;
+  const recipient = String(formData.get("recipient") ?? "").trim();
+  if (!recipient) {
+    return { error: "Recipient email is required." };
+  }
+  return {
+    error:
+      "Transfer API is not available in this environment yet. Your transfer request was not sent.",
+  };
+}
+
+export async function requestRefund(
+  orderId: string,
+  _prev: OrderState,
+  formData: FormData
+): Promise<OrderState> {
+  void orderId;
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (!reason) {
+    return { error: "Refund reason is required." };
+  }
+  return {
+    error:
+      "Refund API is not available in this environment yet. Your refund request was not sent.",
+  };
+}

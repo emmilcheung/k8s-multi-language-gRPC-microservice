@@ -73,4 +73,17 @@ describe("OrdersOverview", () => {
 
     expect(screen.getByRole("heading", { level: 3, name: /order fallback title/i })).toBeInTheDocument();
   });
+
+  it("switches to the saved tab from the empty-state CTA", async () => {
+    const user = userEvent.setup();
+
+    render(<OrdersOverview orders={[]} savedEvents={[]} />);
+
+    expect(screen.getByRole("tab", { name: /upcoming/i })).toHaveAttribute("aria-selected", "true");
+
+    await user.click(screen.getByRole("button", { name: /view saved events/i }));
+
+    expect(screen.getByRole("tab", { name: /saved/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText(/no saved events yet/i)).toBeInTheDocument();
+  });
 });

@@ -827,6 +827,24 @@ test.describe("orders", () => {
     await expect(page.getByText(/no saved events yet/i)).toBeVisible({ timeout: 10000 });
   });
 
+  test("completed order exposes transfer and refund action routes", async ({ page }) => {
+    await setupPurchase(page);
+    const orderUrl = page.url();
+
+    await page.goto(orderUrl);
+    await expect(page.getByRole("link", { name: /send to friend/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("link", { name: /request refund/i })).toBeVisible({ timeout: 10000 });
+
+    await page.getByRole("link", { name: /send to friend/i }).click();
+    await expect(page).toHaveURL(/\/orders\/.+\/transfer/);
+    await expect(page.getByRole("heading", { name: /transfer pass/i })).toBeVisible({ timeout: 10000 });
+
+    await page.goto(orderUrl);
+    await page.getByRole("link", { name: /request refund/i }).click();
+    await expect(page).toHaveURL(/\/orders\/.+\/refund/);
+    await expect(page.getByRole("heading", { name: /request refund/i })).toBeVisible({ timeout: 10000 });
+  });
+
   test("ticket shows unavailable state after order is created", async ({ page }) => {
     const { ticketUrl } = await setupPurchase(page);
 

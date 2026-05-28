@@ -139,7 +139,7 @@ function InlineHoldTimer({ expiresAt }: { expiresAt: string }) {
   );
 }
 
-function EmptyOrdersCard() {
+function EmptyOrdersCard({ onViewSaved }: { onViewSaved: () => void }) {
   return (
     <Card>
       <CardContent className="flex flex-col items-center gap-5 px-8 py-14 text-center">
@@ -161,7 +161,7 @@ function EmptyOrdersCard() {
             Browse tonight&apos;s shows
             <ArrowRight className="size-4" />
           </Link>
-          <button type="button" className={buttonVariants({ variant: "ghost" })}>
+          <button type="button" className={buttonVariants({ variant: "ghost" })} onClick={onViewSaved}>
             View saved events
           </button>
         </div>
@@ -388,7 +388,9 @@ export function OrdersOverview({ orders, savedEvents = [] }: OrdersOverviewProps
       </div>
 
       <div className="flex flex-col gap-3">
-        {activeTab === "upcoming" && tabbedOrders.upcoming.length === 0 && <EmptyOrdersCard />}
+        {activeTab === "upcoming" && tabbedOrders.upcoming.length === 0 && (
+          <EmptyOrdersCard onViewSaved={() => setActiveTab("saved")} />
+        )}
         {activeTab === "saved" && savedEvents.length === 0 && (
           <PlaceholderTab
             title="No saved events yet"
