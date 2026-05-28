@@ -10,6 +10,9 @@ const GRAPHQL_FALLBACK_URL = `${
 const browserClient = createClient({
   url: process.env.NEXT_PUBLIC_GRAPHQL_API_URL ?? GRAPHQL_FALLBACK_URL,
   fetchOptions: { credentials: "include" },
+  // Kong's /graphql route only accepts POST (GET is rejected and CORS allows
+  // POST,OPTIONS only). urql defaults queries to GET, so this must be false.
+  preferGetMethod: false,
   exchanges: [cacheExchange, fetchExchange],
 });
 

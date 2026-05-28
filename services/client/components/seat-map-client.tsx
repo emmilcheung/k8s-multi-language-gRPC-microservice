@@ -286,7 +286,7 @@ export function SeatMapClient({ ticketId, planId, plan, basePrice, priceTiers = 
         const [id, entry] = relevantSeats[idx] as [string, { status: SeatStatus; sectionId: string }];
         row.push({
           id,
-          label: isGA ? `GA${idx + 1}` : `R${r + 1}S${s + 1}`,
+          label: isGA ? `GA${idx + 1}` : `${String.fromCharCode(65 + r)}${s + 1}`,
           status: entry.status,
         });
       }
