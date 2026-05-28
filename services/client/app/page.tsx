@@ -6,24 +6,94 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Search, MapPin, Calendar } from "lucide-react";
 import BrowseFiltersClient from "@/app/_components/browse-filters";
+import { cn } from "@/lib/utils";
 
 const CATEGORIES = [
-  { name: "Concerts", count: "—" },
-  { name: "Sports", count: "—" },
-  { name: "Comedy", count: "—" },
-  { name: "Theatre", count: "—" },
-  { name: "Festivals", count: "—" },
-  { name: "Other", count: "—" },
+  { name: "Concerts", query: "concert" },
+  { name: "Sports", query: "sport" },
+  { name: "Comedy", query: "comedy" },
+  { name: "Theatre", query: "theatre" },
+  { name: "Festivals", query: "festival" },
+  { name: "Other", query: "event" },
 ];
 
-export default async function HomePage() {
+interface HomePageProps {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}
+
+function pickString(value: string | string[] | undefined): string | null {
+  if (!value) return null;
+  return Array.isArray(value) ? value[0] ?? null : value;
+}
+
+export default async function HomePage({ searchParams }: HomePageProps = {}) {
+  const resolvedParams = (await searchParams) ?? {};
+  const query = (pickString(resolvedParams.q) ?? "").trim().toLowerCase();
+  const maxPriceRaw = pickString(resolvedParams.maxPrice);
+  const maxPrice = maxPriceRaw ? Number(maxPriceRaw) : null;
+  const dateFilter = pickString(resolvedParams.date);
+  const sort = pickString(resolvedParams.sort) === "price" ? "price" : "date";
+  const view = pickString(resolvedParams.view) === "list" ? "list" : "grid";
+
+  const buildHref = (updates: Record<string, string | null>) => {
+    const next = new URLSearchParams();
+    for (const [key, value] of Object.entries(resolvedParams)) {
+      const asString = pickString(value);
+      if (asString) next.set(key, asString);
+    }
+    for (const [key, value] of Object.entries(updates)) {
+      if (value && value.length > 0) next.set(key, value);
+      else next.delete(key);
+    }
+    const queryString = next.toString();
+    return queryString ? `/?${queryString}` : "/";
+  };
+
   const firstPage = await fetchTicketPageViaGraphQL(null).catch(() => ({
     tickets: [],
     cursor: null,
     hasMore: false,
   }));
 
-  const tickets = firstPage.tickets;
+  const now = new Date();
+  const tickets = firstPage.tickets
+    .filter((ticket) => {
+      if (!query) return true;
+      const haystack = [
+        ticket.title,
+        ticket.event?.title ?? "",
+        ticket.event?.venueName ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    })
+    .filter((ticket) => {
+      if (maxPrice == null || Number.isNaN(maxPrice)) return true;
+      return parseFloat(ticket.price) <= maxPrice;
+    })
+    .filter((ticket) => {
+      if (!dateFilter) return true;
+      if (!ticket.event?.startsAt) return false;
+      const startsAt = new Date(ticket.event.startsAt);
+      if (Number.isNaN(startsAt.getTime())) return false;
+      if (dateFilter === "tonight") {
+        return startsAt.toDateString() === now.toDateString();
+      }
+      if (dateFilter === "weekend") {
+        const day = startsAt.getDay();
+        return day === 0 || day === 6;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (sort === "price") {
+        return parseFloat(a.price) - parseFloat(b.price);
+      }
+      const aTs = a.event?.startsAt ? new Date(a.event.startsAt).getTime() : Number.MAX_SAFE_INTEGER;
+      const bTs = b.event?.startsAt ? new Date(b.event.startsAt).getTime() : Number.MAX_SAFE_INTEGER;
+      return aTs - bTs;
+    });
   const heroTicket = tickets[0];
   const gridTickets = tickets.slice(1);
 
@@ -42,36 +112,50 @@ export default async function HomePage() {
     <div className="flex flex-col">
       {/* ── Search header ─────────────────────────────────────────────────── */}
       <section className="border-b border-line bg-page px-8 py-6">
-        <div className="flex items-center gap-3 max-w-2xl">
+        <form action="/" className="flex items-center gap-3 max-w-2xl">
           <Input
+            name="q"
             type="text"
             placeholder="Search events, artists, venues..."
+            defaultValue={query}
             leading={<Search className="size-4 text-mute" />}
             className="flex-1"
           />
-        </div>
+          <Button type="submit" variant="outline" size="sm">
+            Search
+          </Button>
+        </form>
       </section>
 
       {/* ── Quick filter chips ────────────────────────────────────────────── */}
       <section className="border-b border-line bg-card px-8 py-4 flex items-center gap-2 overflow-x-auto">
         <span className="text-sm font-medium text-ink shrink-0">Quick filters:</span>
-        <Badge tone="neutral" className="shrink-0">All events</Badge>
-        <Badge tone="neutral" variant="outline" className="shrink-0">Tonight</Badge>
-        <Badge tone="neutral" variant="outline" className="shrink-0">Under $50</Badge>
-        <Badge tone="neutral" variant="outline" className="shrink-0">This weekend</Badge>
+        <Link href={buildHref({ date: null, maxPrice: null })} className="shrink-0">
+          <Badge tone="neutral" className="shrink-0">All events</Badge>
+        </Link>
+        <Link href={buildHref({ date: "tonight" })} className="shrink-0">
+          <Badge tone="neutral" variant="outline" className="shrink-0">Tonight</Badge>
+        </Link>
+        <Link href={buildHref({ maxPrice: "50" })} className="shrink-0">
+          <Badge tone="neutral" variant="outline" className="shrink-0">Under $50</Badge>
+        </Link>
+        <Link href={buildHref({ date: "weekend" })} className="shrink-0">
+          <Badge tone="neutral" variant="outline" className="shrink-0">This weekend</Badge>
+        </Link>
       </section>
 
       {/* ── Category cards ────────────────────────────────────────────────── */}
       <section className="px-8 py-6 border-b border-line">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {CATEGORIES.map((cat) => (
-            <button
+            <Link
               key={cat.name}
+              href={buildHref({ q: cat.query })}
               className="flex flex-col gap-2 rounded-md border border-line bg-card p-3 hover:border-mute hover:bg-subtle transition-colors"
             >
               <span className="text-sm font-medium text-ink">{cat.name}</span>
-              <span className="text-xs font-mono text-mute">{cat.count}</span>
-            </button>
+              <span className="text-xs font-mono text-mute">search</span>
+            </Link>
           ))}
         </div>
       </section>
@@ -112,7 +196,9 @@ export default async function HomePage() {
                 </div>
                 <div className="text-xs text-mute mt-2">+ fees shown at checkout</div>
               </div>
-              <Button variant="primary">Get tickets</Button>
+              <span className="inline-flex items-center justify-center rounded-[min(var(--radius-md),12px)] bg-accent px-4 py-2.5 text-sm font-medium text-on-accent">
+                Get tickets
+              </span>
             </div>
           </Link>
         </section>
@@ -135,30 +221,40 @@ export default async function HomePage() {
               </h3>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm">Sort: Date</Button>
+              <Link href={buildHref({ sort: sort === "date" ? "price" : "date" })}>
+                <Button variant="ghost" size="sm">Sort: {sort === "date" ? "Date" : "Price"}</Button>
+              </Link>
               <div className="flex border border-line rounded-md overflow-hidden">
-                <button className="px-2 py-1.5 bg-ink text-card">
+                <Link
+                  href={buildHref({ view: "grid" })}
+                  aria-label="Grid view"
+                  className={cn("px-2 py-1.5", view === "grid" ? "bg-ink text-card" : "bg-card text-mute")}
+                >
                   <svg className="size-4" fill="currentColor" viewBox="0 0 24 24">
                     <rect x="3" y="3" width="7" height="7" />
                     <rect x="14" y="3" width="7" height="7" />
                     <rect x="3" y="14" width="7" height="7" />
                     <rect x="14" y="14" width="7" height="7" />
                   </svg>
-                </button>
-                <button className="px-2 py-1.5 bg-card text-mute">
+                </Link>
+                <Link
+                  href={buildHref({ view: "list" })}
+                  aria-label="List view"
+                  className={cn("px-2 py-1.5", view === "list" ? "bg-ink text-card" : "bg-card text-mute")}
+                >
                   <svg className="size-4" fill="currentColor" viewBox="0 0 24 24">
                     <rect x="3" y="4" width="18" height="2" />
                     <rect x="3" y="11" width="18" height="2" />
                     <rect x="3" y="18" width="18" height="2" />
                   </svg>
-                </button>
+                </Link>
               </div>
             </div>
           </div>
 
           {/* Grid of events */}
           {gridTickets.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className={cn("gap-4", view === "grid" ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" : "flex flex-col")}>
               {gridTickets.map((ticket) => {
                 const date = ticket.event?.startsAt
                   ? new Date(ticket.event.startsAt).toLocaleDateString("en-US", {
@@ -174,6 +270,7 @@ export default async function HomePage() {
                     date={date}
                     priceFromCents={Math.round(parseFloat(ticket.price) * 100)}
                     href={`/tickets/${ticket.id}`}
+                    className={view === "list" ? "sm:max-w-none lg:max-w-none" : undefined}
                   />
                 );
               })}

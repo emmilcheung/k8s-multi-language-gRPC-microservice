@@ -414,8 +414,7 @@ describe("HomePage", () => {
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
 
-    // New design has category cards for Concerts, Sports, etc.
-    expect(screen.getByRole("button", { name: /concerts/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /concerts/i })).toHaveAttribute("href", "/?q=concert");
   });
 
   it("shows event count when tickets exist", async () => {
@@ -427,6 +426,28 @@ describe("HomePage", () => {
 
     // Hero card takes first ticket; grid has 1 remaining event
     expect(screen.getByText(/1\s*events/)).toBeInTheDocument();
+  });
+
+  it("applies query filters from search params", async () => {
+    const tickets = [
+      makeTicket({
+        id: "ticket-a",
+        title: "Classical Night",
+        event: { title: "Classical Night", startsAt: "2099-08-09T20:30:00Z", venueName: "Hall A" },
+      }),
+      makeTicket({
+        id: "ticket-b",
+        title: "Laugh Out Loud",
+        event: { title: "Laugh Out Loud", startsAt: "2099-08-12T20:30:00Z", venueName: "Club B" },
+      }),
+    ];
+    fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets, cursor: null, hasMore: false });
+
+    const { default: HomePage } = await import("@/app/page");
+    render(await HomePage({ searchParams: Promise.resolve({ q: "laugh" }) }));
+
+    expect(screen.getByRole("heading", { name: /laugh out loud/i })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /classical night/i })).not.toBeInTheDocument();
   });
 
   it("displays filter section with date, price, category, availability options", async () => {
