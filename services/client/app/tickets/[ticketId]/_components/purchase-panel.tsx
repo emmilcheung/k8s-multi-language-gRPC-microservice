@@ -89,61 +89,63 @@ export function PurchasePanel({
   return (
     <>
       <aside className="hidden self-start lg:sticky lg:top-20 lg:block">
-      <Card elev className="flex flex-col gap-4">
-        {/* From price */}
-        <div className="flex flex-col gap-1">
-          <div className="text-[11px] uppercase tracking-[0.08em] text-mute">from</div>
-          <div className="text-3xl font-mono tabular-nums text-ink font-semibold">
-            ${(priceCents / 100).toFixed(2)}
+      <Card elev className="gap-0 p-0">
+        {/* From-price ribbon */}
+        <div className="flex items-end justify-between gap-3 border-b border-line px-[18px] py-4">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mute">From</span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-mono text-[28px] font-semibold leading-none tracking-tight tabular-nums text-ink">
+                ${(priceCents / 100).toFixed(2)}
+              </span>
+              <span className="text-xs text-mute">+ fees at checkout</span>
+            </div>
           </div>
-          <div className="text-xs text-mute">+ fees at checkout</div>
-        </div>
-
-        {/* Ticket type badges */}
-        <div className="flex flex-wrap gap-2">
-          <Badge tone="accent">{ticket.ticketType ?? "General"}</Badge>
-          <Badge tone="neutral" dot>
-            {(ticket.available ?? 0) > 0 ? "On sale" : "Sold out"}
-          </Badge>
-          {isSeated && (
-            <Badge tone="accent">
-              <MapPin className="w-3 h-3 mr-1" />
-              Seated
-            </Badge>
-          )}
           {(ticket.available ?? 0) > 0 && (
             <Badge tone="warn" dot>{ticket.available} left</Badge>
           )}
         </div>
 
-        {/* Primary CTA */}
-        <div className="flex flex-col gap-2">
-          {renderPrimaryAction()}
-
-          {purchaseGate && (
-            <p className="text-xs text-mute text-center">
-              {purchaseGate.message}
-            </p>
-          )}
-          {!purchaseGate && (
-            <p className="text-xs text-mute text-center">
-              No hidden fees. Cancel before payment completes.
-            </p>
-          )}
-        </div>
-
-        {/* Event countdown */}
-        {ticket.event?.startsAt && (
-          <div className="pt-4 border-t border-line">
-            <EventCountdown startsAt={ticket.event.startsAt} />
+        {/* Body */}
+        <div className="flex flex-col gap-3.5 px-[18px] py-[18px]">
+          {/* Ticket type badges */}
+          <div className="flex flex-wrap gap-2">
+            <Badge tone="accent">{ticket.ticketType ?? "General"}</Badge>
+            <Badge tone="neutral" dot>
+              {(ticket.available ?? 0) > 0 ? "On sale" : "Sold out"}
+            </Badge>
+            {isSeated && (
+              <Badge tone="accent">
+                <MapPin className="mr-1 h-3 w-3" />
+                Seated
+              </Badge>
+            )}
           </div>
-        )}
 
-        {/* Trust strip */}
-        <div className="text-xs text-mute flex flex-col gap-1.5 pt-4 border-t border-line">
-          <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-ok" />Mobile entry</span>
-          <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-ok" />Refund-protected</span>
-          <span className="inline-flex items-center gap-1.5"><Check className="w-3.5 h-3.5 text-ok" />Transferable</span>
+          {/* Primary CTA */}
+          <div className="flex flex-col gap-2">
+            {renderPrimaryAction()}
+
+            <p className="text-center text-xs text-mute">
+              {purchaseGate
+                ? purchaseGate.message
+                : "No hidden fees. Cancel before payment completes."}
+            </p>
+          </div>
+
+          {/* Event countdown */}
+          {ticket.event?.startsAt && (
+            <div className="border-t border-line pt-3.5">
+              <EventCountdown startsAt={ticket.event.startsAt} />
+            </div>
+          )}
+
+          {/* Trust strip */}
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5 border-t border-line pt-3.5 text-xs text-mute">
+            <span className="inline-flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-ok" />Mobile entry</span>
+            <span className="inline-flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-ok" />Refund-protected</span>
+            <span className="inline-flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-ok" />Transferable</span>
+          </div>
         </div>
       </Card>
       </aside>
