@@ -131,7 +131,11 @@ vi.mock("@/app/tickets/[ticketId]/_components/purchase-panel", () => ({
       <div data-testid="purchase-panel">
         <div>{priceStr}</div>
         {purchaseGate && (
-          <button disabled>{purchaseGate.label}</button>
+          purchaseGate.label === "Already Reserved" && token ? (
+            <button>View your orders</button>
+          ) : (
+            <button disabled>{purchaseGate.label}</button>
+          )
         )}
         {!purchaseGate && isReserved && (
           <button disabled>Already Reserved</button>
@@ -849,7 +853,7 @@ describe("TicketDetailPage", () => {
     expect(link).toHaveAttribute("href", "/auth/signin");
   });
 
-  it("shows 'Already Reserved' disabled button for a buyer on a reserved ticket", async () => {
+  it("routes reserved buyers to orders from the purchase panel", async () => {
     const ticket = makeTicket({ userId: "owner-uuid", orderId: "order-1" });
     executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
@@ -859,9 +863,7 @@ describe("TicketDetailPage", () => {
     );
     render(await TicketDetailPage({ params }));
 
-    const btn = screen.getByRole("button", { name: /already reserved/i });
-    expect(btn).toBeInTheDocument();
-    expect(btn).toBeDisabled();
+    expect(screen.getByRole("button", { name: /view your orders/i })).toBeInTheDocument();
   });
 
   it("falls back to purchase view (non-owner) when JWT is malformed", async () => {

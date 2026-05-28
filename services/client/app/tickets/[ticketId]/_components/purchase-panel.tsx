@@ -66,9 +66,17 @@ export function PurchasePanel({
         {/* Primary CTA */}
         <div className="flex flex-col gap-2">
           {purchaseGate ? (
-            <Button disabled variant="outline" className="w-full">
-              {purchaseGate.label}
-            </Button>
+            purchaseGate.label === "Already Reserved" && token ? (
+              <Link href="/orders" className="w-full">
+                <Button variant="outline" className="w-full">
+                  View your orders
+                </Button>
+              </Link>
+            ) : (
+              <Button disabled variant="outline" className="w-full">
+                {purchaseGate.label}
+              </Button>
+            )
           ) : isSeated ? (
             token ? (
               <Link href={`/tickets/${ticket.id}/seats`} className="w-full">
