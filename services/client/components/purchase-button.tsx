@@ -42,7 +42,7 @@ export function PurchaseButton({ ticketId, maxQuantity = 1 }: PurchaseButtonProp
       {/* Quantity stepper — only shown when quota > 1 */}
       {maxQuantity > 1 && (
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="quantity" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <Label htmlFor="quantity" className="text-xs font-medium text-mute uppercase tracking-wider">
             Quantity
           </Label>
           <Input
@@ -54,7 +54,7 @@ export function PurchaseButton({ ticketId, maxQuantity = 1 }: PurchaseButtonProp
             defaultValue={1}
             className="w-full"
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-mute">
             Up to {maxQuantity} per order
           </p>
         </div>
@@ -67,7 +67,7 @@ export function PurchaseButton({ ticketId, maxQuantity = 1 }: PurchaseButtonProp
 
       <Button
         type="submit"
-        className="w-full gap-2 bg-primary hover:bg-primary/90 text-primary-foreground glow-violet"
+        className="w-full gap-2 bg-accent hover:bg-accent/90 text-on-accent"
         disabled={pending}
       >
         {pending ? (

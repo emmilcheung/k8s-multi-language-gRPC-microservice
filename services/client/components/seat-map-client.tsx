@@ -362,7 +362,7 @@ export function SeatMapClient({ ticketId, planId, plan, basePrice, priceTiers = 
 
       {/* Mode indicator (no toggle — determined by seller's plan) */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-mute">
           {isAutoAssignMode
             ? "Best available seats will be automatically selected for you."
             : "Click seats on the map to select them manually."}

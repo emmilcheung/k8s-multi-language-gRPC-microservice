@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { cn } from "@/lib/utils";
 import {
   FileText,
   DollarSign,
@@ -101,19 +102,19 @@ const TICKET_TYPES: { value: TicketType; label: string; description: string; ico
     value: "GA",
     label: "General Admission",
     description: "Sell tickets with quantity limits. Buyers select how many they want.",
-    icon: <Radio className="size-5 shrink-0 text-primary" />,
+    icon: <Radio className="size-5 shrink-0 text-accent" />,
   },
   {
     value: "SEATED_MANUAL",
     label: "Manual Assigned Seating",
     description: "Buyers pick their own seats from your venue layout.",
-    icon: <Armchair className="size-5 shrink-0 text-primary" />,
+    icon: <Armchair className="size-5 shrink-0 text-accent" />,
   },
   {
     value: "SEATED_AUTO",
     label: "Auto-assigned Seating",
     description: "System automatically assigns the best available seats.",
-    icon: <Zap className="size-5 shrink-0 text-primary" />,
+    icon: <Zap className="size-5 shrink-0 text-accent" />,
   },
 ];
 
@@ -300,30 +301,30 @@ export function TicketForm({
   // ── Step 1: Select ticket type ────────────────────────────────────────────
   if (step === "type") {
     return (
-      <div className="bg-card border border-border rounded-lg w-full max-w-md p-8 flex flex-col gap-6 shadow-sm">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-lg font-bold tracking-tight">Select Ticket Type</h2>
-          <p className="text-sm text-muted-foreground">
-            Choose how you want to sell your tickets.
+      <div className="w-full max-w-4xl rounded-3xl border border-line/70 bg-card/95 p-8 md:p-10 shadow-[0_20px_60px_-40px_rgba(0,0,0,0.65)] flex flex-col gap-8">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-2xl font-semibold tracking-tight text-ink">Create your event listing</h2>
+          <p className="text-sm text-mute">
+            Start by choosing the ticket model for this event.
           </p>
         </div>
 
         <Separator />
 
-        <div className="flex flex-col gap-3">
+        <div className="grid gap-3 md:grid-cols-3">
           {TICKET_TYPES.map(({ value, label, description, icon }) => (
             <button
               key={value}
               type="button"
               onClick={() => handleTypeSelect(value)}
-              className="flex items-start gap-4 p-4 rounded-xl border border-border hover:border-primary/40 hover:bg-primary/5 transition-all cursor-pointer text-left group"
+              className="flex items-start gap-4 p-4 rounded-2xl border border-line bg-bg/80 hover:border-accent/40 hover:bg-accent-soft/40 transition-all cursor-pointer text-left group"
             >
-              <div className="flex items-center justify-center size-10 rounded-lg bg-primary/10 ring-1 ring-primary/20 shrink-0 group-hover:bg-primary/15 transition-colors">
+              <div className="flex items-center justify-center size-10 rounded-lg bg-accent-soft ring-1 ring-accent/20 shrink-0 transition-colors">
                 {icon}
               </div>
               <div className="flex flex-col gap-0.5 min-w-0">
                 <p className="font-medium text-sm">{label}</p>
-                <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
+                <p className="text-xs text-mute leading-relaxed">{description}</p>
               </div>
             </button>
           ))}
@@ -336,14 +337,57 @@ export function TicketForm({
   const typeLabel = TICKET_TYPES.find((t) => t.value === ticketType)?.label ?? "Ticket";
 
   return (
-    <form onSubmit={handleSubmit} className="bg-card border border-border rounded-lg w-full max-w-md p-8 flex flex-col gap-6 shadow-sm">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-bold tracking-tight">
-          {ticketType === "GA" ? "General Admission Details" : "Seating Plan Details"}
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Type: <span className="text-foreground font-medium">{typeLabel}</span>
-        </p>
+    <form
+      onSubmit={handleSubmit}
+      className="w-full max-w-7xl grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)_360px]"
+    >
+      <aside className="rounded-2xl border border-line/70 bg-subtle/70 p-4 md:p-5 h-fit">
+        <p className="text-[11px] uppercase tracking-[0.12em] font-semibold text-mute mb-3">Setup</p>
+        <div className="flex flex-col gap-1.5">
+          {[
+            "Basics",
+            "Date & venue",
+            "Ticket types",
+            "Seating plan",
+            "Pricing & fees",
+            "Refund policy",
+            "Attendance & QR",
+            "Review & publish",
+          ].map((item) => {
+            const isActive = item === "Ticket types";
+            return (
+              <div
+                key={item}
+                className={cn(
+                  "rounded-lg border px-3 py-2 text-sm",
+                  isActive
+                    ? "border-line bg-bg text-ink font-medium"
+                    : "border-transparent text-mute"
+                )}
+              >
+                {item}
+              </div>
+            );
+          })}
+        </div>
+      </aside>
+
+      <div className="rounded-3xl border border-line/70 bg-card/95 p-8 md:p-10 shadow-[0_20px_60px_-40px_rgba(0,0,0,0.65)] flex flex-col gap-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <p className="text-[11px] uppercase tracking-[0.12em] font-semibold text-mute">
+            Step 3 of 9
+          </p>
+          <h2 className="text-2xl font-semibold tracking-tight text-ink">
+            {ticketType === "GA" ? "General admission setup" : "Assigned seating setup"}
+          </h2>
+          <p className="text-sm text-mute">
+            Configure pricing, limits, and event metadata.
+          </p>
+        </div>
+        <span className="inline-flex h-8 items-center rounded-full border border-accent/25 bg-accent-soft px-3 text-xs font-medium text-accent-foreground">
+          {typeLabel}
+        </span>
       </div>
 
       <Separator />
@@ -357,11 +401,11 @@ export function TicketForm({
 
       {/* Title */}
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="title" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        <Label htmlFor="title" className="text-xs font-medium text-mute uppercase tracking-wider">
           Title
         </Label>
         <div className="relative">
-          <FileText className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+          <FileText className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
           <Input
             id="title"
             name="title"
@@ -379,11 +423,11 @@ export function TicketForm({
       {ticketType === "GA" && (
         <>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="price" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <Label htmlFor="price" className="text-xs font-medium text-mute uppercase tracking-wider">
               Price (USD)
             </Label>
             <div className="relative">
-              <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
               <Input
                 id="price"
                 name="price"
@@ -401,11 +445,11 @@ export function TicketForm({
 
           <div className="flex gap-4">
             <div className="flex flex-col gap-1.5 flex-1">
-              <Label htmlFor="quota" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <Label htmlFor="quota" className="text-xs font-medium text-mute uppercase tracking-wider">
                 Capacity
               </Label>
               <div className="relative">
-                <Hash className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+                <Hash className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
                 <Input
                   id="quota"
                   name="quota"
@@ -426,11 +470,11 @@ export function TicketForm({
             </div>
 
             <div className="flex flex-col gap-1.5 flex-1">
-              <Label htmlFor="maxPerUser" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <Label htmlFor="maxPerUser" className="text-xs font-medium text-mute uppercase tracking-wider">
                 Max / Buyer
               </Label>
               <div className="relative">
-                <Users className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+                <Users className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
                 <Input
                   id="maxPerUser"
                   name="maxPerUser"
@@ -457,11 +501,11 @@ export function TicketForm({
       {ticketType?.startsWith("SEATED") && (
         <>
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <Label className="text-xs font-medium text-mute uppercase tracking-wider">
               Venue Template
             </Label>
             {venuesLoading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 text-sm text-mute">
                 <Loader2 className="size-4 animate-spin" />
                 Loading venues…
               </div>
@@ -486,7 +530,7 @@ export function TicketForm({
             ) : (
               <>
                 <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
                   <Input
                     id="venueId"
                     name="venueId"
@@ -511,7 +555,7 @@ export function TicketForm({
 
           {/* Pricing Mode */}
           <div className="flex flex-col gap-2">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pricing Mode</p>
+            <p className="text-xs font-medium text-mute uppercase tracking-wider">Pricing Mode</p>
             <ToggleGroup
               orientation="vertical"
               spacing={2}
@@ -525,15 +569,15 @@ export function TicketForm({
             >
               <ToggleGroupItem value="single" variant="outline" className="w-full justify-start gap-2 text-sm font-normal">
                 Single Price
-                <span className="text-xs text-muted-foreground ml-1">all seats cost the same</span>
+                <span className="text-xs text-mute ml-1">all seats cost the same</span>
               </ToggleGroupItem>
               <ToggleGroupItem value="section" variant="outline" className="w-full justify-start gap-2 text-sm font-normal">
                 Section Pricing
-                <span className="text-xs text-muted-foreground ml-1">different prices per section</span>
+                <span className="text-xs text-mute ml-1">different prices per section</span>
               </ToggleGroupItem>
               <ToggleGroupItem value="seat" variant="outline" className="w-full justify-start gap-2 text-sm font-normal">
                 Seat Pricing
-                <span className="text-xs text-muted-foreground ml-1">configured in plan editor</span>
+                <span className="text-xs text-mute ml-1">configured in plan editor</span>
               </ToggleGroupItem>
             </ToggleGroup>
           </div>
@@ -541,11 +585,11 @@ export function TicketForm({
           {/* Single price */}
           {(formData.pricingMode === "single" || !formData.pricingMode) && (
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="price" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <Label htmlFor="price" className="text-xs font-medium text-mute uppercase tracking-wider">
                 Price (USD)
               </Label>
               <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
                 <Input
                   id="price"
                   name="price"
@@ -559,7 +603,7 @@ export function TicketForm({
                   className="pl-9"
                 />
               </div>
-              <p className="text-xs text-muted-foreground">Price for all seats in this event.</p>
+              <p className="text-xs text-mute">Price for all seats in this event.</p>
             </div>
           )}
 
@@ -584,11 +628,11 @@ export function TicketForm({
           )}
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="maxSeatsPerOrder" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <Label htmlFor="maxSeatsPerOrder" className="text-xs font-medium text-mute uppercase tracking-wider">
               Max Seats Per Buyer
             </Label>
             <div className="relative">
-              <Users className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Users className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
               <Input
                 id="maxSeatsPerOrder"
                 name="maxSeatsPerOrder"
@@ -613,15 +657,15 @@ export function TicketForm({
       {/* ── Event Details ── */}
       <Separator />
 
-      <div className="flex flex-col gap-4">
-        <p className="text-sm font-semibold">Event Details</p>
+      <div className="grid gap-4 md:grid-cols-2">
+        <p className="text-sm font-semibold md:col-span-2">Event Details</p>
 
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="eventTitle" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        <div className="flex flex-col gap-1.5 md:col-span-2">
+          <Label htmlFor="eventTitle" className="text-xs font-medium text-mute uppercase tracking-wider">
             Event Name
           </Label>
           <div className="relative">
-            <FileText className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+            <FileText className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
             <Input
               id="eventTitle"
               name="eventTitle"
@@ -632,16 +676,16 @@ export function TicketForm({
               className="pl-9"
             />
           </div>
-          <p className="text-xs text-muted-foreground">Defaults to ticket title if left blank.</p>
+          <p className="text-xs text-mute">Defaults to ticket title if left blank.</p>
         </div>
 
-        <div className="flex gap-4">
+        <div className="flex gap-4 md:col-span-2">
           <div className="flex flex-col gap-1.5 flex-1">
-            <Label htmlFor="startsAt" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <Label htmlFor="startsAt" className="text-xs font-medium text-mute uppercase tracking-wider">
               Starts <span className="text-destructive">*</span>
             </Label>
             <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
               <Input
                 id="startsAt"
                 name="startsAt"
@@ -654,11 +698,11 @@ export function TicketForm({
           </div>
 
           <div className="flex flex-col gap-1.5 flex-1">
-            <Label htmlFor="endsAt" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Ends <span className="text-muted-foreground font-normal">(opt.)</span>
+            <Label htmlFor="endsAt" className="text-xs font-medium text-mute uppercase tracking-wider">
+              Ends <span className="text-mute font-normal">(opt.)</span>
             </Label>
             <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
               <Input
                 id="endsAt"
                 name="endsAt"
@@ -671,9 +715,9 @@ export function TicketForm({
           </div>
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="eventDescription" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Description <span className="text-muted-foreground font-normal">(optional)</span>
+        <div className="flex flex-col gap-1.5 md:col-span-2">
+          <Label htmlFor="eventDescription" className="text-xs font-medium text-mute uppercase tracking-wider">
+            Description <span className="text-mute font-normal">(optional)</span>
           </Label>
           <Textarea
             id="eventDescription"
@@ -685,12 +729,12 @@ export function TicketForm({
           />
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="eventImageUrl" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Image URL <span className="text-muted-foreground font-normal">(optional)</span>
+        <div className="flex flex-col gap-1.5 md:col-span-2">
+          <Label htmlFor="eventImageUrl" className="text-xs font-medium text-mute uppercase tracking-wider">
+            Image URL <span className="text-mute font-normal">(optional)</span>
           </Label>
           <div className="relative">
-            <ImageIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+            <ImageIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
             <Input
               id="eventImageUrl"
               name="eventImageUrl"
@@ -701,16 +745,16 @@ export function TicketForm({
               className="pl-9"
             />
           </div>
-          <p className="text-xs text-muted-foreground">Shown as a banner on the ticket page.</p>
+          <p className="text-xs text-mute">Shown as a banner on the ticket page.</p>
         </div>
 
-        <div className="flex gap-4">
+        <div className="flex gap-4 md:col-span-2">
           <div className="flex flex-col gap-1.5 flex-1">
-            <Label htmlFor="venueName" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Venue <span className="text-muted-foreground font-normal">(opt.)</span>
+            <Label htmlFor="venueName" className="text-xs font-medium text-mute uppercase tracking-wider">
+              Venue <span className="text-mute font-normal">(opt.)</span>
             </Label>
             <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
               <Input
                 id="venueName"
                 name="venueName"
@@ -724,11 +768,11 @@ export function TicketForm({
           </div>
 
           <div className="flex flex-col gap-1.5 flex-1">
-            <Label htmlFor="venueAddress" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Address <span className="text-muted-foreground font-normal">(opt.)</span>
+            <Label htmlFor="venueAddress" className="text-xs font-medium text-mute uppercase tracking-wider">
+              Address <span className="text-mute font-normal">(opt.)</span>
             </Label>
             <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
               <Input
                 id="venueAddress"
                 name="venueAddress"
@@ -742,7 +786,7 @@ export function TicketForm({
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/20 px-3 py-2">
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-line bg-subtle/70 px-4 py-3 md:col-span-2">
           <Label htmlFor="requireQrForEntry" className="text-sm font-medium">
             Require QR admission
           </Label>
@@ -760,7 +804,7 @@ export function TicketForm({
           />
         </div>
         {attendanceLocked && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-mute">
             Attendance requirement is locked because at least one ticket has already been sold.
           </p>
         )}
@@ -797,6 +841,43 @@ export function TicketForm({
           )}
         </Button>
       </div>
+      </div>
+
+      <aside className="rounded-2xl border border-line/70 bg-subtle/60 p-5 md:p-6 h-fit">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] uppercase tracking-[0.1em] font-semibold text-mute">Live preview</p>
+          <span className="text-xs text-mute font-mono">Draft</span>
+        </div>
+
+        <div className="mt-3 rounded-xl border border-line bg-card p-4 flex flex-col gap-2">
+          <p className="text-sm font-semibold text-ink">
+            {formData.eventTitle || formData.title || "Untitled event"}
+          </p>
+          <p className="text-xs text-mute">
+            {ticketType === "GA" ? "General admission" : "Reserved seating"} ·{" "}
+            {(formData.price && Number(formData.price) > 0) ? `$${Number(formData.price).toFixed(2)}` : "Set price"}
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            <span className="inline-flex h-6 items-center rounded-full border border-line bg-bg px-2 text-[11px] text-mute">
+              {formData.maxPerUser ? `Max ${formData.maxPerUser}/buyer` : "Set buyer limit"}
+            </span>
+            <span className="inline-flex h-6 items-center rounded-full border border-line bg-bg px-2 text-[11px] text-mute">
+              {formData.startsAt ? "Date set" : "Choose event date"}
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-line bg-card p-4">
+          <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-mute mb-2">Checklist</p>
+          <div className="flex flex-col gap-1.5 text-sm">
+            <p className={cn(formData.title ? "text-ink" : "text-mute")}>Ticket type</p>
+            <p className={cn(formData.title ? "text-ink" : "text-mute")}>Ticket details</p>
+            <p className={cn(formData.startsAt ? "text-ink" : "text-mute")}>Date & venue</p>
+            <p className={cn(formData.eventDescription ? "text-ink" : "text-mute")}>Description</p>
+            <p className={cn(ticketType?.startsWith("SEATED") ? "text-ink" : "text-mute")}>Seating plan</p>
+          </div>
+        </div>
+      </aside>
     </form>
   );
 }

@@ -23,7 +23,7 @@ export function PriceTierForm({ action, tiers }: PriceTierFormProps) {
     <div className="glass rounded-2xl p-6 flex flex-col gap-5">
       <div className="flex flex-col gap-1">
         <h3 className="font-semibold">Price Tiers</h3>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-mute">
           Named price levels assigned to sections (e.g. Floor $200, Upper $80).
         </p>
       </div>
@@ -33,19 +33,19 @@ export function PriceTierForm({ action, tiers }: PriceTierFormProps) {
           {tiers.map((t) => (
             <li
               key={t.id}
-              className="flex items-center justify-between rounded-xl bg-white/4 px-3 py-2 text-sm"
+              className="flex items-center justify-between rounded-xl bg-subtle px-3 py-2 text-sm"
             >
               <span className="flex items-center gap-2">
-                <Tag className="w-3.5 h-3.5 text-primary shrink-0" />
+                <Tag className="w-3.5 h-3.5 text-accent shrink-0" />
                 <span className="font-medium">{t.name}</span>
               </span>
-              <span className="font-mono text-primary">${parseFloat(t.price).toFixed(2)}</span>
+              <span className="font-mono text-accent">${parseFloat(t.price).toFixed(2)}</span>
             </li>
           ))}
         </ul>
       )}
 
-      <div className="h-px bg-white/6" />
+      <div className="h-px bg-line" />
 
       <form action={formAction} className="flex flex-col gap-3">
         {state?.error && (
@@ -61,7 +61,7 @@ export function PriceTierForm({ action, tiers }: PriceTierFormProps) {
         <div className="flex flex-col gap-1.5">
           <Label
             htmlFor="tierName"
-            className="text-xs font-medium text-muted-foreground uppercase tracking-wider"
+            className="text-xs font-medium text-mute uppercase tracking-wider"
           >
             Tier name
           </Label>
@@ -77,7 +77,7 @@ export function PriceTierForm({ action, tiers }: PriceTierFormProps) {
         <div className="flex flex-col gap-1.5">
           <Label
             htmlFor="tierPrice"
-            className="text-xs font-medium text-muted-foreground uppercase tracking-wider"
+            className="text-xs font-medium text-mute uppercase tracking-wider"
           >
             Price (USD)
           </Label>

@@ -149,11 +149,11 @@ export default async function OrganizerAttendancePage({ params }: Props) {
         </div>
 
         <div className="flex flex-wrap gap-2 text-xs text-mute">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-background px-3 py-1.5">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-subtle px-3 py-1.5">
             <Settings2 className="size-3.5" />
             Policy settings below
           </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-background px-3 py-1.5">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-subtle px-3 py-1.5">
             <Users className="size-3.5" />
             {checkIns.length} recent scans loaded
           </span>

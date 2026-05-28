@@ -5,6 +5,38 @@ import { TicketForm } from "@/components/ticket-form";
 import type { TicketState } from "@/app/actions/tickets";
 
 describe("TicketForm", () => {
+  it("renders modern creator entry heading on ticket-type step", () => {
+    const action = vi.fn(async (prev: TicketState, formData: FormData): Promise<TicketState> => {
+      void prev;
+      void formData;
+      return {};
+    });
+
+    render(<TicketForm action={action} />);
+
+    expect(
+      screen.getByRole("heading", { name: /create your event listing/i })
+    ).toBeInTheDocument();
+  });
+
+  it("shows organizer-style setup rails after choosing a ticket type", async () => {
+    const user = userEvent.setup();
+    const action = vi.fn(async (prev: TicketState, formData: FormData): Promise<TicketState> => {
+      void prev;
+      void formData;
+      return {};
+    });
+
+    render(<TicketForm action={action} />);
+
+    await user.click(screen.getByRole("button", { name: /general admission/i }));
+
+    expect(screen.getByText(/^setup$/i)).toBeInTheDocument();
+    expect(screen.getByText(/step 3 of 9/i)).toBeInTheDocument();
+    expect(screen.getByText(/live preview/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/seating plan/i).length).toBeGreaterThan(0);
+  });
+
   it("renders defaults and submits edited values", async () => {
     const user = userEvent.setup();
     const action = vi.fn(async (prev: TicketState, formData: FormData): Promise<TicketState> => {

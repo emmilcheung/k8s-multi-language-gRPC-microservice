@@ -12,8 +12,8 @@ export default function OrganizerLayout({
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-8">
       <div className="flex flex-col gap-4 border-b border-line pb-5">
         <div className="flex items-center gap-2">
-          <span className="inline-block h-px w-6 bg-primary" />
-          <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+          <span className="inline-block h-px w-6 bg-accent" />
+          <span className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">
             Organizer console
           </span>
         </div>

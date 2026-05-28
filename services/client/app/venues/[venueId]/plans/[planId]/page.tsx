@@ -98,7 +98,7 @@ export default async function PlanDetailPage({ params }: Props) {
 
         <h1 className="text-3xl font-bold tracking-tight leading-tight">{plan.name}</h1>
 
-        <div className="flex flex-wrap gap-4 text-sm text-muted-foreground pt-2 border-t border-white/6">
+        <div className="flex flex-wrap gap-4 text-sm text-muted-foreground pt-2 border-t border-line">
           <span className="flex items-center gap-1.5">
             <Users className="w-3.5 h-3.5" />
             Max {plan.maxSeatsPerOrder} seats per order
@@ -115,7 +115,7 @@ export default async function PlanDetailPage({ params }: Props) {
         </div>
 
         {/* Plan ID — for reference / debugging */}
-        <div className="bg-white/4 rounded-xl px-3 py-2 flex flex-col gap-0.5">
+        <div className="bg-subtle rounded-xl px-3 py-2 flex flex-col gap-0.5">
           <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Plan ID</p>
           <p className="font-mono text-sm text-foreground break-all">{plan.id}</p>
           <p className="text-xs text-muted-foreground">

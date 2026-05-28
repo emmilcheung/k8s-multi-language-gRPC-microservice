@@ -39,15 +39,15 @@ export default async function RootLayout({
       <head>
         {traceId ? <meta name="x-trace-id" content={traceId} /> : null}
       </head>
-      <body className="min-h-full flex flex-col bg-background text-foreground selection:bg-primary/20 selection:text-primary">
+      <body className="min-h-full flex flex-col bg-bg text-ink selection:bg-accent/20 selection:text-accent">
         <NavBar isLoggedIn={isLoggedIn} />
         <main className="flex-1 container mx-auto max-w-6xl px-4 pb-24 pt-6 md:py-10">
           {children}
         </main>
 
-        <footer className="mb-14 border-t border-border py-8 md:mb-0">
-          <div className="container mx-auto px-4 max-w-6xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
-            <span className="font-sans font-semibold text-foreground text-sm tracking-tight">
+        <footer className="mb-14 border-t border-line py-8 md:mb-0">
+          <div className="container mx-auto px-4 max-w-6xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-mute">
+            <span className="font-sans font-semibold text-ink text-sm tracking-tight">
               MARQUEE
             </span>
             <span>© {new Date().getFullYear()} Ticketing Platform · All events welcome</span>

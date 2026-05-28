@@ -40,7 +40,7 @@ function resultTone(result?: ScannerResponse["result"]): string {
 }
 
 function shellTone(result?: ScannerResponse["result"]): string {
-  if (!result) return "bg-background";
+  if (!result) return "bg-bg";
   if (result === "valid") return "bg-ok-soft/35";
   if (result === "already_used" || result === "revoked") return "bg-warn-soft/35";
   return "bg-bad-soft/30";
@@ -296,7 +296,7 @@ export function ScannerClient({ eventId, eventTitle, venueName }: ScannerClientP
       </div>
 
       <div className="grid lg:grid-cols-[minmax(0,1fr)_360px]">
-        <section className="flex flex-col items-center justify-center gap-6 bg-subtle/40 px-4 py-6 sm:px-6 sm:py-10">
+        <section className="flex flex-col items-center justify-center gap-6 bg-bg/40 px-4 py-6 sm:px-6 sm:py-10">
           <div className="flex h-[280px] w-full max-w-[520px] items-center justify-center rounded-[28px] border border-line bg-card p-4 shadow-[0_0_80px_rgba(58,79,255,0.08)] sm:h-[420px] sm:p-8">
             <div className="relative h-full w-full overflow-hidden rounded-[22px] border border-line bg-ink">
               <video
@@ -350,7 +350,7 @@ export function ScannerClient({ eventId, eventTitle, venueName }: ScannerClientP
         </section>
 
         <aside className="space-y-4 border-t border-line bg-card px-6 py-6 lg:border-l lg:border-t-0">
-          <div className="rounded-2xl border border-line bg-background">
+          <div className="rounded-2xl border border-line bg-subtle">
             <div className="border-b border-line px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-mute">Last scan</p>
             </div>
@@ -378,7 +378,7 @@ export function ScannerClient({ eventId, eventTitle, venueName }: ScannerClientP
             </div>
           </div>
 
-          <div className="rounded-2xl border border-line bg-background p-4">
+          <div className="rounded-2xl border border-line bg-subtle p-4">
             <div className="mb-4 flex flex-col gap-1.5">
               <Label htmlFor="gate-label">Gate label</Label>
               <Input
@@ -425,7 +425,7 @@ export function ScannerClient({ eventId, eventTitle, venueName }: ScannerClientP
             </form>
           </div>
 
-          <form onSubmit={onEmailSubmit} className="flex flex-col gap-3 rounded-2xl border border-line bg-background p-4">
+          <form onSubmit={onEmailSubmit} className="flex flex-col gap-3 rounded-2xl border border-line bg-subtle p-4">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="buyer-email">Buyer email</Label>
               <Input

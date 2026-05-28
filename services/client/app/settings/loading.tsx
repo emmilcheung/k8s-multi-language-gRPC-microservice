@@ -11,7 +11,7 @@ export default function SettingsLoading() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         {Array.from({ length: 4 }).map((_, index) => (
-          <div key={index} className="rounded-xl border border-border p-4 space-y-3">
+          <div key={index} className="rounded-xl border border-line p-4 space-y-3">
             <Skeleton className="h-5 w-40" />
             <Skeleton className="h-4 w-64" />
             <Skeleton className="h-8 w-full" />
@@ -21,7 +21,7 @@ export default function SettingsLoading() {
         ))}
       </div>
 
-      <div className="rounded-xl border border-border p-4 space-y-3">
+      <div className="rounded-xl border border-line p-4 space-y-3">
         <Skeleton className="h-5 w-36" />
         <Skeleton className="h-4 w-72" />
         <div className="grid gap-3 sm:grid-cols-3">

@@ -74,6 +74,7 @@ describe("SeatingPlanCanvas", () => {
     );
     expect(screen.getByText("Orchestra")).toBeInTheDocument();
     expect(screen.getByText("General Admission")).toBeInTheDocument();
+    expect(screen.getByText(/plan editor/i)).toBeInTheDocument();
   });
 
   it("should render SEATED and GA badges", () => {

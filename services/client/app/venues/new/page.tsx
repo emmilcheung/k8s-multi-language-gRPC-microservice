@@ -23,7 +23,7 @@ export default async function NewVenuePage() {
         href="/venues"
         className={cn(
           buttonVariants({ variant: "ghost", size: "sm" }),
-          "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2"
+          "gap-1.5 text-mute hover:text-ink self-start -ml-2"
         )}
       >
         <ArrowLeft className="w-3.5 h-3.5" />
@@ -31,8 +31,8 @@ export default async function NewVenuePage() {
       </Link>
 
       <div>
-        <h1 className="text-3xl font-bold tracking-tight gradient-text">New Venue</h1>
-        <p className="text-muted-foreground mt-1">
+        <h1 className="text-3xl font-semibold tracking-tight text-ink">New Venue</h1>
+        <p className="mt-1 text-sm text-mute">
           Create a venue to add seating plans and attach them to tickets.
         </p>
       </div>

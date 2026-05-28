@@ -39,19 +39,19 @@ export function TicketGrid({
 
   if (available.length === 0) {
     return (
-      <div className="border border-border rounded bg-card flex flex-col items-center gap-5 py-20 px-8 text-center">
-        <div className="flex items-center justify-center size-14 rounded bg-muted">
-          <TicketIcon className="size-7 text-muted-foreground" />
+      <div className="border border-line rounded bg-card flex flex-col items-center gap-5 py-20 px-8 text-center">
+        <div className="flex items-center justify-center size-14 rounded bg-subtle">
+          <TicketIcon className="size-7 text-mute" />
         </div>
         <div className="flex flex-col gap-1">
-          <p className="font-display font-bold text-lg">No tickets yet</p>
-          <p className="text-sm text-muted-foreground max-w-xs">
+          <p className="font-sans font-bold text-lg">No tickets yet</p>
+          <p className="text-sm text-mute max-w-xs">
             Be the first to list a ticket and set the market price.
           </p>
         </div>
         <Link
           href="/tickets/new"
-          className={cn(buttonVariants(), "gap-2 bg-primary hover:bg-primary/90 text-primary-foreground")}
+          className={cn(buttonVariants(), "gap-2 bg-accent hover:bg-accent/90 text-accent-ink")}
         >
           <Tag className="size-4" />
           List a Ticket
@@ -128,45 +128,45 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
   return (
     <Link
       href={`/tickets/${ticket.id}`}
-      className="group relative flex flex-col bg-card border border-border rounded overflow-hidden transition-all duration-150 hover:shadow-md hover:border-primary/30"
+      className="group relative flex flex-col bg-card border border-line rounded overflow-hidden transition-all duration-150 hover:shadow-md hover:border-accent/30"
     >
       {/* Left accent bar */}
-      <span className="absolute left-0 top-0 bottom-0 w-0.75 bg-primary" />
+      <span className="absolute left-0 top-0 bottom-0 w-0.75 bg-accent" />
 
       {/* Card body */}
       <div className="pl-5 pr-4 pt-4 pb-4 flex flex-col gap-3 flex-1">
         {/* Top row: date + price */}
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium min-w-0">
+          <div className="flex items-center gap-1.5 text-xs text-mute font-medium min-w-0">
             {eventDate ? (
               <>
-                <CalendarDays className="size-3 shrink-0 text-primary/60" />
+                <CalendarDays className="size-3 shrink-0 text-accent/60" />
                 <span className="truncate">{eventDate}{eventTime ? ` · ${eventTime}` : ""}</span>
               </>
             ) : (
-              <span className="text-muted-foreground/50 italic text-xs">No date set</span>
+              <span className="text-mute/50 italic text-xs">No date set</span>
             )}
           </div>
-          <span className="font-display font-bold text-base text-foreground shrink-0 group-hover:text-primary transition-colors">
+          <span className="font-sans font-bold text-base text-ink shrink-0 group-hover:text-accent transition-colors">
             ${parseFloat(ticket.price).toFixed(2)}
           </span>
         </div>
 
         {/* Event / ticket title */}
-        <p className="font-display font-bold text-sm leading-snug line-clamp-2 group-hover:text-primary transition-colors">
+        <p className="font-sans font-bold text-sm leading-snug line-clamp-2 group-hover:text-accent transition-colors">
           {ticket.event?.title || ticket.title}
         </p>
 
         {/* Venue */}
         {venueName && (
-          <div className="flex items-center gap-1 text-xs text-muted-foreground min-w-0">
+          <div className="flex items-center gap-1 text-xs text-mute min-w-0">
             <MapPin className="size-3 shrink-0" />
             <span className="truncate">{venueName}</span>
           </div>
         )}
 
         {/* Footer: type + remaining + arrow */}
-        <div className="flex items-center justify-between gap-2 mt-auto pt-2 border-t border-border">
+        <div className="flex items-center justify-between gap-2 mt-auto pt-2 border-t border-line">
           <div className="flex items-center gap-1.5 flex-wrap">
             {typeInfo && (
               <Badge variant="secondary" className="gap-1 text-xs px-1.5 py-0 font-medium rounded">
@@ -175,12 +175,12 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
               </Badge>
             )}
             {remaining !== null && (
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-mute">
                 {remaining} left
               </span>
             )}
           </div>
-          <span className="flex items-center gap-0.5 text-xs text-muted-foreground group-hover:text-primary transition-colors shrink-0">
+          <span className="flex items-center gap-0.5 text-xs text-mute group-hover:text-accent transition-colors shrink-0">
             View
             <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
           </span>

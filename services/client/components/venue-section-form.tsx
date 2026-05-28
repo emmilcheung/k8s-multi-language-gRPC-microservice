@@ -32,7 +32,7 @@ export function VenueSectionForm({ addAction, sections }: VenueSectionFormProps)
     <div className="glass rounded-2xl p-6 flex flex-col gap-5">
       <div className="flex flex-col gap-1">
         <h3 className="font-semibold">Venue Layout Template</h3>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-mute">
           Define the physical seating structure once. Every event plan created for this venue will automatically get its own independent inventory from this template.
         </p>
       </div>
@@ -46,7 +46,7 @@ export function VenueSectionForm({ addAction, sections }: VenueSectionFormProps)
         </ul>
       )}
 
-      <div className="h-px bg-white/6" />
+      <div className="h-px bg-line" />
 
       {/* Add section form */}
       <form action={addFormAction} className="flex flex-col gap-4">
@@ -62,18 +62,18 @@ export function VenueSectionForm({ addAction, sections }: VenueSectionFormProps)
 
         {/* Section name */}
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="vs-name" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <Label htmlFor="vs-name" className="text-xs font-medium text-mute uppercase tracking-wider">
             Section name
           </Label>
           <div className="relative">
-            <Grid3X3 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <Grid3X3 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-mute pointer-events-none" />
             <Input id="vs-name" name="name" type="text" required placeholder="Floor A" className="pl-9" />
           </div>
         </div>
 
         {/* Type toggle */}
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Type</Label>
+          <Label className="text-xs font-medium text-mute uppercase tracking-wider">Type</Label>
           <input type="hidden" name="type" value={sectionType} />
           <div className="flex gap-2">
             {(["seated", "ga"] as const).map((t) => (
@@ -83,8 +83,8 @@ export function VenueSectionForm({ addAction, sections }: VenueSectionFormProps)
                 onClick={() => setSectionType(t)}
                 className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium border transition-colors ${
                   sectionType === t
-                    ? "bg-primary/20 text-primary border-primary/40"
-                    : "bg-transparent text-muted-foreground border-white/10 hover:border-white/20"
+                    ? "bg-accent/20 text-accent border-accent/40"
+                    : "bg-transparent text-mute border-line hover:border-mute"
                 }`}
               >
                 {t === "seated" ? "Seated" : "GA"}
@@ -97,13 +97,13 @@ export function VenueSectionForm({ addAction, sections }: VenueSectionFormProps)
         {sectionType === "seated" && (
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="vs-rows" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <Label htmlFor="vs-rows" className="text-xs font-medium text-mute uppercase tracking-wider">
                 Rows
               </Label>
               <Input id="vs-rows" name="rowCount" type="number" min="1" step="1" required placeholder="10" />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="vs-cols" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <Label htmlFor="vs-cols" className="text-xs font-medium text-mute uppercase tracking-wider">
                 Columns
               </Label>
               <Input id="vs-cols" name="columnCount" type="number" min="1" step="1" required placeholder="20" />
@@ -116,7 +116,7 @@ export function VenueSectionForm({ addAction, sections }: VenueSectionFormProps)
           <>
             <input type="hidden" name="rowCount" value="0" />
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="vs-cap" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <Label htmlFor="vs-cap" className="text-xs font-medium text-mute uppercase tracking-wider">
                 Capacity
               </Label>
               <Input id="vs-cap" name="columnCount" type="number" min="1" step="1" required placeholder="500" />
@@ -148,11 +148,11 @@ function VenueSectionRow({
   const [, formAction, pending] = useActionState(deleteAction, {});
 
   return (
-    <li className="flex items-center justify-between rounded-xl bg-white/4 px-3 py-2.5 text-sm gap-3">
+    <li className="flex items-center justify-between rounded-xl bg-subtle px-3 py-2.5 text-sm gap-3">
       <span className="flex items-center gap-2 min-w-0">
-        <Grid3X3 className="w-3.5 h-3.5 text-primary shrink-0" />
+        <Grid3X3 className="w-3.5 h-3.5 text-accent shrink-0" />
         <span className="font-medium truncate">{section.name}</span>
-        <span className="text-xs text-muted-foreground shrink-0">
+        <span className="text-xs text-mute shrink-0">
           {section.type === "seated"
             ? `${section.rowCount}R × ${section.columnCount}C`
             : `GA · ${section.columnCount} cap`}
@@ -163,7 +163,7 @@ function VenueSectionRow({
           type="submit"
           disabled={pending}
           aria-label={`Remove ${section.name}`}
-          className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-40"
+          className="text-mute hover:text-destructive transition-colors disabled:opacity-40"
         >
           {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
         </button>

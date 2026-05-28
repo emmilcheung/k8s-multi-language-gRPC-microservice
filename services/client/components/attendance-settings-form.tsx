@@ -51,10 +51,10 @@ export function AttendanceSettingsForm({
   }
 
   return (
-    <div className="bg-card border border-border rounded-lg p-6 flex flex-col gap-5 shadow-sm">
+    <div className="bg-card border border-line rounded-lg p-6 flex flex-col gap-5 shadow-sm">
       <div className="flex flex-col gap-1">
         <h2 className="text-lg font-semibold">Attendance settings</h2>
-        <p className="text-sm text-muted-foreground">Control QR admission requirements for this event.</p>
+        <p className="text-sm text-mute">Control QR admission requirements for this event.</p>
       </div>
 
       <form className="flex flex-col gap-4" onSubmit={onSubmit}>
@@ -84,7 +84,7 @@ export function AttendanceSettingsForm({
           {saving ? "Saving…" : "Save Settings"}
         </Button>
         {locked && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-mute">
             Attendance settings are locked because this ticket already has completed sales.
           </p>
         )}
@@ -98,26 +98,26 @@ export function AttendanceSettingsForm({
       {saved && <p className="text-sm text-emerald-500">Settings saved.</p>}
 
       {summary && (
-        <div className="border-t border-border pt-4 text-sm text-muted-foreground flex flex-wrap gap-4">
+        <div className="border-t border-line pt-4 text-sm text-mute flex flex-wrap gap-4">
           <span>{summary.totalAdmitted} admitted</span>
           <span>{summary.totalDenied} denied</span>
           <span>{summary.totalCheckedIn} checked in</span>
         </div>
       )}
 
-      <div className="border-t border-border pt-4 flex flex-col gap-2">
+      <div className="border-t border-line pt-4 flex flex-col gap-2">
         <h3 className="text-sm font-semibold">Checked-in attendees</h3>
         {checkIns.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No attendees checked in yet.</p>
+          <p className="text-sm text-mute">No attendees checked in yet.</p>
         ) : (
-          <ul className="text-sm text-muted-foreground space-y-1">
+          <ul className="text-sm text-mute space-y-1">
             {checkIns.map((entry) => {
               const userLabel = entry.buyerUserId
                 ? (buyerEmailsByUserID[entry.buyerUserId] ?? entry.buyerUserId)
                 : "Unknown buyer";
               return (
                 <li key={entry.credentialId}>
-                  <span className="text-foreground">{userLabel}</span>
+                  <span className="text-ink">{userLabel}</span>
                   {entry.checkedInAt ? ` · ${new Date(entry.checkedInAt).toLocaleString()}` : ""}
                 </li>
               );

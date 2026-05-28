@@ -30,16 +30,16 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
   }, []);
 
   return (
-    <header className="sticky top-0 z-50 bg-background border-b border-border">
+    <header className="sticky top-0 z-50 bg-bg border-b border-line">
       <div className="container mx-auto px-4 max-w-6xl h-14 flex items-center justify-between gap-4">
         {/* Brand */}
         <Link href="/" className="flex items-center gap-2.5 group shrink-0">
-          <span className="flex items-center justify-center size-7 rounded bg-primary">
-            <span className="text-primary-foreground font-display font-extrabold text-xs tracking-widest leading-none">
+          <span className="flex items-center justify-center size-7 rounded bg-accent">
+            <span className="text-accent-ink font-sans font-extrabold text-xs tracking-widest leading-none">
               M
             </span>
           </span>
-          <span className="font-display font-extrabold text-sm tracking-[0.12em] uppercase text-foreground">
+          <span className="font-sans font-extrabold text-sm tracking-[0.12em] uppercase text-ink">
             Marquee
           </span>
         </Link>
@@ -57,7 +57,7 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
                 href="/tickets/new"
                 className={cn(
                   buttonVariants({ variant: "ghost", size: "sm" }),
-                  "gap-1.5 text-muted-foreground hover:text-foreground text-xs font-medium"
+                  "gap-1.5 text-mute hover:text-ink text-xs font-medium"
                 )}
               >
                 <Tag className="size-3.5" />
@@ -67,7 +67,7 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
                 href="/venues"
                 className={cn(
                   buttonVariants({ variant: "ghost", size: "sm" }),
-                  "gap-1.5 text-muted-foreground hover:text-foreground text-xs font-medium"
+                  "gap-1.5 text-mute hover:text-ink text-xs font-medium"
                 )}
               >
                 <Building2 className="size-3.5" />
@@ -77,7 +77,7 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
                 href="/orders"
                 className={cn(
                   buttonVariants({ variant: "ghost", size: "sm" }),
-                  "gap-1.5 text-muted-foreground hover:text-foreground text-xs font-medium"
+                  "gap-1.5 text-mute hover:text-ink text-xs font-medium"
                 )}
               >
                 <LayoutDashboard className="size-3.5" />
@@ -87,7 +87,7 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
                 href="/settings"
                 className={cn(
                   buttonVariants({ variant: "ghost", size: "sm" }),
-                  "gap-1.5 text-muted-foreground hover:text-foreground text-xs font-medium"
+                  "gap-1.5 text-mute hover:text-ink text-xs font-medium"
                 )}
               >
                 <Settings className="size-3.5" />
@@ -98,7 +98,7 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
                   type="submit"
                   variant="ghost"
                   size="sm"
-                  className="gap-1.5 text-muted-foreground hover:text-foreground text-xs font-medium"
+                  className="gap-1.5 text-mute hover:text-ink text-xs font-medium"
                 >
                   <LogOut className="size-3.5" />
                   Sign Out
@@ -111,7 +111,7 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
                 href="/auth/signin"
                 className={cn(
                   buttonVariants({ variant: "ghost", size: "sm" }),
-                  "gap-1.5 text-muted-foreground hover:text-foreground text-xs font-medium"
+                  "gap-1.5 text-mute hover:text-ink text-xs font-medium"
                 )}
               >
                 <LogIn className="size-3.5" />
@@ -121,7 +121,7 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
                 href="/auth/signup"
                 className={cn(
                   buttonVariants({ size: "sm" }),
-                  "gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold ml-1"
+                  "gap-1.5 bg-accent hover:bg-accent/90 text-accent-ink text-xs font-semibold ml-1"
                 )}
               >
                 <UserPlus className="size-3.5" />
@@ -133,38 +133,38 @@ export function NavBar({ isLoggedIn }: NavBarProps) {
       </div>
 
       {/* Mobile bottom tab bar */}
-      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/95 backdrop-blur md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-line bg-bg/95 backdrop-blur md:hidden">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-around px-2">
           {isLoggedIn ? (
             <>
-              <Link href="/" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+              <Link href="/" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
                 <Home className="size-4" />
                 Browse
               </Link>
-              <Link href="/tickets/new" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+              <Link href="/tickets/new" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
                 <Tag className="size-4" />
                 Sell
               </Link>
-              <Link href="/orders" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+              <Link href="/orders" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
                 <LayoutDashboard className="size-4" />
                 Orders
               </Link>
-              <Link href="/settings" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+              <Link href="/settings" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
                 <Settings className="size-4" />
                 Settings
               </Link>
             </>
           ) : (
             <>
-              <Link href="/" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+              <Link href="/" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
                 <Home className="size-4" />
                 Browse
               </Link>
-              <Link href="/auth/signin" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+              <Link href="/auth/signin" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
                 <LogIn className="size-4" />
                 Sign in
               </Link>
-              <Link href="/auth/signup" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-muted-foreground">
+              <Link href="/auth/signup" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
                 <UserPlus className="size-4" />
                 Sign up
               </Link>

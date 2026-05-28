@@ -156,3 +156,13 @@
   }
 }
 
+@layer components {
+  /* Quiet flat-card surface. Pairs with the caller's own rounding/padding —
+     it only supplies background, hairline border, and a subtle lift. */
+  .glass {
+    background-color: var(--card);
+    border: 1px solid var(--line);
+    box-shadow: 0 1px 2px oklch(0.18 0.012 260 / 0.04);
+  }
+}
+

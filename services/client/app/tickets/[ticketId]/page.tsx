@@ -223,7 +223,7 @@ export default async function TicketDetailPage({ params }: Props) {
       ? {
           label: "Unavailable",
           badge: "Unavailable",
-          badgeClass: "bg-muted/40 text-muted-foreground border-muted/20",
+          badgeClass: "bg-subtle/40 text-mute border-line/20",
           message: "This seating plan is not active, so this ticket cannot be purchased right now.",
         }
       : seatedSoldOut
@@ -244,7 +244,7 @@ export default async function TicketDetailPage({ params }: Props) {
           badgeClass:
             ticket.sold != null && ticket.quota != null && ticket.sold >= ticket.quota
               ? "bg-destructive/15 text-destructive border-destructive/20"
-              : "bg-muted/40 text-muted-foreground border-muted/20",
+              : "bg-subtle/40 text-mute border-line/20",
           message:
             ticket.sold != null && ticket.quota != null && ticket.sold >= ticket.quota
               ? "This ticket is sold out."
@@ -254,7 +254,7 @@ export default async function TicketDetailPage({ params }: Props) {
       ? {
           label: "Already Reserved",
           badge: "Already Reserved",
-          badgeClass: "bg-muted/40 text-muted-foreground border-muted/20",
+          badgeClass: "bg-subtle/40 text-mute border-line/20",
           message: "You already have an active reservation for this ticket.",
         }
       : null;

@@ -67,11 +67,11 @@ export function AuthForm({ mode, action, next }: AuthFormProps) {
         <form action={formAction} className="flex flex-col gap-4">
           {next && <input type="hidden" name="next" value={next} />}
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="email" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <Label htmlFor="email" className="text-xs font-semibold uppercase tracking-wider text-mute">
               Email
             </Label>
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
               <Input
                 id="email"
                 name="email"
@@ -79,17 +79,17 @@ export function AuthForm({ mode, action, next }: AuthFormProps) {
                 autoComplete={isSignup ? "email" : "username"}
                 required
                 placeholder="you@example.com"
-                className="pl-9 bg-background border-border focus:border-primary"
+                className="pl-9"
               />
             </div>
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="password" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <Label htmlFor="password" className="text-xs font-semibold uppercase tracking-wider text-mute">
               Password
             </Label>
             <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
               <Input
                 id="password"
                 name="password"
@@ -98,17 +98,17 @@ export function AuthForm({ mode, action, next }: AuthFormProps) {
                 required
                 placeholder="••••••••"
                 minLength={isSignup ? 8 : undefined}
-                className="pl-9 bg-background border-border focus:border-primary"
+                className="pl-9"
               />
             </div>
             {isSignup && (
-              <p className="text-xs text-muted-foreground">Minimum 8 characters</p>
+              <p className="text-xs text-mute">Minimum 8 characters</p>
             )}
           </div>
 
           <Button
             type="submit"
-            className="mt-2 h-11 w-full bg-primary text-primary-foreground font-semibold hover:bg-primary/90"
+            className="mt-2 h-11 w-full font-semibold"
             disabled={pending}
           >
             {pending ? (

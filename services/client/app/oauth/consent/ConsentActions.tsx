@@ -46,7 +46,7 @@ export function ConsentActions({ requestId }: ConsentActionsProps) {
       <div className="flex gap-3">
         <Button
           variant="outline"
-          className="flex-1 border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive hover:border-destructive/50"
+          className="flex-1 border-line text-mute hover:bg-destructive/10 hover:text-destructive hover:border-destructive/50"
           disabled={pending !== null}
           onClick={() => submitConsent(false)}
         >
@@ -58,7 +58,7 @@ export function ConsentActions({ requestId }: ConsentActionsProps) {
           Deny
         </Button>
         <Button
-          className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
+          className="flex-1 font-semibold"
           disabled={pending !== null}
           onClick={() => submitConsent(true)}
         >

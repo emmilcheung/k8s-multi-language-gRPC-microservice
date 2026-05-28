@@ -83,6 +83,15 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+const fetchPriceTiersMock = vi.fn();
+const createPriceTierMock = vi.fn();
+vi.mock("@/app/actions/venues", () => ({
+  fetchPriceTiers: (...args: unknown[]) =>
+    fetchPriceTiersMock(...(args as Parameters<typeof fetchPriceTiersMock>)),
+  createPriceTier: (...args: unknown[]) =>
+    createPriceTierMock(...(args as Parameters<typeof createPriceTierMock>)),
+}));
+
 // ── Component mocks (keep tests focused on page logic, not child UI) ───────────
 
 vi.mock("@/components/ticket-grid", () => ({
@@ -105,6 +114,32 @@ vi.mock("@/components/purchase-button", () => ({
   PurchaseButton: ({ ticketId }: { ticketId: string }) => (
     <button data-testid="purchase-button" data-ticket-id={ticketId}>
       Purchase
+    </button>
+  ),
+}));
+
+vi.mock("@/components/seating-plan-canvas", () => ({
+  SeatingPlanCanvas: ({ planId }: { planId: string }) => (
+    <div data-testid="seating-plan-canvas" data-plan-id={planId} />
+  ),
+}));
+
+vi.mock("@/components/price-tier-form", () => ({
+  PriceTierForm: () => <div data-testid="price-tier-form" />,
+}));
+
+vi.mock("@/components/activate-plan-button", () => ({
+  ActivatePlanButton: ({ planId }: { planId: string }) => (
+    <button data-testid="activate-plan-button" data-plan-id={planId}>
+      Activate plan
+    </button>
+  ),
+}));
+
+vi.mock("@/components/deactivate-plan-button", () => ({
+  DeactivatePlanButton: ({ planId }: { planId: string }) => (
+    <button data-testid="deactivate-plan-button" data-plan-id={planId}>
+      Deactivate plan
     </button>
   ),
 }));
@@ -186,6 +221,8 @@ vi.mock("lucide-react", () => ({
   Settings2: () => <span />,
   Users: () => <span />,
   LayoutDashboard: () => <span />,
+  Layers: () => <span />,
+  Grid3X3: () => <span />,
   Building2: () => <span />,
   Tag: () => <span />,
   Zap: () => <span />,
@@ -483,6 +520,51 @@ describe("OrdersPage", () => {
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
   });
 
+  describe("VenuePlanDetailPage", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+      fetchPriceTiersMock.mockResolvedValue([]);
+      createPriceTierMock.mockResolvedValue({});
+    });
+
+    it("renders the modernized venue plan editor shell for draft plans", async () => {
+      serverApiMock
+        .mockResolvedValueOnce({
+          id: "plan-uuid-1",
+          name: "Main Hall Layout",
+          status: "draft",
+          venueId: "venue-uuid-1",
+          ticketId: null,
+          maxSeatsPerOrder: 6,
+          layoutJson: { nodes: [] },
+        })
+        .mockResolvedValueOnce({
+          sections: [
+            {
+              id: "section-1",
+              name: "Front Rows",
+              type: "seated",
+              rowCount: 5,
+              columnCount: 8,
+              priceTierId: null,
+            },
+          ],
+        });
+
+      const { default: VenuePlanDetailPage } = await import("@/app/venues/[venueId]/plans/[planId]/page");
+      render(
+        await VenuePlanDetailPage({
+          params: Promise.resolve({ venueId: "venue-uuid-1", planId: "plan-uuid-1" }),
+        })
+      );
+
+      expect(screen.getByText("Main Hall Layout")).toBeInTheDocument();
+      expect(screen.getByTestId("seating-plan-canvas")).toBeInTheDocument();
+      expect(screen.getByTestId("activate-plan-button")).toBeInTheDocument();
+    });
+  });
+
   it("renders the authenticated order list from GraphQL", async () => {
     executeQueryMock.mockResolvedValueOnce({
       orders: [
@@ -590,12 +672,10 @@ describe("OrderDetailPage", () => {
     const { default: OrderDetailPage } = await import("@/app/orders/[orderId]/page");
     render(await OrderDetailPage({ params: Promise.resolve({ orderId: "order-uuid-2" }) }));
 
-    const transferBtn = screen.getByRole("button", { name: /send to friend/i });
-    expect(transferBtn).toBeDisabled();
-    expect(transferBtn).toHaveAttribute("title", expect.stringMatching(/phase 7/i));
-    const refundBtn = screen.getByRole("button", { name: /request refund/i });
-    expect(refundBtn).toBeDisabled();
-    expect(refundBtn).toHaveAttribute("title", expect.stringMatching(/phase 7/i));
+    const transferLink = screen.getByRole("link", { name: /send to friend/i });
+    expect(transferLink).toHaveAttribute("href", "/orders/order-uuid-2/transfer");
+    const refundLink = screen.getByRole("link", { name: /request refund/i });
+    expect(refundLink).toHaveAttribute("href", "/orders/order-uuid-2/refund");
   });
 });
 
@@ -608,45 +688,77 @@ describe("TransferRefundPages", () => {
   });
 
   it("renders transfer page for authenticated users", async () => {
-    executeQueryMock.mockResolvedValue({
-      order: {
-        id: "order-uuid-3",
-        userId: "buyer-uuid",
-        status: "COMPLETE",
-        quantity: 1,
-        expiresAt: null,
-        createdAt: "2026-01-01T00:00:00Z",
-        ticket: { id: "ticket-uuid-3", title: "Concert", price: "49.99" },
-      },
-      currentUser: { id: "buyer-uuid", paymentMethods: [] },
-    });
+    executeQueryMock
+      .mockResolvedValueOnce({
+        order: {
+          id: "order-uuid-3",
+          userId: "buyer-uuid",
+          status: "COMPLETE",
+          quantity: 1,
+          expiresAt: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          ticket: { id: "ticket-uuid-3", title: "Concert", price: "49.99" },
+        },
+        currentUser: { id: "buyer-uuid", paymentMethods: [] },
+      })
+      .mockResolvedValueOnce({
+        admissionPass: {
+          id: "cred-3",
+          ticketId: "ticket-uuid-3",
+          orderId: "order-uuid-3",
+          eventId: "event-uuid-3",
+          status: "ISSUED",
+          issuedAt: "2026-01-01T00:00:00Z",
+          usedAt: null,
+          qrToken: "signed-token",
+          transferState: "NONE",
+          transferredTo: null,
+          transferredAt: null,
+        },
+      });
 
     const { default: TransferPage } = await import("@/app/orders/[orderId]/transfer/page");
     render(await TransferPage({ params: Promise.resolve({ orderId: "order-uuid-3" }) }));
 
     expect(screen.getByRole("heading", { name: /transfer pass/i })).toBeInTheDocument();
-    expect(screen.getByLabelText(/recipient email/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /which seat are you sending/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /they'll receive/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/their email/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/add a note/i)).toBeInTheDocument();
   });
 
   it("renders refund page for authenticated users", async () => {
-    executeQueryMock.mockResolvedValue({
-      order: {
-        id: "order-uuid-4",
-        userId: "buyer-uuid",
-        status: "COMPLETE",
-        quantity: 1,
-        expiresAt: null,
-        createdAt: "2026-01-01T00:00:00Z",
-        ticket: { id: "ticket-uuid-4", title: "Concert", price: "49.99" },
-      },
-      currentUser: { id: "buyer-uuid", paymentMethods: [] },
-    });
+    executeQueryMock
+      .mockResolvedValueOnce({
+        order: {
+          id: "order-uuid-4",
+          userId: "buyer-uuid",
+          status: "COMPLETE",
+          quantity: 1,
+          expiresAt: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          ticket: { id: "ticket-uuid-4", title: "Concert", price: "49.99" },
+        },
+        currentUser: { id: "buyer-uuid", paymentMethods: [] },
+      })
+      .mockResolvedValueOnce({
+        refundEligibility: {
+          orderId: "order-uuid-4",
+          eligible: true,
+          reason: null,
+          refundableAmount: 4999,
+          cutoffAt: null,
+        },
+      });
 
     const { default: RefundPage } = await import("@/app/orders/[orderId]/refund/page");
     render(await RefundPage({ params: Promise.resolve({ orderId: "order-uuid-4" }) }));
 
     expect(screen.getByRole("heading", { name: /request refund/i })).toBeInTheDocument();
-    expect(screen.getByLabelText(/refund reason/i)).toBeInTheDocument();
+    expect(screen.getByText(/you're eligible for a full refund/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /reason for refund/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /refund summary/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /can't attend — schedule changed/i })).toBeInTheDocument();
   });
 });
 
@@ -1144,9 +1256,9 @@ describe("AdmissionPage", () => {
     expect(screen.getByText(/this order has 2 passes/i)).toBeInTheDocument();
     expect(screen.getAllByText("A-12").length).toBeGreaterThan(0);
     expect(screen.getAllByText("A-13").length).toBeGreaterThan(0);
-    const transferBtns = screen.getAllByRole("button", { name: /transfer/i });
-    expect(transferBtns).toHaveLength(2);
-    transferBtns.forEach((btn) => expect(btn).toBeDisabled());
+    const transferLinks = screen.getAllByRole("link", { name: /transfer/i });
+    expect(transferLinks).toHaveLength(2);
+    transferLinks.forEach((link) => expect(link).toHaveAttribute("href", "/orders/order-1/transfer"));
     expect(screen.queryByText(/qr token payload/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/signed-token/i)).not.toBeInTheDocument();
   });

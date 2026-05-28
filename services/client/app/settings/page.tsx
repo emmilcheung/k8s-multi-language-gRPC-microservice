@@ -163,16 +163,16 @@ export default async function SettingsPage(props: SettingsPageProps) {
       )}
       <header className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <span className="inline-block h-px w-6 bg-primary" />
-          <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+          <span className="inline-block h-px w-6 bg-accent" />
+          <span className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">
             Settings
           </span>
         </div>
         <h1 className="text-[30px] font-semibold tracking-[-0.03em] text-ink">Settings</h1>
         {currentUserEmail && (
-          <p className="text-sm text-muted-foreground font-medium">{currentUserEmail}</p>
+          <p className="text-sm text-mute font-medium">{currentUserEmail}</p>
         )}
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-mute">
           Manage your profile, sessions, payments, and billing details.
         </p>
       </header>
@@ -216,11 +216,11 @@ export default async function SettingsPage(props: SettingsPageProps) {
           <SectionCard
             title="Profile"
             description="Update personal information used for your account."
-            icon={<UserRound className="size-4 text-primary" />}
+            icon={<UserRound className="size-4 text-accent" />}
           >
             <form action={handleUpdateProfile} className="grid gap-3">
               <div className="grid gap-1.5">
-                <label htmlFor="displayName" className="text-xs font-medium text-muted-foreground">
+                <label htmlFor="displayName" className="text-xs font-medium text-mute">
                   Display name
                 </label>
                 <Input
@@ -230,13 +230,13 @@ export default async function SettingsPage(props: SettingsPageProps) {
                 />
               </div>
               <div className="grid gap-1.5">
-                <label htmlFor="locale" className="text-xs font-medium text-muted-foreground">
+                <label htmlFor="locale" className="text-xs font-medium text-mute">
                   Locale
                 </label>
                 <Input id="locale" name="locale" defaultValue={profile?.locale ?? ""} />
               </div>
               <div className="grid gap-1.5">
-                <label htmlFor="timezone" className="text-xs font-medium text-muted-foreground">
+                <label htmlFor="timezone" className="text-xs font-medium text-mute">
                   Timezone
                 </label>
                 <Input id="timezone" name="timezone" defaultValue={profile?.timezone ?? ""} />
@@ -248,7 +248,7 @@ export default async function SettingsPage(props: SettingsPageProps) {
           <SectionCard
             title="Payment methods"
             description="Used for ticket purchases and quick checkout."
-            icon={<CreditCard className="size-4 text-primary" />}
+            icon={<CreditCard className="size-4 text-accent" />}
           >
             <SettingsPaymentMethods initialPaymentMethods={paymentMethods} />
           </SectionCard>
@@ -267,7 +267,7 @@ export default async function SettingsPage(props: SettingsPageProps) {
                   type="checkbox"
                   name="orderUpdates"
                   defaultChecked={Boolean(preferences?.orderUpdates)}
-                  className="size-4 rounded border-border bg-background"
+                  className="size-4 rounded border-line bg-subtle"
                 />
               </label>
               <label className="flex items-center justify-between gap-4 rounded-xl border border-line px-4 py-3 text-sm">
@@ -279,7 +279,7 @@ export default async function SettingsPage(props: SettingsPageProps) {
                   type="checkbox"
                   name="productUpdates"
                   defaultChecked={Boolean(preferences?.productUpdates)}
-                  className="size-4 rounded border-border bg-background"
+                  className="size-4 rounded border-line bg-subtle"
                 />
               </label>
               <label className="flex items-center justify-between gap-4 rounded-xl border border-line px-4 py-3 text-sm">
@@ -291,7 +291,7 @@ export default async function SettingsPage(props: SettingsPageProps) {
                   type="checkbox"
                   name="marketingOptIn"
                   defaultChecked={Boolean(preferences?.marketingOptIn)}
-                  className="size-4 rounded border-border bg-background"
+                  className="size-4 rounded border-line bg-subtle"
                 />
               </label>
               <button type="submit" className={cn(buttonVariants({ variant: "outline" }), "w-fit")}>
@@ -303,18 +303,18 @@ export default async function SettingsPage(props: SettingsPageProps) {
           <SectionCard
             title="Security & sessions"
             description="Review active sessions and revoke access you do not trust."
-            icon={<Shield className="size-4 text-primary" />}
+            icon={<Shield className="size-4 text-accent" />}
           >
             <div className="space-y-3">
             {sessions.length === 0 ? (
-              <p className="rounded border border-dashed border-border p-4 text-sm text-muted-foreground">
+              <p className="rounded border border-dashed border-line p-4 text-sm text-mute">
                 No active sessions found.
               </p>
             ) : (
               sessions.map((session) => (
                 <div
                   key={session.sessionId}
-                  className="flex flex-col gap-3 rounded border border-border p-3 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-3 rounded border border-line p-3 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -323,10 +323,10 @@ export default async function SettingsPage(props: SettingsPageProps) {
                       </p>
                       {session.current && <Badge className="text-xs">Current</Badge>}
                     </div>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-mute">
                       Last active: {formatTimestamp(session.lastRotatedAt ?? session.createdAt)}
                     </p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-mute">
                       IP: {session.ipAddress?.trim() || "Unknown"}
                     </p>
                   </div>
@@ -351,30 +351,30 @@ export default async function SettingsPage(props: SettingsPageProps) {
           <SectionCard
             title="Billing address"
             description="Keep your billing details up to date for invoices and receipts."
-            icon={<MapPinHouse className="size-4 text-primary" />}
+            icon={<MapPinHouse className="size-4 text-accent" />}
           >
             <form action={handleUpdateBillingAddress} className="grid gap-3">
               <div className="grid gap-1.5">
-                <label htmlFor="line1" className="text-xs font-medium text-muted-foreground">
+                <label htmlFor="line1" className="text-xs font-medium text-mute">
                   Address line 1
                 </label>
                 <Input id="line1" name="line1" defaultValue={billingAddress?.line1 ?? ""} />
               </div>
               <div className="grid gap-1.5">
-                <label htmlFor="line2" className="text-xs font-medium text-muted-foreground">
+                <label htmlFor="line2" className="text-xs font-medium text-mute">
                   Address line 2
                 </label>
                 <Input id="line2" name="line2" defaultValue={billingAddress?.line2 ?? ""} />
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
-                  <label htmlFor="city" className="text-xs font-medium text-muted-foreground">
+                  <label htmlFor="city" className="text-xs font-medium text-mute">
                     City
                   </label>
                   <Input id="city" name="city" defaultValue={billingAddress?.city ?? ""} />
                 </div>
                 <div className="grid gap-1.5">
-                  <label htmlFor="state" className="text-xs font-medium text-muted-foreground">
+                  <label htmlFor="state" className="text-xs font-medium text-mute">
                     State / region
                   </label>
                   <Input id="state" name="state" defaultValue={billingAddress?.state ?? ""} />
@@ -382,7 +382,7 @@ export default async function SettingsPage(props: SettingsPageProps) {
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
-                  <label htmlFor="postalCode" className="text-xs font-medium text-muted-foreground">
+                  <label htmlFor="postalCode" className="text-xs font-medium text-mute">
                     Postal code
                   </label>
                   <Input
@@ -392,7 +392,7 @@ export default async function SettingsPage(props: SettingsPageProps) {
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <label htmlFor="country" className="text-xs font-medium text-muted-foreground">
+                  <label htmlFor="country" className="text-xs font-medium text-mute">
                     Country
                   </label>
                   <Input id="country" name="country" defaultValue={billingAddress?.country ?? ""} />

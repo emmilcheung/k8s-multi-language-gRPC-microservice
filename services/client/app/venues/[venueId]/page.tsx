@@ -31,7 +31,7 @@ export async function generateMetadata({ params }: Props) {
 const planStatusColor: Record<SeatingPlan["status"], string> = {
   draft: "bg-yellow-500/15 text-yellow-400 border-yellow-500/20",
   active: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
-  inactive: "bg-muted/40 text-muted-foreground border-muted/20",
+  inactive: "bg-subtle/40 text-mute border-line/20",
 };
 
 export default async function VenueDetailPage({ params }: Props) {
@@ -77,7 +77,7 @@ export default async function VenueDetailPage({ params }: Props) {
         href="/venues"
         className={cn(
           buttonVariants({ variant: "ghost", size: "sm" }),
-          "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2"
+          "gap-1.5 text-mute hover:text-ink self-start -ml-2"
         )}
       >
         <ArrowLeft className="w-3.5 h-3.5" />
@@ -87,11 +87,11 @@ export default async function VenueDetailPage({ params }: Props) {
       {/* Venue info */}
       <div className="glass rounded-2xl p-8 flex flex-col gap-6">
         <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-primary/10 ring-1 ring-primary/20 shrink-0">
-            <Building2 className="w-7 h-7 text-primary" />
+          <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-accent-soft ring-1 ring-accent/20 shrink-0">
+            <Building2 className="w-7 h-7 text-accent" />
           </div>
           <div className="flex items-center gap-2">
-            <Badge className="bg-primary/15 text-primary border-primary/20">Venue</Badge>
+            <Badge className="bg-accent-soft text-accent border-accent/20">Venue</Badge>
             {isOwner && (
               <Link
                 href={`/venues/${venueId}/edit`}
@@ -108,7 +108,7 @@ export default async function VenueDetailPage({ params }: Props) {
           <h1 className="text-3xl font-bold tracking-tight leading-tight">{venue.name}</h1>
         </div>
 
-        <div className="flex flex-wrap gap-4 text-sm text-muted-foreground pt-2 border-t border-white/6">
+        <div className="flex flex-wrap gap-4 text-sm text-mute pt-2 border-t border-line/60">
           <span className="flex items-center gap-1.5">
             <Users className="w-3.5 h-3.5" />
             {venue.capacity.toLocaleString()} total capacity
@@ -137,7 +137,7 @@ export default async function VenueDetailPage({ params }: Props) {
         <div className="flex flex-col gap-4">
           <div>
             <h2 className="text-xl font-semibold">Seating Plans</h2>
-            <p className="text-sm text-muted-foreground mt-0.5">
+            <p className="text-sm text-mute mt-0.5">
               Plans created for tickets using this venue as a template. Plans are managed in ticket context.
             </p>
           </div>
@@ -148,15 +148,15 @@ export default async function VenueDetailPage({ params }: Props) {
                 key={plan.id}
                 className="glass rounded-2xl p-5 flex items-center gap-4"
               >
-                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 ring-1 ring-primary/20 shrink-0">
-                  <Layers className="w-5 h-5 text-primary" />
+                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent-soft ring-1 ring-accent/20 shrink-0">
+                  <Layers className="w-5 h-5 text-accent" />
                 </div>
 
                 <div className="flex-1 min-w-0">
                   <p className="font-medium truncate">
                     {plan.name}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
+                  <p className="text-xs text-mute mt-0.5">
                     Max {plan.maxSeatsPerOrder} seats/order
                     {plan.ticketId && (
                       <> · Attached to ticket</>

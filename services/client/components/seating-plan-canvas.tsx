@@ -115,14 +115,14 @@ const SectionNode = React.memo(function SectionNode({
           onPointerMove={handleRowPointerMove}
           onPointerUp={handleRowPointerUp}
         >
-          <span className="text-[10px] text-muted-foreground w-4 shrink-0 text-right font-mono">
+          <span className="text-[10px] text-mute w-4 shrink-0 text-right font-mono">
             {rowLabel}
           </span>
           <div className="flex gap-px">
             {Array.from({ length: section.columnCount }, (_, j) => (
               <div
                 key={j}
-                className="w-3.5 h-3.5 rounded-sm bg-primary/30 ring-1 ring-primary/20"
+                className="w-3.5 h-3.5 rounded-sm bg-accent/30 ring-1 ring-accent/20"
               />
             ))}
           </div>
@@ -144,18 +144,18 @@ const SectionNode = React.memo(function SectionNode({
     <div
       className={cn(
         "glass rounded-xl p-3 min-w-[140px] max-w-[360px]",
-        "ring-1 ring-white/10 shadow-lg",
-        isSeated ? "bg-primary/5" : "bg-violet-500/10"
+        "ring-1 ring-line shadow-sm",
+        isSeated ? "bg-accent/5" : "bg-violet-500/10"
       )}
     >
       {/* Header */}
       <div className="flex items-center gap-2 mb-2">
-        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/15 ring-1 ring-primary/20 shrink-0">
-          <Grid3X3 className="w-3.5 h-3.5 text-primary" />
+        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-accent/15 ring-1 ring-accent/20 shrink-0">
+          <Grid3X3 className="w-3.5 h-3.5 text-accent" />
         </div>
         <p className="text-xs font-semibold truncate flex-1">{section.name}</p>
         {isDraft && (
-          <Move className="w-3 h-3 text-muted-foreground shrink-0 opacity-60" />
+          <Move className="w-3 h-3 text-mute shrink-0 opacity-60" />
         )}
       </div>
 
@@ -163,7 +163,7 @@ const SectionNode = React.memo(function SectionNode({
         className={cn(
           "text-[10px] mb-2",
           isSeated
-            ? "bg-primary/15 text-primary border-primary/20"
+            ? "bg-accent/15 text-accent border-accent/20"
             : "bg-violet-500/15 text-violet-300 border-violet-500/20"
         )}
       >
@@ -180,7 +180,7 @@ const SectionNode = React.memo(function SectionNode({
         </div>
       )}
 
-      <p className="text-[10px] text-muted-foreground mt-2 text-right">
+      <p className="text-[10px] text-mute mt-2 text-right">
         {isSeated
           ? `${section.rowCount}R × ${section.columnCount}C`
           : section.columnCount > 0 ? `${section.columnCount} cap` : "GA"}
@@ -328,8 +328,8 @@ export function SeatingPlanCanvas({
   if (sections.length === 0) {
     return (
       <div className="glass rounded-2xl p-10 flex flex-col items-center gap-3 text-center">
-        <Grid3X3 className="w-10 h-10 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">
+        <Grid3X3 className="w-10 h-10 text-mute" />
+        <p className="text-sm text-mute">
           Add sections using the form before arranging the canvas.
         </p>
       </div>
@@ -337,10 +337,22 @@ export function SeatingPlanCanvas({
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="glass rounded-3xl p-6 md:p-7 flex flex-col gap-5 border border-line/70">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Plan editor</h2>
+          <p className="text-xs text-mute mt-0.5">
+            Drag sections to position them and offset seated rows for better sightlines.
+          </p>
+        </div>
+        <Badge variant="outline" className="text-xs">
+          {isDraft ? "Draft (editable)" : "Published (read-only)"}
+        </Badge>
+      </div>
+
       {/* Canvas */}
       <div
-        className="rounded-2xl overflow-hidden ring-1 ring-white/10"
+        className="rounded-2xl overflow-hidden ring-1 ring-line/70 bg-subtle/60"
         style={{ height: 500 }}
       >
         <ReactFlow
@@ -356,9 +368,9 @@ export function SeatingPlanCanvas({
           panOnDrag
           zoomOnScroll
           proOptions={{ hideAttribution: true }}
-          colorMode="dark"
+          colorMode="light"
         >
-          <Background color="#ffffff14" gap={20} size={1} />
+          <Background color="#cbd5e133" gap={20} size={1} />
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>
@@ -370,7 +382,7 @@ export function SeatingPlanCanvas({
             <p className="text-xs text-destructive flex-1">{saveError}</p>
           )}
           {savedAt && !saveError && (
-            <p className="text-xs text-muted-foreground flex-1">
+            <p className="text-xs text-mute flex-1">
               Saved {savedAt.toLocaleTimeString()}
             </p>
           )}
@@ -379,7 +391,7 @@ export function SeatingPlanCanvas({
             disabled={saving}
             className={cn(
               "inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors",
-              "bg-primary text-primary-foreground hover:bg-primary/90",
+              "bg-accent text-accent-ink hover:bg-accent/90",
               "disabled:opacity-50 disabled:pointer-events-none"
             )}
           >
