@@ -655,6 +655,47 @@ describe("TicketDetailPage", () => {
     expect(screen.getAllByText("$49.99").length).toBeGreaterThanOrEqual(1);
   });
 
+  it("renders related events row when browse data is available", async () => {
+    const ticket = makeTicket({ id: "ticket-uuid-1" });
+    executeQueryMock
+      .mockResolvedValueOnce({ ticket: makeTicketDetailGraphql(ticket) })
+      .mockResolvedValueOnce({
+        ticketsConnection: {
+          edges: [
+            {
+              node: {
+                id: "ticket-uuid-2",
+                title: "Late Night Set",
+                price: "35.00",
+                available: 20,
+                ticketType: "GA",
+                seatingPlan: null,
+                event: {
+                  title: "Late Night Set",
+                  startsAt: "2026-06-10T20:00:00Z",
+                  venueName: "Moon Hall",
+                },
+              },
+              cursor: "c1",
+            },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      });
+
+    const { default: TicketDetailPage } = await import(
+      "@/app/tickets/[ticketId]/page"
+    );
+    render(await TicketDetailPage({ params }));
+
+    expect(screen.getByRole("heading", { name: /related events/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /browse all/i })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: /late night set/i })).toHaveAttribute(
+      "href",
+      "/tickets/ticket-uuid-2"
+    );
+  });
+
   it("calls notFound() when the GraphQL query returns null", async () => {
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
     executeQueryMock.mockResolvedValue({ ticket: null });

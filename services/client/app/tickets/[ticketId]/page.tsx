@@ -9,11 +9,16 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ApiError, serverApi } from "@/lib/api";
 import { executeQuery } from "@/lib/graphql/execute";
-import { TicketDetailDocument, AttendancePolicyDocument } from "@/lib/graphql/generated";
+import {
+  TicketDetailDocument,
+  AttendancePolicyDocument,
+  TicketsBrowseDocument,
+} from "@/lib/graphql/generated";
 import type { Ticket, SeatingPlan, PriceTier, AvailabilitySnapshot } from "@/lib/types";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { EventPoster } from "@/components/system";
 import { cn } from "@/lib/utils";
 import { TicketForm } from "@/components/ticket-form";
 import { SeatingPlanPreview } from "@/components/seating-plan-preview";
@@ -178,6 +183,30 @@ export default async function TicketDetailPage({ params }: Props) {
   const gaMaxQuantity = ticket.quota
     ? Math.min(ticket.maxPerUser ?? ticket.quota, Math.min(ticket.quota, 10))
     : 1;
+
+  let relatedEvents: Array<{
+    id: string;
+    title: string;
+    price: number;
+    event?: {
+      title?: string | null;
+      startsAt?: string | null;
+      venueName?: string | null;
+    } | null;
+  }> = [];
+  try {
+    const data = await executeQuery(
+      TicketsBrowseDocument,
+      { first: 4 },
+      { cookie: cookieStore.toString() }
+    );
+    relatedEvents = (data?.ticketsConnection?.edges ?? [])
+      .map((edge) => edge.node)
+      .filter((node) => node.id !== ticket.id)
+      .slice(0, 3);
+  } catch {
+    relatedEvents = [];
+  }
   const gaRemaining =
     !isSeated && ticket.quota != null
       ? Math.max(0, ticket.quota - (ticket.reserved ?? 0) - (ticket.sold ?? 0))
@@ -351,7 +380,40 @@ export default async function TicketDetailPage({ params }: Props) {
             </div>
           ) : null}
 
-          {/* TODO: related events row — needs data wire (Phase 1+ follow-up) */}
+          {relatedEvents.length > 0 && (
+            <section className="mt-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-ink">Related events</h2>
+                <Link
+                  href="/"
+                  className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "px-2")}
+                >
+                  Browse all
+                </Link>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {relatedEvents.map((item) => {
+                  const startsAt = item.event?.startsAt;
+                  const date = startsAt
+                    ? new Date(startsAt).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })
+                    : "TBA";
+                  return (
+                    <EventPoster
+                      key={item.id}
+                      title={item.event?.title || item.title}
+                      venue={item.event?.venueName || "Venue TBA"}
+                      date={date}
+                      priceFromCents={Math.round(item.price * 100)}
+                      href={`/tickets/${item.id}`}
+                    />
+                  );
+                })}
+              </div>
+            </section>
+          )}
         </div>
 
         {/* Right column — sticky purchase panel */}
