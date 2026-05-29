@@ -10,14 +10,17 @@ import (
 )
 
 type AdmissionPass struct {
-	ID       string           `json:"id"`
-	TicketID string           `json:"ticketId"`
-	OrderID  string           `json:"orderId"`
-	EventID  string           `json:"eventId"`
-	Status   CredentialStatus `json:"status"`
-	IssuedAt string           `json:"issuedAt"`
-	UsedAt   *string          `json:"usedAt,omitempty"`
-	QRToken  *string          `json:"qrToken,omitempty"`
+	ID            string           `json:"id"`
+	TicketID      string           `json:"ticketId"`
+	OrderID       string           `json:"orderId"`
+	EventID       string           `json:"eventId"`
+	Status        CredentialStatus `json:"status"`
+	IssuedAt      string           `json:"issuedAt"`
+	UsedAt        *string          `json:"usedAt,omitempty"`
+	QRToken       *string          `json:"qrToken,omitempty"`
+	TransferState TransferState    `json:"transferState"`
+	TransferredTo *string          `json:"transferredTo,omitempty"`
+	TransferredAt *string          `json:"transferredAt,omitempty"`
 }
 
 func (AdmissionPass) IsEntity() {}
@@ -67,6 +70,16 @@ type ScanValidationResult struct {
 	TicketID *string `json:"ticketId,omitempty"`
 	OrderID  *string `json:"orderId,omitempty"`
 	EventID  *string `json:"eventId,omitempty"`
+}
+
+type TransferAdmissionCredentialInput struct {
+	CredentialID   string `json:"credentialId"`
+	RecipientEmail string `json:"recipientEmail"`
+}
+
+type TransferResult struct {
+	Credential        *AdmissionPass `json:"credential"`
+	PendingTransferID string         `json:"pendingTransferId"`
 }
 
 type UpdateAttendancePolicyInput struct {
@@ -185,6 +198,65 @@ func (e *CredentialStatus) UnmarshalJSON(b []byte) error {
 }
 
 func (e CredentialStatus) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type TransferState string
+
+const (
+	TransferStateNone     TransferState = "NONE"
+	TransferStatePending  TransferState = "PENDING"
+	TransferStateAccepted TransferState = "ACCEPTED"
+	TransferStateRecalled TransferState = "RECALLED"
+)
+
+var AllTransferState = []TransferState{
+	TransferStateNone,
+	TransferStatePending,
+	TransferStateAccepted,
+	TransferStateRecalled,
+}
+
+func (e TransferState) IsValid() bool {
+	switch e {
+	case TransferStateNone, TransferStatePending, TransferStateAccepted, TransferStateRecalled:
+		return true
+	}
+	return false
+}
+
+func (e TransferState) String() string {
+	return string(e)
+}
+
+func (e *TransferState) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = TransferState(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid TransferState", str)
+	}
+	return nil
+}
+
+func (e TransferState) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *TransferState) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e TransferState) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil

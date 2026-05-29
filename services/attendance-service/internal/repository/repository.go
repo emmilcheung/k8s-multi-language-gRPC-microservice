@@ -74,6 +74,31 @@ type AdmissionCredential struct {
 	UsedByDeviceID           *string
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
+
+	TransferState TransferState
+	TransferredTo *string
+	TransferredAt *time.Time
+}
+
+type TransferState string
+
+const (
+	TransferStateNone     TransferState = "NONE"
+	TransferStatePending  TransferState = "PENDING"
+	TransferStateAccepted TransferState = "ACCEPTED"
+	TransferStateRecalled TransferState = "RECALLED"
+)
+
+type AdmissionTransfer struct {
+	ID             string
+	CredentialID   string
+	SenderUserID   string
+	RecipientUserID *string
+	RecipientEmail string
+	State          TransferState
+	CreatedAt      time.Time
+	AcceptedAt     *time.Time
+	RecalledAt     *time.Time
 }
 
 // OutboxRow is a durable Kafka message waiting to be relayed.
@@ -150,6 +175,12 @@ type CredentialRepository interface {
 	// ListCheckedInByEventID returns recently checked-in credentials (status USED)
 	// for an event, ordered by most recent check-in first.
 	ListCheckedInByEventID(ctx context.Context, eventID string, limit int) ([]*AdmissionCredential, error)
+	CreateTransfer(ctx context.Context, transfer *AdmissionTransfer) error
+	FindLatestTransferByCredentialID(ctx context.Context, credentialID string) (*AdmissionTransfer, error)
+	FindTransferByID(ctx context.Context, id string) (*AdmissionTransfer, error)
+	AcceptTransfer(ctx context.Context, transferID string, recipientUserID string, acceptedAt time.Time) (*AdmissionTransfer, error)
+	RecallTransfer(ctx context.Context, credentialID string, senderUserID string, recalledAt time.Time) (*AdmissionTransfer, error)
+	UpdateCredentialBuyer(ctx context.Context, credentialID string, buyerUserID string) error
 }
 
 // OutboxRepository manages unpublished outbox rows and publish acknowledgements.

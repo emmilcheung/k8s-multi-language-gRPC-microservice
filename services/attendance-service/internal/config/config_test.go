@@ -112,6 +112,7 @@ func TestLoad_Success(t *testing.T) {
 	assert.Equal(t, []string{"localhost:9092"}, cfg.KafkaBrokers)
 	assert.NotEmpty(t, cfg.QRSigningKey)
 	assert.Equal(t, "ticket-service:50051", cfg.TicketServiceURL)
+	assert.Equal(t, "http://auth-service:3000", cfg.AuthServiceURL)
 }
 
 func TestLoad_MultipleErrors(t *testing.T) {

@@ -284,3 +284,27 @@ func (s *spyCredentialRepo) MarkEventPublished(_ context.Context, _ string, _ ti
 func (s *spyCredentialRepo) ListCheckedInByEventID(_ context.Context, _ string, _ int) ([]*repository.AdmissionCredential, error) {
 	return []*repository.AdmissionCredential{}, s.err
 }
+
+func (s *spyCredentialRepo) CreateTransfer(_ context.Context, _ *repository.AdmissionTransfer) error {
+	return s.err
+}
+
+func (s *spyCredentialRepo) RecallTransfer(_ context.Context, _, _ string, _ time.Time) (*repository.AdmissionTransfer, error) {
+	return nil, s.err
+}
+
+func (s *spyCredentialRepo) AcceptTransfer(_ context.Context, _, _ string, _ time.Time) (*repository.AdmissionTransfer, error) {
+	return nil, s.err
+}
+
+func (s *spyCredentialRepo) FindTransferByID(_ context.Context, _ string) (*repository.AdmissionTransfer, error) {
+	return nil, s.err
+}
+
+func (s *spyCredentialRepo) FindLatestTransferByCredentialID(_ context.Context, _ string) (*repository.AdmissionTransfer, error) {
+	return nil, s.err
+}
+
+func (s *spyCredentialRepo) UpdateCredentialBuyer(_ context.Context, _, _ string) error {
+	return s.err
+}

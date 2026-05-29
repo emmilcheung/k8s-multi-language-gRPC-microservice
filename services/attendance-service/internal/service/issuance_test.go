@@ -148,6 +148,30 @@ func (r *credRepoDouble) ListCheckedInByEventID(_ context.Context, _ string, _ i
 	return []*repository.AdmissionCredential{}, nil
 }
 
+func (r *credRepoDouble) CreateTransfer(_ context.Context, _ *repository.AdmissionTransfer) error {
+	return nil
+}
+
+func (r *credRepoDouble) RecallTransfer(_ context.Context, _, _ string, _ time.Time) (*repository.AdmissionTransfer, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (r *credRepoDouble) AcceptTransfer(_ context.Context, _, _ string, _ time.Time) (*repository.AdmissionTransfer, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (r *credRepoDouble) FindTransferByID(_ context.Context, _ string) (*repository.AdmissionTransfer, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (r *credRepoDouble) FindLatestTransferByCredentialID(_ context.Context, _ string) (*repository.AdmissionTransfer, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (r *credRepoDouble) UpdateCredentialBuyer(_ context.Context, _, _ string) error {
+	return nil
+}
+
 type pubDouble struct {
 	published []publishedMsg
 	err       error

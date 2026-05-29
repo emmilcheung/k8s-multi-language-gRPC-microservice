@@ -5,8 +5,10 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/acme/attendance-service/internal/repository"
+	"github.com/google/uuid"
 )
 
 // ErrForbidden indicates the caller is authenticated but not authorized.
@@ -36,6 +38,13 @@ type AttendanceService interface {
 	// EnsureOrganizerOwnsEvent checks that organizerID owns the event resource.
 	// WS3 derives eventID from ticketID, so this checks ticket ownership.
 	EnsureOrganizerOwnsEvent(ctx context.Context, eventID, organizerID string) error
+	TransferAdmissionCredential(
+		ctx context.Context,
+		credentialID, senderUserID, recipientEmail, requesterUserSig string,
+	) (*repository.AdmissionCredential, *repository.AdmissionTransfer, error)
+	RecallTransfer(ctx context.Context, credentialID, senderUserID string) (*repository.AdmissionCredential, error)
+	AcceptTransfer(ctx context.Context, transferID, recipientUserID string) (*repository.AdmissionCredential, error)
+	FindLatestTransferByCredentialID(ctx context.Context, credentialID string) (*repository.AdmissionTransfer, error)
 }
 
 // attendanceService is the concrete implementation wired with repository dependencies.
@@ -44,6 +53,7 @@ type attendanceService struct {
 	policyRepo   repository.PolicyRepository
 	scanRepo     repository.ScanEventRepository
 	ticketLookup TicketOwnerLookup
+	userLookup   UserIdentityLookup
 }
 
 // NewAttendanceService creates an AttendanceService.
@@ -52,7 +62,7 @@ func NewAttendanceService(
 	policyRepo repository.PolicyRepository,
 	scanRepo repository.ScanEventRepository,
 ) AttendanceService {
-	return NewAttendanceServiceWithTicketLookup(credRepo, policyRepo, scanRepo, nil)
+	return NewAttendanceServiceWithLookups(credRepo, policyRepo, scanRepo, nil, nil)
 }
 
 // NewAttendanceServiceWithTicketLookup creates an AttendanceService with ticket
@@ -63,11 +73,24 @@ func NewAttendanceServiceWithTicketLookup(
 	scanRepo repository.ScanEventRepository,
 	ticketLookup TicketOwnerLookup,
 ) AttendanceService {
+	return NewAttendanceServiceWithLookups(credRepo, policyRepo, scanRepo, ticketLookup, nil)
+}
+
+// NewAttendanceServiceWithLookups creates an AttendanceService with optional
+// ticket ownership and recipient identity lookup adapters.
+func NewAttendanceServiceWithLookups(
+	credRepo repository.CredentialRepository,
+	policyRepo repository.PolicyRepository,
+	scanRepo repository.ScanEventRepository,
+	ticketLookup TicketOwnerLookup,
+	userLookup UserIdentityLookup,
+) AttendanceService {
 	return &attendanceService{
 		credRepo:     credRepo,
 		policyRepo:   policyRepo,
 		scanRepo:     scanRepo,
 		ticketLookup: ticketLookup,
+		userLookup:   userLookup,
 	}
 }
 
@@ -146,4 +169,84 @@ func (s *attendanceService) EnsureOrganizerOwnsEvent(ctx context.Context, eventI
 		return ErrForbidden
 	}
 	return nil
+}
+
+func (s *attendanceService) TransferAdmissionCredential(
+	ctx context.Context,
+	credentialID, senderUserID, recipientEmail, requesterUserSig string,
+) (*repository.AdmissionCredential, *repository.AdmissionTransfer, error) {
+	cred, err := s.credRepo.FindByID(ctx, credentialID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if cred.BuyerUserID == nil || *cred.BuyerUserID != senderUserID {
+		return nil, nil, ErrForbidden
+	}
+	if s.userLookup == nil {
+		return nil, nil, ErrForbidden
+	}
+
+	recipientUserID, err := s.userLookup.LookupUserIDByEmail(ctx, recipientEmail, senderUserID, requesterUserSig)
+	if err != nil {
+		return nil, nil, err
+	}
+	if recipientUserID == senderUserID {
+		return nil, nil, ErrForbidden
+	}
+
+	transfer := &repository.AdmissionTransfer{
+		ID:              uuid.New().String(),
+		CredentialID:    credentialID,
+		SenderUserID:    senderUserID,
+		RecipientUserID: &recipientUserID,
+		RecipientEmail:  recipientEmail,
+		State:           repository.TransferStatePending,
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := s.credRepo.CreateTransfer(ctx, transfer); err != nil {
+		return nil, nil, err
+	}
+	return cred, transfer, nil
+}
+
+func (s *attendanceService) RecallTransfer(
+	ctx context.Context,
+	credentialID, senderUserID string,
+) (*repository.AdmissionCredential, error) {
+	cred, err := s.credRepo.FindByID(ctx, credentialID)
+	if err != nil {
+		return nil, err
+	}
+	if cred.BuyerUserID == nil || *cred.BuyerUserID != senderUserID {
+		return nil, ErrForbidden
+	}
+	if _, err := s.credRepo.RecallTransfer(ctx, credentialID, senderUserID, time.Now().UTC()); err != nil {
+		return nil, err
+	}
+	return cred, nil
+}
+
+func (s *attendanceService) AcceptTransfer(
+	ctx context.Context,
+	transferID, recipientUserID string,
+) (*repository.AdmissionCredential, error) {
+	transfer, err := s.credRepo.FindTransferByID(ctx, transferID)
+	if err != nil {
+		return nil, err
+	}
+	if transfer.State != repository.TransferStatePending {
+		return nil, repository.ErrNotFound
+	}
+	if transfer.RecipientUserID != nil && *transfer.RecipientUserID != recipientUserID {
+		return nil, ErrForbidden
+	}
+
+	if _, err := s.credRepo.AcceptTransfer(ctx, transferID, recipientUserID, time.Now().UTC()); err != nil {
+		return nil, err
+	}
+	return s.credRepo.FindByID(ctx, transfer.CredentialID)
+}
+
+func (s *attendanceService) FindLatestTransferByCredentialID(ctx context.Context, credentialID string) (*repository.AdmissionTransfer, error) {
+	return s.credRepo.FindLatestTransferByCredentialID(ctx, credentialID)
 }
