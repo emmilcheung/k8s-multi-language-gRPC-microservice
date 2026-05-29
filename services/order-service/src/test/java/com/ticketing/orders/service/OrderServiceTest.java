@@ -3,6 +3,7 @@ package com.ticketing.orders.service;
 import tools.jackson.databind.ObjectMapper;
 import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
+import com.ticketing.orders.dto.RefundEligibilityResponse;
 import com.ticketing.orders.entity.Order;
 import com.ticketing.orders.entity.OrderStatus;
 import com.ticketing.orders.entity.OrderTicket;
@@ -306,6 +307,61 @@ class OrderServiceTest {
         List<OrderResponse> responses = orderService.listOrders(userId);
 
         assertThat(responses).hasSize(2);
+    }
+
+    @Test
+    void refundEligibility_returnsEligibleForCompleteOrderBeforeCutoff() {
+        OrderTicket futureTicket = new OrderTicket(
+                ticketId,
+                "Concert Ticket",
+                new BigDecimal("49.99"),
+                OffsetDateTime.now().plusDays(2)
+        );
+        Order order = new Order(userId, OrderStatus.COMPLETE, OffsetDateTime.now().plusMinutes(15), futureTicket);
+        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+
+        RefundEligibilityResponse response = orderService.refundEligibility(orderId, userId);
+
+        assertThat(response.eligible()).isTrue();
+        assertThat(response.reason()).isNull();
+        assertThat(response.refundableAmount()).isEqualTo(4999);
+        assertThat(response.cutoffAt()).isNotNull();
+    }
+
+    @Test
+    void refundEligibility_returnsWrongStateWhenOrderIsNotComplete() {
+        OrderTicket futureTicket = new OrderTicket(
+                ticketId,
+                "Concert Ticket",
+                new BigDecimal("49.99"),
+                OffsetDateTime.now().plusDays(2)
+        );
+        Order order = new Order(userId, OrderStatus.CREATED, OffsetDateTime.now().plusMinutes(15), futureTicket);
+        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+
+        RefundEligibilityResponse response = orderService.refundEligibility(orderId, userId);
+
+        assertThat(response.eligible()).isFalse();
+        assertThat(response.reason()).isEqualTo("WRONG_STATE");
+        assertThat(response.refundableAmount()).isZero();
+    }
+
+    @Test
+    void refundEligibility_returnsPastCutoffWhenEventStartsSoon() {
+        OrderTicket nearTicket = new OrderTicket(
+                ticketId,
+                "Concert Ticket",
+                new BigDecimal("49.99"),
+                OffsetDateTime.now().plusHours(6)
+        );
+        Order order = new Order(userId, OrderStatus.COMPLETE, OffsetDateTime.now().plusMinutes(15), nearTicket);
+        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+
+        RefundEligibilityResponse response = orderService.refundEligibility(orderId, userId);
+
+        assertThat(response.eligible()).isFalse();
+        assertThat(response.reason()).isEqualTo("PAST_CUTOFF");
+        assertThat(response.refundableAmount()).isZero();
     }
 
     // ── expireOrder ───────────────────────────────────────────────────────────

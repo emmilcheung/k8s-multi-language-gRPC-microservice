@@ -2,6 +2,7 @@ package com.ticketing.orders.graphql;
 
 import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
+import com.ticketing.orders.dto.RefundEligibilityResponse;
 import com.ticketing.orders.service.OrderService;
 import graphql.GraphQLContext;
 import org.springframework.graphql.data.method.annotation.Argument;
@@ -37,6 +38,15 @@ public class OrderGraphqlController {
         String userId = ctx.get(UserIdInterceptor.USER_ID_KEY);
         if (userId == null) return List.of();
         return orderService.listOrders(UUID.fromString(userId));
+    }
+
+    @QueryMapping
+    public RefundEligibilityResponse refundEligibility(
+            @Argument String orderId,
+            GraphQLContext ctx) {
+        String userId = ctx.get(UserIdInterceptor.USER_ID_KEY);
+        if (userId == null) return null;
+        return orderService.refundEligibility(UUID.fromString(orderId), UUID.fromString(userId));
     }
 
     @MutationMapping

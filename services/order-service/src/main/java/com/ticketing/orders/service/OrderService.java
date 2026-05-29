@@ -4,6 +4,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
+import com.ticketing.orders.dto.RefundEligibilityResponse;
 import com.ticketing.orders.entity.Order;
 import com.ticketing.orders.entity.OrderSeat;
 import com.ticketing.orders.entity.OrderStatus;
@@ -31,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
@@ -282,6 +284,44 @@ public class OrderService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public RefundEligibilityResponse refundEligibility(UUID orderId, UUID userId) {
+        Order order = orderRepository.findByIdWithTicket(orderId).orElse(null);
+        if (order == null) {
+            return null;
+        }
+        if (!order.getUserId().equals(userId)) {
+            return new RefundEligibilityResponse(order.getId(), false, "NOT_OWNER", 0, null);
+        }
+        if (order.getStatus() != OrderStatus.COMPLETE) {
+            return new RefundEligibilityResponse(order.getId(), false, "WRONG_STATE", 0, null);
+        }
+
+        OffsetDateTime startsAt = order.getTicket().getStartsAt();
+        if (startsAt == null) {
+            return new RefundEligibilityResponse(order.getId(), false, "PAST_CUTOFF", 0, null);
+        }
+        OffsetDateTime cutoffAt = startsAt.minusHours(24);
+        if (!OffsetDateTime.now().isBefore(cutoffAt)) {
+            return new RefundEligibilityResponse(
+                    order.getId(),
+                    false,
+                    "PAST_CUTOFF",
+                    0,
+                    cutoffAt.toInstant().toString()
+            );
+        }
+
+        int refundableAmount = calculateRefundableAmount(order);
+        return new RefundEligibilityResponse(
+                order.getId(),
+                true,
+                null,
+                refundableAmount,
+                cutoffAt.toInstant().toString()
+        );
+    }
+
     // ── Cancel ────────────────────────────────────────────────────────────────
 
     @Transactional
@@ -428,6 +468,7 @@ public class OrderService {
                     seatIds.isEmpty() ? null : seatIds
             );
         }
+
         // Legacy path — no reservationId; ticket-service falls back to ReleaseTicket
         return new OrderCancelledEvent(
                 order.getId().toString(),
@@ -435,6 +476,20 @@ public class OrderService {
                 order.getTicket().getId().toString(),
                 order.getVersion()
         );
+    }
+
+    private int calculateRefundableAmount(Order order) {
+        List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(order.getId());
+        if (!seats.isEmpty()) {
+            return seats.stream()
+                    .map(OrderSeat::getPrice)
+                    .map(price -> price.movePointRight(2).intValueExact())
+                    .reduce(0, Integer::sum);
+        }
+        return order.getTicket().getPrice()
+                .multiply(java.math.BigDecimal.valueOf(order.getQuantity()))
+                .movePointRight(2)
+                .intValueExact();
     }
 
     private void writeOutbox(String topic, String partitionKey, Object payload) {

@@ -58,7 +58,8 @@ public class OrderResponse {
             r.ticket = new TicketSummary(
                     order.getTicket().getId(),
                     order.getTicket().getTitle(),
-                    order.getTicket().getPrice()
+                    order.getTicket().getPrice(),
+                    order.getTicket().getStartsAt()
             );
         }
         r.seats = orderSeats == null
@@ -72,7 +73,7 @@ public class OrderResponse {
 
     // ── nested DTO ────────────────────────────────────────────────────────────
 
-    public record TicketSummary(UUID id, String title, BigDecimal price) {}
+    public record TicketSummary(UUID id, String title, BigDecimal price, OffsetDateTime startsAt) {}
 
     // ── accessors ─────────────────────────────────────────────────────────────
 

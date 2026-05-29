@@ -2,6 +2,7 @@ package com.ticketing.orders.graphql;
 
 import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
+import com.ticketing.orders.dto.RefundEligibilityResponse;
 import com.ticketing.orders.exception.ForbiddenException;
 import com.ticketing.orders.service.OrderService;
 import graphql.GraphQLContext;
@@ -72,6 +73,36 @@ class OrderControllerTest {
 
         assertThatThrownBy(() -> controller.order(orderId, ctxWithUserId(userId)))
                 .isInstanceOf(ForbiddenException.class);
+    }
+
+    @Test
+    void refundEligibility_returnsEligibilityForOwner() {
+        String userId = UUID.randomUUID().toString();
+        String orderId = UUID.randomUUID().toString();
+        RefundEligibilityResponse eligibility = new RefundEligibilityResponse(
+                UUID.fromString(orderId),
+                true,
+                null,
+                4200,
+                "2027-01-01T10:00:00Z"
+        );
+        when(orderService.refundEligibility(UUID.fromString(orderId), UUID.fromString(userId)))
+                .thenReturn(eligibility);
+
+        RefundEligibilityResponse result = controller.refundEligibility(orderId, ctxWithUserId(userId));
+
+        assertThat(result).isSameAs(eligibility);
+        verify(orderService).refundEligibility(UUID.fromString(orderId), UUID.fromString(userId));
+    }
+
+    @Test
+    void refundEligibility_returnsNullWhenRequesterMissing() {
+        String orderId = UUID.randomUUID().toString();
+
+        RefundEligibilityResponse result = controller.refundEligibility(orderId, GraphQLContext.newContext().build());
+
+        assertThat(result).isNull();
+        verify(orderService, never()).refundEligibility(any(), any());
     }
 
     @Test

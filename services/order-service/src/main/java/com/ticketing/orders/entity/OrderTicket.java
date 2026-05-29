@@ -29,6 +29,9 @@ public class OrderTicket {
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal price;
 
+    @Column(name = "starts_at")
+    private OffsetDateTime startsAt;
+
     @Version
     @Column(nullable = false)
     private int version;
@@ -61,6 +64,13 @@ public class OrderTicket {
         this.price = price;
     }
 
+    public OrderTicket(UUID id, String title, BigDecimal price, OffsetDateTime startsAt) {
+        this.id = id;
+        this.title = title;
+        this.price = price;
+        this.startsAt = startsAt;
+    }
+
     // ── accessors ─────────────────────────────────────────────────────────────
 
     public UUID getId() { return id; }
@@ -68,6 +78,8 @@ public class OrderTicket {
     public void setTitle(String title) { this.title = title; }
     public BigDecimal getPrice() { return price; }
     public void setPrice(BigDecimal price) { this.price = price; }
+    public OffsetDateTime getStartsAt() { return startsAt; }
+    public void setStartsAt(OffsetDateTime startsAt) { this.startsAt = startsAt; }
     public int getVersion() { return version; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
