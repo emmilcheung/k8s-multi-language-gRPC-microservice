@@ -23,6 +23,7 @@ const orderResponseSchema = z.object({
   ticket: z
     .object({
       price: z.union([z.string(), z.number()]),
+      startsAt: z.string().optional(),
     })
     .nullable()
     .optional(),
@@ -54,6 +55,7 @@ export interface OrderSnapshot {
   status: string;
   amount: number;
   currency: string;
+  startsAt?: string;
 }
 
 function getOrCreateFailureCounter(registry: Registry): Counter<FailureLabels> {
@@ -288,6 +290,7 @@ export class OrderServiceClient {
       status: payload.data.status,
       amount: this.computeAmount(payload.data),
       currency: DEFAULT_CURRENCY,
+      startsAt: payload.data.ticket?.startsAt,
     };
   }
 

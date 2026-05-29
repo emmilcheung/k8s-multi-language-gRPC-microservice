@@ -170,6 +170,27 @@ export class PaymentMethodMutationResolver {
     return toPaymentResponse(payment);
   }
 
+  @Mutation('requestRefund')
+  @UseGuards(UserIdSigGuard)
+  async requestRefund(@Args('input') input: Record<string, unknown>, @Context() ctx: GqlContext) {
+    const userId = extractUserId(ctx);
+    if (!userId) {
+      throw new ForbiddenException('Missing X-User-Id');
+    }
+    const result = await this.paymentsService.requestRefund({
+      orderId: input.orderId as string,
+      reason: input.reason as string,
+      userId,
+      userIdSig: extractUserIdSig(ctx),
+    });
+
+    return {
+      payment: toPaymentResponse(result.payment),
+      refundId: result.refundId,
+      status: result.status,
+    };
+  }
+
   @Mutation('setDefaultPaymentMethod')
   @UseGuards(UserIdSigGuard)
   async setDefaultPaymentMethod(@Args('id') id: string, @Context() ctx: GqlContext) {

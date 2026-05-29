@@ -4,13 +4,16 @@ import { DRIZZLE_DB, type DrizzleDB } from '../../database/database.module';
 import {
   paymentCustomers,
   payments,
+  refunds,
   savedPaymentMethods,
   type NewPayment,
   type NewPaymentCustomer,
+  type NewRefund,
   type NewSavedPaymentMethod,
   type Payment,
   type PaymentCustomer,
   type PaymentStatus,
+  type Refund,
   type SavedPaymentMethod,
 } from '../../database/schema';
 
@@ -143,5 +146,19 @@ export class PaymentsRepository {
       .where(eq(payments.id, id))
       .returning();
     return row;
+  }
+
+  async createRefund(data: NewRefund): Promise<Refund> {
+    const [row] = await this.db.insert(refunds).values(data).returning();
+    return row;
+  }
+
+  async findActiveRefundByOrderId(orderId: string): Promise<Refund | null> {
+    const [row] = await this.db
+      .select()
+      .from(refunds)
+      .where(and(eq(refunds.orderId, orderId), eq(refunds.status, 'requested')))
+      .orderBy(desc(refunds.createdAt));
+    return row ?? null;
   }
 }

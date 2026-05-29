@@ -41,6 +41,7 @@ export const PAYMENT_STATUS = {
   PENDING: 'pending',
   COMPLETED: 'completed',
   FAILED: 'failed',
+  REFUNDED: 'refunded',
 } as const;
 
 export type PaymentStatus = (typeof PAYMENT_STATUS)[keyof typeof PAYMENT_STATUS];
@@ -125,3 +126,36 @@ export const outbox = pgTable('outbox', {
 
 export type OutboxRow = typeof outbox.$inferSelect;
 export type NewOutboxRow = typeof outbox.$inferInsert;
+
+export const REFUND_STATUS = {
+  REQUESTED: 'requested',
+  PROCESSING: 'processing',
+  COMPLETED: 'completed',
+  FAILED: 'failed',
+} as const;
+
+export type RefundStatus = (typeof REFUND_STATUS)[keyof typeof REFUND_STATUS];
+
+export const refunds = pgTable(
+  'refunds',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    paymentId: uuid('payment_id')
+      .notNull()
+      .references(() => payments.id),
+    orderId: uuid('order_id').notNull(),
+    amount: integer('amount').notNull(),
+    reason: text('reason').notNull(),
+    status: text('status').notNull().default(REFUND_STATUS.REQUESTED),
+    stripeRefundId: text('stripe_refund_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_refunds_payment_id').on(table.paymentId),
+    index('idx_refunds_order_id').on(table.orderId),
+  ],
+);
+
+export type Refund = typeof refunds.$inferSelect;
+export type NewRefund = typeof refunds.$inferInsert;

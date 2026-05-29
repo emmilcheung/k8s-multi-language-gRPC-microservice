@@ -20,6 +20,7 @@ import {
   type Payment,
   type SavedPaymentMethod,
   PAYMENT_STATUS,
+  REFUND_STATUS,
   outbox,
   payments,
 } from '../../database/schema';
@@ -42,6 +43,19 @@ export interface ChargePaymentDto {
   userIdSig?: string;
 }
 
+export interface RequestRefundDto {
+  orderId: string;
+  reason: string;
+  userId: string;
+  userIdSig?: string;
+}
+
+export interface RequestRefundResult {
+  payment: Payment;
+  refundId: string;
+  status: 'REQUESTED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+}
+
 const PAYABLE_ORDER_STATUSES = new Set(['created', 'awaiting_payment']);
 const TERMINAL_PAYMENT_STATUSES = new Set<string>([
   PAYMENT_STATUS.COMPLETED,
@@ -53,6 +67,8 @@ const FAILED_INTENT_STATUSES = new Set<Stripe.PaymentIntent.Status>([
 ]);
 const MOCK_DECLINED_TOKEN = 'pm_mock_declined';
 const MOCK_DECLINED_REASON = 'Mock payment declined';
+const REFUND_REASON_MAX_LENGTH = 500;
+const REFUND_WINDOW_HOURS = 24;
 
 @Injectable()
 export class PaymentsService {
@@ -381,6 +397,132 @@ export class PaymentsService {
         error: { code: 'PAYMENT_FAILED', message: 'Payment processing failed' },
       });
     }
+  }
+
+  async requestRefund(dto: RequestRefundDto): Promise<RequestRefundResult> {
+    const reason = dto.reason.trim();
+    if (!reason) {
+      throw new BadRequestException({
+        error: {
+          code: 'REFUND_REASON_REQUIRED',
+          message: 'Refund reason is required',
+        },
+      });
+    }
+    if (reason.length > REFUND_REASON_MAX_LENGTH) {
+      throw new BadRequestException({
+        error: {
+          code: 'REFUND_REASON_TOO_LONG',
+          message: `Refund reason must be at most ${REFUND_REASON_MAX_LENGTH} characters`,
+        },
+      });
+    }
+
+    const order = await this.orderServiceClient.getOrderSnapshot(
+      dto.orderId,
+      dto.userId,
+      dto.userIdSig,
+    );
+    if (order.status !== 'complete') {
+      throw new ConflictException({
+        error: {
+          code: 'ORDER_NOT_REFUNDABLE',
+          message: 'Order is not refundable in its current state',
+        },
+      });
+    }
+    if (!order.startsAt) {
+      throw new ConflictException({
+        error: {
+          code: 'ORDER_NOT_REFUNDABLE',
+          message: 'Order refund window has closed',
+        },
+      });
+    }
+
+    const cutoffAt = new Date(order.startsAt);
+    cutoffAt.setHours(cutoffAt.getHours() - REFUND_WINDOW_HOURS);
+    if (!(new Date() < cutoffAt)) {
+      throw new ConflictException({
+        error: {
+          code: 'ORDER_NOT_REFUNDABLE',
+          message: 'Order refund window has closed',
+        },
+      });
+    }
+
+    const payment = await this.paymentsRepo.findByOrderId(dto.orderId);
+    if (!payment || payment.userId !== dto.userId) {
+      throw new NotFoundException({
+        error: { code: 'PAYMENT_NOT_FOUND', message: 'Payment not found' },
+      });
+    }
+    if (payment.status === PAYMENT_STATUS.REFUNDED) {
+      throw new ConflictException({
+        error: {
+          code: 'REFUND_ALREADY_EXISTS',
+          message: 'Refund already requested for this order',
+        },
+      });
+    }
+    if (payment.status !== PAYMENT_STATUS.COMPLETED) {
+      throw new ConflictException({
+        error: {
+          code: 'REFUND_NOT_ALLOWED',
+          message: 'Payment is not refundable in its current state',
+        },
+      });
+    }
+
+    const existingRefund = await this.paymentsRepo.findActiveRefundByOrderId(dto.orderId);
+    if (existingRefund) {
+      throw new ConflictException({
+        error: {
+          code: 'REFUND_ALREADY_EXISTS',
+          message: 'Refund already requested for this order',
+        },
+      });
+    }
+
+    const refund = await this.paymentsRepo.createRefund({
+      paymentId: payment.id,
+      orderId: payment.orderId,
+      amount: payment.amount,
+      reason,
+      status: REFUND_STATUS.REQUESTED,
+    });
+
+    const updatedPayment = await this.paymentsRepo.updateStatus(
+      payment.id,
+      PAYMENT_STATUS.REFUNDED,
+    );
+
+    await this.db.transaction(async (tx) => {
+      await tx.insert(outbox).values(
+        this.buildOutboxRow('payments.refund.requested', payment.orderId, {
+          orderId: payment.orderId,
+          paymentId: payment.id,
+          refundId: refund.id,
+          userId: payment.userId,
+          amount: payment.amount,
+          reason,
+        }),
+      );
+    });
+
+    this.auditInfo('payment.refund.requested', {
+      orderId: payment.orderId,
+      paymentId: payment.id,
+      refundId: refund.id,
+      userId: payment.userId,
+      amount: payment.amount,
+    });
+
+    return {
+      payment: updatedPayment,
+      refundId: refund.id,
+      status: 'REQUESTED',
+    };
   }
 
   async registerSavedPaymentMethod(

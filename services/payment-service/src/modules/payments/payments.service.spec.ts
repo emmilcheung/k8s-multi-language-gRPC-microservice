@@ -31,6 +31,8 @@ type RepoMock = Pick<
   | 'createSavedPaymentMethod'
   | 'setDefaultSavedPaymentMethod'
   | 'softDeleteSavedPaymentMethod'
+  | 'createRefund'
+  | 'findActiveRefundByOrderId'
 >;
 type OrderServiceClientMock = Pick<OrderServiceClient, 'getOrderSnapshot'>;
 type LoggerMock = Pick<PinoLogger, 'info' | 'warn' | 'error' | 'debug'>;
@@ -97,6 +99,8 @@ function makeRepo() {
     createSavedPaymentMethod: vi.fn(),
     setDefaultSavedPaymentMethod: vi.fn(),
     softDeleteSavedPaymentMethod: vi.fn(),
+    createRefund: vi.fn(),
+    findActiveRefundByOrderId: vi.fn(),
   };
 }
 
@@ -782,6 +786,105 @@ describe('PaymentsService saved payment methods', () => {
       'user-uuid-1',
       'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
     );
+  });
+});
+
+describe('PaymentsService.requestRefund', () => {
+  let repo: ReturnType<typeof makeRepo>;
+  let stripe: ReturnType<typeof makeStripe>;
+  let paymentVaultProvider: ReturnType<typeof makePaymentVaultProvider>;
+  let logger: ReturnType<typeof makeLogger>;
+  let config: ReturnType<typeof makeConfig>;
+  let db: ReturnType<typeof makeDb>;
+  let orderServiceClient: ReturnType<typeof makeOrderServiceClient>;
+  let service: PaymentsService;
+
+  beforeEach(() => {
+    repo = makeRepo();
+    stripe = makeStripe();
+    paymentVaultProvider = makePaymentVaultProvider();
+    logger = makeLogger();
+    config = makeConfig();
+    db = makeDb();
+    orderServiceClient = makeOrderServiceClient();
+
+    service = createService({
+      logger,
+      repo,
+      orderServiceClient,
+      stripe,
+      paymentVaultProvider,
+      config,
+      db,
+    });
+  });
+
+  it('creates a refund and marks payment as refunded', async () => {
+    const payment = makePayment({
+      id: 'pay-ref-1',
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+      status: PAYMENT_STATUS.COMPLETED,
+      amount: 3700,
+    });
+    const updatedPayment = { ...payment, status: PAYMENT_STATUS.REFUNDED };
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(
+      makeOrderSnapshot({
+        orderId: payment.orderId,
+        userId: payment.userId,
+        status: 'complete',
+        startsAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+      }),
+    );
+    repo.findByOrderId.mockResolvedValue(payment);
+    repo.findActiveRefundByOrderId.mockResolvedValue(null);
+    repo.createRefund.mockResolvedValue({
+      id: 'ref-1',
+      paymentId: payment.id,
+      orderId: payment.orderId,
+      amount: payment.amount,
+      reason: 'Cannot attend',
+      status: 'requested',
+      stripeRefundId: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    repo.updateStatus.mockResolvedValue(updatedPayment);
+
+    const result = await service.requestRefund({
+      orderId: payment.orderId,
+      reason: 'Cannot attend',
+      userId: payment.userId,
+    });
+
+    expect(repo.createRefund).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paymentId: payment.id,
+        orderId: payment.orderId,
+        amount: payment.amount,
+        status: 'requested',
+      }),
+    );
+    expect(repo.updateStatus).toHaveBeenCalledWith(payment.id, PAYMENT_STATUS.REFUNDED);
+    expect(result.refundId).toBe('ref-1');
+    expect(result.payment.status).toBe(PAYMENT_STATUS.REFUNDED);
+  });
+
+  it('rejects refund when order is not complete', async () => {
+    orderServiceClient.getOrderSnapshot.mockResolvedValue(
+      makeOrderSnapshot({
+        status: 'created',
+        startsAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+      }),
+    );
+
+    await expect(
+      service.requestRefund({
+        orderId: '11111111-1111-4111-8111-111111111111',
+        reason: 'Cannot attend',
+        userId: '22222222-2222-4222-8222-222222222222',
+      }),
+    ).rejects.toThrow(ConflictException);
   });
 });
 
