@@ -7,14 +7,15 @@ import { Badge } from "@/components/ui/badge";
 import { Search, MapPin, Calendar } from "lucide-react";
 import BrowseFiltersClient from "@/app/_components/browse-filters";
 import { cn } from "@/lib/utils";
+import type { TicketFilter, TicketCategory } from "@/lib/graphql/generated";
 
 const CATEGORIES = [
-  { name: "Concerts", query: "concert" },
-  { name: "Sports", query: "sport" },
-  { name: "Comedy", query: "comedy" },
-  { name: "Theatre", query: "theatre" },
-  { name: "Festivals", query: "festival" },
-  { name: "Other", query: "event" },
+  { name: "Concerts", value: "concert" },
+  { name: "Sports", value: "sport" },
+  { name: "Comedy", value: "comedy" },
+  { name: "Theatre", value: "theatre" },
+  { name: "Festivals", value: "festival" },
+  { name: "Other", value: "other" },
 ];
 
 interface HomePageProps {
@@ -28,9 +29,11 @@ function pickString(value: string | string[] | undefined): string | null {
 
 export default async function HomePage({ searchParams }: HomePageProps = {}) {
   const resolvedParams = (await searchParams) ?? {};
-  const query = (pickString(resolvedParams.q) ?? "").trim().toLowerCase();
-  const maxPriceRaw = pickString(resolvedParams.maxPrice);
-  const maxPrice = maxPriceRaw ? Number(maxPriceRaw) : null;
+  const q = (pickString(resolvedParams.q) ?? "").trim();
+  const categoryParam = pickString(resolvedParams.category);
+  const availabilityParam = pickString(resolvedParams.availability);
+  const maxPriceChip = pickString(resolvedParams.maxPrice);
+  const priceParam = pickString(resolvedParams.price);
   const dateFilter = pickString(resolvedParams.date);
   const sort = pickString(resolvedParams.sort) === "price" ? "price" : "date";
   const view = pickString(resolvedParams.view) === "list" ? "list" : "grid";
@@ -49,29 +52,76 @@ export default async function HomePage({ searchParams }: HomePageProps = {}) {
     return queryString ? `/?${queryString}` : "/";
   };
 
-  const firstPage = await fetchTicketPageViaGraphQL(null).catch(() => ({
+  // Build server-side TicketFilter from searchParams
+  const categoryMapping: Record<string, TicketCategory> = {
+    "concert": "CONCERT",
+    "sport": "SPORTS",
+    "sports": "SPORTS",
+    "comedy": "COMEDY",
+    "theatre": "THEATRE",
+    "theater": "THEATRE",
+    "festival": "FESTIVAL",
+    "festivals": "FESTIVAL",
+    "other": "OTHER",
+  };
+
+  // Build price bounds from bands (price param) or chip (maxPrice)
+  let minPrice: number | undefined;
+  let maxPrice: number | undefined;
+
+  if (priceParam) {
+    const bands = priceParam.split(",");
+    const bandRanges: Array<[number, number | null]> = [];
+    for (const band of bands) {
+      if (band === "0-25") bandRanges.push([0, 25]);
+      else if (band === "25-50") bandRanges.push([25, 50]);
+      else if (band === "50-100") bandRanges.push([50, 100]);
+      else if (band === "100+") bandRanges.push([100, null]);
+    }
+    if (bandRanges.length > 0) {
+      const minPrices = bandRanges.map(r => r[0]);
+      const maxPrices = bandRanges.map(r => r[1]).filter(m => m !== null) as number[];
+      minPrice = Math.min(...minPrices);
+      if (maxPrices.length > 0) {
+        maxPrice = Math.max(...maxPrices);
+      }
+    }
+  } else if (maxPriceChip) {
+    maxPrice = Number(maxPriceChip);
+  }
+
+  // Normalize category
+  let category: TicketCategory | undefined;
+  if (categoryParam) {
+    const catLower = categoryParam.toLowerCase();
+    const normalized = categoryMapping[catLower];
+    if (normalized) {
+      category = normalized;
+    }
+  }
+
+  // Determine availableOnly (default to true for catalog view)
+  const availableOnly = !availabilityParam || availabilityParam === "on-sale" || availabilityParam === "hide-sold-out";
+
+  // Build the filter object (omit undefined keys)
+  const ticketFilter: TicketFilter = {
+    ...(q && { search: q }),
+    ...(category && { category }),
+    ...(minPrice !== undefined && { minPrice }),
+    ...(maxPrice !== undefined && { maxPrice }),
+    ...(availableOnly && { availableOnly }),
+  };
+
+  const firstPage = await fetchTicketPageViaGraphQL(null, ticketFilter).catch(() => ({
     tickets: [],
     cursor: null,
     hasMore: false,
   }));
 
   const now = new Date();
+
+  // Client-side filtering: only date filtering (search and price are server-side now)
   const tickets = firstPage.tickets
-    .filter((ticket) => {
-      if (!query) return true;
-      const haystack = [
-        ticket.title,
-        ticket.event?.title ?? "",
-        ticket.event?.venueName ?? "",
-      ]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(query);
-    })
-    .filter((ticket) => {
-      if (maxPrice == null || Number.isNaN(maxPrice)) return true;
-      return parseFloat(ticket.price) <= maxPrice;
-    })
     .filter((ticket) => {
       if (!dateFilter) return true;
       if (!ticket.event?.startsAt) return false;
@@ -84,6 +134,14 @@ export default async function HomePage({ searchParams }: HomePageProps = {}) {
         const day = startsAt.getDay();
         return day === 0 || day === 6;
       }
+      if (dateFilter === "week") {
+        const diffTime = startsAt.getTime() - now.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays > 0 && diffDays <= 7;
+      }
+      if (dateFilter === "month") {
+        return startsAt.getMonth() === now.getMonth() && startsAt.getFullYear() === now.getFullYear();
+      }
       return true;
     })
     .sort((a, b) => {
@@ -94,8 +152,19 @@ export default async function HomePage({ searchParams }: HomePageProps = {}) {
       const bTs = b.event?.startsAt ? new Date(b.event.startsAt).getTime() : Number.MAX_SAFE_INTEGER;
       return aTs - bTs;
     });
-  const heroTicket = tickets[0];
-  const gridTickets = tickets.slice(1);
+
+  // Fix hero-steals-result bug: only show hero on unfiltered default view
+  const hasActiveFilter = Boolean(q || categoryParam || priceParam || maxPriceChip || availabilityParam || dateFilter);
+  let heroTicket: typeof firstPage.tickets[0] | undefined;
+  let gridTickets: typeof firstPage.tickets;
+
+  if (hasActiveFilter) {
+    heroTicket = undefined;
+    gridTickets = tickets;
+  } else {
+    heroTicket = tickets[0];
+    gridTickets = tickets.slice(1);
+  }
 
   const heroTitle = heroTicket?.event?.title || heroTicket?.title || "Featured Event";
   const heroDate = heroTicket?.event?.startsAt
@@ -117,7 +186,7 @@ export default async function HomePage({ searchParams }: HomePageProps = {}) {
             name="q"
             type="text"
             placeholder="Search events, artists, venues..."
-            defaultValue={query}
+            defaultValue={q}
             leading={<Search className="size-4 text-mute" />}
             className="flex-1"
           />
@@ -150,11 +219,11 @@ export default async function HomePage({ searchParams }: HomePageProps = {}) {
           {CATEGORIES.map((cat) => (
             <Link
               key={cat.name}
-              href={buildHref({ q: cat.query })}
+              href={buildHref({ category: cat.value })}
               className="flex flex-col gap-2 rounded-md border border-line bg-card p-3 hover:border-mute hover:bg-subtle transition-colors"
             >
               <span className="text-sm font-medium text-ink">{cat.name}</span>
-              <span className="text-xs font-mono text-mute">search</span>
+              <span className="text-xs font-mono text-mute">category</span>
             </Link>
           ))}
         </div>

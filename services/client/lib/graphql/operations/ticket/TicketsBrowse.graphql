@@ -1,5 +1,5 @@
-query TicketsBrowse($first: Int, $after: String) {
-  ticketsConnection(filter: { availableOnly: true }, first: $first, after: $after) {
+query TicketsBrowse($first: Int, $after: String, $filter: TicketFilter) {
+  ticketsConnection(filter: $filter, first: $first, after: $after) {
     edges {
       node {
         id
@@ -7,6 +7,7 @@ query TicketsBrowse($first: Int, $after: String) {
         price
         available
         ticketType
+        category
         seatingPlan {
           id
         }

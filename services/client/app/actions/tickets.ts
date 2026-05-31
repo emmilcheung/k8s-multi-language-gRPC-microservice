@@ -13,6 +13,7 @@ import {
   UpdateTicketDocument,
   UpdateSeatingPlanDocument,
   UpdateAttendancePolicyDocument,
+  type TicketFilter,
 } from "@/lib/graphql/generated";
 import type { AvailabilitySnapshot, SeatingPlan, Ticket } from "@/lib/types";
 import { createSeatingPlanForTicket } from "./venues";
@@ -57,7 +58,7 @@ async function isPubliclyAvailableSeatedTicket(planId: string): Promise<boolean>
  * This is a Server Action so it can be called from Client Components without
  * exposing the internal API URL or auth cookie logic to the browser.
  */
-export async function fetchTicketPageViaGraphQL(after: string | null): Promise<TicketPage> {
+export async function fetchTicketPageViaGraphQL(after: string | null, filter?: TicketFilter): Promise<TicketPage> {
   const applySeatedVisibility = async (tickets: Ticket[]): Promise<Ticket[]> => {
     const visible = await Promise.all(
       tickets.map(async (ticket) => {
@@ -74,7 +75,7 @@ export async function fetchTicketPageViaGraphQL(after: string | null): Promise<T
 
     const data = await executeQuery(
       TicketsBrowseDocument,
-      { first: PAGE_SIZE, after: after || undefined },
+      { first: PAGE_SIZE, after: after || undefined, filter },
       { cookie: cookieHeader }
     );
 
