@@ -290,6 +290,11 @@ type Order
   expiresAt: String
   createdAt: String!
   seats: [OrderSeat!]!
+  subtotal: String!
+  serviceFee: String!
+  facilityFee: String!
+  tax: String!
+  total: String!
   payment: Payment
 }
 
