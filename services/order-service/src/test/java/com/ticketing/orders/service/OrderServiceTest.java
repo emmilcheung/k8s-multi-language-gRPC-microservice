@@ -612,4 +612,34 @@ class OrderServiceTest {
         assertThat(response.getOrderType()).isEqualTo(OrderType.AUTO_ASSIGN_SEATED);
         assertThat(response.getSeats()).hasSize(1);
     }
+
+    // ── fee breakdown tests ───────────────────────────────────────────────────
+
+    @Test
+    void orderResponse_should_compute_fees_correctly_for_GA_order() {
+        // GA order: ticket price $49.99, quantity 2
+        // subtotal = 4999 cents * 2 = 9998 cents ($99.98)
+        // serviceFee = Math.round(9998 * 0.10) = 1000 cents ($10.00)
+        // facilityFee = 2 * 150 = 300 cents ($3.00)
+        // tax = 0
+        // total = 9998 + 1000 + 300 + 0 = 11298 cents ($112.98)
+        UUID reservationId = UUID.randomUUID();
+        Order order = new Order(userId, OrderStatus.CREATED,
+                OffsetDateTime.now().plusMinutes(15), ticket, reservationId, 2);
+
+        OrderResponse response = OrderResponse.from(order, Collections.emptyList());
+
+        assertThat(response.getSubtotal()).isEqualTo("99.98");
+        assertThat(response.getServiceFee()).isEqualTo("10.00");
+        assertThat(response.getFacilityFee()).isEqualTo("3.00");
+        assertThat(response.getTax()).isEqualTo("0.00");
+        assertThat(response.getTotal()).isEqualTo("112.98");
+
+        // Verify the invariant: total = subtotal + serviceFee + facilityFee + tax
+        BigDecimal totalComputed = new BigDecimal(response.getSubtotal())
+                .add(new BigDecimal(response.getServiceFee()))
+                .add(new BigDecimal(response.getFacilityFee()))
+                .add(new BigDecimal(response.getTax()));
+        assertThat(totalComputed).isEqualByComparingTo(new BigDecimal(response.getTotal()));
+    }
 }
