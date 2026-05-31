@@ -155,4 +155,33 @@ describe('OrderServiceClient', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(snapshot.currency).toBe('usd');
   });
+
+  it('uses total from order payload when present instead of computing from seats/quantity', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: '11111111-1111-4111-8111-111111111111',
+          userId: '22222222-2222-4222-8222-222222222222',
+          status: 'created',
+          quantity: 2,
+          ticket: { price: '12.50' },
+          seats: [],
+          total: '112.98',
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { client } = makeClient();
+    const snapshot = await client.getOrderSnapshot(
+      '11111111-1111-4111-8111-111111111111',
+      'user-1',
+    );
+
+    expect(snapshot.amount).toBe(11298);
+  });
 });

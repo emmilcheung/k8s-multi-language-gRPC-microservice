@@ -35,6 +35,7 @@ const orderResponseSchema = z.object({
     )
     .optional()
     .default([]),
+  total: z.union([z.string(), z.number()]).optional(),
 });
 
 type FailureReason =
@@ -382,6 +383,10 @@ export class OrderServiceClient {
   }
 
   private computeAmount(order: z.infer<typeof orderResponseSchema>): number {
+    if (order.total != null) {
+      return this.decimalToMinorUnits(order.total);
+    }
+
     if (order.seats.length > 0) {
       return order.seats.reduce((sum, seat) => sum + this.decimalToMinorUnits(seat.price), 0);
     }
