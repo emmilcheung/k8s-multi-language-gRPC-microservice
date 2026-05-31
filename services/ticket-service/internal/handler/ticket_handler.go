@@ -47,6 +47,7 @@ type createTicketRequest struct {
 	Price      string `json:"price"`
 	Quota      int    `json:"quota"`
 	MaxPerUser int    `json:"maxPerUser"`
+	Category   string `json:"category,omitempty"`
 	Event      *struct {
 		Title        string     `json:"title"`
 		Description  string     `json:"description,omitempty"`
@@ -222,6 +223,7 @@ func (h *TicketHandler) Create(c echo.Context) error {
 		UserID:     userID,
 		Quota:      req.Quota,
 		MaxPerUser: req.MaxPerUser,
+		Category:   req.Category,
 		Event:      eventData,
 	})
 	if err != nil {

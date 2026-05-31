@@ -14,6 +14,7 @@ type Ticket @key(fields: "id") {
   available: Int!
   maxPerUser: Int
   ticketType: TicketType!
+  category: TicketCategory!
   seatingPlan: SeatingPlan
   event: TicketEvent
   createdAt: String!
@@ -40,9 +41,22 @@ enum TicketType {
   SEATED
 }
 
+enum TicketCategory {
+  CONCERT
+  SPORTS
+  COMEDY
+  THEATRE
+  FESTIVAL
+  OTHER
+}
+
 input TicketFilter {
   availableOnly: Boolean
   ticketType: TicketType
+  search: String
+  category: TicketCategory
+  minPrice: Int
+  maxPrice: Int
 }
 
 type TicketEdge {
@@ -104,6 +118,7 @@ input CreateTicketInput {
   quota: Int!
   maxPerUser: Int
   ticketType: TicketType!
+  category: TicketCategory
   event: TicketEventInput!
 }
 

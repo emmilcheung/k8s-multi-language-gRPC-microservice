@@ -15,6 +15,7 @@ type CreateTicketInput struct {
 	Quota      int               `json:"quota"`
 	MaxPerUser *int              `json:"maxPerUser,omitempty"`
 	TicketType TicketType        `json:"ticketType"`
+	Category   *TicketCategory   `json:"category,omitempty"`
 	Event      *TicketEventInput `json:"event"`
 }
 
@@ -46,23 +47,24 @@ type SeatingPlan struct {
 func (SeatingPlan) IsEntity() {}
 
 type Ticket struct {
-	ID           string       `json:"id"`
-	Title        string       `json:"title"`
-	Price        int          `json:"price"`
-	PriceDecimal string       `json:"priceDecimal"`
-	UserID       string       `json:"userId"`
-	OrderID      *string      `json:"orderId,omitempty"`
-	Quota        int          `json:"quota"`
-	Reserved     int          `json:"reserved"`
-	Sold         int          `json:"sold"`
-	Available    int          `json:"available"`
-	MaxPerUser   *int         `json:"maxPerUser,omitempty"`
-	TicketType   TicketType   `json:"ticketType"`
-	SeatingPlan  *SeatingPlan `json:"seatingPlan,omitempty"`
-	Event        *TicketEvent `json:"event,omitempty"`
-	CreatedAt    string       `json:"createdAt"`
-	UpdatedAt    string       `json:"updatedAt"`
-	SavedByMe    bool         `json:"savedByMe"`
+	ID           string         `json:"id"`
+	Title        string         `json:"title"`
+	Price        int            `json:"price"`
+	PriceDecimal string         `json:"priceDecimal"`
+	UserID       string         `json:"userId"`
+	OrderID      *string        `json:"orderId,omitempty"`
+	Quota        int            `json:"quota"`
+	Reserved     int            `json:"reserved"`
+	Sold         int            `json:"sold"`
+	Available    int            `json:"available"`
+	MaxPerUser   *int           `json:"maxPerUser,omitempty"`
+	TicketType   TicketType     `json:"ticketType"`
+	Category     TicketCategory `json:"category"`
+	SeatingPlan  *SeatingPlan   `json:"seatingPlan,omitempty"`
+	Event        *TicketEvent   `json:"event,omitempty"`
+	CreatedAt    string         `json:"createdAt"`
+	UpdatedAt    string         `json:"updatedAt"`
+	SavedByMe    bool           `json:"savedByMe"`
 }
 
 func (Ticket) IsEntity() {}
@@ -98,8 +100,12 @@ type TicketEventInput struct {
 }
 
 type TicketFilter struct {
-	AvailableOnly *bool       `json:"availableOnly,omitempty"`
-	TicketType    *TicketType `json:"ticketType,omitempty"`
+	AvailableOnly *bool           `json:"availableOnly,omitempty"`
+	TicketType    *TicketType     `json:"ticketType,omitempty"`
+	Search        *string         `json:"search,omitempty"`
+	Category      *TicketCategory `json:"category,omitempty"`
+	MinPrice      *int            `json:"minPrice,omitempty"`
+	MaxPrice      *int            `json:"maxPrice,omitempty"`
 }
 
 type UpdateTicketInput struct {
@@ -109,6 +115,69 @@ type UpdateTicketInput struct {
 	MaxPerUser    *int              `json:"maxPerUser,omitempty"`
 	Event         *TicketEventInput `json:"event,omitempty"`
 	SeatingPlanID *string           `json:"seatingPlanId,omitempty"`
+}
+
+type TicketCategory string
+
+const (
+	TicketCategoryConcert  TicketCategory = "CONCERT"
+	TicketCategorySports   TicketCategory = "SPORTS"
+	TicketCategoryComedy   TicketCategory = "COMEDY"
+	TicketCategoryTheatre  TicketCategory = "THEATRE"
+	TicketCategoryFestival TicketCategory = "FESTIVAL"
+	TicketCategoryOther    TicketCategory = "OTHER"
+)
+
+var AllTicketCategory = []TicketCategory{
+	TicketCategoryConcert,
+	TicketCategorySports,
+	TicketCategoryComedy,
+	TicketCategoryTheatre,
+	TicketCategoryFestival,
+	TicketCategoryOther,
+}
+
+func (e TicketCategory) IsValid() bool {
+	switch e {
+	case TicketCategoryConcert, TicketCategorySports, TicketCategoryComedy, TicketCategoryTheatre, TicketCategoryFestival, TicketCategoryOther:
+		return true
+	}
+	return false
+}
+
+func (e TicketCategory) String() string {
+	return string(e)
+}
+
+func (e *TicketCategory) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = TicketCategory(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid TicketCategory", str)
+	}
+	return nil
+}
+
+func (e TicketCategory) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *TicketCategory) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e TicketCategory) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
 }
 
 type TicketType string

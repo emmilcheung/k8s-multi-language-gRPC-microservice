@@ -1120,3 +1120,30 @@ func TestListSavedEvents_ShouldReturnErrorOnRepoFailure(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "list saved events")
 }
+
+func TestCreateTicket_ShouldPersistCategoryAndDefaultToOther(t *testing.T) {
+	repo := newMockRepo()
+	pub := &mockPublisher{}
+	svc := newSvc(repo, pub)
+
+	// Test with explicit category
+	ticket, err := svc.CreateTicket(context.Background(), service.CreateTicketInput{
+		Title:    "Concert Ticket",
+		Price:    "99.99",
+		UserID:   "user-1",
+		Category: "CONCERT",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "CONCERT", ticket.Category)
+
+	// Test with empty category (should default to OTHER)
+	ticket2, err := svc.CreateTicket(context.Background(), service.CreateTicketInput{
+		Title:  "Sports Ticket",
+		Price:  "49.99",
+		UserID: "user-1",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "OTHER", ticket2.Category)
+}

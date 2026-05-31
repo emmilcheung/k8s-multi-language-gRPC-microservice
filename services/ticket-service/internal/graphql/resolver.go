@@ -27,6 +27,24 @@ func mapTicketToGQL(t *repository.Ticket) *Ticket {
 		ticketType = TicketTypeSeated
 	}
 
+	category := TicketCategoryOther
+	if t.Category != "" {
+		switch t.Category {
+		case "CONCERT":
+			category = TicketCategoryConcert
+		case "SPORTS":
+			category = TicketCategorySports
+		case "COMEDY":
+			category = TicketCategoryComedy
+		case "THEATRE":
+			category = TicketCategoryTheatre
+		case "FESTIVAL":
+			category = TicketCategoryFestival
+		case "OTHER":
+			category = TicketCategoryOther
+		}
+	}
+
 	result := &Ticket{
 		ID:           t.ID,
 		Title:        t.Title,
@@ -38,6 +56,7 @@ func mapTicketToGQL(t *repository.Ticket) *Ticket {
 		Sold:         t.Sold,
 		Available:    available,
 		TicketType:   ticketType,
+		Category:     category,
 		SavedByMe:    false,
 		CreatedAt:    t.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:    t.UpdatedAt.Format(time.RFC3339),

@@ -30,6 +30,7 @@ type SeatingPlanLookupClient interface {
 // CreateTicketInput is the validated input for creating a ticket.
 // Price is a decimal string (e.g. "9.99") — no float64 to avoid precision drift.
 // Event is optional; if provided, StartsAt is required.
+// Category is optional; defaults to "OTHER" if empty.
 // WS8: Event metadata denormalization.
 type CreateTicketInput struct {
 	Title      string
@@ -37,6 +38,7 @@ type CreateTicketInput struct {
 	UserID     string
 	Quota      int // defaults to 1 if 0
 	MaxPerUser int // defaults to 1 if 0
+	Category   string // optional; defaults to "OTHER" if empty
 	Event      *repository.TicketEvent
 }
 
@@ -123,12 +125,18 @@ func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInpu
 		return nil, errors.New("event.startsAt is required")
 	}
 
+	category := input.Category
+	if category == "" {
+		category = "OTHER"
+	}
+
 	ticket := &repository.Ticket{
 		Title:      input.Title,
 		Price:      input.Price,
 		UserID:     input.UserID,
 		Quota:      input.Quota,
 		MaxPerUser: input.MaxPerUser,
+		Category:   category,
 		Event:      input.Event,
 	}
 	ticket.PendingOutbox = []repository.TicketOutboxEvent{

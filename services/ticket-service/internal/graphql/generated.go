@@ -78,6 +78,7 @@ type ComplexityRoot struct {
 
 	Ticket struct {
 		Available    func(childComplexity int) int
+		Category     func(childComplexity int) int
 		CreatedAt    func(childComplexity int) int
 		Event        func(childComplexity int) int
 		ID           func(childComplexity int) int
@@ -317,6 +318,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Ticket.Available(childComplexity), true
+	case "Ticket.category":
+		if e.ComplexityRoot.Ticket.Category == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Ticket.Category(childComplexity), true
 	case "Ticket.createdAt":
 		if e.ComplexityRoot.Ticket.CreatedAt == nil {
 			break
@@ -896,6 +903,8 @@ func (ec *executionContext) fieldContext_Entity_findTicketByID(ctx context.Conte
 				return ec.fieldContext_Ticket_maxPerUser(ctx, field)
 			case "ticketType":
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
+			case "category":
+				return ec.fieldContext_Ticket_category(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
 			case "event":
@@ -973,6 +982,8 @@ func (ec *executionContext) fieldContext_Mutation_createTicket(ctx context.Conte
 				return ec.fieldContext_Ticket_maxPerUser(ctx, field)
 			case "ticketType":
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
+			case "category":
+				return ec.fieldContext_Ticket_category(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
 			case "event":
@@ -1050,6 +1061,8 @@ func (ec *executionContext) fieldContext_Mutation_updateTicket(ctx context.Conte
 				return ec.fieldContext_Ticket_maxPerUser(ctx, field)
 			case "ticketType":
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
+			case "category":
+				return ec.fieldContext_Ticket_category(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
 			case "event":
@@ -1127,6 +1140,8 @@ func (ec *executionContext) fieldContext_Mutation_saveEvent(ctx context.Context,
 				return ec.fieldContext_Ticket_maxPerUser(ctx, field)
 			case "ticketType":
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
+			case "category":
+				return ec.fieldContext_Ticket_category(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
 			case "event":
@@ -1204,6 +1219,8 @@ func (ec *executionContext) fieldContext_Mutation_unsaveEvent(ctx context.Contex
 				return ec.fieldContext_Ticket_maxPerUser(ctx, field)
 			case "ticketType":
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
+			case "category":
+				return ec.fieldContext_Ticket_category(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
 			case "event":
@@ -1338,6 +1355,8 @@ func (ec *executionContext) fieldContext_Query_tickets(_ context.Context, field 
 				return ec.fieldContext_Ticket_maxPerUser(ctx, field)
 			case "ticketType":
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
+			case "category":
+				return ec.fieldContext_Ticket_category(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
 			case "event":
@@ -1451,6 +1470,8 @@ func (ec *executionContext) fieldContext_Query_ticket(ctx context.Context, field
 				return ec.fieldContext_Ticket_maxPerUser(ctx, field)
 			case "ticketType":
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
+			case "category":
+				return ec.fieldContext_Ticket_category(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
 			case "event":
@@ -1826,6 +1847,8 @@ func (ec *executionContext) fieldContext_SavedEventEdge_node(_ context.Context, 
 				return ec.fieldContext_Ticket_maxPerUser(ctx, field)
 			case "ticketType":
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
+			case "category":
+				return ec.fieldContext_Ticket_category(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
 			case "event":
@@ -2249,6 +2272,35 @@ func (ec *executionContext) fieldContext_Ticket_ticketType(_ context.Context, fi
 	return fc, nil
 }
 
+func (ec *executionContext) _Ticket_category(ctx context.Context, field graphql.CollectedField, obj *Ticket) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Ticket_category,
+		func(ctx context.Context) (any, error) {
+			return obj.Category, nil
+		},
+		nil,
+		ec.marshalNTicketCategory2githubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketCategory,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Ticket_category(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Ticket",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type TicketCategory does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Ticket_seatingPlan(ctx context.Context, field graphql.CollectedField, obj *Ticket) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -2532,6 +2584,8 @@ func (ec *executionContext) fieldContext_TicketEdge_node(_ context.Context, fiel
 				return ec.fieldContext_Ticket_maxPerUser(ctx, field)
 			case "ticketType":
 				return ec.fieldContext_Ticket_ticketType(ctx, field)
+			case "category":
+				return ec.fieldContext_Ticket_category(ctx, field)
 			case "seatingPlan":
 				return ec.fieldContext_Ticket_seatingPlan(ctx, field)
 			case "event":
@@ -4267,7 +4321,7 @@ func (ec *executionContext) unmarshalInputCreateTicketInput(ctx context.Context,
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"title", "price", "quota", "maxPerUser", "ticketType", "event"}
+	fieldsInOrder := [...]string{"title", "price", "quota", "maxPerUser", "ticketType", "category", "event"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -4309,6 +4363,13 @@ func (ec *executionContext) unmarshalInputCreateTicketInput(ctx context.Context,
 				return it, err
 			}
 			it.TicketType = data
+		case "category":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("category"))
+			data, err := ec.unmarshalOTicketCategory2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketCategory(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Category = data
 		case "event":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("event"))
 			data, err := ec.unmarshalNTicketEventInput2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketEventInput(ctx, v)
@@ -4404,7 +4465,7 @@ func (ec *executionContext) unmarshalInputTicketFilter(ctx context.Context, obj 
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"availableOnly", "ticketType"}
+	fieldsInOrder := [...]string{"availableOnly", "ticketType", "search", "category", "minPrice", "maxPrice"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -4425,6 +4486,34 @@ func (ec *executionContext) unmarshalInputTicketFilter(ctx context.Context, obj 
 				return it, err
 			}
 			it.TicketType = data
+		case "search":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("search"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Search = data
+		case "category":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("category"))
+			data, err := ec.unmarshalOTicketCategory2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketCategory(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Category = data
+		case "minPrice":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("minPrice"))
+			data, err := ec.unmarshalOInt2ᚖint(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.MinPrice = data
+		case "maxPrice":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("maxPrice"))
+			data, err := ec.unmarshalOInt2ᚖint(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.MaxPrice = data
 		}
 	}
 	return it, nil
@@ -5073,6 +5162,11 @@ func (ec *executionContext) _Ticket(ctx context.Context, sel ast.SelectionSet, o
 			out.Values[i] = ec._Ticket_maxPerUser(ctx, field, obj)
 		case "ticketType":
 			out.Values[i] = ec._Ticket_ticketType(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "category":
+			out.Values[i] = ec._Ticket_category(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -5796,6 +5890,16 @@ func (ec *executionContext) marshalNTicket2ᚖgithubᚗcomᚋacmeᚋticketᚑser
 	return ec._Ticket(ctx, sel, v)
 }
 
+func (ec *executionContext) unmarshalNTicketCategory2githubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketCategory(ctx context.Context, v any) (TicketCategory, error) {
+	var res TicketCategory
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNTicketCategory2githubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketCategory(ctx context.Context, sel ast.SelectionSet, v TicketCategory) graphql.Marshaler {
+	return v
+}
+
 func (ec *executionContext) marshalNTicketConnection2githubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketConnection(ctx context.Context, sel ast.SelectionSet, v TicketConnection) graphql.Marshaler {
 	return ec._TicketConnection(ctx, sel, &v)
 }
@@ -6359,6 +6463,22 @@ func (ec *executionContext) marshalOTicket2ᚖgithubᚗcomᚋacmeᚋticketᚑser
 		return graphql.Null
 	}
 	return ec._Ticket(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalOTicketCategory2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketCategory(ctx context.Context, v any) (*TicketCategory, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var res = new(TicketCategory)
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOTicketCategory2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketCategory(ctx context.Context, sel ast.SelectionSet, v *TicketCategory) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return v
 }
 
 func (ec *executionContext) marshalOTicketEvent2ᚖgithubᚗcomᚋacmeᚋticketᚑserviceᚋinternalᚋgraphqlᚐTicketEvent(ctx context.Context, sel ast.SelectionSet, v *TicketEvent) graphql.Marshaler {

@@ -31,6 +31,9 @@ func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketI
 	if input.MaxPerUser != nil {
 		svcInput.MaxPerUser = *input.MaxPerUser
 	}
+	if input.Category != nil {
+		svcInput.Category = string(*input.Category)
+	}
 	if input.Event != nil {
 		ev, err := mapEventInput(input.Event)
 		if err != nil {
@@ -149,8 +152,24 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 	if after != nil {
 		params.After = *after
 	}
-	if filter != nil && filter.AvailableOnly != nil {
-		params.AvailableOnly = *filter.AvailableOnly
+	if filter != nil {
+		if filter.AvailableOnly != nil {
+			params.AvailableOnly = *filter.AvailableOnly
+		}
+		if filter.Search != nil {
+			params.Search = *filter.Search
+		}
+		if filter.Category != nil {
+			params.Category = string(*filter.Category)
+		}
+		if filter.MinPrice != nil {
+			minPriceFloat := float64(*filter.MinPrice)
+			params.MinPrice = &minPriceFloat
+		}
+		if filter.MaxPrice != nil {
+			maxPriceFloat := float64(*filter.MaxPrice)
+			params.MaxPrice = &maxPriceFloat
+		}
 	}
 
 	tickets, err := r.TicketService.ListTickets(ctx, params)
