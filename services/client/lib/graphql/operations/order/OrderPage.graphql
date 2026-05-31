@@ -17,6 +17,11 @@ query OrderPage($id: ID!) {
       seatLabel
       price
     }
+    subtotal
+    serviceFee
+    facilityFee
+    tax
+    total
   }
   currentUser {
     id

@@ -27,7 +27,7 @@ import { fetchPriceTiers } from "@/app/actions/venues";
 import { PurchasePanel } from "./_components/purchase-panel";
 import { QuickFacts } from "./_components/quick-facts";
 import { SaveEventButton } from "./_components/save-event-button";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, MapPin } from "lucide-react";
 
 interface Props {
   params: Promise<{ ticketId: string }>;
@@ -277,21 +277,69 @@ export default async function TicketDetailPage({ params }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left — 2 columns of main content */}
         <div className="lg:col-span-2 flex flex-col gap-6">
-          {/* Hero band */}
-          <div className="h-28 rounded-t-md bg-gradient-to-br from-accent/80 to-accent" />
+          {/* Rich hero with background image or gradient */}
+          <div className="relative overflow-hidden rounded-lg border border-line h-80">
+            {/* Background — plain <img> (imageUrl is an arbitrary organizer URL;
+                next/image would require every host in images.remotePatterns). */}
+            {ticket.event?.imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={ticket.event.imageUrl}
+                alt={ticket.event?.title || ticket.title || "Event"}
+                className="absolute inset-0 h-full w-full object-cover"
+              />
+            ) : (
+              <div className="absolute inset-0 bg-gradient-to-br from-accent/70 via-accent to-ink" />
+            )}
 
-          {/* Title */}
-          <h1 className="text-3xl font-semibold text-ink leading-tight -mt-4">
-            {ticket.event?.title || ticket.title || "Event"}
-          </h1>
+            {/* Scrim overlay for legibility */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
 
-          {/* Chips row */}
-          <div className="flex flex-wrap gap-2">
-            <Badge tone="accent">{ticket.ticketType ?? "General"}</Badge>
-            <Badge tone="neutral" dot>
-              {(ticket.available ?? 0) > 0 ? "On sale" : "Sold out"}
-            </Badge>
-            {isOwner && <Badge tone="ink">Your listing</Badge>}
+            {/* Top-left badges */}
+            <div className="absolute top-4 left-4 flex gap-2 z-10">
+              <Badge
+                tone="neutral"
+                dot
+                className="bg-black/40 text-white border-white/25"
+              >
+                {(ticket.available ?? 0) > 0 ? "On sale" : "Sold out"}
+              </Badge>
+              <Badge
+                tone="neutral"
+                className="bg-black/40 text-white border-white/25"
+              >
+                {ticket.ticketType ?? "General Admission"}
+              </Badge>
+            </div>
+
+            {/* Bottom-left text overlay */}
+            <div className="absolute bottom-0 left-0 right-0 p-6 text-white z-10">
+              <div className="text-xs font-semibold uppercase tracking-widest opacity-85 mb-2">
+                {ticket.event?.venueName ? "Live event" : "Event"}
+              </div>
+              <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight leading-tight mb-2">
+                {ticket.event?.title || ticket.title || "Event"}
+              </h1>
+              <div className="flex items-center gap-2 text-sm opacity-95">
+                {ticket.event?.venueName && (
+                  <>
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>{ticket.event.venueName}</span>
+                  </>
+                )}
+                {ticket.event?.startsAt && (
+                  <>
+                    {ticket.event.venueName && <span>·</span>}
+                    <span>
+                      {new Date(ticket.event.startsAt).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Quick facts strip */}
@@ -306,6 +354,65 @@ export default async function TicketDetailPage({ params }: Props) {
             <p className="text-text leading-relaxed">
               More details coming soon.
             </p>
+          )}
+
+          {/* Ticket-content card (for all viewers including owner) */}
+          {isSeated ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Pick your section</CardTitle>
+                <p className="text-xs text-mute mt-1">Tap a section to view available seats and prices.</p>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                {/* Placeholder seat map */}
+                <div className="bg-subtle border border-line rounded-md h-40 flex items-center justify-center">
+                  <span className="text-sm text-mute">Seat map</span>
+                </div>
+                <Link
+                  href={`/tickets/${ticketId}/seats`}
+                  className={cn(buttonVariants({ variant: "default", size: "sm" }), "w-full")}
+                >
+                  View seat map
+                </Link>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Ticket type</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/* Single GA ticket type card */}
+                <div
+                  className={cn(
+                    "p-4 rounded-md border border-l-2 bg-card",
+                    "border-line border-l-accent flex flex-col gap-3"
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-ink">
+                      {ticket.ticketType ?? "General Admission"}
+                    </span>
+                    <span className="text-sm font-semibold font-mono tabular-nums text-ink">
+                      ${parseFloat(ticket.price).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span
+                      className={cn(
+                        "text-xs font-mono tabular-nums",
+                        gaRemaining != null && gaRemaining < 20 ? "text-bad" : "text-mute"
+                      )}
+                    >
+                      {gaRemaining != null ? `${gaRemaining} remaining` : "—"}
+                    </span>
+                    <Badge tone="accent" className="text-xs">
+                      Selected
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           {/* Owner edit form */}

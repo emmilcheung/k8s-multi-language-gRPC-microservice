@@ -205,6 +205,11 @@ export interface Order {
     price: string;
   }>;
   version: number;
+  subtotal?: string;
+  serviceFee?: string;
+  facilityFee?: string;
+  tax?: string;
+  total?: string;
 }
 
 export interface Payment {

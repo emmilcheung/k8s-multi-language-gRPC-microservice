@@ -56,6 +56,11 @@ async function getOrderPageData(
             price: s.price,
           })),
           version: 0,
+          subtotal: raw.subtotal,
+          serviceFee: raw.serviceFee,
+          facilityFee: raw.facilityFee,
+          tax: raw.tax,
+          total: raw.total,
         }
       : null,
     savedPaymentMethods: (data.currentUser?.paymentMethods ?? []).map((method) => ({
@@ -153,51 +158,55 @@ export default async function OrderDetailPage({ params }: Props) {
         </div>
       )}
 
-      {/* Stepper */}
-      {!isCancelled ? (
-        <div className="bg-card border border-line rounded px-8 py-5">
-          <ol className="flex items-center gap-0">
+      {/* Header + Step Bar (V2 design) */}
+      {!isCancelled && (
+        <div className="flex items-start justify-between gap-8">
+          <div className="flex flex-col gap-2">
+            <p className="text-xs tracking-widest uppercase font-semibold text-mute">Checkout</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-ink">
+              {order.status === "created" && "Review your order"}
+              {order.status === "awaiting_payment" && "Payment"}
+              {order.status === "complete" && "You're going!"}
+            </h1>
+          </div>
+          <div className="flex items-center gap-1">
             {STEPS.map((step, idx) => {
               const done = currentStep > idx;
               const active = currentStep === idx;
               return (
-                <li key={step.key} className="flex items-center flex-1 last:flex-none">
-                  <div className="flex flex-col items-center gap-1.5">
-                    <div
-                      className={cn(
-                        "flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-colors",
-                        done
-                          ? "bg-accent text-on-accent"
-                          : active
-                          ? "bg-accent text-on-accent"
-                          : "bg-subtle text-mute"
-                      )}
-                    >
-                      {done ? <CheckCircle2 className="w-4 h-4" /> : step.icon}
-                    </div>
-                    <span
-                      className={cn(
-                        "text-xs font-medium text-center whitespace-nowrap",
-                        active || done ? "text-ink" : "text-mute"
-                      )}
-                    >
-                      {step.label}
-                    </span>
+                <div key={step.key} className="flex items-center gap-1">
+                  <div
+                    className={cn(
+                      "flex items-center justify-center w-5 h-5 rounded-full text-xs font-mono font-semibold border transition-colors",
+                      done
+                        ? "bg-accent border-accent text-on-accent"
+                        : active
+                        ? "border-ink text-ink ring-1 ring-offset-1 ring-ink"
+                        : "border-line text-mute"
+                    )}
+                  >
+                    {done ? <CheckCircle2 className="w-3 h-3" /> : idx + 1}
                   </div>
+                  <span
+                    className={cn(
+                      "text-xs font-medium whitespace-nowrap",
+                      done || active ? "text-ink" : "text-mute"
+                    )}
+                  >
+                    {step.label}
+                  </span>
                   {idx < STEPS.length - 1 && (
-                    <div
-                      className={cn(
-                        "h-px flex-1 mx-3 mb-5 transition-colors",
-                        currentStep > idx ? "bg-accent" : "bg-line"
-                      )}
-                    />
+                    <div className="w-3 h-px bg-line mx-1" />
                   )}
-                </li>
+                </div>
               );
             })}
-          </ol>
+          </div>
         </div>
-      ) : (
+      )}
+
+      {/* Cancelled banner */}
+      {isCancelled && (
         <div className="bg-card border border-line rounded px-6 py-4 flex items-center gap-3 border-l-4 border-l-bad-soft">
           <XCircle className="w-5 h-5 text-bad shrink-0" />
           <div>
@@ -232,18 +241,64 @@ export default async function OrderDetailPage({ params }: Props) {
                 </div>
               </div>
 
-              {/* Price */}
-              <div className="flex items-start gap-3">
-                <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-accent/10 shrink-0 mt-0.5">
-                  <DollarSign className="w-4 h-4 text-accent" />
+              {/* Price / Fee Breakdown */}
+              {order.total != null ? (
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    {order.subtotal && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-mute">Subtotal</span>
+                        <span className="font-mono tabular-nums text-ink">
+                          ${parseFloat(order.subtotal).toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                    {order.serviceFee && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-mute">Service fee</span>
+                        <span className="font-mono tabular-nums text-ink">
+                          ${parseFloat(order.serviceFee).toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                    {order.facilityFee && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-mute">Facility fee</span>
+                        <span className="font-mono tabular-nums text-ink">
+                          ${parseFloat(order.facilityFee).toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                    {order.tax && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-mute">Tax</span>
+                        <span className="font-mono tabular-nums text-ink">
+                          ${parseFloat(order.tax).toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <Divider />
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-ink">Total</span>
+                    <span className="text-2xl font-semibold font-mono tabular-nums text-ink">
+                      ${amount.toFixed(2)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex flex-col gap-0.5">
-                  <p className="text-xs text-mute uppercase tracking-wider">Amount</p>
-                  <p className="font-semibold text-2xl text-ink font-mono tabular-nums">
-                    ${amount.toFixed(2)}
-                  </p>
+              ) : (
+                <div className="flex items-start gap-3">
+                  <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-accent/10 shrink-0 mt-0.5">
+                    <DollarSign className="w-4 h-4 text-accent" />
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <p className="text-xs text-mute uppercase tracking-wider">Amount</p>
+                    <p className="font-semibold text-2xl text-ink font-mono tabular-nums">
+                      ${amount.toFixed(2)}
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Seats (seated orders only) */}
