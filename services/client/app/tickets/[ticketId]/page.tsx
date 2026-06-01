@@ -310,6 +310,14 @@ export default async function TicketDetailPage({ params }: Props) {
               >
                 {ticket.ticketType ?? "General Admission"}
               </Badge>
+              {isOwner && (
+                <Badge
+                  tone="neutral"
+                  className="bg-black/40 text-white border-white/25"
+                >
+                  Your listing
+                </Badge>
+              )}
             </div>
 
             {/* Bottom-left text overlay */}
