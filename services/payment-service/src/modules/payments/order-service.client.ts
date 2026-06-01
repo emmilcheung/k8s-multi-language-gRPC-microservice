@@ -23,7 +23,9 @@ const orderResponseSchema = z.object({
   ticket: z
     .object({
       price: z.union([z.string(), z.number()]),
-      startsAt: z.string().optional(),
+      // order-service REST serialises a missing replica start date as null
+      // (not undefined), so accept null here too.
+      startsAt: z.string().nullish(),
     })
     .nullable()
     .optional(),
@@ -291,7 +293,7 @@ export class OrderServiceClient {
       status: payload.data.status,
       amount: this.computeAmount(payload.data),
       currency: DEFAULT_CURRENCY,
-      startsAt: payload.data.ticket?.startsAt,
+      startsAt: payload.data.ticket?.startsAt ?? undefined,
     };
   }
 

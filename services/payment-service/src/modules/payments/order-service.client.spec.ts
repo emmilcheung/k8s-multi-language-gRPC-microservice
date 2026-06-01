@@ -184,4 +184,34 @@ describe('OrderServiceClient', () => {
 
     expect(snapshot.amount).toBe(11298);
   });
+
+  it('accepts a null ticket.startsAt without failing order verification', async () => {
+    // order-service REST serialises a missing replica start date as null (not
+    // undefined). The schema must tolerate it, otherwise the whole order lookup
+    // fails with ORDER_LOOKUP_FAILED and payment cannot proceed.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: '11111111-1111-4111-8111-111111111111',
+          userId: '22222222-2222-4222-8222-222222222222',
+          status: 'created',
+          quantity: 1,
+          ticket: { price: '55.00', startsAt: null },
+          seats: [],
+          total: '62.00',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { client } = makeClient();
+    const snapshot = await client.getOrderSnapshot(
+      '11111111-1111-4111-8111-111111111111',
+      'user-1',
+    );
+
+    expect(snapshot.amount).toBe(6200);
+    expect(snapshot.startsAt).toBeUndefined();
+  });
 });
