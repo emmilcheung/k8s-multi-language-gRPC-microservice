@@ -586,7 +586,7 @@ test.describe("tickets", () => {
     await expect(page.getByRole("heading", { level: 1 })).toContainText(updated, {
       timeout: 10000,
     });
-    await expect(page.getByText("$99.99")).toBeVisible();
+    await expect(page.getByText("$99.99").first()).toBeVisible();
   });
 
   test("seller edit form stays in sync with stored event fields", async ({ page }) => {
@@ -828,16 +828,54 @@ test.describe("orders", () => {
   });
 
   test("completed order exposes transfer and refund action routes", async ({ page }) => {
+    test.setTimeout(90_000);
+    // The transfer route is gated on an issued admission pass, which only exists
+    // once the order is paid — so complete the payment first.
+    await installStripeMock(page, { paymentMethodId: "pm_mock_success" });
     await setupPurchase(page);
     const orderUrl = page.url();
 
-    await page.goto(orderUrl);
+    await expect(page.locator("#card-element")).toHaveAttribute("data-stripe-mock", "mounted", {
+      timeout: 10000,
+    });
+    await expect(page.getByRole("button", { name: /pay now/i })).toBeEnabled();
+    await clickPayNowAndWaitForSubmitPayment(page);
+
+    await expect
+      .poll(
+        async () => {
+          await page.reload({ waitUntil: "domcontentloaded" });
+          const ready = await page
+            .getByRole("heading", { name: /order summary/i })
+            .waitFor({ state: "visible", timeout: 10000 })
+            .then(() => true)
+            .catch(() => false);
+          if (!ready) return false;
+          return page.getByText(/payment received/i).isVisible();
+        },
+        { timeout: 40000, intervals: [2000, 4000] }
+      )
+      .toBe(true);
+
     await expect(page.getByRole("link", { name: /send to friend/i })).toBeVisible({ timeout: 10000 });
     await expect(page.getByRole("link", { name: /request refund/i })).toBeVisible({ timeout: 10000 });
 
-    await page.getByRole("link", { name: /send to friend/i }).click();
-    await expect(page).toHaveURL(/\/orders\/.+\/transfer/);
-    await expect(page.getByRole("heading", { name: /transfer pass/i })).toBeVisible({ timeout: 10000 });
+    // Pass issuance is Kafka-driven and can lag the status flip; the transfer page
+    // 404s until the pass exists. Poll the route directly with a waiting locator.
+    const transferUrl = `${orderUrl}/transfer`;
+    await expect
+      .poll(
+        async () => {
+          await page.goto(transferUrl, { waitUntil: "domcontentloaded" });
+          return page
+            .getByRole("heading", { name: /transfer pass/i })
+            .waitFor({ state: "visible", timeout: 4000 })
+            .then(() => true)
+            .catch(() => false);
+        },
+        { timeout: 40000, intervals: [3000, 5000] }
+      )
+      .toBe(true);
 
     await page.goto(orderUrl);
     await page.getByRole("link", { name: /request refund/i }).click();
@@ -902,7 +940,9 @@ test.describe("orders", () => {
 
     // Visit as unauthenticated user
     await page.goto(ticketUrl, { waitUntil: "commit" });
-    await expect(page.locator("nav").getByRole("link", { name: /sign in/i })).toBeVisible({
+    // The nav renders responsive (desktop + mobile) variants, so the sign-in
+    // link can appear more than once in the DOM — assert the first is visible.
+    await expect(page.locator("nav").getByRole("link", { name: /sign in/i }).first()).toBeVisible({
       timeout: 15_000,
     });
     await expect(page.getByRole("button", { name: /purchase ticket/i })).toHaveCount(0);
@@ -1080,8 +1120,9 @@ test.describe("seating plan", () => {
     // 4. Verify the ticket was created with auto-assigned type
     await expect(page.getByRole("heading", { name: ticketTitle })).toBeVisible();
 
-    // 5. Verify ticket detail page shows the auto-assigned type
-    await expect(page.getByText("Type: Auto-assigned Seating")).toBeVisible({ timeout: 5000 });
+    // 5. Verify ticket detail page surfaces the auto-assigned seating type
+    // (now shown via the owner edit form's type selector, not a "Type:" label).
+    await expect(page.getByText("Auto-assigned Seating").first()).toBeVisible({ timeout: 5000 });
   });
 
   test("buyer cannot enter seat selection when the seating plan is inactive", async ({ page }) => {
@@ -1235,11 +1276,13 @@ test.describe("seating plan", () => {
     await openTicketDetailUntilReady(
       page,
       ticketUrl,
-      page.locator('#quantity[type="number"]')
+      // The purchase panel renders a desktop + a mobile (responsive) CTA, so the
+      // quantity input appears twice in the DOM — scope to the first (visible) one.
+      page.locator('#quantity[type="number"]').first()
     );
 
     // Quantity stepper should appear because maxQuantity (3) > 1
-    const qtyInput = page.locator('#quantity[type="number"]');
+    const qtyInput = page.locator('#quantity[type="number"]').first();
     await expect(qtyInput).toBeVisible({ timeout: 10000 });
 
     // Set quantity to 2
@@ -1330,14 +1373,16 @@ test.describe("seating plan", () => {
     // The CTA is disabled before any second click, enforcing maxPerUser=1 at the
     // UI layer. The backend 422 (FAILED_PRECONDITION) would fire if the request were
     // made anyway (e.g. directly via API), but the E2E path validates the UI gate.
+    // Reserved state: the panel surfaces a "View your orders" CTA (the redesigned
+    // gate for an already-reserved ticket when signed in).
     await openTicketDetailUntilReady(
       page,
       ticketUrl,
-      page.getByRole("button", { name: /already reserved/i })
+      page.getByRole("button", { name: /view your orders/i })
     );
 
     await expect(
-      page.getByRole("button", { name: /already reserved/i })
+      page.getByRole("button", { name: /view your orders/i }).first()
     ).toBeVisible({ timeout: 15000 });
   });
 });
