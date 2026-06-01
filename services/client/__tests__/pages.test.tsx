@@ -451,7 +451,7 @@ describe("HomePage", () => {
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
 
-    expect(screen.getByRole("link", { name: /concerts/i })).toHaveAttribute("href", "/?q=concert");
+    expect(screen.getByRole("link", { name: /concerts/i })).toHaveAttribute("href", "/?category=concert");
   });
 
   it("shows event count when tickets exist", async () => {
@@ -465,13 +465,10 @@ describe("HomePage", () => {
     expect(screen.getByText(/1\s*events/)).toBeInTheDocument();
   });
 
-  it("applies query filters from search params", async () => {
+  it("passes the search param into the server-side TicketFilter", async () => {
+    // Search is filtered server-side now: the page forwards `q` as filter.search
+    // to fetchTicketPageViaGraphQL rather than filtering the result client-side.
     const tickets = [
-      makeTicket({
-        id: "ticket-a",
-        title: "Classical Night",
-        event: { title: "Classical Night", startsAt: "2099-08-09T20:30:00Z", venueName: "Hall A" },
-      }),
       makeTicket({
         id: "ticket-b",
         title: "Laugh Out Loud",
@@ -483,8 +480,12 @@ describe("HomePage", () => {
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage({ searchParams: Promise.resolve({ q: "laugh" }) }));
 
+    expect(fetchTicketPageViaGraphQLMock).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ search: "laugh" })
+    );
+    // With a filter active the hero is suppressed and results render in the grid.
     expect(screen.getByRole("heading", { name: /laugh out loud/i })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: /classical night/i })).not.toBeInTheDocument();
   });
 
   it("displays filter section with date, price, category, availability options", async () => {

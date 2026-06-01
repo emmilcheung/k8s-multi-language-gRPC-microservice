@@ -77,16 +77,17 @@ describe("SeatingPlanCanvas", () => {
     expect(screen.getByText(/plan editor/i)).toBeInTheDocument();
   });
 
-  it("should render SEATED and GA badges", () => {
+  it("should label a seated section with its row × column dimensions", () => {
+    // V2 canvas conveys section type via the tone + label (no SEATED/GA badges):
+    // seated sections show their grid dimensions.
     render(
       <SeatingPlanCanvas
         planId="plan-1"
-        sections={[seatedSection, gaSection]}
+        sections={[seatedSection]}
         isDraft
       />
     );
-    expect(screen.getAllByText("SEATED").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("GA").length).toBeGreaterThan(0);
+    expect(screen.getByText("3R × 10C")).toBeInTheDocument();
   });
 
   it("should show GA capacity label for GA sections", () => {
@@ -97,7 +98,7 @@ describe("SeatingPlanCanvas", () => {
         isDraft
       />
     );
-    expect(screen.getByText(/200 seats \(ga\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/200 cap \(ga\)/i)).toBeInTheDocument();
   });
 
   it("should display a Save Layout button when isDraft is true", () => {
