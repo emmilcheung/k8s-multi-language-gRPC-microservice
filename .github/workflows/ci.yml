@@ -913,7 +913,7 @@ jobs:
   e2e:
     name: Playwright E2E (full stack)
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     needs: [changes, auth, client, expiration, kong, order, payment, proto, ticket, user, venue]
     env:
       E2E_INFRA_SERVICES: postgres-auth postgres-orders postgres-payments postgres-attendance mongodb redis kafka schema-registry
