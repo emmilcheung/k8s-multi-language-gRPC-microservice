@@ -164,6 +164,7 @@ input CreateTicketInput
   quota: Int!
   maxPerUser: Int
   ticketType: TicketType!
+  category: TicketCategory
   event: TicketEventInput!
 }
 
@@ -569,11 +570,23 @@ type Ticket
   available: Int!
   maxPerUser: Int
   ticketType: TicketType!
+  category: TicketCategory!
   seatingPlan: SeatingPlan
   event: TicketEvent
   createdAt: String!
   updatedAt: String!
   savedByMe: Boolean!
+}
+
+enum TicketCategory
+  @join__type(graph: TICKETS)
+{
+  CONCERT @join__enumValue(graph: TICKETS)
+  SPORTS @join__enumValue(graph: TICKETS)
+  COMEDY @join__enumValue(graph: TICKETS)
+  THEATRE @join__enumValue(graph: TICKETS)
+  FESTIVAL @join__enumValue(graph: TICKETS)
+  OTHER @join__enumValue(graph: TICKETS)
 }
 
 type TicketConnection
@@ -619,6 +632,10 @@ input TicketFilter
 {
   availableOnly: Boolean
   ticketType: TicketType
+  search: String
+  category: TicketCategory
+  minPrice: Int
+  maxPrice: Int
 }
 
 enum TicketType

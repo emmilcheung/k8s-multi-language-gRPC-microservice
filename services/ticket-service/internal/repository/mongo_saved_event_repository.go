@@ -133,7 +133,7 @@ func (r *MongoSavedEventRepository) ListSavedEvents(ctx context.Context, userID 
 	if err != nil {
 		return nil, fmt.Errorf("mongo list saved events: %w", err)
 	}
-	defer cursor.Close(ctx)
+	defer func() { _ = cursor.Close(ctx) }()
 	
 	var events []*SavedEvent
 	if err := cursor.All(ctx, &events); err != nil {
