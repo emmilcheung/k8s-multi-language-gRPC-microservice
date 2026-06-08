@@ -149,15 +149,18 @@ async function openTicketDetailUntilReady(
       await page.waitForTimeout(delayMs);
     }
 
-    await page.goto(ticketUrl, { waitUntil: "commit", timeout: 10000 });
+    await page.goto(ticketUrl, { waitUntil: "domcontentloaded", timeout: 10000 });
 
-    const isReady = await readyLocator.isVisible().catch(() => false);
+    const isReady = await readyLocator
+      .waitFor({ state: "visible", timeout: 4000 })
+      .then(() => true)
+      .catch(() => false);
     if (isReady) {
       return;
     }
   }
 
-  await expect(readyLocator).toBeVisible({ timeout: 1000 });
+  await expect(readyLocator).toBeVisible({ timeout: 5000 });
 }
 
 /**
@@ -493,7 +496,9 @@ test.describe("settings", () => {
     // RSC streams after page load — wait for real content to replace the loading skeleton
     await expect(page.getByRole("heading", { name: /^settings$/i })).toBeVisible({ timeout: 15000 });
 
-    await expect(page.getByText(/security sessions/i)).toBeVisible();
+    await expect(
+      page.locator('[data-slot="card-title"]').filter({ hasText: /security\s*&\s*sessions/i })
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: /^revoke$/i })).toHaveCount(1);
   });
 });
@@ -580,7 +585,7 @@ test.describe("tickets", () => {
     await expect(page.getByRole("heading", { level: 1 })).toContainText(updated, {
       timeout: 10000,
     });
-    await expect(page.getByText("$99.99")).toBeVisible();
+    await expect(page.getByText("$99.99").first()).toBeVisible();
   });
 
   test("seller edit form stays in sync with stored event fields", async ({ page }) => {
@@ -788,26 +793,11 @@ test.describe("orders", () => {
     ).toContainText(/mock payment declined|subgraph errors redacted/i, {
       timeout: 10000,
     });
-
-    await expect
-      .poll(
-        async () => {
-          await page.reload();
-          await page
-            .getByRole("heading", { name: /order summary|order cancelled/i })
-            .first()
-            .waitFor({ timeout: 10000 })
-            .catch(() => {});
-          return page.getByText(/order cancelled/i).isVisible();
-        },
-        { timeout: 45000, intervals: [2000, 3000, 5000] }
-      )
-      .toBe(true);
-
-    await expect(page.getByRole("button", { name: /pay now/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /pay now/i })).toBeVisible();
   });
 
   test("buyer cancels — order list shows cancelled badge", async ({ page }) => {
+    test.setTimeout(60_000);
     await setupPurchase(page);
 
     // Wait for client component to hydrate before clicking
@@ -817,22 +807,8 @@ test.describe("orders", () => {
 
     await page.getByRole("button", { name: /cancel order/i }).click();
     await page.waitForURL("/orders", { timeout: 15000 });
-
-    for (const delayMs of [0, 3000, 6000]) {
-      if (delayMs > 0) {
-        await page.waitForTimeout(delayMs);
-        await page.goto("/orders", { waitUntil: "domcontentloaded" });
-      }
-      const hasOrdersPage = await page
-        .getByRole("heading", { name: /my orders/i })
-        .isVisible()
-        .catch(() => false);
-      if (hasOrdersPage) {
-        break;
-      }
-    }
-    await expect(page.getByRole("heading", { name: /my orders/i })).toBeVisible({ timeout: 1000 });
-    // The cancelled status badge text should appear somewhere on the page
+    await expect(page.getByRole("heading", { name: /my orders/i })).toBeVisible({ timeout: 15000 });
+    await page.getByRole("tab", { name: /past/i }).click();
     await expect(page.getByText(/cancelled/i).first()).toBeVisible({ timeout: 10000 });
   });
 
@@ -843,7 +819,67 @@ test.describe("orders", () => {
 
     // RSC streams after navigation — wait for real content to replace the loading skeleton
     await expect(page.getByRole("heading", { name: /my orders/i })).toBeVisible({ timeout: 15000 });
+    await page.getByRole("tab", { name: /past/i }).click();
     await expect(page.getByText(ticketTitle)).toBeVisible({ timeout: 10000 });
+
+    await page.getByRole("tab", { name: /saved/i }).click();
+    await expect(page.getByText(/no saved events yet/i)).toBeVisible({ timeout: 10000 });
+  });
+
+  test("completed order exposes transfer and refund action routes", async ({ page }) => {
+    test.setTimeout(90_000);
+    // The transfer route is gated on an issued admission pass, which only exists
+    // once the order is paid — so complete the payment first.
+    await installStripeMock(page, { paymentMethodId: "pm_mock_success" });
+    await setupPurchase(page);
+    const orderUrl = page.url();
+
+    await expect(page.locator("#card-element")).toHaveAttribute("data-stripe-mock", "mounted", {
+      timeout: 10000,
+    });
+    await expect(page.getByRole("button", { name: /pay now/i })).toBeEnabled();
+    await clickPayNowAndWaitForSubmitPayment(page);
+
+    await expect
+      .poll(
+        async () => {
+          await page.reload({ waitUntil: "domcontentloaded" });
+          const ready = await page
+            .getByRole("heading", { name: /order summary/i })
+            .waitFor({ state: "visible", timeout: 10000 })
+            .then(() => true)
+            .catch(() => false);
+          if (!ready) return false;
+          return page.getByText(/payment received/i).isVisible();
+        },
+        { timeout: 40000, intervals: [2000, 4000] }
+      )
+      .toBe(true);
+
+    await expect(page.getByRole("link", { name: /send to friend/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("link", { name: /request refund/i })).toBeVisible({ timeout: 10000 });
+
+    // Pass issuance is Kafka-driven and can lag the status flip; the transfer page
+    // 404s until the pass exists. Poll the route directly with a waiting locator.
+    const transferUrl = `${orderUrl}/transfer`;
+    await expect
+      .poll(
+        async () => {
+          await page.goto(transferUrl, { waitUntil: "domcontentloaded" });
+          return page
+            .getByRole("heading", { name: /transfer pass/i })
+            .waitFor({ state: "visible", timeout: 4000 })
+            .then(() => true)
+            .catch(() => false);
+        },
+        { timeout: 40000, intervals: [3000, 5000] }
+      )
+      .toBe(true);
+
+    await page.goto(orderUrl);
+    await page.getByRole("link", { name: /request refund/i }).click();
+    await expect(page).toHaveURL(/\/orders\/.+\/refund/);
+    await expect(page.getByRole("heading", { name: /request refund/i })).toBeVisible({ timeout: 10000 });
   });
 
   test("ticket shows unavailable state after order is created", async ({ page }) => {
@@ -903,7 +939,9 @@ test.describe("orders", () => {
 
     // Visit as unauthenticated user
     await page.goto(ticketUrl, { waitUntil: "commit" });
-    await expect(page.locator("nav").getByRole("link", { name: /sign in/i })).toBeVisible({
+    // The nav renders responsive (desktop + mobile) variants, so the sign-in
+    // link can appear more than once in the DOM — assert the first is visible.
+    await expect(page.locator("nav").getByRole("link", { name: /sign in/i }).first()).toBeVisible({
       timeout: 15_000,
     });
     await expect(page.getByRole("button", { name: /purchase ticket/i })).toHaveCount(0);
@@ -972,7 +1010,24 @@ test.describe("seating plan", () => {
     await expect(page.getByRole("button", { name: /create replacement plan/i })).toBeVisible();
 
     await page.getByRole("button", { name: /reactivate plan/i }).click();
-    await expect(page.getByRole("button", { name: /deactivate plan/i })).toBeVisible({ timeout: 10000 });
+    await expect
+      .poll(
+        async () => {
+          await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
+          const hasRealContent = await page
+            .getByRole("link", { name: /back to ticket/i })
+            .waitFor({ state: "visible", timeout: 10000 })
+            .then(() => true)
+            .catch(() => false);
+          if (!hasRealContent) return false;
+          return page
+            .getByRole("button", { name: /deactivate plan/i })
+            .isVisible()
+            .catch(() => false);
+        },
+        { timeout: 15000, intervals: [1000, 2000, 3000] }
+      )
+      .toBe(true);
 
     await page.getByRole("button", { name: /deactivate plan/i }).click();
     await expect(page.getByRole("button", { name: /create replacement plan/i })).toBeVisible({ timeout: 10000 });
@@ -1064,8 +1119,9 @@ test.describe("seating plan", () => {
     // 4. Verify the ticket was created with auto-assigned type
     await expect(page.getByRole("heading", { name: ticketTitle })).toBeVisible();
 
-    // 5. Verify ticket detail page shows the auto-assigned type
-    await expect(page.getByText("Type: Auto-assigned Seating")).toBeVisible({ timeout: 5000 });
+    // 5. Verify ticket detail page surfaces the auto-assigned seating type
+    // (now shown via the owner edit form's type selector, not a "Type:" label).
+    await expect(page.getByText("Auto-assigned Seating").first()).toBeVisible({ timeout: 5000 });
   });
 
   test("buyer cannot enter seat selection when the seating plan is inactive", async ({ page }) => {
@@ -1219,11 +1275,13 @@ test.describe("seating plan", () => {
     await openTicketDetailUntilReady(
       page,
       ticketUrl,
-      page.locator('#quantity[type="number"]')
+      // The purchase panel renders a desktop + a mobile (responsive) CTA, so the
+      // quantity input appears twice in the DOM — scope to the first (visible) one.
+      page.locator('#quantity[type="number"]').first()
     );
 
     // Quantity stepper should appear because maxQuantity (3) > 1
-    const qtyInput = page.locator('#quantity[type="number"]');
+    const qtyInput = page.locator('#quantity[type="number"]').first();
     await expect(qtyInput).toBeVisible({ timeout: 10000 });
 
     // Set quantity to 2
@@ -1314,14 +1372,79 @@ test.describe("seating plan", () => {
     // The CTA is disabled before any second click, enforcing maxPerUser=1 at the
     // UI layer. The backend 422 (FAILED_PRECONDITION) would fire if the request were
     // made anyway (e.g. directly via API), but the E2E path validates the UI gate.
+    // Reserved state: the panel surfaces a "View your orders" CTA (the redesigned
+    // gate for an already-reserved ticket when signed in).
     await openTicketDetailUntilReady(
       page,
       ticketUrl,
-      page.getByRole("button", { name: /already reserved/i })
+      page.getByRole("button", { name: /view your orders/i })
     );
 
     await expect(
-      page.getByRole("button", { name: /already reserved/i })
+      page.getByRole("button", { name: /view your orders/i }).first()
     ).toBeVisible({ timeout: 15000 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Saved Events tests (Phase 7a)
+// ---------------------------------------------------------------------------
+
+test.describe("saved events", () => {
+  test("buyer can save a ticket, view it in Saved tab, and unsave it", async ({ page }) => {
+    test.setTimeout(90_000);
+
+    // Creator creates a ticket
+    const creatorEmail = uniqueEmail("saved-creator");
+    await signupAsCreator(page, creatorEmail);
+    const title = `Save Test ${Date.now()}`;
+    const ticketUrl = await createTicket(page, title, "25.00");
+    await signout(page);
+
+    // Buyer signs up and navigates to the ticket
+    const buyerEmail = uniqueEmail("saved-buyer");
+    await signup(page, buyerEmail);
+    await page.goto(ticketUrl);
+    await page.getByRole("heading", { level: 1 }).waitFor({ state: "attached", timeout: 10000 });
+
+    // Save event button should be visible for authenticated non-owner
+    const saveBtn = page.getByRole("button", { name: /save event/i });
+    await expect(saveBtn).toBeVisible({ timeout: 10000 });
+    await saveBtn.click();
+
+    // After saving, button should toggle to "Saved"
+    await expect(page.getByRole("button", { name: /^saved$/i })).toBeVisible({ timeout: 10000 });
+
+    // Navigate to orders page, check the Saved tab
+    await page.goto("/orders");
+    await expect(page.getByRole("heading", { level: 1, name: /my orders/i })).toBeVisible({
+      timeout: 15000,
+    });
+    const savedTab = page.getByRole("tab", { name: /saved/i });
+    await savedTab.click();
+
+    // Saved event should appear in the tab
+    await expect(page.getByText(title)).toBeVisible({ timeout: 15000 });
+
+    // Navigate back and unsave
+    await page.goto(ticketUrl);
+    await page.getByRole("heading", { level: 1 }).waitFor({ state: "attached", timeout: 10000 });
+    const savedBtn = page.getByRole("button", { name: /^saved$/i });
+    await expect(savedBtn).toBeVisible({ timeout: 10000 });
+    await savedBtn.click();
+
+    // After unsaving, button should return to "Save event"
+    await expect(page.getByRole("button", { name: /save event/i })).toBeVisible({
+      timeout: 10000,
+    });
+
+    // Saved tab should no longer list the event after unsave
+    await page.goto("/orders");
+    await expect(page.getByRole("heading", { level: 1, name: /my orders/i })).toBeVisible({
+      timeout: 15000,
+    });
+    await page.getByRole("tab", { name: /saved/i }).click();
+    await expect(page.getByText(/no saved events yet/i)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(title)).not.toBeVisible();
   });
 });

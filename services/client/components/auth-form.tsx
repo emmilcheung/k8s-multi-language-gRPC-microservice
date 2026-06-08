@@ -2,11 +2,11 @@
 
 import { useActionState } from "react";
 import Link from "next/link";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Separator } from "@/components/ui/separator";
 import { Mail, Lock, AlertCircle, ArrowRight, Loader2 } from "lucide-react";
 import type { AuthState } from "@/app/actions/auth";
 
@@ -23,50 +23,55 @@ export function AuthForm({ mode, action, next }: AuthFormProps) {
   const [state, formAction, pending] = useActionState(action, initialState);
 
   const isSignup = mode === "signup";
-  const title = isSignup ? "Create an account" : "Welcome back";
+  const title = isSignup ? "Create your account" : "Welcome back";
   const subtitle = isSignup
-    ? "Join thousands buying and selling event tickets"
-    : "Sign in to your Marquee account";
+    ? "Create your Stagepass account with email and password to unlock faster checkout and mobile passes."
+    : "Sign in to find tickets, pay faster, and access your passes.";
   const submitLabel = isSignup ? "Sign Up" : "Sign In";
-  const altText = isSignup ? "Already have an account?" : "Don't have an account?";
-  const altHref = isSignup ? "/auth/signin" : "/auth/signup";
-  const altLabel = isSignup ? "Sign in" : "Sign up";
+  const tabs = [
+    { href: "/auth/signin", label: "Sign in", active: !isSignup },
+    { href: "/auth/signup", label: "Create account", active: isSignup },
+  ];
 
   return (
-    <div className="w-full max-w-sm flex flex-col gap-8">
-      {/* Header */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="inline-block h-px w-6 bg-primary" />
-          <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-            {isSignup ? "New Account" : "Sign In"}
-          </span>
-        </div>
-        <h1 className="font-display font-extrabold text-2xl tracking-tight text-foreground">
-          {title}
-        </h1>
-        <p className="text-sm text-muted-foreground">{subtitle}</p>
+    <div className="flex w-full max-w-md flex-col">
+      <div className="mb-7 inline-flex w-fit rounded-lg border border-line bg-subtle p-1">
+        {tabs.map((tab) => (
+          <Link
+            key={tab.href}
+            href={tab.href}
+            aria-current={tab.active ? "page" : undefined}
+            className={cn(
+              "rounded-md px-4 py-2 text-sm font-medium transition-colors",
+              tab.active ? "bg-card text-ink shadow-sm" : "text-mute hover:text-ink"
+            )}
+          >
+            {tab.label}
+          </Link>
+        ))}
       </div>
 
-      {/* Form card */}
-      <div className="bg-card border border-border rounded-lg p-6 flex flex-col gap-5 shadow-sm">
+      <div className="space-y-2">
+        <h1 className="text-[28px] font-semibold tracking-[-0.022em] text-ink">{title}</h1>
+        <p className="text-sm leading-6 text-mute">{subtitle}</p>
+      </div>
+
+      <div className="mt-8 rounded-2xl border border-line bg-card p-6 shadow-sm sm:p-7">
         {state?.error && (
-          <Alert variant="destructive">
+          <Alert variant="destructive" className="mb-5">
             <AlertCircle />
             <AlertDescription>{state.error}</AlertDescription>
           </Alert>
         )}
 
         <form action={formAction} className="flex flex-col gap-4">
-          {/* Hidden field carries the post-login redirect URL for OAuth flows */}
           {next && <input type="hidden" name="next" value={next} />}
-          {/* Email */}
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="email" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <Label htmlFor="email" className="text-xs font-semibold uppercase tracking-wider text-mute">
               Email
             </Label>
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
               <Input
                 id="email"
                 name="email"
@@ -74,18 +79,17 @@ export function AuthForm({ mode, action, next }: AuthFormProps) {
                 autoComplete={isSignup ? "email" : "username"}
                 required
                 placeholder="you@example.com"
-                className="pl-9 bg-background border-border focus:border-primary"
+                className="pl-9"
               />
             </div>
           </div>
 
-          {/* Password */}
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="password" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <Label htmlFor="password" className="text-xs font-semibold uppercase tracking-wider text-mute">
               Password
             </Label>
             <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
               <Input
                 id="password"
                 name="password"
@@ -94,17 +98,17 @@ export function AuthForm({ mode, action, next }: AuthFormProps) {
                 required
                 placeholder="••••••••"
                 minLength={isSignup ? 8 : undefined}
-                className="pl-9 bg-background border-border focus:border-primary"
+                className="pl-9"
               />
             </div>
             {isSignup && (
-              <p className="text-xs text-muted-foreground">Minimum 8 characters</p>
+              <p className="text-xs text-mute">Minimum 8 characters</p>
             )}
           </div>
 
           <Button
             type="submit"
-            className="w-full mt-1 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
+            className="mt-2 h-11 w-full font-semibold"
             disabled={pending}
           >
             {pending ? (
@@ -120,18 +124,6 @@ export function AuthForm({ mode, action, next }: AuthFormProps) {
             )}
           </Button>
         </form>
-
-        <Separator />
-
-        <p className="text-sm text-muted-foreground text-center">
-          {altText}{" "}
-          <Link
-            href={altHref}
-            className="text-primary font-semibold hover:underline underline-offset-2 transition-colors"
-          >
-            {altLabel}
-          </Link>
-        </p>
       </div>
     </div>
   );

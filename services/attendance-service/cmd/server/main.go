@@ -23,11 +23,11 @@ import (
 	"github.com/acme/attendance-service/internal/service"
 	"github.com/acme/attendance-service/internal/tracing"
 	"github.com/acme/attendance-service/pkg/logger"
-	ticketsv1 "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	ticketsv1 "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -112,9 +112,10 @@ func main() {
 	}
 	defer ticketConn.Close() //nolint:errcheck
 	ticketLookup := service.NewGRPCTicketOwnerLookup(ticketsv1.NewTicketServiceClient(ticketConn), 0)
+	userLookup := service.NewHTTPUserIdentityLookup(cfg.AuthServiceURL, nil, 0)
 
 	// Service
-	svc := service.NewAttendanceServiceWithTicketLookup(credRepo, policyRepo, scanRepo, ticketLookup)
+	svc := service.NewAttendanceServiceWithLookups(credRepo, policyRepo, scanRepo, ticketLookup, userLookup)
 
 	// QR token generator
 	qrGen := qr.NewGenerator(cfg.QRSigningKey)

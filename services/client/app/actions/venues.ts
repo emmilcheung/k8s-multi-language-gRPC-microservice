@@ -415,6 +415,7 @@ export async function createPriceTier(
 export async function createSection(
   planId: string,
   venueId: string,
+  ticketId: string,
   _prev: PlanState,
   formData: FormData
 ): Promise<PlanState> {
@@ -449,8 +450,13 @@ export async function createSection(
     return { error: body?.error ?? "Failed to create section." };
   }
 
-  revalidatePath(`/venues/${venueId}/plans/${planId}`);
-  redirect(`/venues/${venueId}/plans/${planId}`);
+  if (ticketId) {
+    revalidatePath(`/tickets/${ticketId}/plans/${planId}`);
+    redirect(`/tickets/${ticketId}/plans/${planId}`);
+  } else {
+    revalidatePath(`/venues/${venueId}/plans/${planId}`);
+    redirect(`/venues/${venueId}/plans/${planId}`);
+  }
 }
 
 /**

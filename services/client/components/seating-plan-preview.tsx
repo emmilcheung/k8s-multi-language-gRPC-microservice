@@ -14,9 +14,9 @@ interface SeatingPlanPreviewProps {
 }
 
 const STATUS_CLASS: Record<SeatingPlan["status"], string> = {
-  draft: "bg-yellow-500/15 text-yellow-400 border-yellow-500/20",
-  active: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
-  inactive: "bg-muted/40 text-muted-foreground border-muted/20",
+  draft: "bg-amber-500/15 text-amber-600 border-amber-500/30",
+  active: "bg-emerald-500/15 text-emerald-700 border-emerald-500/30",
+  inactive: "bg-subtle/60 text-mute border-line/40",
 };
 
 function totalCapacity(sections: Section[]): number {
@@ -31,16 +31,16 @@ export function SeatingPlanPreview({ plan, priceTiers = [] }: SeatingPlanPreview
   const capacity = totalCapacity(sections);
 
   return (
-    <div className="glass rounded-2xl p-5 flex flex-col gap-4">
+    <div className="rounded-3xl border border-line/70 bg-card/95 p-6 flex flex-col gap-4 shadow-[0_20px_60px_-40px_rgba(0,0,0,0.65)]">
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 ring-1 ring-primary/20 shrink-0">
-            <Layers className="w-4 h-4 text-primary" />
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-accent/10 ring-1 ring-accent/20 shrink-0">
+            <Layers className="w-4 h-4 text-accent" />
           </div>
           <div className="min-w-0">
             <p className="font-semibold text-sm truncate">{plan.name}</p>
-            <p className="text-xs text-muted-foreground font-mono">{plan.id.slice(0, 8)}…</p>
+            <p className="text-xs text-mute font-mono">{plan.id.slice(0, 8)}…</p>
           </div>
         </div>
         <Badge className={cn("shrink-0 text-xs", STATUS_CLASS[plan.status])}>
@@ -50,7 +50,7 @@ export function SeatingPlanPreview({ plan, priceTiers = [] }: SeatingPlanPreview
 
       {/* Capacity summary */}
       {capacity > 0 && (
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-xs text-mute">
           <Users className="w-3.5 h-3.5" />
           <span>{capacity.toLocaleString()} total seats · {sections.length} section{sections.length !== 1 ? "s" : ""}</span>
         </div>
@@ -65,11 +65,11 @@ export function SeatingPlanPreview({ plan, priceTiers = [] }: SeatingPlanPreview
             return (
               <div
                 key={s.id}
-                className="flex items-center gap-2.5 bg-white/4 rounded-xl px-3 py-2"
+                className="flex items-center gap-2.5 rounded-xl border border-line/60 bg-subtle/70 px-3 py-2"
               >
-                <Grid3X3 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <Grid3X3 className="w-3.5 h-3.5 text-mute shrink-0" />
                 <span className="text-xs font-medium flex-1 min-w-0 truncate">{s.name}</span>
-                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                <span className="text-xs text-mute whitespace-nowrap">
                   {s.type === "ga"
                     ? `GA · ${cap} cap.`
                     : `${s.rowCount}R × ${s.columnCount}C`}
@@ -84,7 +84,7 @@ export function SeatingPlanPreview({ plan, priceTiers = [] }: SeatingPlanPreview
       {/* Link to plan management page */}
       <Link
         href={plan.ticketId ? `/tickets/${plan.ticketId}/plans/${plan.id}` : `/venues/${plan.venueId}/plans/${plan.id}`}
-        className="flex items-center gap-1.5 text-xs text-primary hover:underline self-start"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/60 px-3 py-2 text-xs font-medium text-accent-foreground hover:bg-accent-soft self-start"
       >
         <ExternalLink className="w-3.5 h-3.5" />
         Manage plan

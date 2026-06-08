@@ -30,6 +30,7 @@ type SeatingPlanLookupClient interface {
 // CreateTicketInput is the validated input for creating a ticket.
 // Price is a decimal string (e.g. "9.99") — no float64 to avoid precision drift.
 // Event is optional; if provided, StartsAt is required.
+// Category is optional; defaults to "OTHER" if empty.
 // WS8: Event metadata denormalization.
 type CreateTicketInput struct {
 	Title      string
@@ -37,6 +38,7 @@ type CreateTicketInput struct {
 	UserID     string
 	Quota      int // defaults to 1 if 0
 	MaxPerUser int // defaults to 1 if 0
+	Category   string // optional; defaults to "OTHER" if empty
 	Event      *repository.TicketEvent
 }
 
@@ -70,11 +72,18 @@ type TicketService struct {
 	publisher          EventPublisher
 	log                *zap.Logger
 	venueServiceClient SeatingPlanLookupClient // WS3: fetch seating plan assignment mode
+	savedEventRepo     repository.SavedEventRepository
 }
 
 // NewTicketService creates a new TicketService with the given dependencies.
-func NewTicketService(repo repository.TicketRepository, publisher EventPublisher, log *zap.Logger, venueClient SeatingPlanLookupClient) *TicketService {
-	return &TicketService{repo: repo, publisher: publisher, log: log, venueServiceClient: venueClient}
+func NewTicketService(repo repository.TicketRepository, publisher EventPublisher, log *zap.Logger, venueClient SeatingPlanLookupClient, savedEventRepo repository.SavedEventRepository) *TicketService {
+	return &TicketService{
+		repo:               repo,
+		publisher:          publisher,
+		log:                log,
+		venueServiceClient: venueClient,
+		savedEventRepo:     savedEventRepo,
+	}
 }
 
 func buildOutboxPayload(ticket *repository.Ticket) repository.TicketOutboxPayload {
@@ -116,12 +125,18 @@ func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInpu
 		return nil, errors.New("event.startsAt is required")
 	}
 
+	category := input.Category
+	if category == "" {
+		category = "OTHER"
+	}
+
 	ticket := &repository.Ticket{
 		Title:      input.Title,
 		Price:      input.Price,
 		UserID:     input.UserID,
 		Quota:      input.Quota,
 		MaxPerUser: input.MaxPerUser,
+		Category:   category,
 		Event:      input.Event,
 	}
 	ticket.PendingOutbox = []repository.TicketOutboxEvent{
@@ -272,4 +287,77 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 	s.log.Info("ticket updated", zap.String("ticketId", ticket.ID), zap.String("userId", ticket.UserID))
 
 	return ticket, nil
+}
+
+// SaveEvent saves an event (ticket detail) for a user.
+// In v1, eventId maps to ticketId. Idempotent: re-saving updates the timestamp.
+// Verifies the ticket exists before saving to prevent orphan saved-event rows.
+// Returns the ticket it fetched, useful for GraphQL flows.
+func (s *TicketService) SaveEvent(ctx context.Context, userID, eventID string) (*repository.Ticket, error) {
+	// Verify ticket exists before persisting the saved-event row
+	ticket, err := s.repo.FindByID(ctx, eventID)
+	if err != nil {
+		return nil, fmt.Errorf("save event: %w", err)
+	}
+	if err := s.savedEventRepo.SaveEvent(ctx, userID, eventID); err != nil {
+		return nil, fmt.Errorf("save event: %w", err)
+	}
+	s.log.Info("event saved", zap.String("userId", userID), zap.String("eventId", eventID))
+	return ticket, nil
+}
+
+// UnsaveEvent removes a saved event for a user.
+// In v1, eventId maps to ticketId. Idempotent: unsaving a non-saved event is a no-op.
+func (s *TicketService) UnsaveEvent(ctx context.Context, userID, eventID string) error {
+	if err := s.savedEventRepo.UnsaveEvent(ctx, userID, eventID); err != nil {
+		return fmt.Errorf("unsave event: %w", err)
+	}
+	s.log.Info("event unsaved", zap.String("userId", userID), zap.String("eventId", eventID))
+	return nil
+}
+
+// IsSaved reports whether the given user has saved the given event (ticket).
+func (s *TicketService) IsSaved(ctx context.Context, userID, eventID string) (bool, error) {
+	saved, err := s.savedEventRepo.IsSaved(ctx, userID, eventID)
+	if err != nil {
+		return false, fmt.Errorf("is saved: %w", err)
+	}
+	return saved, nil
+}
+
+// ListSavedEvents returns saved events (tickets) for a user in saved order (newest first).
+// Enriches saved-event records with full ticket data. Skips tickets that no longer exist.
+// Supports cursor-based pagination; pass empty string for first page.
+func (s *TicketService) ListSavedEvents(ctx context.Context, userID, after string, limit int) ([]*repository.Ticket, error) {
+	// Get saved events from repository
+	savedEvents, err := s.savedEventRepo.ListSavedEvents(ctx, userID, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list saved events: %w", err)
+	}
+	
+	if len(savedEvents) == 0 {
+		return []*repository.Ticket{}, nil
+	}
+	
+	// Extract event IDs (ticket IDs in v1)
+	eventIDs := make([]string, len(savedEvents))
+	for i, se := range savedEvents {
+		eventIDs[i] = se.EventID
+	}
+	
+	// Batch-fetch tickets
+	tickets, err := s.repo.FindByIDs(ctx, eventIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list saved events: fetch tickets: %w", err)
+	}
+	
+	// Filter out nil tickets (deleted) and preserve saved order
+	result := make([]*repository.Ticket, 0, len(tickets))
+	for _, ticket := range tickets {
+		if ticket != nil {
+			result = append(result, ticket)
+		}
+	}
+	
+	return result, nil
 }

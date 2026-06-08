@@ -16,6 +16,7 @@ import (
 type stubCredentialRepo struct {
 	credential *repository.AdmissionCredential
 	checkedIn  []*repository.AdmissionCredential
+	transfer   *repository.AdmissionTransfer
 	err        error
 }
 
@@ -69,6 +70,55 @@ func (s *stubCredentialRepo) ListCheckedInByEventID(_ context.Context, _ string,
 		return s.checkedIn, s.err
 	}
 	return []*repository.AdmissionCredential{}, s.err
+}
+
+func (s *stubCredentialRepo) CreateTransfer(_ context.Context, transfer *repository.AdmissionTransfer) error {
+	s.transfer = transfer
+	return s.err
+}
+
+func (s *stubCredentialRepo) RecallTransfer(_ context.Context, _ string, _ string, _ time.Time) (*repository.AdmissionTransfer, error) {
+	if s.transfer == nil {
+		return nil, repository.ErrNotFound
+	}
+	return s.transfer, s.err
+}
+
+func (s *stubCredentialRepo) AcceptTransfer(_ context.Context, _ string, _ string, _ time.Time) (*repository.AdmissionTransfer, error) {
+	if s.transfer == nil {
+		return nil, repository.ErrNotFound
+	}
+	return s.transfer, s.err
+}
+
+func (s *stubCredentialRepo) FindTransferByID(_ context.Context, _ string) (*repository.AdmissionTransfer, error) {
+	if s.transfer == nil {
+		return nil, repository.ErrNotFound
+	}
+	return s.transfer, s.err
+}
+
+func (s *stubCredentialRepo) FindLatestTransferByCredentialID(_ context.Context, _ string) (*repository.AdmissionTransfer, error) {
+	if s.transfer == nil {
+		return nil, repository.ErrNotFound
+	}
+	return s.transfer, s.err
+}
+
+func (s *stubCredentialRepo) UpdateCredentialBuyer(_ context.Context, _ string, _ string) error {
+	return s.err
+}
+
+type stubUserLookup struct {
+	userID string
+	err    error
+}
+
+func (s *stubUserLookup) LookupUserIDByEmail(_ context.Context, _ string, _ string, _ string) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.userID, nil
 }
 
 // stubPolicyRepo is a test double for PolicyRepository.
@@ -190,6 +240,65 @@ func TestGetAdmissionPassForBuyer_ReturnsForbidden_WhenCredentialBelongsToDiffer
 	_, err := svc.GetAdmissionPassForBuyer(context.Background(), "ticket-1", nil, "other-buyer")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, service.ErrForbidden))
+}
+
+func TestTransferAdmissionCredential_ResolvesRecipientUserID(t *testing.T) {
+	senderID := "buyer-1"
+	cred := &repository.AdmissionCredential{
+		ID:          "cred-1",
+		TicketID:    "ticket-1",
+		OrderID:     "order-1",
+		BuyerUserID: &senderID,
+		Status:      repository.CredentialStatusIssued,
+	}
+	repo := &stubCredentialRepo{credential: cred}
+	svc := service.NewAttendanceServiceWithLookups(
+		repo,
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+		nil,
+		&stubUserLookup{userID: "recipient-1"},
+	)
+
+	_, transfer, err := svc.TransferAdmissionCredential(
+		context.Background(),
+		"cred-1",
+		senderID,
+		"friend@example.com",
+		"sig-abc",
+	)
+	require.NoError(t, err)
+	require.NotNil(t, transfer.RecipientUserID)
+	assert.Equal(t, "recipient-1", *transfer.RecipientUserID)
+}
+
+func TestTransferAdmissionCredential_RecipientNotFound(t *testing.T) {
+	senderID := "buyer-1"
+	cred := &repository.AdmissionCredential{
+		ID:          "cred-1",
+		TicketID:    "ticket-1",
+		OrderID:     "order-1",
+		BuyerUserID: &senderID,
+		Status:      repository.CredentialStatusIssued,
+	}
+	repo := &stubCredentialRepo{credential: cred}
+	svc := service.NewAttendanceServiceWithLookups(
+		repo,
+		&stubPolicyRepo{},
+		&stubScanRepo{},
+		nil,
+		&stubUserLookup{err: repository.ErrNotFound},
+	)
+
+	_, _, err := svc.TransferAdmissionCredential(
+		context.Background(),
+		"cred-1",
+		senderID,
+		"missing@example.com",
+		"sig-abc",
+	)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, repository.ErrNotFound))
 }
 
 // TestGetAttendancePolicy_ReturnsPolicy_WhenFound tests policy retrieval.

@@ -222,6 +222,17 @@ func TestGraphQL_RecordCheckinByUserID_RequiresAuth(t *testing.T) {
 	assert.Contains(t, err.Error(), "unauthorized")
 }
 
+func TestGraphQL_TransferAdmissionCredential_RequiresBuyerAuth(t *testing.T) {
+	svc := service.NewAttendanceService(&stubCredentialRepo{}, &stubPolicyRepo{}, &stubScanRepo{})
+	resolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}}
+	_, err := resolver.Mutation().TransferAdmissionCredential(context.Background(), gqlgraph.TransferAdmissionCredentialInput{
+		CredentialID:   "cred-1",
+		RecipientEmail: "friend@example.com",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unauthorized")
+}
+
 func TestGraphQL_RecordCheckinByUserID_SuccessfulCheckin(t *testing.T) {
 	now := time.Now()
 	usedAt := now
@@ -484,8 +495,8 @@ func (s *stubPolicyRepoWithUpsert) Upsert(_ context.Context, p *repository.Atten
 }
 
 type stubAttendanceSvcWithCheckedIn struct {
-	creds    []*repository.AdmissionCredential
-	checkErr error
+	creds     []*repository.AdmissionCredential
+	checkErr  error
 	lastLimit int
 }
 
@@ -520,6 +531,22 @@ func (s *stubAttendanceSvcWithCheckedIn) ListCheckedIn(_ context.Context, _ stri
 
 func (s *stubAttendanceSvcWithCheckedIn) EnsureOrganizerOwnsEvent(_ context.Context, _, _ string) error {
 	return s.checkErr
+}
+
+func (s *stubAttendanceSvcWithCheckedIn) TransferAdmissionCredential(_ context.Context, _, _, _, _ string) (*repository.AdmissionCredential, *repository.AdmissionTransfer, error) {
+	return nil, nil, repository.ErrNotFound
+}
+
+func (s *stubAttendanceSvcWithCheckedIn) RecallTransfer(_ context.Context, _, _ string) (*repository.AdmissionCredential, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (s *stubAttendanceSvcWithCheckedIn) AcceptTransfer(_ context.Context, _, _ string) (*repository.AdmissionCredential, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (s *stubAttendanceSvcWithCheckedIn) FindLatestTransferByCredentialID(_ context.Context, _ string) (*repository.AdmissionTransfer, error) {
+	return nil, repository.ErrNotFound
 }
 
 // stubAttendanceSvcWithPolicyRepo is a minimal AttendanceService stub that allows
@@ -565,4 +592,20 @@ func (s *stubAttendanceSvcWithPolicyRepo) ListCheckedIn(_ context.Context, _ str
 
 func (s *stubAttendanceSvcWithPolicyRepo) EnsureOrganizerOwnsEvent(_ context.Context, _, _ string) error {
 	return nil // always allow in tests
+}
+
+func (s *stubAttendanceSvcWithPolicyRepo) TransferAdmissionCredential(_ context.Context, _, _, _, _ string) (*repository.AdmissionCredential, *repository.AdmissionTransfer, error) {
+	return nil, nil, repository.ErrNotFound
+}
+
+func (s *stubAttendanceSvcWithPolicyRepo) RecallTransfer(_ context.Context, _, _ string) (*repository.AdmissionCredential, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (s *stubAttendanceSvcWithPolicyRepo) AcceptTransfer(_ context.Context, _, _ string) (*repository.AdmissionCredential, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (s *stubAttendanceSvcWithPolicyRepo) FindLatestTransferByCredentialID(_ context.Context, _ string) (*repository.AdmissionTransfer, error) {
+	return nil, repository.ErrNotFound
 }

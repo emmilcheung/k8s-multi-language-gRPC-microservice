@@ -44,12 +44,12 @@ export default async function ScanPage({ searchParams }: Props) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto flex flex-col gap-6">
-      <h1 className="text-2xl font-display font-extrabold tracking-tight">Scanner Console</h1>
-      <p className="text-sm text-muted-foreground">
-        Scan attendee QR passes with your camera. Manual token entry is available only as a fallback.
-      </p>
-      <ScannerClient eventId={eventId} />
+    <div className="mx-auto flex w-full max-w-6xl flex-col">
+      <ScannerClient
+        eventId={eventId}
+        eventTitle={ticketData.ticket.event?.title ?? ticketData.ticket.title}
+        venueName={ticketData.ticket.event?.venueName ?? undefined}
+      />
     </div>
   );
 }

@@ -10,6 +10,9 @@ type AdmissionPass @key(fields: "id") {
   issuedAt: String!
   usedAt: String
   qrToken: String
+  transferState: TransferState!
+  transferredTo: ID
+  transferredAt: String
 }
 
 type AttendancePolicy {
@@ -50,6 +53,13 @@ enum CredentialStatus {
   EXPIRED
 }
 
+enum TransferState {
+  NONE
+  PENDING
+  ACCEPTED
+  RECALLED
+}
+
 enum CheckinSource {
   QR_SCAN
   MANUAL_OVERRIDE
@@ -71,6 +81,16 @@ input RecordCheckinByUserIdInput {
   userId: ID!
 }
 
+input TransferAdmissionCredentialInput {
+  credentialId: ID!
+  recipientEmail: String!
+}
+
+type TransferResult {
+  credential: AdmissionPass!
+  pendingTransferId: ID!
+}
+
 type Query {
   # Buyer: get admission pass by ticketId (optionally filtered by orderId)
   admissionPass(ticketId: ID!, orderId: ID): AdmissionPass
@@ -87,4 +107,7 @@ type Mutation {
   validateScan(token: String!): ScanValidationResult!
   recordCheckin(input: RecordCheckinInput!): EventCheckin!
   recordCheckinByUserId(input: RecordCheckinByUserIdInput!): EventCheckin!
+  transferAdmissionCredential(input: TransferAdmissionCredentialInput!): TransferResult!
+  recallTransfer(credentialId: ID!): AdmissionPass!
+  acceptTransfer(pendingTransferId: ID!): AdmissionPass!
 }

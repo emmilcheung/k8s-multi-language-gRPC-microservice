@@ -30,6 +30,8 @@ import (
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -64,12 +66,29 @@ func main() {
 	shutdownTracing := tracing.Init(context.Background(), "ticket-service", log)
 	defer shutdownTracing(context.Background())
 
-	// MongoDB repository
-	mongoRepo, err := repository.NewMongoTicketRepository(context.Background(), cfg.MongoURI, cfg.MongoDB)
+	// MongoDB connection — used by saved-event repository;
+	// ticket repository creates its own client internally.
+	clientOpts := options.Client().ApplyURI(cfg.MongoURI)
+	mongoClient, err := mongo.Connect(clientOpts)
 	if err != nil {
 		log.Fatal("failed to connect to MongoDB", zap.Error(err))
 	}
+	if err := mongoClient.Ping(context.Background(), nil); err != nil {
+		log.Fatal("failed to ping MongoDB", zap.Error(err))
+	}
+	defer mongoClient.Disconnect(context.Background()) //nolint:errcheck
+
+	// MongoDB repositories
+	mongoRepo, err := repository.NewMongoTicketRepository(context.Background(), cfg.MongoURI, cfg.MongoDB)
+	if err != nil {
+		log.Fatal("failed to initialize ticket repository", zap.Error(err))
+	}
 	defer mongoRepo.Close(context.Background()) //nolint:errcheck
+
+	savedEventRepo, err := repository.NewMongoSavedEventRepository(mongoClient, cfg.MongoDB)
+	if err != nil {
+		log.Fatal("failed to initialize saved-event repository", zap.Error(err))
+	}
 
 	var ticketRepo repository.TicketRepository
 	var redisChecker *health.RedisChecker
@@ -154,7 +173,7 @@ func main() {
 	log.Info("connected to venue-service", zap.String("addr", cfg.VenueServiceAddr))
 
 	// Business logic service
-	svc := service.NewTicketService(ticketRepo, producer, log, venueClient)
+	svc := service.NewTicketService(ticketRepo, producer, log, venueClient, savedEventRepo)
 
 	// gRPC server — runs alongside HTTP in a separate goroutine
 	grpcCtx, grpcCancel := context.WithCancel(context.Background())

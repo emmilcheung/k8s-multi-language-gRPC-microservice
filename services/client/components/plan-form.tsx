@@ -27,12 +27,12 @@ export function PlanForm({
     <div className="glass rounded-2xl w-full max-w-md p-8 flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <h2 className="text-lg font-bold tracking-tight">{submitLabel}</h2>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-mute">
           Define the plan name and seat limit per order.
         </p>
       </div>
 
-      <div className="h-px bg-white/6" />
+      <div className="h-px bg-line" />
 
       <form action={formAction} className="flex flex-col gap-4">
         {/* Hidden venue ID */}
@@ -51,11 +51,11 @@ export function PlanForm({
 
         {/* Plan name */}
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="name" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <Label htmlFor="name" className="text-xs font-medium text-mute uppercase tracking-wider">
             Plan Name
           </Label>
           <div className="relative">
-            <Layers className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <Layers className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-mute pointer-events-none" />
             <Input
               id="name"
               name="name"
@@ -69,11 +69,11 @@ export function PlanForm({
 
         {/* Max seats per order */}
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="maxSeatsPerOrder" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <Label htmlFor="maxSeatsPerOrder" className="text-xs font-medium text-mute uppercase tracking-wider">
             Max Seats per Order
           </Label>
           <div className="relative">
-            <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-mute pointer-events-none" />
             <Input
               id="maxSeatsPerOrder"
               name="maxSeatsPerOrder"
@@ -89,7 +89,7 @@ export function PlanForm({
         {/* Submit */}
         <Button
           type="submit"
-          className="w-full gap-2 bg-primary hover:bg-primary/90 text-primary-foreground mt-1"
+          className="w-full gap-2 mt-1"
           disabled={pending}
         >
           {pending ? (

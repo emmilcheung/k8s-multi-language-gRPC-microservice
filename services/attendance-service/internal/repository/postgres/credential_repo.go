@@ -341,6 +341,140 @@ func (r *CredentialRepo) ListCheckedInByEventID(
 	return records, nil
 }
 
+func (r *CredentialRepo) CreateTransfer(ctx context.Context, transfer *repository.AdmissionTransfer) error {
+	const q = `
+		INSERT INTO admission_transfers
+			(id, credential_id, sender_user_id, recipient_user_id, recipient_email, state, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	_, err := r.db.Exec(
+		ctx,
+		q,
+		transfer.ID,
+		transfer.CredentialID,
+		transfer.SenderUserID,
+		transfer.RecipientUserID,
+		transfer.RecipientEmail,
+		string(transfer.State),
+		transfer.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("credential_repo: create transfer: %w", err)
+	}
+	return nil
+}
+
+func (r *CredentialRepo) FindLatestTransferByCredentialID(ctx context.Context, credentialID string) (*repository.AdmissionTransfer, error) {
+	const q = `
+		SELECT id, credential_id, sender_user_id, recipient_user_id, recipient_email, state, created_at, accepted_at, recalled_at
+		FROM admission_transfers
+		WHERE credential_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1`
+	row := r.db.QueryRow(ctx, q, credentialID)
+	return scanTransfer(row)
+}
+
+func (r *CredentialRepo) FindTransferByID(ctx context.Context, id string) (*repository.AdmissionTransfer, error) {
+	const q = `
+		SELECT id, credential_id, sender_user_id, recipient_user_id, recipient_email, state, created_at, accepted_at, recalled_at
+		FROM admission_transfers
+		WHERE id = $1`
+	row := r.db.QueryRow(ctx, q, id)
+	return scanTransfer(row)
+}
+
+func (r *CredentialRepo) AcceptTransfer(
+	ctx context.Context,
+	transferID string,
+	recipientUserID string,
+	acceptedAt time.Time,
+) (*repository.AdmissionTransfer, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("credential_repo: begin accept transfer tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const lockQ = `
+		SELECT id, credential_id, sender_user_id, recipient_user_id, recipient_email, state, created_at, accepted_at, recalled_at
+		FROM admission_transfers
+		WHERE id = $1
+		FOR UPDATE`
+	transfer, err := scanTransfer(tx.QueryRow(ctx, lockQ, transferID))
+	if err != nil {
+		return nil, err
+	}
+	if transfer.State != repository.TransferStatePending {
+		return nil, repository.ErrNotFound
+	}
+
+	const updateTransferQ = `
+		UPDATE admission_transfers
+		SET state = 'ACCEPTED',
+		    recipient_user_id = $2,
+		    accepted_at = $3
+		WHERE id = $1`
+	if _, err := tx.Exec(ctx, updateTransferQ, transferID, recipientUserID, acceptedAt); err != nil {
+		return nil, fmt.Errorf("credential_repo: accept transfer update transfer: %w", err)
+	}
+
+	const updateCredentialQ = `
+		UPDATE admission_credentials
+		SET buyer_user_id = $2,
+		    updated_at = now()
+		WHERE id = $1`
+	if _, err := tx.Exec(ctx, updateCredentialQ, transfer.CredentialID, recipientUserID); err != nil {
+		return nil, fmt.Errorf("credential_repo: accept transfer update credential: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("credential_repo: commit accept transfer: %w", err)
+	}
+
+	transfer.State = repository.TransferStateAccepted
+	transfer.RecipientUserID = &recipientUserID
+	transfer.AcceptedAt = &acceptedAt
+	return transfer, nil
+}
+
+func (r *CredentialRepo) RecallTransfer(
+	ctx context.Context,
+	credentialID string,
+	senderUserID string,
+	recalledAt time.Time,
+) (*repository.AdmissionTransfer, error) {
+	const q = `
+		UPDATE admission_transfers
+		SET state = 'RECALLED',
+		    recalled_at = $3
+		WHERE credential_id = $1
+		  AND sender_user_id = $2
+		  AND state = 'PENDING'
+		RETURNING id, credential_id, sender_user_id, recipient_user_id, recipient_email, state, created_at, accepted_at, recalled_at`
+	row := r.db.QueryRow(ctx, q, credentialID, senderUserID, recalledAt)
+	transfer, err := scanTransfer(row)
+	if err != nil {
+		return nil, err
+	}
+	return transfer, nil
+}
+
+func (r *CredentialRepo) UpdateCredentialBuyer(ctx context.Context, credentialID string, buyerUserID string) error {
+	const q = `
+		UPDATE admission_credentials
+		SET buyer_user_id = $2,
+		    updated_at = now()
+		WHERE id = $1`
+	ct, err := r.db.Exec(ctx, q, credentialID, buyerUserID)
+	if err != nil {
+		return fmt.Errorf("credential_repo: update credential buyer: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}
+
 // ListUnpublished returns unpublished outbox rows ordered by creation time.
 func (r *CredentialRepo) ListUnpublished(ctx context.Context, limit int) ([]*repository.OutboxRow, error) {
 	if limit <= 0 {
@@ -483,5 +617,30 @@ func scanCredential(row pgx.Row) (*repository.AdmissionCredential, error) {
 		return nil, err
 	}
 	c.Status = repository.CredentialStatus(status)
+	c.TransferState = repository.TransferStateNone
 	return &c, nil
+}
+
+func scanTransfer(row pgx.Row) (*repository.AdmissionTransfer, error) {
+	var t repository.AdmissionTransfer
+	var state string
+	err := row.Scan(
+		&t.ID,
+		&t.CredentialID,
+		&t.SenderUserID,
+		&t.RecipientUserID,
+		&t.RecipientEmail,
+		&state,
+		&t.CreatedAt,
+		&t.AcceptedAt,
+		&t.RecalledAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, repository.ErrNotFound
+		}
+		return nil, fmt.Errorf("credential_repo: scan transfer: %w", err)
+	}
+	t.State = repository.TransferState(state)
+	return &t, nil
 }

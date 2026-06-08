@@ -1,0 +1,6 @@
+mutation SaveEvent($eventId: ID!) {
+  saveEvent(eventId: $eventId) {
+    id
+    savedByMe
+  }
+}

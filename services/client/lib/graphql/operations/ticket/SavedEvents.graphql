@@ -1,0 +1,24 @@
+query SavedEvents($first: Int, $after: String) {
+  savedEvents(first: $first, after: $after) {
+    edges {
+      cursor
+      node {
+        id
+        title
+        priceDecimal
+        savedByMe
+        event {
+          title
+          startsAt
+          imageUrl
+          venueName
+          venueAddress
+        }
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}

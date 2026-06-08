@@ -72,6 +72,24 @@ func (d *scanCredRepoDouble) MarkEventPublished(_ context.Context, _ string, _ t
 func (d *scanCredRepoDouble) ListCheckedInByEventID(_ context.Context, _ string, _ int) ([]*repository.AdmissionCredential, error) {
 	return []*repository.AdmissionCredential{}, nil
 }
+func (d *scanCredRepoDouble) CreateTransfer(_ context.Context, _ *repository.AdmissionTransfer) error {
+	return nil
+}
+func (d *scanCredRepoDouble) RecallTransfer(_ context.Context, _, _ string, _ time.Time) (*repository.AdmissionTransfer, error) {
+	return nil, repository.ErrNotFound
+}
+func (d *scanCredRepoDouble) AcceptTransfer(_ context.Context, _, _ string, _ time.Time) (*repository.AdmissionTransfer, error) {
+	return nil, repository.ErrNotFound
+}
+func (d *scanCredRepoDouble) FindTransferByID(_ context.Context, _ string) (*repository.AdmissionTransfer, error) {
+	return nil, repository.ErrNotFound
+}
+func (d *scanCredRepoDouble) FindLatestTransferByCredentialID(_ context.Context, _ string) (*repository.AdmissionTransfer, error) {
+	return nil, repository.ErrNotFound
+}
+func (d *scanCredRepoDouble) UpdateCredentialBuyer(_ context.Context, _, _ string) error {
+	return nil
+}
 
 type scanRepoDouble struct {
 	events []*repository.ScanEvent

@@ -30,6 +30,8 @@ vi.mock("next/link", () => ({
 vi.mock("next/navigation", () => ({
   notFound: vi.fn(() => { throw new Error("NEXT_NOT_FOUND"); }),
   redirect: vi.fn(),
+  useRouter: vi.fn(() => ({ push: vi.fn() })),
+  useSearchParams: vi.fn(() => new URLSearchParams()),
 }));
 
 // cookies() returns a store-like object; tests override per-case via cookieStoreMock
@@ -57,6 +59,19 @@ vi.mock("@/lib/graphql/execute", () => ({
   executeQuery: (...args: unknown[]) => executeQueryMock(...args),
 }));
 
+const getSettingsDataMock = vi.fn();
+const updateProfileActionMock = vi.fn();
+const updatePreferencesActionMock = vi.fn();
+const updateBillingAddressActionMock = vi.fn();
+const revokeSessionActionMock = vi.fn();
+vi.mock("@/app/actions/settings", () => ({
+  getSettingsData: (...args: unknown[]) => getSettingsDataMock(...args),
+  updateProfileAction: (...args: unknown[]) => updateProfileActionMock(...args),
+  updatePreferencesAction: (...args: unknown[]) => updatePreferencesActionMock(...args),
+  updateBillingAddressAction: (...args: unknown[]) => updateBillingAddressActionMock(...args),
+  revokeSessionAction: (...args: unknown[]) => revokeSessionActionMock(...args),
+}));
+
 const serverApiMock = vi.fn<() => Promise<unknown>>();
 const lookupUserMock = vi.fn();
 vi.mock("@/lib/api", () => ({
@@ -66,6 +81,15 @@ vi.mock("@/lib/api", () => ({
   ApiError: class ApiError extends Error {
     constructor(public status: number, message: string) { super(message); }
   },
+}));
+
+const fetchPriceTiersMock = vi.fn();
+const createPriceTierMock = vi.fn();
+vi.mock("@/app/actions/venues", () => ({
+  fetchPriceTiers: (...args: unknown[]) =>
+    fetchPriceTiersMock(...(args as Parameters<typeof fetchPriceTiersMock>)),
+  createPriceTier: (...args: unknown[]) =>
+    createPriceTierMock(...(args as Parameters<typeof createPriceTierMock>)),
 }));
 
 // ── Component mocks (keep tests focused on page logic, not child UI) ───────────
@@ -80,12 +104,102 @@ vi.mock("@/components/ticket-form", () => ({
   TicketForm: () => <div data-testid="ticket-form" />,
 }));
 
+vi.mock("@/components/settings-payment-methods", () => ({
+  SettingsPaymentMethods: ({ initialPaymentMethods }: { initialPaymentMethods: Array<{ id: string }> }) => (
+    <div data-testid="settings-payment-methods" data-count={initialPaymentMethods.length} />
+  ),
+}));
+
 vi.mock("@/components/purchase-button", () => ({
   PurchaseButton: ({ ticketId }: { ticketId: string }) => (
     <button data-testid="purchase-button" data-ticket-id={ticketId}>
       Purchase
     </button>
   ),
+}));
+
+vi.mock("@/components/seating-plan-canvas", () => ({
+  SeatingPlanCanvas: ({ planId }: { planId: string }) => (
+    <div data-testid="seating-plan-canvas" data-plan-id={planId} />
+  ),
+}));
+
+vi.mock("@/components/price-tier-form", () => ({
+  PriceTierForm: () => <div data-testid="price-tier-form" />,
+}));
+
+vi.mock("@/components/activate-plan-button", () => ({
+  ActivatePlanButton: ({ planId }: { planId: string }) => (
+    <button data-testid="activate-plan-button" data-plan-id={planId}>
+      Activate plan
+    </button>
+  ),
+}));
+
+vi.mock("@/components/deactivate-plan-button", () => ({
+  DeactivatePlanButton: ({ planId }: { planId: string }) => (
+    <button data-testid="deactivate-plan-button" data-plan-id={planId}>
+      Deactivate plan
+    </button>
+  ),
+}));
+
+// Note: isReserved is computed in the real page but passed implicitly via purchaseGate/token logic
+vi.mock("@/app/tickets/[ticketId]/_components/purchase-panel", () => ({
+  PurchasePanel: (props: {
+    ticket: { id: string; price: string; orderId?: string | null; reserved?: number };
+    token?: string;
+    isOwner: boolean;
+    isSeated: boolean;
+    gaMaxQuantity: number;
+    purchaseGate?: { label: string };
+  }) => {
+    const { ticket, token, purchaseGate, isSeated } = props;
+    const isReserved = Boolean(ticket.orderId) || (ticket.reserved != null && ticket.reserved > 0);
+
+    // Calculate price in dollars
+    const priceCents = Math.round(parseFloat(ticket.price) * 100);
+    const priceStr = `$${(priceCents / 100).toFixed(2)}`;
+
+    // Render relevant content for testing
+    return (
+      <div data-testid="purchase-panel">
+        <div>{priceStr}</div>
+        {purchaseGate && (
+          purchaseGate.label === "Already Reserved" && token ? (
+            <button>View your orders</button>
+          ) : (
+            <button disabled>{purchaseGate.label}</button>
+          )
+        )}
+        {!purchaseGate && isReserved && (
+          <button disabled>Already Reserved</button>
+        )}
+        {!purchaseGate && !isReserved && !isSeated && !token && (
+          <a href="/auth/signin">Sign in to Purchase</a>
+        )}
+        {token && !purchaseGate && !isReserved && !isSeated && (
+          <button data-testid="purchase-button" data-ticket-id={ticket.id}>
+            Purchase
+          </button>
+        )}
+        {token && !purchaseGate && !isReserved && isSeated && (
+          <>
+            <button>Pick seats</button>
+            <button>Auto-assign</button>
+          </>
+        )}
+      </div>
+    );
+  },
+}));
+
+vi.mock("@/app/tickets/[ticketId]/_components/quick-facts", () => ({
+  QuickFacts: () => <div data-testid="quick-facts" />,
+}));
+
+vi.mock("@/app/tickets/[ticketId]/_components/event-countdown", () => ({
+  EventCountdown: () => <div data-testid="event-countdown" />,
 }));
 
 // lucide-react icons — render as bare spans to avoid SVG parse overhead
@@ -95,9 +209,21 @@ vi.mock("@/components/scanner-client", () => ({
   ),
 }));
 
+vi.mock("@/app/_components/browse-filters", () => ({
+  default: () => <div data-testid="browse-filters">Filters</div>,
+}));
+
 vi.mock("lucide-react", () => ({
+  AlertCircle: () => <span />,
   Ticket: () => <span />,
   ArrowRight: () => <span />,
+  QrCode: () => <span />,
+  Settings2: () => <span />,
+  Users: () => <span />,
+  LayoutDashboard: () => <span />,
+  Layers: () => <span />,
+  Grid3X3: () => <span />,
+  Building2: () => <span />,
   Tag: () => <span />,
   Zap: () => <span />,
   Shield: () => <span />,
@@ -108,9 +234,23 @@ vi.mock("lucide-react", () => ({
   ShoppingBag: () => <span />,
   Globe: () => <span />,
   ArrowLeft: () => <span />,
+  CreditCard: () => <span />,
+  DollarSign: () => <span />,
   User: () => <span />,
   ShieldCheck: () => <span />,
   MapPin: () => <span />,
+  MapPinHouse: () => <span />,
+  UserRound: () => <span />,
+  X: () => <span />,
+  Mail: () => <span />,
+  Lock: () => <span />,
+  Loader2: () => <span />,
+  Search: () => <span />,
+  Calendar: () => <span />,
+  CalendarDays: () => <span />,
+  Clock3: () => <span />,
+  Bookmark: () => <span />,
+  BookmarkCheck: () => <span />,
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -142,6 +282,7 @@ function makeTicketDetailGraphql(ticket: Ticket) {
       ticket.available ??
       Math.max((ticket.quota ?? 1) - (ticket.reserved ?? 0) - (ticket.sold ?? 0), 0),
     maxPerUser: ticket.maxPerUser ?? 1,
+    savedByMe: false,
     ticketType:
       ticket.ticketType === "SEATED_MANUAL" || ticket.ticketType === "SEATED_AUTO"
         ? "SEATED"
@@ -158,52 +299,204 @@ function makeJwt(sub: string): string {
 
 // ── HomePage ──────────────────────────────────────────────────────────────────
 
+describe("AuthPages", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cookieStoreMock.get.mockReturnValue(undefined);
+  });
+
+  it("renders the sign-in page inside the split auth shell", async () => {
+    const { default: SigninPage } = await import("@/app/auth/signin/page");
+    render(await SigninPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByText(/the ticketing platform/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: /welcome back/i })).toBeInTheDocument();
+  });
+
+  it("renders the signup page inside the same auth shell", async () => {
+    const { default: SignupPage } = await import("@/app/auth/signup/page");
+    render(<SignupPage />);
+
+    expect(screen.getByText(/the ticketing platform/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: /create your account/i })).toBeInTheDocument();
+  });
+});
+
+describe("OrganizerPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("renders organizer stats and activity placeholder from owned tickets", async () => {
+    executeQueryMock
+      .mockResolvedValueOnce({
+        tickets: [
+          {
+            id: "ticket-uuid-1",
+            title: "Concert Night",
+            userId: "owner-uuid",
+            priceDecimal: "49.99",
+            sold: 3,
+            available: 25,
+            ticketType: "GENERAL_ADMISSION",
+            event: {
+              title: "Phoenix",
+              startsAt: "2099-08-09T20:30:00Z",
+              venueName: "The Greek Theatre",
+              venueAddress: "2700 N Vermont Ave",
+            },
+          },
+          {
+            id: "ticket-uuid-2",
+            title: "Other Event",
+            userId: "someone-else",
+            priceDecimal: "20.00",
+            sold: 5,
+            available: 10,
+            ticketType: "GENERAL_ADMISSION",
+            event: {
+              title: "Ignore Me",
+              startsAt: "2099-08-12T20:30:00Z",
+              venueName: "Elsewhere",
+              venueAddress: "Hidden",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ticket: { id: "ticket-uuid-1", title: "Concert Night", userId: "owner-uuid", sold: 3 },
+        attendancePolicy: { eventId: "ticket-uuid-1", requireQrForEntry: true, allowManualOverride: false },
+        attendanceSummary: { eventId: "ticket-uuid-1", totalAdmitted: 7, totalDenied: 2, totalCheckedIn: 7 },
+        eventCheckins: [],
+      });
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+
+    const { default: OrganizerPage } = await import("@/app/organizer/page");
+    render(await OrganizerPage());
+
+    expect(screen.getByText("$149.97")).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /attendance monitor/i })).toHaveAttribute(
+      "href",
+      "/organizer/events/ticket-uuid-1/attendance"
+    );
+    expect(screen.getByRole("link", { name: /open scanner/i })).toHaveAttribute(
+      "href",
+      "/scan?eventId=ticket-uuid-1"
+    );
+    expect(screen.getByText(/live activity coming soon/i)).toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+    getSettingsDataMock.mockResolvedValue({
+      profile: { displayName: "Jamie Stone", locale: "en-US", timezone: "UTC" },
+      preferences: { marketingOptIn: true, orderUpdates: true, productUpdates: false },
+      billingAddress: {
+        line1: "123 Main St",
+        line2: undefined,
+        city: "San Francisco",
+        state: "CA",
+        postalCode: "94105",
+        country: "US",
+      },
+      sessions: [
+        {
+          sessionId: "session-1",
+          createdAt: "2026-05-01T10:00:00Z",
+          lastRotatedAt: "2026-05-02T10:00:00Z",
+          userAgent: "Chrome",
+          ipAddress: "127.0.0.1",
+          current: true,
+        },
+      ],
+      paymentMethods: [{ id: "pm-1" }],
+      orders: [{ id: "order-1", status: "complete", createdAt: "2026-05-10T10:00:00Z" }],
+    });
+  });
+
+  it("renders the settings sidebar and hides unsupported reminder toggles", async () => {
+    const { default: SettingsPage } = await import("@/app/settings/page");
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByText(/^connected apps$/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/^security & sessions$/i)).not.toHaveLength(0);
+    expect(screen.getAllByText(/^payment methods$/i)).not.toHaveLength(0);
+    expect(screen.queryByText(/hold timer reminders/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/show reminders the day of/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("HomePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("renders the hero heading", async () => {
+  it("renders the search header", async () => {
     fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets: [], cursor: null, hasMore: false });
 
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
 
-    expect(screen.getByRole("heading", { level: 1, name: /find your/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: /next show/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/search events/i)).toBeInTheDocument();
   });
 
-  it("renders TicketGrid with the fetched tickets", async () => {
+  it("renders category filter buttons when tickets exist", async () => {
     const tickets = [makeTicket(), makeTicket({ id: "ticket-uuid-2" })];
     fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets, cursor: null, hasMore: false });
 
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
 
-    const grid = screen.getByTestId("ticket-grid");
-    expect(grid).toBeInTheDocument();
-    expect(grid.getAttribute("data-count")).toBe("2");
+    expect(screen.getByRole("link", { name: /concerts/i })).toHaveAttribute("href", "/?category=concert");
   });
 
-  it("shows available ticket count when tickets exist", async () => {
+  it("shows event count when tickets exist", async () => {
     const tickets = [makeTicket(), makeTicket({ id: "t2" })];
     fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets, cursor: null, hasMore: false });
 
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
 
-    // availableCount = 2 (all tickets returned by GraphQL are available)
-    expect(screen.getByText(/2\s*listings/)).toBeInTheDocument();
+    // Hero card takes first ticket; grid has 1 remaining event
+    expect(screen.getByText(/1\s*events/)).toBeInTheDocument();
   });
 
-  it("shows hasMore '+' indicator when there are more pages", async () => {
+  it("passes the search param into the server-side TicketFilter", async () => {
+    // Search is filtered server-side now: the page forwards `q` as filter.search
+    // to fetchTicketPageViaGraphQL rather than filtering the result client-side.
+    const tickets = [
+      makeTicket({
+        id: "ticket-b",
+        title: "Laugh Out Loud",
+        event: { title: "Laugh Out Loud", startsAt: "2099-08-12T20:30:00Z", venueName: "Club B" },
+      }),
+    ];
+    fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets, cursor: null, hasMore: false });
+
+    const { default: HomePage } = await import("@/app/page");
+    render(await HomePage({ searchParams: Promise.resolve({ q: "laugh" }) }));
+
+    expect(fetchTicketPageViaGraphQLMock).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ search: "laugh" })
+    );
+    // With a filter active the hero is suppressed and results render in the grid.
+    expect(screen.getByRole("heading", { name: /laugh out loud/i })).toBeInTheDocument();
+  });
+
+  it("displays filter section with date, price, category, availability options", async () => {
     const tickets = [makeTicket()];
-    fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets, cursor: "cursor-abc", hasMore: true });
+    fetchTicketPageViaGraphQLMock.mockResolvedValue({ tickets, cursor: null, hasMore: false });
 
     const { default: HomePage } = await import("@/app/page");
     render(await HomePage());
 
-    expect(screen.getByText(/1\s*\+\s*listings/)).toBeInTheDocument();
+    // New design includes filter sidebar (visible on desktop)
+    expect(screen.getByTestId("browse-filters")).toBeInTheDocument();
   });
 
   it("falls back gracefully when fetchTicketPageViaGraphQL rejects", async () => {
@@ -214,8 +507,7 @@ describe("HomePage", () => {
     const jsx = await HomePage();
     render(jsx);
 
-    const grid = screen.getByTestId("ticket-grid");
-    expect(grid.getAttribute("data-count")).toBe("0");
+    expect(screen.getByText(/no events available/i)).toBeInTheDocument();
   });
 });
 
@@ -229,8 +521,53 @@ describe("OrdersPage", () => {
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
   });
 
+  describe("VenuePlanDetailPage", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+      fetchPriceTiersMock.mockResolvedValue([]);
+      createPriceTierMock.mockResolvedValue({});
+    });
+
+    it("renders the modernized venue plan editor shell for draft plans", async () => {
+      serverApiMock
+        .mockResolvedValueOnce({
+          id: "plan-uuid-1",
+          name: "Main Hall Layout",
+          status: "draft",
+          venueId: "venue-uuid-1",
+          ticketId: null,
+          maxSeatsPerOrder: 6,
+          layoutJson: { nodes: [] },
+        })
+        .mockResolvedValueOnce({
+          sections: [
+            {
+              id: "section-1",
+              name: "Front Rows",
+              type: "seated",
+              rowCount: 5,
+              columnCount: 8,
+              priceTierId: null,
+            },
+          ],
+        });
+
+      const { default: VenuePlanDetailPage } = await import("@/app/venues/[venueId]/plans/[planId]/page");
+      render(
+        await VenuePlanDetailPage({
+          params: Promise.resolve({ venueId: "venue-uuid-1", planId: "plan-uuid-1" }),
+        })
+      );
+
+      expect(screen.getByText("Main Hall Layout")).toBeInTheDocument();
+      expect(screen.getByTestId("seating-plan-canvas")).toBeInTheDocument();
+      expect(screen.getByTestId("activate-plan-button")).toBeInTheDocument();
+    });
+  });
+
   it("renders the authenticated order list from GraphQL", async () => {
-    executeQueryMock.mockResolvedValue({
+    executeQueryMock.mockResolvedValueOnce({
       orders: [
         {
           id: "order-uuid-1",
@@ -247,18 +584,182 @@ describe("OrdersPage", () => {
         },
       ],
     });
+    executeQueryMock.mockResolvedValueOnce({
+      ticket: {
+        event: {
+          title: "Concert Night",
+          startsAt: "2026-12-10T20:00:00Z",
+          venueName: "Greek Theatre",
+          venueAddress: null,
+        },
+        seatingPlan: null,
+      },
+    });
+    executeQueryMock.mockResolvedValueOnce({
+      savedEvents: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } },
+    });
     serverApiMock.mockRejectedValue(new Error("OrdersPage should not use REST"));
 
     const { default: OrdersPage } = await import("@/app/orders/page");
     render(await OrdersPage());
 
-    expect(executeQueryMock).toHaveBeenCalledTimes(1);
+    expect(executeQueryMock).toHaveBeenCalledTimes(3);
     expect(serverApiMock).not.toHaveBeenCalledWith("/api/tickets/ticket-uuid-1");
     expect(screen.getByRole("heading", { level: 1, name: /my orders/i })).toBeInTheDocument();
     expect(screen.getByText(/1 order/i)).toBeInTheDocument();
     expect(screen.getByText("Concert Night")).toBeInTheDocument();
     expect(screen.getByText("$99.98")).toBeInTheDocument();
-    expect(screen.getByText(/awaiting payment/i)).toBeInTheDocument();
+    expect(screen.getByText(/pay now/i)).toBeInTheDocument();
+  });
+});
+
+describe("OrderDetailPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    executeQueryMock.mockReset();
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+    cookieStoreMock.toString = vi.fn(() => "token=buyer");
+  });
+
+  it("redirects expired created orders to the recovery route", async () => {
+    executeQueryMock.mockResolvedValue({
+      order: {
+        id: "order-uuid-1",
+        userId: "buyer-uuid",
+        status: "CREATED",
+        quantity: 2,
+        expiresAt: "2020-01-01T00:00:00Z",
+        createdAt: "2019-12-31T23:50:00Z",
+        ticket: {
+          id: "ticket-uuid-1",
+          title: "Concert Night",
+          price: "49.99",
+        },
+      },
+      currentUser: {
+        id: "buyer-uuid",
+        paymentMethods: [],
+      },
+    });
+
+    const { redirect } = await import("next/navigation");
+    const { default: OrderDetailPage } = await import("@/app/orders/[orderId]/page");
+    await OrderDetailPage({ params: Promise.resolve({ orderId: "order-uuid-1" }) });
+
+    expect(redirect).toHaveBeenCalledWith("/checkout/recover?orderId=order-uuid-1");
+  });
+
+  it("shows transfer and refund links for completed orders", async () => {
+    executeQueryMock.mockResolvedValue({
+      order: {
+        id: "order-uuid-2",
+        userId: "buyer-uuid",
+        status: "COMPLETE",
+        quantity: 1,
+        expiresAt: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        ticket: {
+          id: "ticket-uuid-2",
+          title: "Concert Night",
+          price: "49.99",
+        },
+      },
+      currentUser: {
+        id: "buyer-uuid",
+        paymentMethods: [],
+      },
+    });
+
+    const { default: OrderDetailPage } = await import("@/app/orders/[orderId]/page");
+    render(await OrderDetailPage({ params: Promise.resolve({ orderId: "order-uuid-2" }) }));
+
+    const transferLink = screen.getByRole("link", { name: /send to friend/i });
+    expect(transferLink).toHaveAttribute("href", "/orders/order-uuid-2/transfer");
+    const refundLink = screen.getByRole("link", { name: /request refund/i });
+    expect(refundLink).toHaveAttribute("href", "/orders/order-uuid-2/refund");
+  });
+});
+
+describe("TransferRefundPages", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    executeQueryMock.mockReset();
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+    cookieStoreMock.toString = vi.fn(() => "token=buyer");
+  });
+
+  it("renders transfer page for authenticated users", async () => {
+    executeQueryMock
+      .mockResolvedValueOnce({
+        order: {
+          id: "order-uuid-3",
+          userId: "buyer-uuid",
+          status: "COMPLETE",
+          quantity: 1,
+          expiresAt: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          ticket: { id: "ticket-uuid-3", title: "Concert", price: "49.99" },
+        },
+        currentUser: { id: "buyer-uuid", paymentMethods: [] },
+      })
+      .mockResolvedValueOnce({
+        admissionPass: {
+          id: "cred-3",
+          ticketId: "ticket-uuid-3",
+          orderId: "order-uuid-3",
+          eventId: "event-uuid-3",
+          status: "ISSUED",
+          issuedAt: "2026-01-01T00:00:00Z",
+          usedAt: null,
+          qrToken: "signed-token",
+          transferState: "NONE",
+          transferredTo: null,
+          transferredAt: null,
+        },
+      });
+
+    const { default: TransferPage } = await import("@/app/orders/[orderId]/transfer/page");
+    render(await TransferPage({ params: Promise.resolve({ orderId: "order-uuid-3" }) }));
+
+    expect(screen.getByRole("heading", { name: /transfer pass/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /which seat are you sending/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /they'll receive/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/their email/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/add a note/i)).toBeInTheDocument();
+  });
+
+  it("renders refund page for authenticated users", async () => {
+    executeQueryMock
+      .mockResolvedValueOnce({
+        order: {
+          id: "order-uuid-4",
+          userId: "buyer-uuid",
+          status: "COMPLETE",
+          quantity: 1,
+          expiresAt: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          ticket: { id: "ticket-uuid-4", title: "Concert", price: "49.99" },
+        },
+        currentUser: { id: "buyer-uuid", paymentMethods: [] },
+      })
+      .mockResolvedValueOnce({
+        refundEligibility: {
+          orderId: "order-uuid-4",
+          eligible: true,
+          reason: null,
+          refundableAmount: 4999,
+          cutoffAt: null,
+        },
+      });
+
+    const { default: RefundPage } = await import("@/app/orders/[orderId]/refund/page");
+    render(await RefundPage({ params: Promise.resolve({ orderId: "order-uuid-4" }) }));
+
+    expect(screen.getByRole("heading", { name: /request refund/i })).toBeInTheDocument();
+    expect(screen.getByText(/you're eligible for a full refund/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /reason for refund/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /refund summary/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /can't attend — schedule changed/i })).toBeInTheDocument();
   });
 });
 
@@ -288,6 +789,47 @@ describe("TicketDetailPage", () => {
     );
     // Price appears in both the info panel and the purchase panel
     expect(screen.getAllByText("$49.99").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders related events row when browse data is available", async () => {
+    const ticket = makeTicket({ id: "ticket-uuid-1" });
+    executeQueryMock
+      .mockResolvedValueOnce({ ticket: makeTicketDetailGraphql(ticket) })
+      .mockResolvedValueOnce({
+        ticketsConnection: {
+          edges: [
+            {
+              node: {
+                id: "ticket-uuid-2",
+                title: "Late Night Set",
+                price: "35.00",
+                available: 20,
+                ticketType: "GA",
+                seatingPlan: null,
+                event: {
+                  title: "Late Night Set",
+                  startsAt: "2026-06-10T20:00:00Z",
+                  venueName: "Moon Hall",
+                },
+              },
+              cursor: "c1",
+            },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      });
+
+    const { default: TicketDetailPage } = await import(
+      "@/app/tickets/[ticketId]/page"
+    );
+    render(await TicketDetailPage({ params }));
+
+    expect(screen.getByRole("heading", { name: /related events/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /browse all/i })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: /late night set/i })).toHaveAttribute(
+      "href",
+      "/tickets/ticket-uuid-2"
+    );
   });
 
   it("calls notFound() when the GraphQL query returns null", async () => {
@@ -359,7 +901,7 @@ describe("TicketDetailPage", () => {
 
     expect(screen.getByRole("link", { name: /attendance settings/i })).toHaveAttribute(
       "href",
-      "/tickets/ticket-uuid-1/attendance"
+      "/organizer/events/ticket-uuid-1/attendance"
     );
   });
 
@@ -389,7 +931,7 @@ describe("TicketDetailPage", () => {
 
     expect(screen.getByRole("link", { name: /attendance settings/i })).toHaveAttribute(
       "href",
-      "/tickets/ticket-uuid-1/attendance"
+      "/organizer/events/ticket-uuid-1/attendance"
     );
     expect(screen.getByRole("link", { name: /open scanner console/i })).toHaveAttribute(
       "href",
@@ -443,7 +985,7 @@ describe("TicketDetailPage", () => {
     expect(link).toHaveAttribute("href", "/auth/signin");
   });
 
-  it("shows 'Already Reserved' disabled button for a buyer on a reserved ticket", async () => {
+  it("routes reserved buyers to orders from the purchase panel", async () => {
     const ticket = makeTicket({ userId: "owner-uuid", orderId: "order-1" });
     executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
@@ -453,9 +995,7 @@ describe("TicketDetailPage", () => {
     );
     render(await TicketDetailPage({ params }));
 
-    const btn = screen.getByRole("button", { name: /already reserved/i });
-    expect(btn).toBeInTheDocument();
-    expect(btn).toBeDisabled();
+    expect(screen.getByRole("button", { name: /view your orders/i })).toBeInTheDocument();
   });
 
   it("falls back to purchase view (non-owner) when JWT is malformed", async () => {
@@ -509,81 +1049,116 @@ describe("TicketDetailPage", () => {
   });
 });
 
-describe("AttendanceSettingsPage", () => {
+describe("OrganizerAttendancePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     lookupUserMock.mockReset();
     lookupUserMock.mockResolvedValue({ user: { id: "buyer-uuid", email: "buyer@example.com" } });
   });
 
-  it("redirects to sign-in when the viewer is logged out", async () => {
-    cookieStoreMock.get.mockReturnValue(undefined);
+  it("redirects the legacy ticket attendance route to the organizer route", async () => {
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
     const navigation = await import("next/navigation");
     vi.mocked(navigation.redirect).mockImplementationOnce(() => {
       throw new Error("NEXT_REDIRECT");
     });
 
-    const { default: AttendanceSettingsPage } = await import(
+    const { default: LegacyAttendancePage } = await import(
       "@/app/tickets/[ticketId]/attendance/page"
     );
 
     await expect(
-      AttendanceSettingsPage({ params: Promise.resolve({ ticketId: "ticket-uuid-1" }) })
+      LegacyAttendancePage({ params: Promise.resolve({ ticketId: "ticket-uuid-1" }) })
     ).rejects.toThrow("NEXT_REDIRECT");
-    expect(navigation.redirect).toHaveBeenCalledWith("/auth/signin");
+    expect(navigation.redirect).toHaveBeenCalledWith("/organizer/events/ticket-uuid-1/attendance");
   });
 
-  it("renders the policy form with settings and summary", async () => {
-    executeQueryMock.mockResolvedValue({
-      ticket: { id: "ticket-uuid-1", title: "Concert Night", userId: "owner-uuid", sold: 0 },
-      attendancePolicy: { eventId: "ticket-uuid-1", requireQrForEntry: true, allowManualOverride: false },
-      attendanceSummary: { eventId: "ticket-uuid-1", totalAdmitted: 7, totalDenied: 2, totalCheckedIn: 7 },
-      eventCheckins: [],
-    });
+  it("renders the organizer attendance page with event context and scanner link", async () => {
+    executeQueryMock
+      .mockResolvedValueOnce({
+        ticket: { id: "ticket-uuid-1", title: "Concert Night", userId: "owner-uuid", sold: 0 },
+        attendancePolicy: { eventId: "ticket-uuid-1", requireQrForEntry: true, allowManualOverride: false },
+        attendanceSummary: { eventId: "ticket-uuid-1", totalAdmitted: 7, totalDenied: 2, totalCheckedIn: 7 },
+        eventCheckins: [],
+      })
+      .mockResolvedValueOnce({
+        ticket: {
+          id: "ticket-uuid-1",
+          title: "Concert Night",
+          userId: "owner-uuid",
+          sold: 0,
+          event: {
+            title: "Phoenix",
+            startsAt: "2026-08-09T20:30:00Z",
+            venueName: "The Greek Theatre",
+          },
+        },
+      });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
-    const { default: AttendanceSettingsPage } = await import(
-      "@/app/tickets/[ticketId]/attendance/page"
+    const { default: OrganizerAttendancePage } = await import(
+      "@/app/organizer/events/[id]/attendance/page"
     );
-    render(await AttendanceSettingsPage({ params: Promise.resolve({ ticketId: "ticket-uuid-1" }) }));
+    render(await OrganizerAttendancePage({ params: Promise.resolve({ id: "ticket-uuid-1" }) }));
 
-    expect(screen.getByRole("heading", { level: 1, name: /attendance settings/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: /phoenix/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open scanner/i })).toHaveAttribute("href", "/scan?eventId=ticket-uuid-1");
     expect(screen.getByText(/7 admitted/i)).toBeInTheDocument();
     expect(screen.getByText(/2 denied/i)).toBeInTheDocument();
   });
 
   it("calls notFound when a logged-in non-owner opens attendance settings", async () => {
-    executeQueryMock.mockResolvedValue({
-      ticket: { id: "ticket-uuid-1", title: "Concert Night", userId: "owner-uuid", sold: 0 },
-      attendancePolicy: { eventId: "ticket-uuid-1", requireQrForEntry: true, allowManualOverride: false },
-      attendanceSummary: { eventId: "ticket-uuid-1", totalAdmitted: 0, totalDenied: 0, totalCheckedIn: 0 },
-      eventCheckins: [],
-    });
+    executeQueryMock
+      .mockResolvedValueOnce({
+        ticket: { id: "ticket-uuid-1", title: "Concert Night", userId: "owner-uuid", sold: 0 },
+        attendancePolicy: { eventId: "ticket-uuid-1", requireQrForEntry: true, allowManualOverride: false },
+        attendanceSummary: { eventId: "ticket-uuid-1", totalAdmitted: 0, totalDenied: 0, totalCheckedIn: 0 },
+        eventCheckins: [],
+      })
+      .mockResolvedValueOnce({
+        ticket: {
+          id: "ticket-uuid-1",
+          title: "Concert Night",
+          userId: "owner-uuid",
+          sold: 0,
+          event: { title: "Phoenix", startsAt: "2026-08-09T20:30:00Z", venueName: "The Greek Theatre" },
+        },
+      });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
 
-    const { default: AttendanceSettingsPage } = await import(
-      "@/app/tickets/[ticketId]/attendance/page"
+    const { default: OrganizerAttendancePage } = await import(
+      "@/app/organizer/events/[id]/attendance/page"
     );
 
     await expect(
-      AttendanceSettingsPage({ params: Promise.resolve({ ticketId: "ticket-uuid-1" }) })
+      OrganizerAttendancePage({ params: Promise.resolve({ id: "ticket-uuid-1" }) })
     ).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
   it("locks attendance requirement controls after tickets are sold", async () => {
-    executeQueryMock.mockResolvedValue({
-      ticket: { id: "ticket-uuid-1", title: "Concert Night", userId: "owner-uuid", sold: 1 },
-      attendancePolicy: { eventId: "ticket-uuid-1", requireQrForEntry: true, allowManualOverride: false },
-      attendanceSummary: { eventId: "ticket-uuid-1", totalAdmitted: 0, totalDenied: 0, totalCheckedIn: 0 },
-      eventCheckins: [],
-    });
+    executeQueryMock
+      .mockResolvedValueOnce({
+        ticket: { id: "ticket-uuid-1", title: "Concert Night", userId: "owner-uuid", sold: 1 },
+        attendancePolicy: { eventId: "ticket-uuid-1", requireQrForEntry: true, allowManualOverride: false },
+        attendanceSummary: { eventId: "ticket-uuid-1", totalAdmitted: 0, totalDenied: 0, totalCheckedIn: 0 },
+        eventCheckins: [],
+      })
+      .mockResolvedValueOnce({
+        ticket: {
+          id: "ticket-uuid-1",
+          title: "Concert Night",
+          userId: "owner-uuid",
+          sold: 1,
+          event: { title: "Phoenix", startsAt: "2026-08-09T20:30:00Z", venueName: "The Greek Theatre" },
+        },
+      });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
-    const { default: AttendanceSettingsPage } = await import(
-      "@/app/tickets/[ticketId]/attendance/page"
+    const { default: OrganizerAttendancePage } = await import(
+      "@/app/organizer/events/[id]/attendance/page"
     );
-    render(await AttendanceSettingsPage({ params: Promise.resolve({ ticketId: "ticket-uuid-1" }) }));
+    render(await OrganizerAttendancePage({ params: Promise.resolve({ id: "ticket-uuid-1" }) }));
 
     expect(screen.getByLabelText(/require qr for entry/i)).toBeDisabled();
     expect(screen.getByRole("button", { name: /save settings/i })).toBeDisabled();
@@ -593,22 +1168,81 @@ describe("AttendanceSettingsPage", () => {
 describe("AdmissionPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    executeQueryMock.mockResolvedValue({
-      admissionPass: {
-        id: "cred-1",
-        ticketId: "ticket-uuid-1",
-        orderId: "order-1",
-        eventId: "ticket-uuid-1",
-        status: "USED",
-        issuedAt: new Date().toISOString(),
-        usedAt: null,
-        qrToken: "signed-token",
-      },
-    });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
   });
 
-  it("shows non-admittable copy for used credentials", async () => {
+  it("renders the redesigned pass layout with event context and grouped passes", async () => {
+    serverApiMock.mockResolvedValueOnce({
+      id: "order-1",
+      userId: "buyer-uuid",
+      status: "COMPLETE",
+      expiresAt: null,
+      quantity: 2,
+      version: 1,
+      createdAt: "2026-07-26T00:00:00Z",
+      updatedAt: "2026-07-26T00:00:00Z",
+      orderType: "SEATED",
+      planId: "plan-1",
+      ticket: {
+        id: "ticket-uuid-1",
+        title: "Phoenix",
+        price: "48.00",
+      },
+      seats: [
+        {
+          seatId: "seat-1",
+          sectionId: "section-1",
+          seatLabel: "A-12",
+          price: "48.00",
+        },
+        {
+          seatId: "seat-2",
+          sectionId: "section-1",
+          seatLabel: "A-13",
+          price: "48.00",
+        },
+      ],
+    });
+
+    executeQueryMock
+      .mockResolvedValueOnce({
+        admissionPass: {
+          id: "cred-1",
+          ticketId: "ticket-uuid-1",
+          orderId: "order-1",
+          eventId: "event-uuid-1",
+          status: "USED",
+          issuedAt: "2026-07-26T00:00:00Z",
+          usedAt: "2026-08-09T20:42:00Z",
+          qrToken: "signed-token",
+        },
+      })
+      .mockResolvedValueOnce({
+        ticket: {
+          id: "ticket-uuid-1",
+          title: "Phoenix",
+          price: "4800",
+          userId: "owner-uuid",
+          orderId: "order-1",
+          quota: 3000,
+          reserved: 0,
+          sold: 1200,
+          available: 1800,
+          maxPerUser: 6,
+          ticketType: "SEATED_MANUAL",
+          seatingPlan: { id: "plan-1" },
+          event: {
+            title: "Phoenix",
+            description: "Alpha Zulu Tour",
+            startsAt: "2026-08-09T20:30:00Z",
+            endsAt: "2026-08-09T23:00:00Z",
+            imageUrl: null,
+            venueName: "The Greek Theatre",
+            venueAddress: "Berkeley, CA",
+          },
+        },
+      });
+
     const { default: AdmissionPage } = await import(
       "@/app/tickets/[ticketId]/admission/page"
     );
@@ -618,8 +1252,14 @@ describe("AdmissionPage", () => {
       searchParams: Promise.resolve({ orderId: "order-1" }),
     }));
 
-    expect(screen.getByRole("heading", { name: /your admission pass/i })).toBeInTheDocument();
-    expect(screen.getByText(/already been used for entry/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Phoenix" })).toBeInTheDocument();
+    expect(screen.getAllByText(/the greek theatre/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/this order has 2 passes/i)).toBeInTheDocument();
+    expect(screen.getAllByText("A-12").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("A-13").length).toBeGreaterThan(0);
+    const transferLinks = screen.getAllByRole("link", { name: /transfer/i });
+    expect(transferLinks).toHaveLength(2);
+    transferLinks.forEach((link) => expect(link).toHaveAttribute("href", "/orders/order-1/transfer"));
     expect(screen.queryByText(/qr token payload/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/signed-token/i)).not.toBeInTheDocument();
   });
@@ -646,7 +1286,6 @@ describe("ScanPage", () => {
     const { default: ScanPage } = await import("@/app/scan/page");
     render(await ScanPage({ searchParams }));
 
-    expect(screen.getByRole("heading", { level: 1, name: /scanner console/i })).toBeInTheDocument();
     expect(screen.getByTestId("scanner-client")).toHaveAttribute("data-event-id", "event-uuid-1");
 
     expect(executeQueryMock).toHaveBeenCalledTimes(2);

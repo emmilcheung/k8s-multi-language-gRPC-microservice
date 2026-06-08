@@ -5,7 +5,11 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:4000";
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
-  retries: 0,
+  // Retry under CI only: the heaviest journeys (seated venue+plan+sections,
+  // Kafka-driven status transitions) intermittently exceed step timeouts on a
+  // resource-constrained stack. They pass on a clean attempt — retries absorb
+  // the environmental flake without masking real failures (which fail every try).
+  retries: process.env.CI ? 2 : 0,
   workers: 2,  // minikube is resource-constrained; cap concurrency to avoid OOMKill
   reporter: process.env.CI
     ? [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]]

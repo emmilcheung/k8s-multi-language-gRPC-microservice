@@ -22,7 +22,8 @@ func (r *entityResolver) FindAdmissionPassByID(ctx context.Context, id string) (
 		}
 		return nil, err
 	}
-	return mapCredentialToGQL(cred), nil
+	transfer, _ := r.Svc.FindLatestTransferByCredentialID(ctx, cred.ID)
+	return mapCredentialToGQL(cred, transfer), nil
 }
 
 // Entity returns EntityResolver implementation.

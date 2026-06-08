@@ -23,3 +23,13 @@ func userIDFromContext(ctx context.Context) string {
 	}
 	return r.Header.Get("X-User-Id")
 }
+
+// userIDSigFromContext extracts the X-User-Id-Sig header from the request
+// stored in context. Returns an empty string when absent.
+func userIDSigFromContext(ctx context.Context) string {
+	r, ok := ctx.Value(requestContextKey).(*http.Request)
+	if !ok || r == nil {
+		return ""
+	}
+	return r.Header.Get("X-User-Id-Sig")
+}

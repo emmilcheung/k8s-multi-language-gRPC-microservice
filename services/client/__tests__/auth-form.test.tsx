@@ -43,12 +43,29 @@ describe("AuthForm", () => {
 
     render(<AuthForm mode="signin" action={signinAction} />);
 
-    expect(screen.getByRole("link", { name: /sign up/i })).toHaveAttribute("href", "/auth/signup");
+    expect(screen.getByRole("link", { name: /create account/i })).toHaveAttribute("href", "/auth/signup");
+    expect(screen.getByRole("link", { name: /sign in/i })).toHaveAttribute("href", "/auth/signin");
+    expect(screen.getByText(/sign in to find tickets, pay faster, and access your passes/i)).toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/email/i), "user@example.com");
     await user.type(screen.getByLabelText(/password/i), "secret");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => expect(signinAction).toHaveBeenCalledTimes(1));
+  });
+
+  it("renders signup mode with create-account copy", () => {
+    const signupAction = vi.fn(async (prev: AuthState, formData: FormData): Promise<AuthState> => {
+      void prev;
+      void formData;
+      return {};
+    });
+
+    render(<AuthForm mode="signup" action={signupAction} />);
+
+    expect(screen.getByRole("heading", { level: 1, name: /create your account/i })).toBeInTheDocument();
+    expect(screen.getByText(/create your stagepass account with email and password/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /create account/i })).toHaveAttribute("href", "/auth/signup");
+    expect(screen.getByRole("link", { name: /sign in/i })).toHaveAttribute("href", "/auth/signin");
   });
 });

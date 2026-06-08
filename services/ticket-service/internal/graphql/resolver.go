@@ -27,19 +27,39 @@ func mapTicketToGQL(t *repository.Ticket) *Ticket {
 		ticketType = TicketTypeSeated
 	}
 
+	category := TicketCategoryOther
+	if t.Category != "" {
+		switch t.Category {
+		case "CONCERT":
+			category = TicketCategoryConcert
+		case "SPORTS":
+			category = TicketCategorySports
+		case "COMEDY":
+			category = TicketCategoryComedy
+		case "THEATRE":
+			category = TicketCategoryTheatre
+		case "FESTIVAL":
+			category = TicketCategoryFestival
+		case "OTHER":
+			category = TicketCategoryOther
+		}
+	}
+
 	result := &Ticket{
-		ID:         t.ID,
-		Title:      t.Title,
-		Price:      price,
+		ID:           t.ID,
+		Title:        t.Title,
+		Price:        price,
 		PriceDecimal: t.Price,
-		UserID:     t.UserID,
-		Quota:      t.Quota,
-		Reserved:   t.Reserved,
-		Sold:       t.Sold,
-		Available:  available,
-		TicketType: ticketType,
-		CreatedAt:  t.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:  t.UpdatedAt.Format(time.RFC3339),
+		UserID:       t.UserID,
+		Quota:        t.Quota,
+		Reserved:     t.Reserved,
+		Sold:         t.Sold,
+		Available:    available,
+		TicketType:   ticketType,
+		Category:     category,
+		SavedByMe:    false,
+		CreatedAt:    t.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:    t.UpdatedAt.Format(time.RFC3339),
 	}
 
 	if t.MaxPerUser > 0 {

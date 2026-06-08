@@ -55,7 +55,7 @@ export default async function EditVenuePage({ params }: Props) {
           href={`/venues/${venueId}`}
           className={cn(
             buttonVariants({ variant: "ghost", size: "sm" }),
-            "gap-1.5 text-muted-foreground hover:text-foreground -ml-2"
+            "gap-1.5 text-mute hover:text-ink -ml-2"
           )}
         >
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -64,8 +64,8 @@ export default async function EditVenuePage({ params }: Props) {
       </div>
 
       <div className="w-full max-w-md flex flex-col gap-1">
-        <h1 className="text-2xl font-bold tracking-tight">Edit venue</h1>
-        <p className="text-sm text-muted-foreground">
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">Edit venue</h1>
+        <p className="text-sm text-mute">
           Update your venue details.
         </p>
       </div>

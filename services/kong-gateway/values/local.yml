@@ -14,10 +14,14 @@ HOST_VENUE: venue-service:3003
 HOST_APOLLO_ROUTER: apollo-router:4001
 JWT_COOKIE_NAME: token
 
-RATE_LIMIT_ANONYMOUS_PER_MINUTE: 300
+# Local/test limits are deliberately high: the e2e suite drives bursts of
+# signups + ticket creation from a single host IP (workers:2), which tripped the
+# previous 300/min ceiling (HTTP 429). These values apply to the local Docker
+# stack only — dev/staging/prod keep their own (lower) limits.
+RATE_LIMIT_ANONYMOUS_PER_MINUTE: 6000
 RATE_LIMIT_POLICY: local
-RATE_LIMIT_AUTHENTICATED_PER_MINUTE: 300
-RATE_LIMIT_AUTH_ENDPOINTS_PER_MINUTE: 300
-RATE_LIMIT_ATTENDANCE_SCAN_PER_MINUTE: 120
+RATE_LIMIT_AUTHENTICATED_PER_MINUTE: 6000
+RATE_LIMIT_AUTH_ENDPOINTS_PER_MINUTE: 6000
+RATE_LIMIT_ATTENDANCE_SCAN_PER_MINUTE: 1200
 RATE_LIMIT_REDIS_HOST: "127.0.0.1"
 RATE_LIMIT_REDIS_PORT: 6379

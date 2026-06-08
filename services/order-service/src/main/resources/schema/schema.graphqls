@@ -9,6 +9,14 @@ type Order @key(fields: "id") {
   status: OrderStatus!
   expiresAt: String
   createdAt: String!
+  # Reserved seats for seated orders; empty for GA orders.
+  seats: [OrderSeat!]!
+  # Fee breakdown (computed on read)
+  subtotal: String!
+  serviceFee: String!
+  facilityFee: String!
+  tax: String!
+  total: String!
   # Federation edge: payment is owned by payment-service.
   # Resolved by emitting Payment(__typename, orderId); router fetches the rest.
   payment: Payment
@@ -17,6 +25,13 @@ type Order @key(fields: "id") {
 type OrderTicket {
   id: ID!
   title: String!
+  price: String!
+}
+
+type OrderSeat {
+  seatId: ID!
+  sectionId: ID!
+  seatLabel: String!
   price: String!
 }
 
@@ -30,6 +45,14 @@ type User @key(fields: "id") {
   orders: [Order!]! @tag(name: "self-only")
 }
 
+type RefundEligibility {
+  orderId: ID!
+  eligible: Boolean!
+  reason: String
+  refundableAmount: Int!
+  cutoffAt: String
+}
+
 enum OrderStatus {
   CREATED
   AWAITING_PAYMENT
@@ -40,6 +63,7 @@ enum OrderStatus {
 type Query {
   order(id: ID!): Order
   orders: [Order!]!
+  refundEligibility(orderId: ID!): RefundEligibility
 }
 
 type Mutation {

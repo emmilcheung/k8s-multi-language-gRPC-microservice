@@ -31,6 +31,9 @@ func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketI
 	if input.MaxPerUser != nil {
 		svcInput.MaxPerUser = *input.MaxPerUser
 	}
+	if input.Category != nil {
+		svcInput.Category = string(*input.Category)
+	}
 	if input.Event != nil {
 		ev, err := mapEventInput(input.Event)
 		if err != nil {
@@ -89,6 +92,39 @@ func (r *mutationResolver) UpdateTicket(ctx context.Context, id string, input Up
 	return mapTicketToGQL(t), nil
 }
 
+// SaveEvent is the resolver for the saveEvent field.
+func (r *mutationResolver) SaveEvent(ctx context.Context, eventID string) (*Ticket, error) {
+	userID := userIDFromContext(ctx)
+	if userID == "" {
+		return nil, fmt.Errorf("saveEvent: unauthorized: user identity required")
+	}
+	ticket, err := r.TicketService.SaveEvent(ctx, userID, eventID)
+	if err != nil {
+		return nil, fmt.Errorf("saveEvent: %w", err)
+	}
+	t := mapTicketToGQL(ticket)
+	t.SavedByMe = true
+	return t, nil
+}
+
+// UnsaveEvent is the resolver for the unsaveEvent field.
+func (r *mutationResolver) UnsaveEvent(ctx context.Context, eventID string) (*Ticket, error) {
+	userID := userIDFromContext(ctx)
+	if userID == "" {
+		return nil, fmt.Errorf("unsaveEvent: unauthorized: user identity required")
+	}
+	if err := r.TicketService.UnsaveEvent(ctx, userID, eventID); err != nil {
+		return nil, fmt.Errorf("unsaveEvent: %w", err)
+	}
+	ticket, err := r.TicketService.GetTicketByID(ctx, eventID)
+	if err != nil {
+		return nil, fmt.Errorf("unsaveEvent fetch: %w", err)
+	}
+	t := mapTicketToGQL(ticket)
+	t.SavedByMe = false
+	return t, nil
+}
+
 // Tickets is the resolver for the tickets field.
 func (r *queryResolver) Tickets(ctx context.Context) ([]*Ticket, error) {
 	tickets, err := r.TicketService.ListTickets(ctx, repository.PaginationParams{})
@@ -116,8 +152,24 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 	if after != nil {
 		params.After = *after
 	}
-	if filter != nil && filter.AvailableOnly != nil {
-		params.AvailableOnly = *filter.AvailableOnly
+	if filter != nil {
+		if filter.AvailableOnly != nil {
+			params.AvailableOnly = *filter.AvailableOnly
+		}
+		if filter.Search != nil {
+			params.Search = *filter.Search
+		}
+		if filter.Category != nil {
+			params.Category = string(*filter.Category)
+		}
+		if filter.MinPrice != nil {
+			minPriceFloat := float64(*filter.MinPrice)
+			params.MinPrice = &minPriceFloat
+		}
+		if filter.MaxPrice != nil {
+			maxPriceFloat := float64(*filter.MaxPrice)
+			params.MaxPrice = &maxPriceFloat
+		}
 	}
 
 	tickets, err := r.TicketService.ListTickets(ctx, params)
@@ -170,7 +222,62 @@ func (r *queryResolver) Ticket(ctx context.Context, id string) (*Ticket, error) 
 		}
 		return nil, fmt.Errorf("ticket: %w", err)
 	}
-	return mapTicketToGQL(t), nil
+	gqlTicket := mapTicketToGQL(t)
+	if userID := userIDFromContext(ctx); userID != "" {
+		saved, err := r.TicketService.IsSaved(ctx, userID, id)
+		if err != nil {
+			return nil, fmt.Errorf("ticket: resolve saved state: %w", err)
+		}
+		if saved {
+			gqlTicket.SavedByMe = true
+		}
+	}
+	return gqlTicket, nil
+}
+
+// SavedEvents is the resolver for the savedEvents field.
+func (r *queryResolver) SavedEvents(ctx context.Context, first *int, after *string) (*SavedEventConnection, error) {
+	userID := userIDFromContext(ctx)
+	if userID == "" {
+		return nil, fmt.Errorf("savedEvents: unauthorized: user identity required")
+	}
+	limit := 20
+	if first != nil && *first > 0 {
+		limit = *first
+	}
+	var cursor string
+	if after != nil {
+		cursor = *after
+	}
+	tickets, err := r.TicketService.ListSavedEvents(ctx, userID, cursor, limit+1)
+	if err != nil {
+		return nil, fmt.Errorf("savedEvents: %w", err)
+	}
+	hasNextPage := len(tickets) > limit
+	if hasNextPage {
+		tickets = tickets[:limit]
+	}
+	edges := make([]*SavedEventEdge, len(tickets))
+	for i, t := range tickets {
+		gqlTicket := mapTicketToGQL(t)
+		gqlTicket.SavedByMe = true
+		edges[i] = &SavedEventEdge{
+			Node:   gqlTicket,
+			Cursor: t.ID,
+		}
+	}
+	var endCursor *string
+	if len(edges) > 0 {
+		c := edges[len(edges)-1].Cursor
+		endCursor = &c
+	}
+	return &SavedEventConnection{
+		Edges: edges,
+		PageInfo: &PageInfo{
+			HasNextPage: hasNextPage,
+			EndCursor:   endCursor,
+		},
+	}, nil
 }
 
 // Mutation returns MutationResolver implementation.
@@ -181,4 +288,3 @@ func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
-

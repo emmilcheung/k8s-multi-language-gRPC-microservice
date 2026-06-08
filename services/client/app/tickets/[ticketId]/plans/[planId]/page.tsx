@@ -8,11 +8,12 @@ import { cookies } from "next/headers";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ApiError, serverApi } from "@/lib/api";
-import { createPriceTier, fetchPriceTiers } from "@/app/actions/venues";
+import { createPriceTier, createSection, fetchPriceTiers } from "@/app/actions/venues";
 import { replaceInactivePlan } from "@/app/actions/tickets";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { SeatingPlanCanvas } from "@/components/seating-plan-canvas";
+import { SectionForm } from "@/components/section-form";
 import { ActivatePlanButton } from "@/components/activate-plan-button";
 import { DeactivatePlanButton } from "@/components/deactivate-plan-button";
 import { ReplacePlanButton } from "@/components/replace-plan-button";
@@ -65,9 +66,9 @@ async function loadTicketAndPlan(ticketId: string, planId: string) {
 }
 
 const planStatusColor: Record<SeatingPlan["status"], string> = {
-  draft: "bg-yellow-500/15 text-yellow-400 border-yellow-500/20",
-  active: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
-  inactive: "bg-muted/40 text-muted-foreground border-muted/20",
+  draft: "bg-amber-500/15 text-amber-600 border-amber-500/30",
+  active: "bg-emerald-500/15 text-emerald-700 border-emerald-500/30",
+  inactive: "bg-subtle/60 text-mute border-line/40",
 };
 
 export default async function TicketPlanDetailPage({ params }: Props) {
@@ -100,6 +101,10 @@ export default async function TicketPlanDetailPage({ params }: Props) {
     prev: PlanState,
     formData: FormData
   ) => Promise<PlanState>;
+  const addSectionAction = createSection.bind(null, planId, "", ticketId) as (
+    prev: PlanState,
+    formData: FormData
+  ) => Promise<PlanState>;
   const replacePlanAction = replaceInactivePlan.bind(null, ticketId, planId);
 
   const isDraft = plan.status === "draft";
@@ -108,13 +113,13 @@ export default async function TicketPlanDetailPage({ params }: Props) {
   const canActivate = (isDraft || isInactive) && sections.length > 0;
 
   return (
-    <div className="flex flex-col gap-8 max-w-5xl mx-auto">
+    <div className="flex flex-col gap-8 max-w-6xl mx-auto">
       {/* Back */}
       <Link
         href={`/tickets/${ticketId}`}
         className={cn(
           buttonVariants({ variant: "ghost", size: "sm" }),
-          "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2"
+          "gap-1.5 text-mute hover:text-ink self-start -ml-2"
         )}
       >
         <ArrowLeft className="w-3.5 h-3.5" />
@@ -122,19 +127,22 @@ export default async function TicketPlanDetailPage({ params }: Props) {
       </Link>
 
       {/* Plan info */}
-      <div className="glass rounded-2xl p-8 flex flex-col gap-6">
+      <div className="rounded-3xl border border-line/70 bg-card/95 p-8 md:p-10 flex flex-col gap-6 shadow-[0_20px_60px_-40px_rgba(0,0,0,0.65)]">
         <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-primary/10 ring-1 ring-primary/20 shrink-0">
-            <Layers className="w-7 h-7 text-primary" />
+          <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-accent/10 ring-1 ring-accent/20 shrink-0">
+            <Layers className="w-7 h-7 text-accent" />
           </div>
-          <Badge className={cn("text-sm", planStatusColor[plan.status])}>
+          <Badge className={cn("text-sm capitalize", planStatusColor[plan.status])}>
             {plan.status}
           </Badge>
         </div>
 
         <h1 className="text-3xl font-bold tracking-tight leading-tight">{plan.name}</h1>
+        <p className="text-sm text-mute -mt-3">
+          Manage seating geometry, section pricing, and lifecycle for this ticket plan.
+        </p>
 
-        <div className="flex flex-wrap gap-4 text-sm text-muted-foreground pt-2 border-t border-white/6">
+        <div className="flex flex-wrap gap-4 text-sm text-mute pt-2 border-t border-line">
           <span className="flex items-center gap-1.5">
             <Users className="w-3.5 h-3.5" />
             Max {plan.maxSeatsPerOrder} seats per order
@@ -163,16 +171,32 @@ export default async function TicketPlanDetailPage({ params }: Props) {
           )}
         </div>
         {isInactive && (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-mute">
             Inactive plans stay attached for history, but you can reactivate this one or create a fresh
             replacement plan for the same ticket.
           </p>
         )}
       </div>
 
-      {/* Canvas for draft plans */}
+      {/* Canvas for draft plans — interactive once at least one section exists. */}
+      {isDraft && sections.length > 0 && (
+        <SeatingPlanCanvas planId={planId} sections={sections} isDraft={isDraft} tiers={tiers} />
+      )}
+
+      {/* Draft with no sections yet: prompt to add the first one. */}
+      {isDraft && sections.length === 0 && (
+        <div className="glass rounded-2xl p-8 flex flex-col items-center gap-2 text-center border border-line/70">
+          <Grid3X3 className="w-10 h-10 text-mute" />
+          <p className="font-semibold text-sm">No sections yet</p>
+          <p className="text-sm text-mute max-w-sm">
+            Add a section below to start arranging the seating canvas.
+          </p>
+        </div>
+      )}
+
+      {/* Add section form — draft plans only. */}
       {isDraft && (
-        <SeatingPlanCanvas planId={planId} sections={sections} isDraft={isDraft} />
+        <SectionForm action={addSectionAction} tiers={tiers} />
       )}
 
       {/* Sections */}
@@ -180,12 +204,12 @@ export default async function TicketPlanDetailPage({ params }: Props) {
         <div className="flex flex-col gap-4">
           <div>
             <h2 className="text-xl font-semibold">Sections</h2>
-            <p className="text-sm text-muted-foreground mt-0.5">
+            <p className="text-sm text-mute mt-0.5">
               Configured seat sections.
             </p>
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className="grid gap-3 md:grid-cols-2">
             {sections.map((section) => {
               const tier = tiers.find((t) => t.id === section.priceTierId);
               const capacity = section.type === "ga" ? section.columnCount : section.rowCount * section.columnCount;
@@ -193,15 +217,15 @@ export default async function TicketPlanDetailPage({ params }: Props) {
               return (
                 <div
                   key={section.id}
-                  className="glass rounded-2xl p-4 flex items-center gap-4"
+                  className="rounded-2xl border border-line/70 bg-card/90 p-4 flex items-center gap-4"
                 >
-                  <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary/10 ring-1 ring-primary/20 shrink-0">
-                    <Grid3X3 className="w-5 h-5 text-primary" />
+                  <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent/10 ring-1 ring-accent/20 shrink-0">
+                    <Grid3X3 className="w-5 h-5 text-accent" />
                   </div>
 
                   <div className="flex-1 min-w-0">
                     <p className="font-medium truncate">{section.name}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
+                    <p className="text-xs text-mute mt-0.5">
                       {section.type === "ga"
                         ? `GA · ${capacity} capacity`
                         : `${section.rowCount} rows × ${section.columnCount} columns`}
@@ -220,16 +244,16 @@ export default async function TicketPlanDetailPage({ params }: Props) {
         <div className="flex flex-col gap-4">
           <div>
             <h2 className="text-xl font-semibold">Price Tiers</h2>
-            <p className="text-sm text-muted-foreground mt-0.5">
+            <p className="text-sm text-mute mt-0.5">
               Available pricing levels for sections.
             </p>
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className="grid gap-3 md:grid-cols-2">
             {tiers.map((tier) => (
               <div
                 key={tier.id}
-                className="glass rounded-2xl p-4 flex items-center justify-between"
+                className="rounded-2xl border border-line/70 bg-card/90 p-4 flex items-center justify-between"
               >
                 <div>
                   <p className="font-medium">{tier.name}</p>

@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/acme/attendance-service/internal/repository"
 	"github.com/acme/attendance-service/internal/service"
@@ -198,6 +199,75 @@ func (r *mutationResolver) RecordCheckinByUserID(ctx context.Context, input Reco
 	return checkin, nil
 }
 
+// TransferAdmissionCredential is the resolver for the transferAdmissionCredential field.
+func (r *mutationResolver) TransferAdmissionCredential(ctx context.Context, input TransferAdmissionCredentialInput) (*TransferResult, error) {
+	buyerID := userIDFromContext(ctx)
+	if buyerID == "" {
+		return nil, fmt.Errorf("unauthorized: buyer identity required")
+	}
+	userIDSig := userIDSigFromContext(ctx)
+	recipient := strings.TrimSpace(input.RecipientEmail)
+	if recipient == "" {
+		return nil, fmt.Errorf("invalid input: recipientEmail is required")
+	}
+
+	cred, transfer, err := r.Svc.TransferAdmissionCredential(ctx, input.CredentialID, buyerID, recipient, userIDSig)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, fmt.Errorf("not found: credential not found")
+		}
+		if errors.Is(err, service.ErrForbidden) {
+			return nil, fmt.Errorf("forbidden: admission pass not accessible")
+		}
+		return nil, err
+	}
+
+	return &TransferResult{
+		Credential:        mapCredentialToGQL(cred, transfer),
+		PendingTransferID: transfer.ID,
+	}, nil
+}
+
+// RecallTransfer is the resolver for the recallTransfer field.
+func (r *mutationResolver) RecallTransfer(ctx context.Context, credentialID string) (*AdmissionPass, error) {
+	buyerID := userIDFromContext(ctx)
+	if buyerID == "" {
+		return nil, fmt.Errorf("unauthorized: buyer identity required")
+	}
+	cred, err := r.Svc.RecallTransfer(ctx, credentialID, buyerID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, fmt.Errorf("not found: transfer not found")
+		}
+		if errors.Is(err, service.ErrForbidden) {
+			return nil, fmt.Errorf("forbidden: admission pass not accessible")
+		}
+		return nil, err
+	}
+	transfer, _ := r.Svc.FindLatestTransferByCredentialID(ctx, cred.ID)
+	return mapCredentialToGQL(cred, transfer), nil
+}
+
+// AcceptTransfer is the resolver for the acceptTransfer field.
+func (r *mutationResolver) AcceptTransfer(ctx context.Context, pendingTransferID string) (*AdmissionPass, error) {
+	buyerID := userIDFromContext(ctx)
+	if buyerID == "" {
+		return nil, fmt.Errorf("unauthorized: buyer identity required")
+	}
+	cred, err := r.Svc.AcceptTransfer(ctx, pendingTransferID, buyerID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, fmt.Errorf("not found: transfer not found")
+		}
+		if errors.Is(err, service.ErrForbidden) {
+			return nil, fmt.Errorf("forbidden: transfer not accessible")
+		}
+		return nil, err
+	}
+	transfer, _ := r.Svc.FindLatestTransferByCredentialID(ctx, cred.ID)
+	return mapCredentialToGQL(cred, transfer), nil
+}
+
 // AdmissionPass is the resolver for the admissionPass field.
 func (r *queryResolver) AdmissionPass(ctx context.Context, ticketID string, orderID *string) (*AdmissionPass, error) {
 	buyerID := userIDFromContext(ctx)
@@ -214,7 +284,8 @@ func (r *queryResolver) AdmissionPass(ctx context.Context, ticketID string, orde
 		}
 		return nil, err
 	}
-	return mapCredentialToGQL(cred), nil
+	transfer, _ := r.Svc.FindLatestTransferByCredentialID(ctx, cred.ID)
+	return mapCredentialToGQL(cred, transfer), nil
 }
 
 // AttendancePolicy is the resolver for the attendancePolicy field.

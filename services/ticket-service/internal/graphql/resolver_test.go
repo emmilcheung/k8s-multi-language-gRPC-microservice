@@ -141,3 +141,96 @@ func TestGraphQLSignatureValidation_EmptyKey(t *testing.T) {
 		t.Errorf("empty key should skip validation, got status %d, want %d", w.Code, http.StatusOK)
 	}
 }
+
+// TestSaveEventMutation_RequiresAuth verifies saveEvent returns an error without a user.
+func TestSaveEventMutation_RequiresAuth(t *testing.T) {
+	r := &graph.Resolver{} // nil TicketService — only tests auth layer
+	schema := graph.NewExecutableSchema(graph.Config{Resolvers: r})
+	srv := handler.NewDefaultServer(schema)
+
+	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		userID := req.Header.Get("X-User-Id")
+		ctx := req.Context()
+		if userID != "" {
+			ctx = graph.WithUserID(ctx, userID)
+		}
+		srv.ServeHTTP(w, req.WithContext(ctx))
+	})
+
+	body := `{"query":"mutation { saveEvent(eventId: \"event-123\") { id } }"}`
+	req := httptest.NewRequest(http.MethodPost, "/graphql", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// No X-User-Id header
+
+	w := httptest.NewRecorder()
+	gqlHandler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GraphQL should return 200 even for errors, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "unauthorized") {
+		t.Errorf("expected 'unauthorized' in response, got: %s", w.Body.String())
+	}
+}
+
+// TestUnsaveEventMutation_RequiresAuth verifies unsaveEvent returns an error without a user.
+func TestUnsaveEventMutation_RequiresAuth(t *testing.T) {
+	r := &graph.Resolver{} // nil TicketService — only tests auth layer
+	schema := graph.NewExecutableSchema(graph.Config{Resolvers: r})
+	srv := handler.NewDefaultServer(schema)
+
+	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		userID := req.Header.Get("X-User-Id")
+		ctx := req.Context()
+		if userID != "" {
+			ctx = graph.WithUserID(ctx, userID)
+		}
+		srv.ServeHTTP(w, req.WithContext(ctx))
+	})
+
+	body := `{"query":"mutation { unsaveEvent(eventId: \"event-123\") { id } }"}`
+	req := httptest.NewRequest(http.MethodPost, "/graphql", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// No X-User-Id header
+
+	w := httptest.NewRecorder()
+	gqlHandler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GraphQL should return 200 even for errors, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "unauthorized") {
+		t.Errorf("expected 'unauthorized' in response, got: %s", w.Body.String())
+	}
+}
+
+// TestSavedEventsQuery_RequiresAuth verifies savedEvents returns an error without a user.
+func TestSavedEventsQuery_RequiresAuth(t *testing.T) {
+	r := &graph.Resolver{} // nil TicketService — only tests auth layer
+	schema := graph.NewExecutableSchema(graph.Config{Resolvers: r})
+	srv := handler.NewDefaultServer(schema)
+
+	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		userID := req.Header.Get("X-User-Id")
+		ctx := req.Context()
+		if userID != "" {
+			ctx = graph.WithUserID(ctx, userID)
+		}
+		srv.ServeHTTP(w, req.WithContext(ctx))
+	})
+
+	body := `{"query":"{ savedEvents(first: 10) { edges { node { id } } } }"}`
+	req := httptest.NewRequest(http.MethodPost, "/graphql", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// No X-User-Id header
+
+	w := httptest.NewRecorder()
+	gqlHandler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GraphQL should return 200 even for errors, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "unauthorized") {
+		t.Errorf("expected 'unauthorized' in response, got: %s", w.Body.String())
+	}
+}

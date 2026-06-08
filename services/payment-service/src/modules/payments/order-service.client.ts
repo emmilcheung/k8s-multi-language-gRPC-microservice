@@ -23,6 +23,9 @@ const orderResponseSchema = z.object({
   ticket: z
     .object({
       price: z.union([z.string(), z.number()]),
+      // order-service REST serialises a missing replica start date as null
+      // (not undefined), so accept null here too.
+      startsAt: z.string().nullish(),
     })
     .nullable()
     .optional(),
@@ -34,6 +37,7 @@ const orderResponseSchema = z.object({
     )
     .optional()
     .default([]),
+  total: z.union([z.string(), z.number()]).optional(),
 });
 
 type FailureReason =
@@ -54,6 +58,7 @@ export interface OrderSnapshot {
   status: string;
   amount: number;
   currency: string;
+  startsAt?: string;
 }
 
 function getOrCreateFailureCounter(registry: Registry): Counter<FailureLabels> {
@@ -288,6 +293,7 @@ export class OrderServiceClient {
       status: payload.data.status,
       amount: this.computeAmount(payload.data),
       currency: DEFAULT_CURRENCY,
+      startsAt: payload.data.ticket?.startsAt ?? undefined,
     };
   }
 
@@ -379,6 +385,10 @@ export class OrderServiceClient {
   }
 
   private computeAmount(order: z.infer<typeof orderResponseSchema>): number {
+    if (order.total != null) {
+      return this.decimalToMinorUnits(order.total);
+    }
+
     if (order.seats.length > 0) {
       return order.seats.reduce((sum, seat) => sum + this.decimalToMinorUnits(seat.price), 0);
     }

@@ -39,14 +39,17 @@ type DirectiveRoot struct {
 
 type ComplexityRoot struct {
 	AdmissionPass struct {
-		EventID  func(childComplexity int) int
-		ID       func(childComplexity int) int
-		IssuedAt func(childComplexity int) int
-		OrderID  func(childComplexity int) int
-		QRToken  func(childComplexity int) int
-		Status   func(childComplexity int) int
-		TicketID func(childComplexity int) int
-		UsedAt   func(childComplexity int) int
+		EventID       func(childComplexity int) int
+		ID            func(childComplexity int) int
+		IssuedAt      func(childComplexity int) int
+		OrderID       func(childComplexity int) int
+		QRToken       func(childComplexity int) int
+		Status        func(childComplexity int) int
+		TicketID      func(childComplexity int) int
+		TransferState func(childComplexity int) int
+		TransferredAt func(childComplexity int) int
+		TransferredTo func(childComplexity int) int
+		UsedAt        func(childComplexity int) int
 	}
 
 	AttendancePolicy struct {
@@ -77,10 +80,13 @@ type ComplexityRoot struct {
 	}
 
 	Mutation struct {
-		RecordCheckin          func(childComplexity int, input RecordCheckinInput) int
-		RecordCheckinByUserID  func(childComplexity int, input RecordCheckinByUserIDInput) int
-		UpdateAttendancePolicy func(childComplexity int, eventID string, input UpdateAttendancePolicyInput) int
-		ValidateScan           func(childComplexity int, token string) int
+		AcceptTransfer              func(childComplexity int, pendingTransferID string) int
+		RecallTransfer              func(childComplexity int, credentialID string) int
+		RecordCheckin               func(childComplexity int, input RecordCheckinInput) int
+		RecordCheckinByUserID       func(childComplexity int, input RecordCheckinByUserIDInput) int
+		TransferAdmissionCredential func(childComplexity int, input TransferAdmissionCredentialInput) int
+		UpdateAttendancePolicy      func(childComplexity int, eventID string, input UpdateAttendancePolicyInput) int
+		ValidateScan                func(childComplexity int, token string) int
 	}
 
 	Query struct {
@@ -100,6 +106,11 @@ type ComplexityRoot struct {
 		Valid    func(childComplexity int) int
 	}
 
+	TransferResult struct {
+		Credential        func(childComplexity int) int
+		PendingTransferID func(childComplexity int) int
+	}
+
 	_Service struct {
 		SDL func(childComplexity int) int
 	}
@@ -113,6 +124,9 @@ type MutationResolver interface {
 	ValidateScan(ctx context.Context, token string) (*ScanValidationResult, error)
 	RecordCheckin(ctx context.Context, input RecordCheckinInput) (*EventCheckin, error)
 	RecordCheckinByUserID(ctx context.Context, input RecordCheckinByUserIDInput) (*EventCheckin, error)
+	TransferAdmissionCredential(ctx context.Context, input TransferAdmissionCredentialInput) (*TransferResult, error)
+	RecallTransfer(ctx context.Context, credentialID string) (*AdmissionPass, error)
+	AcceptTransfer(ctx context.Context, pendingTransferID string) (*AdmissionPass, error)
 }
 type QueryResolver interface {
 	AdmissionPass(ctx context.Context, ticketID string, orderID *string) (*AdmissionPass, error)
@@ -177,6 +191,24 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.AdmissionPass.TicketID(childComplexity), true
+	case "AdmissionPass.transferState":
+		if e.ComplexityRoot.AdmissionPass.TransferState == nil {
+			break
+		}
+
+		return e.ComplexityRoot.AdmissionPass.TransferState(childComplexity), true
+	case "AdmissionPass.transferredAt":
+		if e.ComplexityRoot.AdmissionPass.TransferredAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.AdmissionPass.TransferredAt(childComplexity), true
+	case "AdmissionPass.transferredTo":
+		if e.ComplexityRoot.AdmissionPass.TransferredTo == nil {
+			break
+		}
+
+		return e.ComplexityRoot.AdmissionPass.TransferredTo(childComplexity), true
 	case "AdmissionPass.usedAt":
 		if e.ComplexityRoot.AdmissionPass.UsedAt == nil {
 			break
@@ -283,6 +315,28 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.EventCheckin.UserID(childComplexity), true
 
+	case "Mutation.acceptTransfer":
+		if e.ComplexityRoot.Mutation.AcceptTransfer == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_acceptTransfer_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.AcceptTransfer(childComplexity, args["pendingTransferId"].(string)), true
+	case "Mutation.recallTransfer":
+		if e.ComplexityRoot.Mutation.RecallTransfer == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_recallTransfer_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.RecallTransfer(childComplexity, args["credentialId"].(string)), true
 	case "Mutation.recordCheckin":
 		if e.ComplexityRoot.Mutation.RecordCheckin == nil {
 			break
@@ -305,6 +359,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.RecordCheckinByUserID(childComplexity, args["input"].(RecordCheckinByUserIDInput)), true
+	case "Mutation.transferAdmissionCredential":
+		if e.ComplexityRoot.Mutation.TransferAdmissionCredential == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_transferAdmissionCredential_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.TransferAdmissionCredential(childComplexity, args["input"].(TransferAdmissionCredentialInput)), true
 	case "Mutation.updateAttendancePolicy":
 		if e.ComplexityRoot.Mutation.UpdateAttendancePolicy == nil {
 			break
@@ -422,6 +487,19 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.ScanValidationResult.Valid(childComplexity), true
 
+	case "TransferResult.credential":
+		if e.ComplexityRoot.TransferResult.Credential == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TransferResult.Credential(childComplexity), true
+	case "TransferResult.pendingTransferId":
+		if e.ComplexityRoot.TransferResult.PendingTransferID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.TransferResult.PendingTransferID(childComplexity), true
+
 	case "_Service.sdl":
 		if e.ComplexityRoot._Service.SDL == nil {
 			break
@@ -439,6 +517,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	inputUnmarshalMap := graphql.BuildUnmarshalerMap(
 		ec.unmarshalInputRecordCheckinByUserIdInput,
 		ec.unmarshalInputRecordCheckinInput,
+		ec.unmarshalInputTransferAdmissionCredentialInput,
 		ec.unmarshalInputUpdateAttendancePolicyInput,
 	)
 	first := true
@@ -621,6 +700,12 @@ func (ec *executionContext) childFields_AdmissionPass(ctx context.Context, field
 		return ec.fieldContext_AdmissionPass_usedAt(ctx, field)
 	case "qrToken":
 		return ec.fieldContext_AdmissionPass_qrToken(ctx, field)
+	case "transferState":
+		return ec.fieldContext_AdmissionPass_transferState(ctx, field)
+	case "transferredTo":
+		return ec.fieldContext_AdmissionPass_transferredTo(ctx, field)
+	case "transferredAt":
+		return ec.fieldContext_AdmissionPass_transferredAt(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type AdmissionPass", field.Name)
 }
@@ -685,6 +770,16 @@ func (ec *executionContext) childFields_ScanValidationResult(ctx context.Context
 		return ec.fieldContext_ScanValidationResult_eventId(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type ScanValidationResult", field.Name)
+}
+
+func (ec *executionContext) childFields_TransferResult(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "credential":
+		return ec.fieldContext_TransferResult_credential(ctx, field)
+	case "pendingTransferId":
+		return ec.fieldContext_TransferResult_pendingTransferId(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type TransferResult", field.Name)
 }
 
 func (ec *executionContext) childFields__Service(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
@@ -825,6 +920,34 @@ func (ec *executionContext) field_Entity_findAdmissionPassByID_args(ctx context.
 	return args, nil
 }
 
+func (ec *executionContext) field_Mutation_acceptTransfer_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "pendingTransferId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNID2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["pendingTransferId"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_recallTransfer_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "credentialId",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNID2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["credentialId"] = arg0
+	return args, nil
+}
+
 func (ec *executionContext) field_Mutation_recordCheckinByUserId_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -845,6 +968,20 @@ func (ec *executionContext) field_Mutation_recordCheckin_args(ctx context.Contex
 	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input",
 		func(ctx context.Context, v any) (RecordCheckinInput, error) {
 			return ec.unmarshalNRecordCheckinInput2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐRecordCheckinInput(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_transferAdmissionCredential_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input",
+		func(ctx context.Context, v any) (TransferAdmissionCredentialInput, error) {
+			return ec.unmarshalNTransferAdmissionCredentialInput2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐTransferAdmissionCredentialInput(ctx, v)
 		})
 	if err != nil {
 		return nil, err
@@ -1242,6 +1379,75 @@ func (ec *executionContext) _AdmissionPass_qrToken(ctx context.Context, field gr
 	)
 }
 func (ec *executionContext) fieldContext_AdmissionPass_qrToken(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("AdmissionPass", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _AdmissionPass_transferState(ctx context.Context, field graphql.CollectedField, obj *AdmissionPass) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_AdmissionPass_transferState(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.TransferState, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v TransferState) graphql.Marshaler {
+			return ec.marshalNTransferState2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐTransferState(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_AdmissionPass_transferState(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("AdmissionPass", field, false, false, errors.New("field of type TransferState does not have child fields"))
+}
+
+func (ec *executionContext) _AdmissionPass_transferredTo(ctx context.Context, field graphql.CollectedField, obj *AdmissionPass) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_AdmissionPass_transferredTo(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.TransferredTo, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_AdmissionPass_transferredTo(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("AdmissionPass", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _AdmissionPass_transferredAt(ctx context.Context, field graphql.CollectedField, obj *AdmissionPass) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_AdmissionPass_transferredAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.TransferredAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_AdmissionPass_transferredAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("AdmissionPass", field, false, false, errors.New("field of type String does not have child fields"))
 }
 
@@ -1787,6 +1993,138 @@ func (ec *executionContext) fieldContext_Mutation_recordCheckinByUserId(ctx cont
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_transferAdmissionCredential(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_transferAdmissionCredential(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().TransferAdmissionCredential(ctx, fc.Args["input"].(TransferAdmissionCredentialInput))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *TransferResult) graphql.Marshaler {
+			return ec.marshalNTransferResult2ᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐTransferResult(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_transferAdmissionCredential(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_TransferResult(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_transferAdmissionCredential_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_recallTransfer(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_recallTransfer(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().RecallTransfer(ctx, fc.Args["credentialId"].(string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *AdmissionPass) graphql.Marshaler {
+			return ec.marshalNAdmissionPass2ᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐAdmissionPass(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_recallTransfer(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_AdmissionPass(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_recallTransfer_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_acceptTransfer(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_acceptTransfer(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().AcceptTransfer(ctx, fc.Args["pendingTransferId"].(string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *AdmissionPass) graphql.Marshaler {
+			return ec.marshalNAdmissionPass2ᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐAdmissionPass(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_acceptTransfer(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_AdmissionPass(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_acceptTransfer_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Query_admissionPass(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -2228,6 +2566,61 @@ func (ec *executionContext) _ScanValidationResult_eventId(ctx context.Context, f
 }
 func (ec *executionContext) fieldContext_ScanValidationResult_eventId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("ScanValidationResult", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _TransferResult_credential(ctx context.Context, field graphql.CollectedField, obj *TransferResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_TransferResult_credential(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Credential, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *AdmissionPass) graphql.Marshaler {
+			return ec.marshalNAdmissionPass2ᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐAdmissionPass(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_TransferResult_credential(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "TransferResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_AdmissionPass(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _TransferResult_pendingTransferId(ctx context.Context, field graphql.CollectedField, obj *TransferResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_TransferResult_pendingTransferId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.PendingTransferID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNID2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_TransferResult_pendingTransferId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("TransferResult", field, false, false, errors.New("field of type ID does not have child fields"))
 }
 
 func (ec *executionContext) __Service_sdl(ctx context.Context, field graphql.CollectedField, obj *fedruntime.Service) (ret graphql.Marshaler) {
@@ -3386,6 +3779,43 @@ func (ec *executionContext) unmarshalInputRecordCheckinInput(ctx context.Context
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputTransferAdmissionCredentialInput(ctx context.Context, obj any) (TransferAdmissionCredentialInput, error) {
+	var it TransferAdmissionCredentialInput
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"credentialId", "recipientEmail"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "credentialId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("credentialId"))
+			data, err := ec.unmarshalNID2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.CredentialID = data
+		case "recipientEmail":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("recipientEmail"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.RecipientEmail = data
+		}
+	}
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputUpdateAttendancePolicyInput(ctx context.Context, obj any) (UpdateAttendancePolicyInput, error) {
 	var it UpdateAttendancePolicyInput
 	if obj == nil {
@@ -3496,6 +3926,15 @@ func (ec *executionContext) _AdmissionPass(ctx context.Context, sel ast.Selectio
 			out.Values[i] = ec._AdmissionPass_usedAt(ctx, field, obj)
 		case "qrToken":
 			out.Values[i] = ec._AdmissionPass_qrToken(ctx, field, obj)
+		case "transferState":
+			out.Values[i] = ec._AdmissionPass_transferState(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "transferredTo":
+			out.Values[i] = ec._AdmissionPass_transferredTo(ctx, field, obj)
+		case "transferredAt":
+			out.Values[i] = ec._AdmissionPass_transferredAt(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -3799,6 +4238,27 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "transferAdmissionCredential":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_transferAdmissionCredential(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "recallTransfer":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_recallTransfer(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "acceptTransfer":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_acceptTransfer(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -4019,6 +4479,50 @@ func (ec *executionContext) _ScanValidationResult(ctx context.Context, sel ast.S
 			out.Values[i] = ec._ScanValidationResult_orderId(ctx, field, obj)
 		case "eventId":
 			out.Values[i] = ec._ScanValidationResult_eventId(ctx, field, obj)
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferred), math.MaxInt32)))
+
+	for label, dfs := range deferred {
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var transferResultImplementors = []string{"TransferResult"}
+
+func (ec *executionContext) _TransferResult(ctx context.Context, sel ast.SelectionSet, obj *TransferResult) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, transferResultImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("TransferResult")
+		case "credential":
+			out.Values[i] = ec._TransferResult_credential(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "pendingTransferId":
+			out.Values[i] = ec._TransferResult_pendingTransferId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -4593,6 +5097,35 @@ func (ec *executionContext) marshalNString2string(ctx context.Context, sel ast.S
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalNTransferAdmissionCredentialInput2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐTransferAdmissionCredentialInput(ctx context.Context, v any) (TransferAdmissionCredentialInput, error) {
+	res, err := ec.unmarshalInputTransferAdmissionCredentialInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNTransferResult2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐTransferResult(ctx context.Context, sel ast.SelectionSet, v TransferResult) graphql.Marshaler {
+	return ec._TransferResult(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNTransferResult2ᚖgithubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐTransferResult(ctx context.Context, sel ast.SelectionSet, v *TransferResult) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._TransferResult(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalNTransferState2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐTransferState(ctx context.Context, v any) (TransferState, error) {
+	var res TransferState
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNTransferState2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐTransferState(ctx context.Context, sel ast.SelectionSet, v TransferState) graphql.Marshaler {
+	return v
 }
 
 func (ec *executionContext) unmarshalNUpdateAttendancePolicyInput2githubᚗcomᚋacmeᚋattendanceᚑserviceᚋinternalᚋgraphqlᚐUpdateAttendancePolicyInput(ctx context.Context, v any) (UpdateAttendancePolicyInput, error) {

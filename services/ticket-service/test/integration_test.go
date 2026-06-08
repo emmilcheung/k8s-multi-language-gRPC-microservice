@@ -63,6 +63,25 @@ func (*stubVenueClient) GetSeatingPlan(_ context.Context, req *venuev1.GetSeatin
 	}, nil
 }
 
+// stubSavedEventRepo is a no-op stub for saved event repository used in tests
+type stubSavedEventRepo struct{}
+
+func (*stubSavedEventRepo) SaveEvent(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (*stubSavedEventRepo) UnsaveEvent(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (*stubSavedEventRepo) IsSaved(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
+
+func (*stubSavedEventRepo) ListSavedEvents(_ context.Context, _ string, _ string, _ int) ([]*repository.SavedEvent, error) {
+	return []*repository.SavedEvent{}, nil
+}
+
 // setupTestServer starts a real MongoDB via Testcontainers, wires the full Echo stack,
 // and returns a running httptest.Server plus a cleanup function.
 func setupTestServer(t *testing.T) (*httptest.Server, func()) {
@@ -83,7 +102,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, func()) {
 	require.NoError(t, err, "failed to create mongo repository")
 
 	log := zap.NewNop()
-	svc := service.NewTicketService(repo, &noopPublisher{}, log, &stubVenueClient{})
+	svc := service.NewTicketService(repo, &noopPublisher{}, log, &stubVenueClient{}, &stubSavedEventRepo{})
 
 	e := echofx.New()
 	e.HideBanner = true

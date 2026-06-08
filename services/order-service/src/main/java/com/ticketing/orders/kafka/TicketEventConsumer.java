@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
@@ -55,16 +56,20 @@ public class TicketEventConsumer {
             UUID ticketId = UUID.fromString(data.path("id").asText());
             String title = data.path("title").asText();
             BigDecimal price = new BigDecimal(data.path("price").asText());
+            final OffsetDateTime startsAt = data.hasNonNull("startsAt")
+                    ? OffsetDateTime.parse(data.path("startsAt").asText())
+                    : null;
 
             orderTicketRepository.findById(ticketId).ifPresentOrElse(
                     existing -> {
                         existing.setTitle(title);
                         existing.setPrice(price);
+                        existing.setStartsAt(startsAt);
                         orderTicketRepository.save(existing);
                         log.info("Ticket replica updated ticketId={}", ticketId);
                     },
                     () -> {
-                        orderTicketRepository.save(new OrderTicket(ticketId, title, price));
+                        orderTicketRepository.save(new OrderTicket(ticketId, title, price, startsAt));
                         log.info("Ticket replica created ticketId={}", ticketId);
                     }
             );

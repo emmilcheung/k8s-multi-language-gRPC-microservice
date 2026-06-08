@@ -1,0 +1,9 @@
+query RefundEligibility($orderId: ID!) {
+  refundEligibility(orderId: $orderId) {
+    orderId
+    eligible
+    reason
+    refundableAmount
+    cutoffAt
+  }
+}

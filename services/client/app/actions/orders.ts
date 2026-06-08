@@ -9,10 +9,13 @@ import {
   CreateOrderDocument,
   CreatePaymentDocument,
   CreateSeatedOrderDocument,
+  RequestRefundDocument,
+  TransferAdmissionCredentialDocument,
 } from "@/lib/graphql/generated";
 
 export interface OrderState {
   error?: string;
+  success?: string;
 }
 
 function isRedirectError(error: unknown): error is Error & { digest?: string } {
@@ -164,5 +167,56 @@ export async function createAutoAssignSeatedOrder(
   } catch (error) {
     if (isRedirectError(error)) throw error;
     return { error: error instanceof Error ? error.message : "Failed to create auto-assign order." };
+  }
+}
+
+export async function initiateTransfer(
+  orderId: string,
+  _prev: OrderState,
+  formData: FormData
+): Promise<OrderState> {
+  const credentialId = String(formData.get("credentialId") ?? "").trim();
+  const recipient = String(formData.get("recipient") ?? "").trim();
+  if (!credentialId) {
+    return { error: "Pass credential is required." };
+  }
+  if (!recipient) {
+    return { error: "Recipient email is required." };
+  }
+  try {
+    await executeMutation(TransferAdmissionCredentialDocument, {
+      input: {
+        credentialId,
+        recipientEmail: recipient,
+      },
+    });
+    revalidatePath(`/orders/${orderId}`);
+    revalidatePath(`/orders/${orderId}/transfer`);
+    return { success: "Transfer request sent." };
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return { error: error instanceof Error ? error.message : "Failed to transfer pass." };
+  }
+}
+
+export async function requestRefund(
+  orderId: string,
+  _prev: OrderState,
+  formData: FormData
+): Promise<OrderState> {
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (!reason) {
+    return { error: "Refund reason is required." };
+  }
+  try {
+    await executeMutation(RequestRefundDocument, {
+      input: { orderId, reason },
+    });
+    revalidatePath(`/orders/${orderId}`);
+    revalidatePath(`/orders/${orderId}/refund`);
+    return { success: "Refund request submitted." };
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return { error: error instanceof Error ? error.message : "Failed to request refund." };
   }
 }

@@ -48,10 +48,10 @@ export function VenueForm({
   const [state, formAction, pending] = useActionState(action, initialState);
 
   return (
-    <div className="bg-card border border-border rounded-lg w-full max-w-md p-8 flex flex-col gap-6 shadow-sm">
+    <div className="w-full max-w-md rounded-xl border border-line bg-card p-8 flex flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-bold tracking-tight">{submitLabel}</h2>
-        <p className="text-sm text-muted-foreground">Enter the details for your venue.</p>
+        <h2 className="text-lg font-semibold tracking-tight text-ink">{submitLabel}</h2>
+        <p className="text-sm text-mute">Enter the details for your venue.</p>
       </div>
 
       <Separator />
@@ -66,11 +66,11 @@ export function VenueForm({
 
         {/* Name */}
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="name" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <Label htmlFor="name" className="text-xs font-medium text-mute uppercase tracking-wider">
             Venue Name
           </Label>
           <div className="relative">
-            <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+            <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
             <Input
               id="name"
               name="name"
@@ -85,11 +85,11 @@ export function VenueForm({
 
         {/* Capacity */}
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="capacity" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <Label htmlFor="capacity" className="text-xs font-medium text-mute uppercase tracking-wider">
             Total Capacity
           </Label>
           <div className="relative">
-            <Users className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+            <Users className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
             <Input
               id="capacity"
               name="capacity"
@@ -106,11 +106,11 @@ export function VenueForm({
 
         {/* Timezone */}
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="timezone" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <Label htmlFor="timezone" className="text-xs font-medium text-mute uppercase tracking-wider">
             Timezone
           </Label>
           <div className="relative">
-            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
             <Input
               id="timezone"
               name="timezone"
@@ -127,18 +127,18 @@ export function VenueForm({
               ))}
             </datalist>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-mute">
             IANA timezone name (e.g. America/New_York, Europe/London).
           </p>
         </div>
 
         {/* Address */}
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="address" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <Label htmlFor="address" className="text-xs font-medium text-mute uppercase tracking-wider">
             Address
           </Label>
           <div className="relative">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-mute pointer-events-none" />
             <Input
               id="address"
               name="address"
@@ -148,7 +148,7 @@ export function VenueForm({
               className="pl-9"
             />
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-mute">
             Street address shown on ticket listings and event pages.
           </p>
         </div>

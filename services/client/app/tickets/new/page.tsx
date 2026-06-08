@@ -26,7 +26,7 @@ export default async function NewTicketPage() {
           href="/"
           className={cn(
             buttonVariants({ variant: "ghost", size: "sm" }),
-            "gap-1.5 text-muted-foreground hover:text-foreground -ml-2"
+            "gap-1.5 text-mute hover:text-ink -ml-2"
           )}
         >
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -36,8 +36,8 @@ export default async function NewTicketPage() {
 
       {/* Heading */}
       <div className="w-full max-w-md flex flex-col gap-1">
-        <h1 className="text-2xl font-bold tracking-tight">List a ticket</h1>
-        <p className="text-sm text-muted-foreground">
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">List a ticket</h1>
+        <p className="text-sm text-mute">
           Set your price and let buyers find you on the marketplace.
         </p>
       </div>

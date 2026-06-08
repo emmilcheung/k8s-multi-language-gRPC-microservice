@@ -6,12 +6,14 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { base, authHeaders } from "@/lib/server-utils";
 import { executeQuery, executeMutation } from "@/lib/graphql/execute";
-import { ApiError } from "@/lib/api";
+import { ApiError, serverApi } from "@/lib/api";
 import {
   TicketsBrowseDocument,
   CreateTicketDocument,
   UpdateTicketDocument,
+  UpdateSeatingPlanDocument,
   UpdateAttendancePolicyDocument,
+  type TicketFilter,
 } from "@/lib/graphql/generated";
 import type { AvailabilitySnapshot, SeatingPlan, Ticket } from "@/lib/types";
 import { createSeatingPlanForTicket } from "./venues";
@@ -56,14 +58,24 @@ async function isPubliclyAvailableSeatedTicket(planId: string): Promise<boolean>
  * This is a Server Action so it can be called from Client Components without
  * exposing the internal API URL or auth cookie logic to the browser.
  */
-export async function fetchTicketPageViaGraphQL(after: string | null): Promise<TicketPage> {
+export async function fetchTicketPageViaGraphQL(after: string | null, filter?: TicketFilter): Promise<TicketPage> {
+  const applySeatedVisibility = async (tickets: Ticket[]): Promise<Ticket[]> => {
+    const visible = await Promise.all(
+      tickets.map(async (ticket) => {
+        if (!ticket.seatingPlanId) return ticket;
+        return (await isPubliclyAvailableSeatedTicket(ticket.seatingPlanId)) ? ticket : null;
+      })
+    );
+    return visible.filter((ticket): ticket is Ticket => ticket !== null);
+  };
+
   try {
     const cookieStore = await cookies();
     const cookieHeader = cookieStore.toString();
 
     const data = await executeQuery(
       TicketsBrowseDocument,
-      { first: PAGE_SIZE, after: after || undefined },
+      { first: PAGE_SIZE, after: after || undefined, filter },
       { cookie: cookieHeader }
     );
 
@@ -78,28 +90,34 @@ export async function fetchTicketPageViaGraphQL(after: string | null): Promise<T
       available: edge.node.available,
       ticketType: edge.node.ticketType,
       seatingPlanId: edge.node.seatingPlan?.id ?? null,
+      event: edge.node.event ? {
+        title: edge.node.event.title,
+        startsAt: edge.node.event.startsAt,
+        venueName: edge.node.event.venueName,
+      } : undefined,
     }));
 
-    const visibleTickets = (
-      await Promise.all(
-        gqlTickets.map(async (ticket) => {
-          if (!ticket.seatingPlanId) return ticket;
-          return (await isPubliclyAvailableSeatedTicket(ticket.seatingPlanId)) ? ticket : null;
-        })
-      )
-    ).filter((ticket): ticket is (typeof gqlTickets)[number] => ticket !== null);
-
-    const cursor = data.ticketsConnection.pageInfo.endCursor ?? null;
-    const hasMore = data.ticketsConnection.pageInfo.hasNextPage;
-
+    const visibleTickets = await applySeatedVisibility(gqlTickets as unknown as Ticket[]);
     return {
       tickets: visibleTickets as unknown as Ticket[],
-      cursor,
-      hasMore,
+      cursor: data.ticketsConnection.pageInfo.endCursor ?? null,
+      hasMore: data.ticketsConnection.pageInfo.hasNextPage,
     };
   } catch {
-    // Non-fatal: return empty page so the UI degrades gracefully.
-    return { tickets: [], cursor: null, hasMore: false };
+    try {
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE), available: "true" });
+      if (after) params.set("after", after);
+      const restTickets = await serverApi<Ticket[]>(`/api/tickets?${params.toString()}`);
+      const visibleTickets = await applySeatedVisibility(restTickets);
+      return {
+        tickets: visibleTickets,
+        cursor: restTickets.at(-1)?.id ?? null,
+        hasMore: restTickets.length === PAGE_SIZE,
+      };
+    } catch {
+      // Non-fatal: return empty page so the UI degrades gracefully.
+      return { tickets: [], cursor: null, hasMore: false };
+    }
   }
 }
 
@@ -183,9 +201,11 @@ export async function createTicket(
   const venueId = (formData.get("venueId") as string | null) ?? "";
   const maxSeatsPerOrder = parseOptionalPositiveInt(formData.get("maxSeatsPerOrder") as string | null);
 
+  // Section/seat pricing: price is configured in the plan editor, not on the ticket.
+  const deferredPricing = pricingMode === "seat" || pricingMode === "section";
+
   if (!title?.trim()) return { error: "Title is required." };
-  // Seat pricing: price is configured per-seat in the plan editor, not on the ticket.
-  if (pricingMode !== "seat") {
+  if (!deferredPricing) {
     if (!priceRaw || isNaN(priceNum) || priceNum <= 0) return { error: "Price must be a positive number." };
   }
 
@@ -223,8 +243,8 @@ export async function createTicket(
   }
 
   // Create the base ticket (without seatingPlanId initially)
-  // Seat pricing: send "0" as placeholder — actual price comes from per-seat plan configuration.
-  const effectivePrice = pricingMode === "seat" ? "0" : priceRaw;
+  // Deferred pricing (section/seat): send "0" placeholder — actual prices come from the plan editor.
+  const effectivePrice = deferredPricing ? "0" : priceRaw;
   const reqBody: Record<string, unknown> = { title: title.trim(), price: effectivePrice };
 
   if (ticketType === "GA") {
@@ -307,6 +327,10 @@ export async function updateTicket(
   const title = formData.get("title") as string;
   const priceRaw = (formData.get("price") as string)?.trim();
   const priceNum = parseFloat(priceRaw);
+  const pricingMode = (formData.get("pricingMode") as string | null) ?? "single";
+  const deferredPricing = pricingMode === "seat" || pricingMode === "section";
+  const seatingPlanId = (formData.get("seatingPlanId") as string | null)?.trim() || "";
+  const maxSeatsPerOrder = parseOptionalPositiveInt(formData.get("maxSeatsPerOrder") as string | null);
   const quota = parseOptionalPositiveInt(formData.get("quota") as string | null);
   const maxPerUser = parseOptionalPositiveInt(formData.get("maxPerUser") as string | null);
   let startsAt = (formData.get("startsAt") as string)?.trim() || "";
@@ -319,7 +343,9 @@ export async function updateTicket(
   const requireQrForEntry = parseRequireQrForEntry(formData.get("requireQrForEntry") as string | null);
 
   if (!title?.trim()) return { error: "Title is required." };
-  if (!priceRaw || isNaN(priceNum) || priceNum <= 0) return { error: "Price must be a positive number." };
+  if (!deferredPricing && (!priceRaw || isNaN(priceNum) || priceNum <= 0)) {
+    return { error: "Price must be a positive number." };
+  }
   if (maxPerUser !== undefined && quota !== undefined && maxPerUser > quota) {
     return { error: "Max per buyer cannot exceed the total capacity." };
   }
@@ -334,7 +360,7 @@ export async function updateTicket(
 
   const updateInput = {
     title: title.trim(),
-    price: Math.round(priceNum * 100),
+    ...(deferredPricing ? {} : { price: Math.round(priceNum * 100) }),
     ...(quota !== undefined && { quota }),
     ...(maxPerUser !== undefined && { maxPerUser }),
     event: {
@@ -354,6 +380,24 @@ export async function updateTicket(
     if (err instanceof ApiError && err.status === 401) redirect("/auth/signin");
     const msg = err instanceof Error ? err.message : "Failed to update ticket.";
     return { error: msg };
+  }
+
+  // pricingMode and maxSeatsPerOrder live on the SeatingPlan, not the Ticket — route them to the plan.
+  const planInput = {
+    ...(formData.get("pricingMode") ? { pricingMode } : {}),
+    ...(maxSeatsPerOrder !== undefined && { maxSeatsPerOrder }),
+  };
+  if (seatingPlanId && Object.keys(planInput).length > 0) {
+    try {
+      await executeMutation(UpdateSeatingPlanDocument, {
+        id: seatingPlanId,
+        input: planInput,
+      });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) redirect("/auth/signin");
+      const msg = err instanceof Error ? err.message : "Failed to update plan settings.";
+      return { error: msg };
+    }
   }
 
   const attendanceError = await upsertAttendanceSettings(ticketId, requireQrForEntry);

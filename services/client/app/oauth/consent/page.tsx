@@ -78,26 +78,26 @@ export default async function ConsentPage({
         {/* Header */}
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2 mb-1">
-            <span className="inline-block h-px w-6 bg-primary" />
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+            <span className="inline-block h-px w-6 bg-accent" />
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">
               Authorization Request
             </span>
           </div>
-          <h1 className="font-display font-extrabold text-2xl tracking-tight text-foreground">
+          <h1 className="font-sans font-extrabold text-2xl tracking-tight text-ink">
             Allow access?
           </h1>
-          <p className="text-sm text-muted-foreground">
-            <span className="font-semibold text-foreground">{consent.clientName}</span>
+          <p className="text-sm text-mute">
+            <span className="font-semibold text-ink">{consent.clientName}</span>
             {" "}is requesting permission to access your Marquee account.
           </p>
         </div>
 
         {/* Consent card */}
-        <div className="bg-card border border-border rounded-lg flex flex-col gap-0 shadow-sm overflow-hidden">
+        <div className="bg-card border border-line rounded-lg flex flex-col gap-0 shadow-sm overflow-hidden">
 
           {/* Scope list */}
           <div className="px-6 py-5 flex flex-col gap-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <p className="text-xs font-semibold uppercase tracking-wider text-mute">
               Requested permissions
             </p>
             <ul className="flex flex-col gap-2.5">
@@ -105,13 +105,13 @@ export default async function ConsentPage({
                 const meta = SCOPE_LABELS[scope];
                 return (
                   <li key={scope} className="flex items-start gap-3">
-                    <Shield className="size-4 text-primary mt-0.5 shrink-0" />
+                    <Shield className="size-4 text-accent mt-0.5 shrink-0" />
                     <div className="flex flex-col gap-0.5 min-w-0">
-                      <span className="text-sm font-medium text-foreground">
+                      <span className="text-sm font-medium text-ink">
                         {meta?.label ?? scope}
                       </span>
                       {meta?.description && (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-mute">
                           {meta.description}
                         </span>
                       )}
@@ -141,10 +141,10 @@ export default async function ConsentPage({
           {/* App identity */}
           <div className="px-6 py-4 flex items-center justify-between">
             <div className="flex flex-col gap-0.5">
-              <span className="text-xs text-muted-foreground">Application</span>
-              <span className="text-sm font-medium text-foreground">{consent.clientName}</span>
+              <span className="text-xs text-mute">Application</span>
+              <span className="text-sm font-medium text-ink">{consent.clientName}</span>
             </div>
-            <Badge variant="outline" className="text-xs font-mono text-muted-foreground">
+            <Badge variant="outline" className="text-xs font-mono text-mute">
               {consent.clientId}
             </Badge>
           </div>
@@ -159,7 +159,7 @@ export default async function ConsentPage({
           </div>
         </div>
 
-        <p className="text-xs text-muted-foreground text-center">
+        <p className="text-xs text-mute text-center">
           You can revoke access at any time from your account settings.
         </p>
       </div>

@@ -23,6 +23,15 @@ function formatPaymentMethodLabel(method: SavedPaymentMethod): string {
   return method.brand?.toUpperCase() ?? "Saved method";
 }
 
+function formatPaymentMethodBadge(method: SavedPaymentMethod): string {
+  const brand = method.brand?.trim().toLowerCase();
+  if (brand === "visa") return "VISA";
+  if (brand === "mastercard") return "MC";
+  if (brand === "apple pay") return "AP";
+  if (brand) return brand.slice(0, 2).toUpperCase();
+  return "PM";
+}
+
 export function SettingsPaymentMethods({
   initialPaymentMethods,
 }: SettingsPaymentMethodsProps) {
@@ -92,7 +101,17 @@ export function SettingsPaymentMethods({
   };
 
   return (
-    <>
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3 rounded-xl border border-line bg-subtle px-4 py-4">
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-ink">Saved cards and wallets</p>
+          <p className="text-xs text-mute">
+            Used for ticket purchases and fast checkout.
+          </p>
+        </div>
+        <div className="text-xs text-mute">{paymentMethods.length} saved</div>
+      </div>
+
       <SettingsAddPaymentMethodForm onSaved={handleSaved} />
 
       {error && (
@@ -102,54 +121,68 @@ export function SettingsPaymentMethods({
       )}
 
       {paymentMethods.length === 0 ? (
-        <p className="rounded border border-dashed border-border p-4 text-sm text-muted-foreground">
+        <div className="rounded-xl border border-dashed border-line px-4 py-5 text-sm text-mute">
           No saved payment methods yet.
-        </p>
+        </div>
       ) : (
-        paymentMethods.map((method) => {
-          const pending = pendingMethodId === method.id;
+        <div className="overflow-hidden rounded-xl border border-line">
+          {paymentMethods.map((method, index) => {
+            const pending = pendingMethodId === method.id;
 
-          return (
-            <div
-              key={method.id}
-              className="flex flex-col gap-3 rounded border border-border p-3 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-semibold">{formatPaymentMethodLabel(method)}</p>
-                  {method.isDefault && <Badge className="text-xs">Default</Badge>}
+            return (
+              <div
+                key={method.id}
+                className={cn(
+                  "flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between",
+                  index < paymentMethods.length - 1 && "border-b border-line"
+                )}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex h-7 min-w-11 items-center justify-center rounded-md border border-line bg-subtle px-2 text-[10px] font-semibold tracking-[0.12em] text-mute">
+                    {formatPaymentMethodBadge(method)}
+                  </span>
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium text-ink">{formatPaymentMethodLabel(method)}</p>
+                      {method.isDefault ? (
+                        <Badge className="text-xs" tone="neutral">
+                          Default
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-mute">
+                      {method.expMonth && method.expYear
+                        ? `Exp ${String(method.expMonth).padStart(2, "0")}/${method.expYear}`
+                        : "Expiry not available"}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {method.expMonth && method.expYear
-                    ? `Expires ${String(method.expMonth).padStart(2, "0")}/${method.expYear}`
-                    : "Expiry not available"}
-                </p>
-              </div>
 
-              <div className="flex gap-2">
-                {!method.isDefault && (
+                <div className="flex flex-wrap gap-2">
+                  {!method.isDefault && (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => void handleSetDefault(method.id)}
+                      className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+                    >
+                      Set default
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={pending}
-                    onClick={() => void handleSetDefault(method.id)}
-                    className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                    onClick={() => void handleDelete(method.id)}
+                    className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-destructive")}
                   >
-                    Set default
+                    Delete
                   </button>
-                )}
-                <button
-                  type="button"
-                  disabled={pending}
-                  onClick={() => void handleDelete(method.id)}
-                  className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-destructive")}
-                >
-                  Delete
-                </button>
+                </div>
               </div>
-            </div>
-          );
-        })
+            );
+          })}
+        </div>
       )}
-    </>
+    </div>
   );
 }

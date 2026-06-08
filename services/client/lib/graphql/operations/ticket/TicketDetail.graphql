@@ -12,6 +12,7 @@ query TicketDetail($id: ID!) {
     available
     maxPerUser
     ticketType
+    savedByMe
     seatingPlan {
       id
     }

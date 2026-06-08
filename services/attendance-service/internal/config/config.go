@@ -27,8 +27,9 @@ type Config struct {
 	KafkaSSLCALocation    string
 	QRSigningKey          string
 	TicketServiceURL      string
+	AuthServiceURL        string
 	UserIDSigningKey      string
-	OTELEndpoint          string // optional; schema-validated if present
+	OTELEndpoint          string        // optional; schema-validated if present
 	QRTokenTTL            time.Duration // configurable via QR_TOKEN_TTL; 0 means use service default (48h)
 }
 
@@ -91,6 +92,10 @@ func Load() (*Config, error) {
 	if ticketServiceURL == "" {
 		errs = append(errs, "TICKET_SERVICE_URL is required")
 	}
+	authServiceURL := strings.TrimSpace(getEnv("AUTH_SERVICE_URL", "http://auth-service:3000"))
+	if _, err := url.ParseRequestURI(authServiceURL); err != nil {
+		errs = append(errs, fmt.Sprintf("AUTH_SERVICE_URL must be a valid URL, got %q", authServiceURL))
+	}
 
 	userIDSigningKey := getEnv("X_USER_ID_SIGNING_KEY", "")
 
@@ -128,6 +133,7 @@ func Load() (*Config, error) {
 		KafkaSSLCALocation:    kafkaSSLCALocation,
 		QRSigningKey:          qrSigningKey,
 		TicketServiceURL:      ticketServiceURL,
+		AuthServiceURL:        authServiceURL,
 		UserIDSigningKey:      userIDSigningKey,
 		OTELEndpoint:          otelEndpoint,
 		QRTokenTTL:            qrTokenTTL,

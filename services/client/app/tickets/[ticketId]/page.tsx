@@ -1,5 +1,6 @@
 // app/tickets/[ticketId]/page.tsx — Ticket detail page.
-// Split layout: info panel (left) + action panel (right). Owner sees edit form.
+// Redesigned layout: hero band (left), quick facts, about section, purchase panel (sticky right).
+// Owner edit form and seating preview in right column.
 
 export const dynamic = "force-dynamic";
 
@@ -8,29 +9,25 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ApiError, serverApi } from "@/lib/api";
 import { executeQuery } from "@/lib/graphql/execute";
-import { TicketDetailDocument, AttendancePolicyDocument } from "@/lib/graphql/generated";
+import {
+  TicketDetailDocument,
+  AttendancePolicyDocument,
+  TicketsBrowseDocument,
+} from "@/lib/graphql/generated";
 import type { Ticket, SeatingPlan, PriceTier, AvailabilitySnapshot } from "@/lib/types";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { EventPoster } from "@/components/system";
 import { cn } from "@/lib/utils";
 import { TicketForm } from "@/components/ticket-form";
-import { PurchaseButton } from "@/components/purchase-button";
 import { SeatingPlanPreview } from "@/components/seating-plan-preview";
 import { updateTicket } from "@/app/actions/tickets";
 import { fetchPriceTiers } from "@/app/actions/venues";
-import { Separator } from "@/components/ui/separator";
-import { Progress, ProgressLabel } from "@/components/ui/progress";
-import {
-  ArrowLeft,
-  Ticket as TicketIcon,
-  Tag,
-  User,
-  ShieldCheck,
-  MapPin,
-  CalendarDays,
-  AlignLeft,
-} from "lucide-react";
+import { PurchasePanel } from "./_components/purchase-panel";
+import { QuickFacts } from "./_components/quick-facts";
+import { SaveEventButton } from "./_components/save-event-button";
+import { ArrowLeft, MapPin } from "lucide-react";
 
 interface Props {
   params: Promise<{ ticketId: string }>;
@@ -57,7 +54,7 @@ function toTicketFormType(
   return "GA";
 }
 
-async function getTicket(ticketId: string): Promise<Ticket> {
+async function getTicket(ticketId: string): Promise<Ticket & { savedByMe: boolean }> {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
 
@@ -82,6 +79,7 @@ async function getTicket(ticketId: string): Promise<Ticket> {
     maxPerUser: gql.maxPerUser ?? undefined,
     ticketType: gql.ticketType,
     seatingPlanId: gql.seatingPlan?.id ?? undefined,
+    savedByMe: gql.savedByMe,
     event: gql.event
       ? {
           title: gql.event.title,
@@ -93,7 +91,7 @@ async function getTicket(ticketId: string): Promise<Ticket> {
           venueAddress: gql.event.venueAddress ?? undefined,
         }
       : undefined,
-  } as Ticket;
+  } as Ticket & { savedByMe: boolean };
 }
 
 export async function generateMetadata() {
@@ -103,7 +101,7 @@ export async function generateMetadata() {
 export default async function TicketDetailPage({ params }: Props) {
   const { ticketId } = await params;
 
-  let ticket: Ticket;
+  let ticket: Ticket & { savedByMe: boolean };
   try {
     ticket = await getTicket(ticketId);
   } catch (error) {
@@ -185,6 +183,30 @@ export default async function TicketDetailPage({ params }: Props) {
   const gaMaxQuantity = ticket.quota
     ? Math.min(ticket.maxPerUser ?? ticket.quota, Math.min(ticket.quota, 10))
     : 1;
+
+  let relatedEvents: Array<{
+    id: string;
+    title: string;
+    price: number;
+    event?: {
+      title?: string | null;
+      startsAt?: string | null;
+      venueName?: string | null;
+    } | null;
+  }> = [];
+  try {
+    const data = await executeQuery(
+      TicketsBrowseDocument,
+      { first: 4 },
+      { cookie: cookieStore.toString() }
+    );
+    relatedEvents = (data?.ticketsConnection?.edges ?? [])
+      .map((edge) => edge.node)
+      .filter((node) => node.id !== ticket.id)
+      .slice(0, 3);
+  } catch {
+    relatedEvents = [];
+  }
   const gaRemaining =
     !isSeated && ticket.quota != null
       ? Math.max(0, ticket.quota - (ticket.reserved ?? 0) - (ticket.sold ?? 0))
@@ -201,7 +223,7 @@ export default async function TicketDetailPage({ params }: Props) {
       ? {
           label: "Unavailable",
           badge: "Unavailable",
-          badgeClass: "bg-muted/40 text-muted-foreground border-muted/20",
+          badgeClass: "bg-subtle/40 text-mute border-line/20",
           message: "This seating plan is not active, so this ticket cannot be purchased right now.",
         }
       : seatedSoldOut
@@ -222,161 +244,195 @@ export default async function TicketDetailPage({ params }: Props) {
           badgeClass:
             ticket.sold != null && ticket.quota != null && ticket.sold >= ticket.quota
               ? "bg-destructive/15 text-destructive border-destructive/20"
-              : "bg-muted/40 text-muted-foreground border-muted/20",
+              : "bg-subtle/40 text-mute border-line/20",
           message:
             ticket.sold != null && ticket.quota != null && ticket.sold >= ticket.quota
               ? "This ticket is sold out."
               : "All remaining tickets are currently reserved or unavailable.",
         }
+      : isReserved
+      ? {
+          label: "Already Reserved",
+          badge: "Already Reserved",
+          badgeClass: "bg-subtle/40 text-mute border-line/20",
+          message: "You already have an active reservation for this ticket.",
+        }
       : null;
 
   return (
-    <div className="flex flex-col gap-8 max-w-4xl mx-auto">
-      {/* Back */}
+    <div className="flex flex-col gap-8 max-w-6xl mx-auto">
+      {/* Back button */}
       <Link
         href="/"
         className={cn(
           buttonVariants({ variant: "ghost", size: "sm" }),
-          "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2 text-xs"
+          "gap-1.5 text-mute self-start -ml-2 text-xs"
         )}
       >
         <ArrowLeft className="w-3.5 h-3.5" />
         All tickets
       </Link>
 
-      {/* Main panel */}
-      <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-        {/* Left — ticket info */}
-        <div className="bg-card border border-border border-l-[3px] border-l-primary rounded overflow-hidden flex flex-col gap-6">
-          {/* Event image banner */}
-          {ticket.event?.imageUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={ticket.event.imageUrl}
-              alt={ticket.event.title || ticket.title}
-              className="w-full h-48 object-cover"
-            />
-          )}
-          <div className="p-8 flex flex-col gap-6">
-          {/* Icon + reserved badge */}
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-primary/10 ring-1 ring-primary/20 shrink-0">
-              <TicketIcon className="w-7 h-7 text-primary" />
-            </div>
-            <div className="flex items-center gap-2">
-              {isSeated && (
-                <Badge className="bg-primary/15 text-primary border-primary/20">
-                  <MapPin className="w-3 h-3 mr-1" />
-                  Seated
-                </Badge>
-              )}
-              {isReserved && (
-                <Badge className="bg-destructive/15 text-destructive border-destructive/20">
-                  Reserved
-                </Badge>
-              )}
-              {!isOwner && purchaseGate && (
-                <Badge className={purchaseGate.badgeClass}>{purchaseGate.badge}</Badge>
-              )}
-            </div>
-          </div>
+      {/* Main grid: left column (content) + right column (purchase panel) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left — 2 columns of main content */}
+        <div className="lg:col-span-2 flex flex-col gap-6">
+          {/* Rich hero with background image or gradient */}
+          <div className="relative overflow-hidden rounded-lg border border-line h-80">
+            {/* Background — plain <img> (imageUrl is an arbitrary organizer URL;
+                next/image would require every host in images.remotePatterns). */}
+            {ticket.event?.imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={ticket.event.imageUrl}
+                alt={ticket.event?.title || ticket.title || "Event"}
+                className="absolute inset-0 h-full w-full object-cover"
+              />
+            ) : (
+              <div className="absolute inset-0 bg-gradient-to-br from-accent/70 via-accent to-ink" />
+            )}
 
-          {/* Title */}
-          <h1 className="font-display font-extrabold text-2xl tracking-tight leading-tight">
-            {ticket.event?.title || ticket.title}
-          </h1>
+            {/* Scrim overlay for legibility */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
 
-          {/* Event date + venue */}
-          {ticket.event?.startsAt && (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2 text-sm">
-                <CalendarDays className="w-4 h-4 text-primary/70 shrink-0" />
-                <span>
-                  {new Date(ticket.event.startsAt).toLocaleDateString("en-US", {
-                    weekday: "short",
-                    month: "long",
-                    day: "numeric",
-                    year: "numeric",
-                  })}{" "}
-                  ·{" "}
-                  {new Date(ticket.event.startsAt).toLocaleTimeString("en-US", {
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </span>
-              </div>
-              {ticket.event.venueName && (
-                <div className="flex items-start gap-2 text-sm text-muted-foreground">
-                  <MapPin className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>
-                    {ticket.event.venueName}
-                    {ticket.event.venueAddress && (
-                      <> · {ticket.event.venueAddress}</>
-                    )}
-                  </span>
-                </div>
-              )}
-              {ticket.event.description && (
-                <div className="flex items-start gap-2 text-sm text-muted-foreground mt-1">
-                  <AlignLeft className="w-4 h-4 shrink-0 mt-0.5" />
-                  <p className="leading-relaxed">{ticket.event.description}</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Price */}
-          <div className="flex items-center gap-3">
-            <Tag className="w-4 h-4 text-muted-foreground" />
-            <span className="font-display font-extrabold text-2xl text-foreground">
-              ${parseFloat(ticket.price).toFixed(2)}
-            </span>
-          </div>
-
-          <Separator />
-          {/* Meta row */}
-          <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <User className="w-3.5 h-3.5" />
-              {isOwner ? "Your listing" : "Listed by seller"}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-primary/60" />
-              Secure purchase
-            </span>
-          </div>
-
-          {/* GA quota availability bar */}
-          {ticket.quota != null && ticket.quota > 1 && (
-            <div className="flex flex-col gap-2 pt-1">
-              <Progress
-                value={Math.min(100, (((ticket.reserved ?? 0) + (ticket.sold ?? 0)) / ticket.quota) * 100)}
+            {/* Top-left badges */}
+            <div className="absolute top-4 left-4 flex gap-2 z-10">
+              <Badge
+                tone="neutral"
+                dot
+                className="bg-black/40 text-white border-white/25"
               >
-                <ProgressLabel>Availability</ProgressLabel>
-                <span className="ml-auto text-sm text-muted-foreground tabular-nums">{Math.max(0, ticket.quota! - (ticket.reserved ?? 0) - (ticket.sold ?? 0))} / {ticket.quota} remaining</span>
-              </Progress>
-              {ticket.maxPerUser != null && ticket.maxPerUser > 1 && (
-                <p className="text-xs text-muted-foreground">
-                  Max {ticket.maxPerUser} per order
-                </p>
+                {(ticket.available ?? 0) > 0 ? "On sale" : "Sold out"}
+              </Badge>
+              <Badge
+                tone="neutral"
+                className="bg-black/40 text-white border-white/25"
+              >
+                {ticket.ticketType ?? "General Admission"}
+              </Badge>
+              {isOwner && (
+                <Badge
+                  tone="neutral"
+                  className="bg-black/40 text-white border-white/25"
+                >
+                  Your listing
+                </Badge>
               )}
             </div>
-          )}
-          </div>{/* end p-8 inner div */}
-        </div>
 
-        {/* Right — action panel */}
-        <div className="flex flex-col gap-4">
+            {/* Bottom-left text overlay */}
+            <div className="absolute bottom-0 left-0 right-0 p-6 text-white z-10">
+              <div className="text-xs font-semibold uppercase tracking-widest opacity-85 mb-2">
+                {ticket.event?.venueName ? "Live event" : "Event"}
+              </div>
+              <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight leading-tight mb-2">
+                {ticket.event?.title || ticket.title || "Event"}
+              </h1>
+              <div className="flex items-center gap-2 text-sm opacity-95">
+                {ticket.event?.venueName && (
+                  <>
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>{ticket.event.venueName}</span>
+                  </>
+                )}
+                {ticket.event?.startsAt && (
+                  <>
+                    {ticket.event.venueName && <span>·</span>}
+                    <span>
+                      {new Date(ticket.event.startsAt).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Quick facts strip */}
+          <QuickFacts ticket={ticket} gaRemaining={gaRemaining} />
+
+          {/* About section */}
+          {ticket.event?.description ? (
+            <div className="prose prose-sm max-w-none mt-2 text-text leading-relaxed">
+              {ticket.event.description}
+            </div>
+          ) : (
+            <p className="text-text leading-relaxed">
+              More details coming soon.
+            </p>
+          )}
+
+          {/* Ticket-content card (for all viewers including owner) */}
+          {isSeated ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Pick your section</CardTitle>
+                <p className="text-xs text-mute mt-1">Tap a section to view available seats and prices.</p>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                {/* Placeholder seat map */}
+                <div className="bg-subtle border border-line rounded-md h-40 flex items-center justify-center">
+                  <span className="text-sm text-mute">Seat map</span>
+                </div>
+                <Link
+                  href={`/tickets/${ticketId}/seats`}
+                  className={cn(buttonVariants({ variant: "default", size: "sm" }), "w-full")}
+                >
+                  View seat map
+                </Link>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Ticket type</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/* Single GA ticket type card */}
+                <div
+                  className={cn(
+                    "p-4 rounded-md border border-l-2 bg-card",
+                    "border-line border-l-accent flex flex-col gap-3"
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-ink">
+                      {ticket.ticketType ?? "General Admission"}
+                    </span>
+                    <span className="text-sm font-semibold font-mono tabular-nums text-ink">
+                      ${parseFloat(ticket.price).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span
+                      className={cn(
+                        "text-xs font-mono tabular-nums",
+                        gaRemaining != null && gaRemaining < 20 ? "text-bad" : "text-mute"
+                      )}
+                    >
+                      {gaRemaining != null ? `${gaRemaining} remaining` : "—"}
+                    </span>
+                    <Badge tone="accent" className="text-xs">
+                      Selected
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Owner edit form */}
           {isOwner ? (
-            /* Owner: edit form + seating plan attachment */
             <div className="flex flex-col gap-4">
-              <div className="bg-card border border-border rounded p-4 flex flex-col gap-3">
+              <div className="bg-card border border-line rounded p-4 flex flex-col gap-3">
                 <p className="text-sm font-semibold">Attendance tools</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-mute">
                   Open attendance settings to view checked-in attendees and manage QR policy for this ticket.
                 </p>
                 <Link
-                  href={`/tickets/${ticketId}/attendance`}
+                  href={`/organizer/events/${ticketId}/attendance`}
                   className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
                 >
                   Attendance settings
@@ -392,109 +448,109 @@ export default async function TicketDetailPage({ params }: Props) {
               </div>
 
               {!isReserved ? (
-                <div className="flex flex-col gap-3">
-                  <TicketForm
-                    action={updateAction}
-                    defaultTitle={ticket.title}
-                    defaultPrice={ticket.price}
-                    defaultQuota={ticket.quota}
-                    defaultMaxPerUser={ticket.maxPerUser}
-                    defaultTicketType={toTicketFormType(ticket, attachedPlan)}
-                    defaultVenueId={attachedPlan?.venueId ?? undefined}
-                    defaultPricingMode={attachedPlan?.pricingMode}
-                    defaultStartsAt={toDateTimeLocalInput(ticket.event?.startsAt)}
-                    defaultEndsAt={toDateTimeLocalInput(ticket.event?.endsAt)}
-                    defaultEventTitle={ticket.event?.title ?? ""}
-                    defaultEventDescription={ticket.event?.description ?? ""}
-                    defaultEventImageUrl={ticket.event?.imageUrl ?? ""}
-                    defaultVenueName={ticket.event?.venueName ?? ""}
-                    defaultVenueAddress={ticket.event?.venueAddress ?? ""}
-                    defaultRequireQrForEntry={defaultRequireQrForEntry}
-                    attendanceLocked={attendanceLocked}
-                    submitLabel="Update Ticket"
-                  />
-                </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Manage event</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <TicketForm
+                      action={updateAction}
+                      defaultTitle={ticket.title}
+                      defaultPrice={ticket.price}
+                      defaultQuota={ticket.quota}
+                      defaultMaxPerUser={attachedPlan?.maxSeatsPerOrder ?? ticket.maxPerUser}
+                      defaultTicketType={toTicketFormType(ticket, attachedPlan)}
+                      defaultVenueId={attachedPlan?.venueId ?? undefined}
+                      defaultSeatingPlanId={attachedPlan?.id ?? ticket.seatingPlanId ?? undefined}
+                      defaultPricingMode={attachedPlan?.pricingMode}
+                      defaultStartsAt={toDateTimeLocalInput(ticket.event?.startsAt)}
+                      defaultEndsAt={toDateTimeLocalInput(ticket.event?.endsAt)}
+                      defaultEventTitle={ticket.event?.title ?? ""}
+                      defaultEventDescription={ticket.event?.description ?? ""}
+                      defaultEventImageUrl={ticket.event?.imageUrl ?? ""}
+                      defaultVenueName={ticket.event?.venueName ?? ""}
+                      defaultVenueAddress={ticket.event?.venueAddress ?? ""}
+                      defaultRequireQrForEntry={defaultRequireQrForEntry}
+                      attendanceLocked={attendanceLocked}
+                      submitLabel="Update Ticket"
+                    />
+                  </CardContent>
+                </Card>
               ) : (
-                <div className="bg-card border border-border rounded shadow-sm p-6 flex flex-col gap-3">
-                  <p className="font-semibold">Your listing</p>
-                  <p className="text-sm text-muted-foreground">
-                    This ticket is currently reserved and cannot be edited.
-                  </p>
-                </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Your listing</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-mute">
+                      This ticket is currently reserved and cannot be edited.
+                    </p>
+                  </CardContent>
+                </Card>
               )}
-              {/* Read-only preview of the attached seating plan (Phase 3) */}
+
+              {/* Read-only preview of the attached seating plan */}
               {attachedPlan && (
                 <SeatingPlanPreview plan={attachedPlan} priceTiers={attachedPlanTiers} />
               )}
             </div>
-          ) : (
-            /* Buyer: purchase or sign-in */
-            <div className="bg-card border border-border rounded p-6 flex flex-col gap-4 shadow-sm">
-              <div className="flex flex-col gap-1">
-                <p className="text-sm text-muted-foreground">
-                  {isSeated ? "Select your seats" : "Total price"}
-                </p>
-                <p className="font-display font-extrabold text-3xl text-foreground">
-                  ${parseFloat(ticket.price).toFixed(2)}
-                  {isSeated && (
-                    <span className="text-sm font-normal text-muted-foreground ml-1">
-                      /seat
-                    </span>
-                  )}
-                </p>
-              </div>
-              <Separator />
-              {purchaseGate ? (
-                <Button disabled className="w-full" variant="outline">
-                  {purchaseGate.label}
-                </Button>
-              ) : isSeated ? (
-                /* Seated ticket — CTA navigates to seat map */
-                token ? (
-                  <Link
-                    href={`/tickets/${ticketId}/seats`}
-                    className={cn(
-                      buttonVariants(),
-                      "w-full gap-2 bg-primary hover:bg-primary/90 text-primary-foreground glow-violet"
-                    )}
-                  >
-                    <MapPin className="w-4 h-4" />
-                    Choose Seats
-                  </Link>
-                ) : (
-                  <Link
-                    href="/auth/signin"
-                    className={cn(
-                      buttonVariants(),
-                      "w-full gap-2 bg-primary hover:bg-primary/90 text-primary-foreground glow-violet"
-                    )}
-                  >
-                    Sign in to Purchase
-                  </Link>
-                )
-              ) : isReserved ? (
-                <Button disabled className="w-full" variant="outline">
-                  Already Reserved
-                </Button>
-              ) : token ? (
-                <PurchaseButton ticketId={ticketId} maxQuantity={gaMaxQuantity} />
-              ) : (
+          ) : null}
+
+          {relatedEvents.length > 0 && (
+            <section className="mt-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-ink">Related events</h2>
                 <Link
-                  href="/auth/signin"
-                  className={cn(
-                    buttonVariants(),
-                    "w-full gap-2 bg-primary hover:bg-primary/90 text-primary-foreground glow-violet"
-                  )}
+                  href="/"
+                  className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "px-2")}
                 >
-                  Sign in to Purchase
+                  Browse all
                 </Link>
-              )}
-              <p className="text-xs text-muted-foreground text-center">
-                {purchaseGate?.message ?? "No hidden fees. Cancel before payment completes."}
-              </p>
-            </div>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {relatedEvents.map((item) => {
+                  const startsAt = item.event?.startsAt;
+                  const date = startsAt
+                    ? new Date(startsAt).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })
+                    : "TBA";
+                  return (
+                    <EventPoster
+                      key={item.id}
+                      title={item.event?.title || item.title}
+                      venue={item.event?.venueName || "Venue TBA"}
+                      date={date}
+                      priceFromCents={Math.round(item.price * 100)}
+                      href={`/tickets/${item.id}`}
+                    />
+                  );
+                })}
+              </div>
+            </section>
           )}
         </div>
+
+        {/* Right column — sticky purchase panel */}
+        {!isOwner && (
+          <div className="flex flex-col gap-3">
+            {currentUserId && (
+              <SaveEventButton
+                eventId={ticketId}
+                initialSaved={ticket.savedByMe}
+              />
+            )}
+            <PurchasePanel
+              ticket={ticket}
+              isOwner={isOwner}
+              isSeated={isSeated}
+              gaMaxQuantity={gaMaxQuantity}
+              purchaseGate={purchaseGate}
+              token={token}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

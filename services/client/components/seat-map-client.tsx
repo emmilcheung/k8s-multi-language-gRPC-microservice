@@ -17,7 +17,6 @@ import { useState, useEffect, useTransition, useRef, useMemo } from "react";
 import { useActionState } from "react";
 import { useQuery, useMutation } from "urql";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Loader2,
   AlertCircle,
@@ -40,27 +39,24 @@ import {
 import type { SeatedOrderState } from "@/app/actions/orders";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Card, CardContent } from "@/components/ui/card";
+import { SeatGrid } from "@/components/system/seat-grid";
+import { HoldTimerRibbon } from "@/components/system/hold-timer";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-const STATUS_CLASS: Record<SeatStatus, string> = {
-  available: "bg-emerald-500/20 border-emerald-500/40 hover:bg-emerald-500/40 cursor-pointer",
-  held: "bg-amber-500/20 border-amber-500/40 cursor-not-allowed opacity-60",
-  reserved: "bg-blue-500/20 border-blue-500/40 cursor-not-allowed opacity-60",
-  sold: "bg-red-500/20 border-red-500/40 cursor-not-allowed opacity-40",
-  blocked: "bg-neutral-500/20 border-neutral-500/40 cursor-not-allowed opacity-40",
-};
-
-const STATUS_LABEL: Record<SeatStatus, string> = {
-  available: "Available",
-  held: "On hold",
-  reserved: "Reserved",
-  sold: "Sold",
-  blocked: "Blocked",
-};
-
-const SELECTED_CLASS =
-  "bg-primary/30 border-primary ring-2 ring-primary/60 cursor-pointer";
+/** Parse seat label (e.g., "G12" or "G-12") into { row, number } for SeatGrid. */
+function parseSeatLabel(label: string): { row: string; number: number } {
+  // Remove hyphens and try to split row from number
+  const normalized = label.replace(/-/g, "");
+  const match = normalized.match(/^([A-Za-z]+)(\d+)$/);
+  if (match) {
+    const [, row, numberStr] = match;
+    const number = parseInt(numberStr, 10);
+    return { row, number: isNaN(number) ? 0 : number };
+  }
+  return { row: "", number: 0 };
+}
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -290,7 +286,7 @@ export function SeatMapClient({ ticketId, planId, plan, basePrice, priceTiers = 
         const [id, entry] = relevantSeats[idx] as [string, { status: SeatStatus; sectionId: string }];
         row.push({
           id,
-          label: isGA ? `GA${idx + 1}` : `R${r + 1}S${s + 1}`,
+          label: isGA ? `GA${idx + 1}` : `${String.fromCharCode(65 + r)}${s + 1}`,
           status: entry.status,
         });
       }
@@ -338,34 +334,35 @@ export function SeatMapClient({ ticketId, planId, plan, basePrice, priceTiers = 
   // ── render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Section tabs */}
+    <div className="flex flex-col gap-6 pb-24 lg:pb-0">
+      {/* Section tabs as filter chip row */}
       {sections.length > 1 && (
         <div className="flex gap-2 flex-wrap">
-          {sections.map((sec, idx) => (
-            <button
-              key={sec.id}
-              onClick={() => setActiveSectionIdx(idx)}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors",
-                idx === activeSectionIdx
-                  ? "bg-primary/20 border-primary/40 text-primary"
-                  : "border-white/10 text-muted-foreground hover:border-white/20"
-              )}
-            >
-              {sec.name}
-              <span className="ml-1.5 text-xs opacity-60">{sec.type.toUpperCase()}</span>
-              {sectionPriceMap[sec.id] && (
-                <span className="ml-1 text-xs opacity-80">${parseFloat(sectionPriceMap[sec.id]).toFixed(2)}</span>
-              )}
-            </button>
-          ))}
+          {sections.map((sec, idx) => {
+            const isActive = idx === activeSectionIdx;
+            const price = sectionPriceMap[sec.id];
+            const label = `${sec.name} • ${sec.type.toUpperCase()}${price ? ` • $${parseFloat(price).toFixed(2)}` : ""}`;
+            return (
+              <button
+                key={sec.id}
+                onClick={() => setActiveSectionIdx(idx)}
+                className={cn(
+                  "px-3 py-1.5 rounded-sm text-xs font-medium border transition-colors",
+                  isActive
+                    ? "bg-accent text-accent-ink border-accent"
+                    : "bg-subtle text-mute border-line hover:border-line/80"
+                )}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
       )}
 
       {/* Mode indicator (no toggle — determined by seller's plan) */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-mute">
           {isAutoAssignMode
             ? "Best available seats will be automatically selected for you."
             : "Click seats on the map to select them manually."}
@@ -374,332 +371,418 @@ export function SeatMapClient({ ticketId, planId, plan, basePrice, priceTiers = 
 
       <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
         {/* Seat map */}
-        <div className="glass rounded-2xl p-6 flex flex-col gap-4">
-          {/* Legend */}
-          <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-            {(["available", "held", "sold", "blocked"] as SeatStatus[]).map((s) => (
-              <span key={s} className="flex items-center gap-1.5">
-                <span
-                  className={cn(
-                    "w-3 h-3 rounded-sm border",
-                    STATUS_CLASS[s].split(" ").slice(0, 2).join(" ")
-                  )}
-                />
-                {STATUS_LABEL[s]}
-              </span>
-            ))}
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm border bg-primary/30 border-primary" />
-              Selected
-            </span>
-          </div>
-
-          {loadError && (
-            <div
-              role="alert"
-              className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2.5"
-            >
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{loadError}</span>
-              <button
-                onClick={() => reexecute({ requestPolicy: "network-only" })}
-                className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
-                aria-label="Retry"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
-
-          {holdError && (
-            <div
-              role="alert"
-              className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2.5"
-            >
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{holdError}</span>
-            </div>
-          )}
-
-          {/* Stage indicator */}
-          <div className="text-center py-1">
-            <div className="h-2 rounded-sm bg-white/6 mx-8 mb-1" />
-            <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Stage</p>
-          </div>
-
-          {/* Grid */}
-          {!availData ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-6 h-6 animate-spin text-primary" />
-            </div>
-          ) : grid.length === 0 ? (
-            <p className="text-center text-sm text-muted-foreground py-8">
-              No seats found for this section.
-            </p>
-          ) : (
-            <div
-              className="grid gap-1 overflow-auto"
-              style={{
-                gridTemplateColumns: `repeat(${
-                  activeSection?.type === "ga"
-                    ? Math.max(1, grid[0]?.length ?? 1)
-                    : activeSection?.columnCount ?? 10
-                }, minmax(28px, 1fr))`,
+        <div className="flex flex-col gap-4">
+          {/* Hold timer ribbon */}
+          {holdExpiresAt && selectedArray.length > 0 && (
+            <HoldTimerRibbon
+              expiresAt={holdExpiresAt}
+              tone="accent"
+              onExpire={() => {
+                // Trigger the existing hold-expiry handler
+                setHoldJustExpired(true);
+                setSelectedIds(new Set());
+                setHeldIds(new Set());
+                setHoldExpiresAt(null);
+                prevSelectedRef.current = new Set();
+                reexecute({ requestPolicy: "network-only" });
               }}
-            >
-              {grid.flat().map((seat) => {
-                const isSelected = selectedIds.has(seat.id);
-                const status = seatStatus(seat.id);
-                return (
-                  <button
-                    key={seat.id}
-                    title={`${seat.label} — ${STATUS_LABEL[status]}`}
-                    aria-pressed={isSelected}
-                    aria-label={`Seat ${seat.label} ${STATUS_LABEL[status]}`}
-                    disabled={
-                      !isSeatSelectable(seat.id) ||
-                      isAutoAssignMode ||
-                      (!isSelected && selectedArray.length >= plan.maxSeatsPerOrder)
-                    }
-                    onClick={() => toggleSeat(seat.id)}
-                    className={cn(
-                      "h-7 w-full rounded-sm border text-[9px] font-mono transition-colors",
-                      isSelected ? SELECTED_CLASS : STATUS_CLASS[status]
-                    )}
-                  >
-                    {seat.label.replace("R", "").replace("S", "")}
-                  </button>
-                );
-              })}
-            </div>
+            />
           )}
+
+          <Card className="p-6">
+            {/* Legend */}
+            <div className="flex flex-wrap gap-3 text-xs text-mute mb-4">
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-sm bg-subtle border border-line" />
+                Available
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-sm bg-warn-soft border border-warn" />
+                On hold
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-sm bg-line border border-line" />
+                Sold
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-sm bg-accent border border-accent" />
+                Selected
+              </span>
+            </div>
+
+            {loadError && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 text-sm text-bad bg-bad-soft border border-bad/20 rounded-md px-3 py-2.5 mb-4"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{loadError}</span>
+                <button
+                  onClick={() => reexecute({ requestPolicy: "network-only" })}
+                  className="ml-auto shrink-0 text-bad hover:text-bad/80"
+                  aria-label="Retry"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {holdError && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 text-sm text-bad bg-bad-soft border border-bad/20 rounded-md px-3 py-2.5 mb-4"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{holdError}</span>
+              </div>
+            )}
+
+            {/* Stage indicator */}
+            <div className="text-center py-2 mb-4">
+              <div className="h-px bg-line mx-8 mb-1" />
+              <p className="text-[10px] text-mute uppercase tracking-widest">Stage</p>
+            </div>
+
+            {/* Grid or loading state */}
+            {!availData ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-6 h-6 animate-spin text-accent" />
+              </div>
+            ) : grid.length === 0 ? (
+              <p className="text-center text-sm text-mute py-8">
+                No seats found for this section.
+              </p>
+            ) : (
+              <SeatGrid
+                seats={grid.flat().map((seat) => {
+                  // Determine the displayed status:
+                  // 1. If selected by current user → "selected"
+                  // 2. If held by current user (server-side) → "selected" (they own it)
+                  // 3. If held by someone else or sold → "held" or "sold"
+                  // 4. Otherwise available
+                  const isSelected = selectedIds.has(seat.id);
+                  const isHeld = heldIds.has(seat.id);
+                  const serverStatus = seatStatus(seat.id);
+
+                  let displayStatus: "available" | "selected" | "held" | "sold" = "available";
+                  if (isSelected || isHeld) {
+                    displayStatus = "selected";
+                  } else if (serverStatus === "held" || serverStatus === "reserved") {
+                    displayStatus = "held";
+                  } else if (serverStatus === "sold" || serverStatus === "blocked") {
+                    displayStatus = "sold";
+                  }
+
+                  return {
+                    id: seat.id,
+                    ...parseSeatLabel(seat.label),
+                    status: displayStatus,
+                  };
+                })}
+                sectionLabel={activeSection?.name}
+                onSelect={(seatId) => {
+                  if (!isAutoAssignMode) {
+                    toggleSeat(seatId);
+                  }
+                }}
+                ariaLabel={`Seating map for ${activeSection?.name}`}
+              />
+            )}
+          </Card>
         </div>
 
         {/* Sidebar */}
         <div className="flex flex-col gap-4">
           {/* Selection summary / auto-assign panel */}
           {isAutoAssignMode ? (
-            <div className="glass rounded-2xl p-6 flex flex-col gap-4">
-              <p className="font-semibold text-sm">Auto-assign seats</p>
-              <p className="text-xs text-muted-foreground">
-                We&apos;ll find the best available block of seats for you.
-              </p>
+            <Card>
+              <CardContent className="pt-4">
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <p className="font-semibold text-sm text-ink">Auto-assign seats</p>
+                    <p className="text-xs text-mute mt-1">
+                      We&apos;ll find the best available block of seats for you.
+                    </p>
+                  </div>
 
-              {autoState?.error && (
-                <div
-                  role="alert"
-                  className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2.5"
-                >
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{autoState.error}</span>
-                </div>
-              )}
-
-              <form action={autoFormAction} className="flex flex-col gap-3">
-                <input type="hidden" name="sectionId" value={activeSection?.id ?? ""} />
-
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="auto-quantity" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Number of seats
-                  </Label>
-                  <Input
-                    id="auto-quantity"
-                    name="quantity"
-                    type="number"
-                    min={1}
-                    max={plan.maxSeatsPerOrder}
-                    value={autoQuantity}
-                    onChange={(e) => {
-                      const parsed = parseInt(e.target.value, 10) || 1;
-                      setAutoQuantity(Math.min(Math.max(parsed, 1), plan.maxSeatsPerOrder));
-                    }}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Up to {plan.maxSeatsPerOrder} per order
-                  </p>
-                </div>
-
-                <div className="h-px bg-white/6" />
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Estimated total</span>
-                  <span className="font-bold gradient-text">
-                    ${(autoQuantity * activeSectionPrice).toFixed(2)}
-                  </span>
-                </div>
-
-                <Button
-                  type="submit"
-                  className="w-full gap-2 bg-primary hover:bg-primary/90 text-primary-foreground glow-violet"
-                  disabled={autoPending || !activeSection}
-                >
-                  {autoPending ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Reserving…
-                    </>
-                  ) : (
-                    <>
-                      <Shuffle className="w-4 h-4" />
-                      Find Best Seats
-                    </>
+                  {autoState?.error && (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 text-sm text-bad bg-bad-soft border border-bad/20 rounded-md px-3 py-2.5"
+                    >
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{autoState.error}</span>
+                    </div>
                   )}
-                </Button>
-              </form>
-            </div>
+
+                  <form action={autoFormAction} className="flex flex-col gap-3">
+                    <input type="hidden" name="sectionId" value={activeSection?.id ?? ""} />
+
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="auto-quantity" className="text-xs font-medium text-mute uppercase tracking-wider">
+                        Number of seats
+                      </Label>
+                      <Input
+                        id="auto-quantity"
+                        name="quantity"
+                        type="number"
+                        min={1}
+                        max={plan.maxSeatsPerOrder}
+                        value={autoQuantity}
+                        onChange={(e) => {
+                          const parsed = parseInt(e.target.value, 10) || 1;
+                          setAutoQuantity(Math.min(Math.max(parsed, 1), plan.maxSeatsPerOrder));
+                        }}
+                      />
+                      <p className="text-xs text-mute">
+                        Up to {plan.maxSeatsPerOrder} per order
+                      </p>
+                    </div>
+
+                    <div className="h-px bg-line" />
+                    <div className="flex justify-between text-sm">
+                      <span className="text-mute">Estimated total</span>
+                      <span className="font-mono tabular-nums font-semibold text-ink">
+                        ${(autoQuantity * activeSectionPrice).toFixed(2)}
+                      </span>
+                    </div>
+
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      className="w-full gap-2"
+                      disabled={autoPending || !activeSection}
+                    >
+                      {autoPending ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Reserving…
+                        </>
+                      ) : (
+                        <>
+                          <Shuffle className="w-4 h-4" />
+                          Find Best Seats
+                        </>
+                      )}
+                    </Button>
+                  </form>
+                </div>
+              </CardContent>
+            </Card>
           ) : (
-            <div className="glass rounded-2xl p-6 flex flex-col gap-4">
-              <p className="font-semibold text-sm">
-                {selectedArray.length === 0
-                  ? "No seats selected"
-                  : `${selectedArray.length} seat${selectedArray.length > 1 ? "s" : ""} selected`}
-              </p>
+            <Card>
+              <CardContent className="pt-4">
+                <div className="flex flex-col gap-4">
+                  <p className="font-semibold text-sm text-ink">
+                    {selectedArray.length === 0
+                      ? "No seats selected"
+                      : `${selectedArray.length} seat${selectedArray.length > 1 ? "s" : ""} selected`}
+                  </p>
 
-              {selectedArray.length >= plan.maxSeatsPerOrder && (
-                <p className="text-xs text-amber-400/90">
-                  Max seats per order reached ({plan.maxSeatsPerOrder}).
-                </p>
-              )}
+                  {selectedArray.length >= plan.maxSeatsPerOrder && (
+                    <p className="text-xs text-warn bg-warn-soft border border-warn/20 rounded-md px-3 py-2">
+                      Max seats per order reached ({plan.maxSeatsPerOrder}).
+                    </p>
+                  )}
 
-              {holdJustExpired && (
-                <div
-                  role="alert"
-                  className="flex flex-col gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2.5"
-                >
-                  <span>Your seat hold expired. Choose seats again to continue.</span>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => {
-                        setHoldJustExpired(false);
-                        reexecute({ requestPolicy: "network-only" });
-                      }}
+                  {holdJustExpired && (
+                    <div
+                      role="alert"
+                      className="flex flex-col gap-2 text-sm text-bad bg-bad-soft border border-bad/20 rounded-md px-3 py-2.5"
                     >
-                      Refresh seats
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => setHoldJustExpired(false)}
+                      <span>Your seat hold expired. Choose seats again to continue.</span>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="text-xs"
+                          onClick={() => {
+                            setHoldJustExpired(false);
+                            reexecute({ requestPolicy: "network-only" });
+                          }}
+                        >
+                          Refresh seats
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs"
+                          onClick={() => setHoldJustExpired(false)}
+                        >
+                          Dismiss
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedArray.length > 0 && (
+                    <ul className="flex flex-col gap-1">
+                      {selectedArray.map((id) => (
+                        <li key={id} className="flex items-center justify-between text-xs">
+                          <span className="font-mono tabular-nums text-mute">{seatLabelMap[id] ?? id.slice(0, 8) + "…"}</span>
+                          <button
+                            onClick={() => toggleSeat(id)}
+                            className="text-mute hover:text-bad transition-colors"
+                            aria-label={`Remove seat ${id}`}
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {manualState?.error && (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 text-sm text-bad bg-bad-soft border border-bad/20 rounded-md px-3 py-2.5"
                     >
-                      Dismiss
-                    </Button>
-                  </div>
-                </div>
-              )}
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{manualState.error}</span>
+                    </div>
+                  )}
 
-              {holdExpiresAt && selectedArray.length > 0 && holdSecondsLeft !== null && (
-                <Badge className={`text-xs w-fit border ${
-                  holdSecondsLeft <= 30
-                    ? "bg-red-500/15 text-red-400 border-red-500/30"
-                    : "bg-amber-500/15 text-amber-400 border-amber-500/30"
-                }`}>
-                  Hold expires in {holdSecondsLeft}s
-                </Badge>
-              )}
-
-              {selectedArray.length > 0 && (
-                <ul className="flex flex-col gap-1">
-                  {selectedArray.map((id) => (
-                    <li key={id} className="flex items-center justify-between text-xs">
-                      <span className="font-mono text-muted-foreground">{seatLabelMap[id] ?? id.slice(0, 8) + "…"}</span>
-                      <button
-                        onClick={() => toggleSeat(id)}
-                        className="text-muted-foreground hover:text-destructive transition-colors"
-                        aria-label={`Remove seat ${id}`}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {manualState?.error && (
-                <div
-                  role="alert"
-                  className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-3 py-2.5"
-                >
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{manualState.error}</span>
-                </div>
-              )}
-
-              {selectedArray.length > 0 && (
-                <>
-                  <div className="h-px bg-white/6" />
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Total</span>
-                    <span className="font-bold gradient-text">
-                      ${totalPrice.toFixed(2)}
-                    </span>
-                  </div>
-                </>
-              )}
-
-              <form action={manualFormAction}>
-                <input
-                  type="hidden"
-                  name="seatIds"
-                  value={JSON.stringify(selectedArray)}
-                />
-                <Button
-                  type="submit"
-                  className="w-full gap-2 bg-primary hover:bg-primary/90 text-primary-foreground glow-violet"
-                  disabled={manualPending || selectedArray.length === 0}
-                >
-                  {manualPending ? (
+                  {selectedArray.length > 0 && (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Reserving…
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="w-4 h-4" />
-                      Reserve {selectedArray.length > 0 ? `${selectedArray.length} Seat${selectedArray.length > 1 ? "s" : ""}` : "Seats"}
+                      <div className="h-px bg-line" />
+                      <div className="flex justify-between text-sm">
+                        <span className="text-mute">Total</span>
+                        <span className="font-mono tabular-nums font-semibold text-ink">
+                          ${totalPrice.toFixed(2)}
+                        </span>
+                      </div>
                     </>
                   )}
-                </Button>
-              </form>
-            </div>
+
+                  <form action={manualFormAction}>
+                    <input
+                      type="hidden"
+                      name="seatIds"
+                      value={JSON.stringify(selectedArray)}
+                    />
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      className="w-full gap-2"
+                      disabled={manualPending || selectedArray.length === 0}
+                    >
+                      {manualPending ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Reserving…
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="w-4 h-4" />
+                          Reserve {selectedArray.length > 0 ? `${selectedArray.length} Seat${selectedArray.length > 1 ? "s" : ""}` : "Seats"}
+                        </>
+                      )}
+                    </Button>
+                  </form>
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           {/* Plan info */}
-          <div className="glass rounded-2xl p-4 flex flex-col gap-2">
-            <p className="text-xs text-muted-foreground uppercase tracking-wider">Plan details</p>
-            <div className="flex flex-col gap-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Max per order</span>
-                <span>{plan.maxSeatsPerOrder}</span>
+          <Card size="sm">
+            <CardContent className="pt-3">
+              <div className="flex flex-col gap-2">
+                <p className="text-xs text-mute uppercase tracking-wider font-medium">Plan details</p>
+                <div className="flex flex-col gap-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-mute">Max per order</span>
+                    <span className="font-mono tabular-nums text-ink">{plan.maxSeatsPerOrder}</span>
+                  </div>
+                  {availData && (() => {
+                    const counts = { available: 0, held: 0, sold: 0 };
+                    for (const e of Object.values(seatMap)) {
+                      if (e.status === "available") counts.available += 1;
+                      else if (e.status === "held") counts.held += 1;
+                      else if (e.status === "sold") counts.sold += 1;
+                    }
+                    return (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-mute">Available</span>
+                          <span className="font-mono tabular-nums text-ok">{counts.available}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-mute">On hold</span>
+                          <span className="font-mono tabular-nums text-warn">{counts.held}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-mute">Sold</span>
+                          <span className="font-mono tabular-nums text-bad">{counts.sold}</span>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
               </div>
-              {availData && (() => {
-                const counts = { available: 0, held: 0, sold: 0 };
-                for (const e of Object.values(seatMap)) {
-                  if (e.status === "available") counts.available += 1;
-                  else if (e.status === "held") counts.held += 1;
-                  else if (e.status === "sold") counts.sold += 1;
-                }
-                return (
-                  <>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Available</span>
-                      <span className="text-emerald-400">{counts.available}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">On hold</span>
-                      <span className="text-amber-400">{counts.held}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Sold</span>
-                      <span className="text-red-400">{counts.sold}</span>
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-          </div>
+            </CardContent>
+          </Card>
+
+          {/* View from seat placeholder */}
+          {selectedArray.length === 1 && (
+            <Card size="sm">
+              <CardContent className="pt-3">
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs text-mute uppercase tracking-wider font-medium">View from seat</p>
+                  <p className="text-xs text-mute">Coming soon</p>
+                  <div className="text-sm font-mono tabular-nums text-ink bg-subtle rounded-sm p-2 text-center">
+                    {(() => {
+                      const singleId = selectedArray[0];
+                      const label = seatLabelMap[singleId];
+                      if (!label) return singleId.slice(0, 8);
+                      // Format as "G·12"
+                      const parsed = parseSeatLabel(label);
+                      return parsed.row ? `${parsed.row}·${parsed.number}` : label;
+                    })()}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-card/95 px-4 py-3 backdrop-blur lg:hidden">
+        <div className="mx-auto flex max-w-5xl items-center gap-3">
+          {isAutoAssignMode ? (
+            <>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] uppercase tracking-wider text-mute">Auto-assign</p>
+                <p className="text-sm text-ink">
+                  {autoQuantity} seat{autoQuantity > 1 ? "s" : ""} · ${(autoQuantity * activeSectionPrice).toFixed(2)}
+                </p>
+              </div>
+              <form action={autoFormAction}>
+                <input type="hidden" name="sectionId" value={activeSection?.id ?? ""} />
+                <input type="hidden" name="quantity" value={String(autoQuantity)} />
+                <Button type="submit" size="sm" disabled={autoPending || !activeSection}>
+                  {autoPending ? "Reserving…" : "Find seats"}
+                </Button>
+              </form>
+            </>
+          ) : (
+            <>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] uppercase tracking-wider text-mute">Selected</p>
+                <p className="text-sm text-ink">
+                  {selectedArray.length} seat{selectedArray.length === 1 ? "" : "s"} · ${totalPrice.toFixed(2)}
+                </p>
+              </div>
+              <form action={manualFormAction}>
+                <input type="hidden" name="seatIds" value={JSON.stringify(selectedArray)} />
+                <Button type="submit" size="sm" disabled={manualPending || selectedArray.length === 0}>
+                  {manualPending ? "Reserving…" : "Reserve"}
+                </Button>
+              </form>
+            </>
+          )}
         </div>
       </div>
     </div>

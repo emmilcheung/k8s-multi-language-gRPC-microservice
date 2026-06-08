@@ -259,40 +259,40 @@ export function SettingsAddPaymentMethodForm({ onSaved }: SettingsAddPaymentMeth
 
   return (
     <>
-      <form onSubmit={handleSubmit} className="rounded border border-border p-3 space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+      <form onSubmit={handleSubmit} className="rounded border border-line p-3 space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-mute">
           Add card
         </p>
 
         <div
           ref={setCardElementNode}
-          className="rounded border border-input bg-background px-3 py-2 min-h-10"
+          className="rounded border border-line bg-subtle px-3 py-2 min-h-10"
         />
 
         <label
           htmlFor="settings-default-method-checkbox"
-          className="flex items-center gap-2 text-sm text-muted-foreground"
+          className="flex items-center gap-2 text-sm text-mute"
         >
           <input
             id="settings-default-method-checkbox"
             type="checkbox"
             checked={setAsDefault}
             onChange={(event) => setSetAsDefault(event.target.checked)}
-            className="size-4 rounded border-border bg-background"
+            className="size-4 rounded border-line bg-subtle"
           />
           Set as default payment method
         </label>
 
         <label
           htmlFor="settings-save-consent-checkbox"
-          className="flex items-start gap-2 text-sm text-muted-foreground"
+          className="flex items-start gap-2 text-sm text-mute"
         >
           <input
             id="settings-save-consent-checkbox"
             type="checkbox"
             checked={consentChecked}
             onChange={(event) => setConsentChecked(event.target.checked)}
-            className="size-4 rounded border-border bg-background mt-0.5"
+            className="size-4 rounded border-line bg-subtle mt-0.5"
           />
           <span>
             I consent to saving this payment method for future charges in accordance with the

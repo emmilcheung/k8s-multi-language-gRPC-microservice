@@ -1,0 +1,6 @@
+mutation UnsaveEvent($eventId: ID!) {
+  unsaveEvent(eventId: $eventId) {
+    id
+    savedByMe
+  }
+}

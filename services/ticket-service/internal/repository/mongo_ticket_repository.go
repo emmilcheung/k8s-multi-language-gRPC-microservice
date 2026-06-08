@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -61,6 +62,9 @@ type TicketEvent struct {
 // TicketType (WS3): denormalizes the assignment mode from the linked seating plan.
 // Valid values: "GA", "SEATED_MANUAL", "SEATED_AUTO". Empty string on create;
 // populated when ticket is attached to a plan.
+//
+// Category: event category enum value (CONCERT, SPORTS, COMEDY, THEATRE, FESTIVAL, OTHER).
+// Defaults to OTHER when missing for backward compatibility.
 type Ticket struct {
 	ID            string              `bson:"_id"`
 	Title         string              `bson:"title"`
@@ -69,6 +73,7 @@ type Ticket struct {
 	OrderID       string              `bson:"orderId,omitempty"`       // deprecated: kept for backward compat during migration
 	SeatingPlanID string              `bson:"seatingPlanId,omitempty"` // CP-13: venue seating plan UUID; empty = GA ticket
 	TicketType    string              `bson:"ticket_type,omitempty"`   // WS3: "GA" | "SEATED_MANUAL" | "SEATED_AUTO"
+	Category      string              `bson:"category,omitempty"`      // event category; defaults to OTHER
 	Quota         int                 `bson:"quota"`                   // total available inventory (GA tickets only)
 	Reserved      int                 `bson:"reserved"`                // currently held by active reservations
 	Sold          int                 `bson:"sold"`                    // permanently sold units
@@ -241,10 +246,17 @@ var ErrOwnership = errors.New("caller does not own this ticket")
 // Limit is the maximum number of tickets to return (capped at 100; 0 means 20).
 // AvailableOnly filters to show only available tickets: GA tickets with sold < quota,
 // and SEATED tickets that are not fully booked.
+// Search applies case-insensitive regex match on the title field.
+// Category filters by the event category enum value.
+// MinPrice and MaxPrice filter by price range in whole dollars.
 type PaginationParams struct {
-	After         string // compound cursor "<unixMilli>:<id>"; empty = start from beginning
-	Limit         int    // max results per page
-	AvailableOnly bool   // if true, filter out sold-out tickets
+	After         string     // compound cursor "<unixMilli>:<id>"; empty = start from beginning
+	Limit         int        // max results per page
+	AvailableOnly bool       // if true, filter out sold-out tickets
+	Search        string     // case-insensitive title search
+	Category      string     // event category filter
+	MinPrice      *float64   // minimum price in dollars
+	MaxPrice      *float64   // maximum price in dollars
 }
 
 // TicketRepository defines the storage interface.
@@ -640,6 +652,7 @@ func (r *MongoTicketRepository) FindByIDs(ctx context.Context, ids []string) ([]
 // FindAll returns a page of tickets ordered by createdAt descending (newest first).
 // p.After is a compound cursor "<createdAtUnixMilli>:<id>" from the last ticket seen.
 // p.Limit caps results (max 100, default 20).
+// Supports filtering by search (title regex), category, price range, and availability.
 func (r *MongoTicketRepository) FindAll(ctx context.Context, p PaginationParams) ([]*Ticket, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -660,19 +673,57 @@ func (r *MongoTicketRepository) FindAll(ctx context.Context, p PaginationParams)
 		}
 	}
 
+	// Apply search filter (case-insensitive regex on title).
+	if p.Search != "" {
+		filter["title"] = bson.M{
+			"$regex":   regexp.QuoteMeta(p.Search),
+			"$options": "i",
+		}
+	}
+
+	// Apply category filter.
+	if p.Category != "" {
+		filter["category"] = p.Category
+	}
+
+	// Collect all $expr conditions to be merged with $and.
+	var exprConditions []bson.M
+
 	// Apply availability filter if requested.
 	// For GA tickets: sold < quota (has remaining inventory).
 	// For SEATED tickets: seatingPlanId must be non-empty (availability managed by venue-service).
-	// We filter out fully-sold GA tickets; seated tickets are assumed available if linked to a plan.
 	if p.AvailableOnly {
-		filter["$expr"] = bson.M{
+		exprConditions = append(exprConditions, bson.M{
 			"$or": bson.A{
 				// GA tickets: must have sold < quota (available inventory)
 				bson.M{"$lt": bson.A{"$sold", "$quota"}},
 				// SEATED tickets: must have a seatingPlanId (availability managed by venue-service)
 				bson.M{"$ne": bson.A{"$seatingPlanId", ""}},
 			},
-		}
+		})
+	}
+
+	// Apply price range filters via $toDouble conversion on the decimal price string.
+	if p.MinPrice != nil {
+		exprConditions = append(exprConditions, bson.M{
+			"$gte": bson.A{
+				bson.M{"$toDouble": "$price"},
+				*p.MinPrice,
+			},
+		})
+	}
+	if p.MaxPrice != nil {
+		exprConditions = append(exprConditions, bson.M{
+			"$lte": bson.A{
+				bson.M{"$toDouble": "$price"},
+				*p.MaxPrice,
+			},
+		})
+	}
+
+	// Merge all $expr conditions with $and.
+	if len(exprConditions) > 0 {
+		filter["$expr"] = bson.M{"$and": exprConditions}
 	}
 
 	opts := options.Find().

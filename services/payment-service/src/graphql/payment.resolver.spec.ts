@@ -261,12 +261,14 @@ describe('PaymentMethodMutationResolver', () => {
   let resolver: PaymentMethodMutationResolver;
   const mockPaymentsService = {
     charge: vi.fn(),
+    requestRefund: vi.fn(),
     setDefaultSavedPaymentMethod: vi.fn(),
     deleteSavedPaymentMethod: vi.fn(),
     registerSavedPaymentMethod: vi.fn(),
   } satisfies Pick<
     PaymentsService,
     | 'charge'
+    | 'requestRefund'
     | 'setDefaultSavedPaymentMethod'
     | 'deleteSavedPaymentMethod'
     | 'registerSavedPaymentMethod'
@@ -351,6 +353,7 @@ describe('PaymentMethodMutationResolver', () => {
         savedPaymentMethodId: undefined,
         userIdSig: 'sig-123',
       });
+
       expect(result).toEqual({ ...payment, status: 'CAPTURED' });
     });
 
@@ -399,6 +402,60 @@ describe('PaymentMethodMutationResolver', () => {
 
       await expect(
         resolver.createPayment({ orderId: 'order-1', token: 'pm_card_visa' }, ctx),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('requestRefund', () => {
+    it('delegates refund request to the service', async () => {
+      const refund = {
+        payment: {
+          id: 'pay-2',
+          orderId: 'order-2',
+          userId: 'user-123',
+          amount: 4200,
+          currency: 'usd',
+          status: 'refunded',
+          createdAt: new Date().toISOString(),
+        },
+        refundId: 'refund-1',
+        status: 'REQUESTED',
+      };
+      mockPaymentsService.requestRefund.mockResolvedValue(refund);
+
+      const ctx = {
+        req: {
+          headers: {
+            'x-user-id': 'user-123',
+            'x-user-id-sig': 'sig-456',
+          },
+        },
+      };
+
+      const result = await resolver.requestRefund(
+        { orderId: 'order-2', reason: 'Unable to attend' },
+        ctx,
+      );
+
+      expect(mockPaymentsService.requestRefund).toHaveBeenCalledWith({
+        orderId: 'order-2',
+        reason: 'Unable to attend',
+        userId: 'user-123',
+        userIdSig: 'sig-456',
+      });
+      expect(result).toEqual({
+        payment: { ...refund.payment, status: 'REFUNDED' },
+        refundId: 'refund-1',
+        status: 'REQUESTED',
+      });
+    });
+
+    it('throws ForbiddenException when requester identity is missing', async () => {
+      const { ForbiddenException } = await import('@nestjs/common');
+      const ctx = { req: { headers: {} } };
+
+      await expect(
+        resolver.requestRefund({ orderId: 'order-1', reason: 'Cannot go' }, ctx),
       ).rejects.toThrow(ForbiddenException);
     });
   });

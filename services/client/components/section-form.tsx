@@ -25,10 +25,10 @@ export function SectionForm({ action, tiers = [] }: SectionFormProps) {
     <div className="glass rounded-2xl p-6 flex flex-col gap-5">
       <div className="flex flex-col gap-1">
         <h3 className="font-semibold">Add Section</h3>
-        <p className="text-sm text-muted-foreground">Define a new section layout.</p>
+        <p className="text-sm text-mute">Define a new section layout.</p>
       </div>
 
-      <div className="h-px bg-white/6" />
+      <div className="h-px bg-line" />
 
       <form action={formAction} className="flex flex-col gap-4">
         {/* Error alert */}
@@ -44,11 +44,11 @@ export function SectionForm({ action, tiers = [] }: SectionFormProps) {
 
         {/* Section name */}
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="section-name" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <Label htmlFor="section-name" className="text-xs font-medium text-mute uppercase tracking-wider">
             Name
           </Label>
           <div className="relative">
-            <Grid3X3 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <Grid3X3 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-mute pointer-events-none" />
             <Input
               id="section-name"
               name="name"
@@ -62,7 +62,7 @@ export function SectionForm({ action, tiers = [] }: SectionFormProps) {
 
         {/* Section type toggle */}
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <Label className="text-xs font-medium text-mute uppercase tracking-wider">
             Type
           </Label>
           {/* Hidden input carries the selected value */}
@@ -73,8 +73,8 @@ export function SectionForm({ action, tiers = [] }: SectionFormProps) {
               onClick={() => setSectionType("seated")}
               className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium border transition-colors ${
                 sectionType === "seated"
-                  ? "bg-primary/20 text-primary border-primary/40"
-                  : "bg-transparent text-muted-foreground border-white/10 hover:border-white/20"
+                  ? "bg-accent/20 text-accent border-accent/40"
+                  : "bg-transparent text-mute border-line hover:border-mute"
               }`}
             >
               Seated
@@ -84,8 +84,8 @@ export function SectionForm({ action, tiers = [] }: SectionFormProps) {
               onClick={() => setSectionType("ga")}
               className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium border transition-colors ${
                 sectionType === "ga"
-                  ? "bg-primary/20 text-primary border-primary/40"
-                  : "bg-transparent text-muted-foreground border-white/10 hover:border-white/20"
+                  ? "bg-accent/20 text-accent border-accent/40"
+                  : "bg-transparent text-mute border-line hover:border-mute"
               }`}
             >
               GA
@@ -97,7 +97,7 @@ export function SectionForm({ action, tiers = [] }: SectionFormProps) {
         {sectionType === "seated" && (
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="rowCount" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <Label htmlFor="rowCount" className="text-xs font-medium text-mute uppercase tracking-wider">
                 Rows
               </Label>
               <Input
@@ -111,7 +111,7 @@ export function SectionForm({ action, tiers = [] }: SectionFormProps) {
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="columnCount" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <Label htmlFor="columnCount" className="text-xs font-medium text-mute uppercase tracking-wider">
                 Columns
               </Label>
               <Input
@@ -132,7 +132,7 @@ export function SectionForm({ action, tiers = [] }: SectionFormProps) {
           <>
             <input type="hidden" name="rowCount" value="0" />
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="columnCount" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <Label htmlFor="columnCount" className="text-xs font-medium text-mute uppercase tracking-wider">
                 Capacity
               </Label>
               <Input
@@ -150,14 +150,14 @@ export function SectionForm({ action, tiers = [] }: SectionFormProps) {
 
         {/* Price tier selector */}
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <Label className="text-xs font-medium text-mute uppercase tracking-wider">
             Price tier
           </Label>
           <input type="hidden" name="priceTierId" value={selectedTierId} />
           <select
             value={selectedTierId}
             onChange={(e) => setSelectedTierId(e.target.value)}
-            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="flex h-9 w-full rounded-md border border-line bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-mute focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
             <option value="">— Use ticket default price —</option>
             {tiers.map((t) => (
@@ -170,7 +170,7 @@ export function SectionForm({ action, tiers = [] }: SectionFormProps) {
 
         <Button
           type="submit"
-          className="w-full gap-2 bg-primary hover:bg-primary/90 text-primary-foreground"
+          className="w-full gap-2"
           disabled={pending}
         >
           {pending ? (

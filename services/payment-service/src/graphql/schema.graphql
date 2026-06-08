@@ -38,6 +38,7 @@ type Query {
 
 type Mutation {
   createPayment(input: CreatePaymentInput!): Payment!
+  requestRefund(input: RequestRefundInput!): RefundResult!
   setDefaultPaymentMethod(id: ID!): PaymentMethod!
   deletePaymentMethod(id: ID!): Boolean!
   registerPaymentMethod(input: RegisterPaymentMethodInput!): PaymentMethod!
@@ -54,4 +55,22 @@ input RegisterPaymentMethodInput {
   setAsDefault: Boolean
   consentAccepted: Boolean!
   consentVersion: String!
+}
+
+input RequestRefundInput {
+  orderId: ID!
+  reason: String!
+}
+
+type RefundResult {
+  payment: Payment!
+  refundId: ID!
+  status: RefundStatus!
+}
+
+enum RefundStatus {
+  REQUESTED
+  PROCESSING
+  COMPLETED
+  FAILED
 }

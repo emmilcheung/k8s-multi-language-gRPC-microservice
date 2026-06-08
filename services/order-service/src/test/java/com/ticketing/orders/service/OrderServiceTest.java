@@ -3,6 +3,7 @@ package com.ticketing.orders.service;
 import tools.jackson.databind.ObjectMapper;
 import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
+import com.ticketing.orders.dto.RefundEligibilityResponse;
 import com.ticketing.orders.entity.Order;
 import com.ticketing.orders.entity.OrderStatus;
 import com.ticketing.orders.entity.OrderTicket;
@@ -308,6 +309,61 @@ class OrderServiceTest {
         assertThat(responses).hasSize(2);
     }
 
+    @Test
+    void refundEligibility_returnsEligibleForCompleteOrderBeforeCutoff() {
+        OrderTicket futureTicket = new OrderTicket(
+                ticketId,
+                "Concert Ticket",
+                new BigDecimal("49.99"),
+                OffsetDateTime.now().plusDays(2)
+        );
+        Order order = new Order(userId, OrderStatus.COMPLETE, OffsetDateTime.now().plusMinutes(15), futureTicket);
+        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+
+        RefundEligibilityResponse response = orderService.refundEligibility(orderId, userId);
+
+        assertThat(response.eligible()).isTrue();
+        assertThat(response.reason()).isNull();
+        assertThat(response.refundableAmount()).isEqualTo(4999);
+        assertThat(response.cutoffAt()).isNotNull();
+    }
+
+    @Test
+    void refundEligibility_returnsWrongStateWhenOrderIsNotComplete() {
+        OrderTicket futureTicket = new OrderTicket(
+                ticketId,
+                "Concert Ticket",
+                new BigDecimal("49.99"),
+                OffsetDateTime.now().plusDays(2)
+        );
+        Order order = new Order(userId, OrderStatus.CREATED, OffsetDateTime.now().plusMinutes(15), futureTicket);
+        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+
+        RefundEligibilityResponse response = orderService.refundEligibility(orderId, userId);
+
+        assertThat(response.eligible()).isFalse();
+        assertThat(response.reason()).isEqualTo("WRONG_STATE");
+        assertThat(response.refundableAmount()).isZero();
+    }
+
+    @Test
+    void refundEligibility_returnsPastCutoffWhenEventStartsSoon() {
+        OrderTicket nearTicket = new OrderTicket(
+                ticketId,
+                "Concert Ticket",
+                new BigDecimal("49.99"),
+                OffsetDateTime.now().plusHours(6)
+        );
+        Order order = new Order(userId, OrderStatus.COMPLETE, OffsetDateTime.now().plusMinutes(15), nearTicket);
+        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+
+        RefundEligibilityResponse response = orderService.refundEligibility(orderId, userId);
+
+        assertThat(response.eligible()).isFalse();
+        assertThat(response.reason()).isEqualTo("PAST_CUTOFF");
+        assertThat(response.refundableAmount()).isZero();
+    }
+
     // ── expireOrder ───────────────────────────────────────────────────────────
 
     @Test
@@ -555,5 +611,35 @@ class OrderServiceTest {
         assertThat(response.getStatus()).isEqualTo(OrderStatus.CREATED);
         assertThat(response.getOrderType()).isEqualTo(OrderType.AUTO_ASSIGN_SEATED);
         assertThat(response.getSeats()).hasSize(1);
+    }
+
+    // ── fee breakdown tests ───────────────────────────────────────────────────
+
+    @Test
+    void orderResponse_should_compute_fees_correctly_for_GA_order() {
+        // GA order: ticket price $49.99, quantity 2
+        // subtotal = 4999 cents * 2 = 9998 cents ($99.98)
+        // serviceFee = Math.round(9998 * 0.10) = 1000 cents ($10.00)
+        // facilityFee = 2 * 150 = 300 cents ($3.00)
+        // tax = 0
+        // total = 9998 + 1000 + 300 + 0 = 11298 cents ($112.98)
+        UUID reservationId = UUID.randomUUID();
+        Order order = new Order(userId, OrderStatus.CREATED,
+                OffsetDateTime.now().plusMinutes(15), ticket, reservationId, 2);
+
+        OrderResponse response = OrderResponse.from(order, Collections.emptyList());
+
+        assertThat(response.getSubtotal()).isEqualTo("99.98");
+        assertThat(response.getServiceFee()).isEqualTo("10.00");
+        assertThat(response.getFacilityFee()).isEqualTo("3.00");
+        assertThat(response.getTax()).isEqualTo("0.00");
+        assertThat(response.getTotal()).isEqualTo("112.98");
+
+        // Verify the invariant: total = subtotal + serviceFee + facilityFee + tax
+        BigDecimal totalComputed = new BigDecimal(response.getSubtotal())
+                .add(new BigDecimal(response.getServiceFee()))
+                .add(new BigDecimal(response.getFacilityFee()))
+                .add(new BigDecimal(response.getTax()));
+        assertThat(totalComputed).isEqualByComparingTo(new BigDecimal(response.getTotal()));
     }
 }

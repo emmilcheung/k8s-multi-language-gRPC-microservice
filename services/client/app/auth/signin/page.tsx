@@ -1,4 +1,5 @@
 import { AuthForm } from "@/components/auth-form";
+import { AuthShell } from "@/components/auth/auth-shell";
 import { signin } from "@/app/actions/auth";
 
 export const metadata = { title: "Sign In — Marquee" };
@@ -11,8 +12,8 @@ export default async function SigninPage({
 }) {
   const { next } = await searchParams;
   return (
-    <div className="min-h-[70vh] flex flex-col justify-center items-center py-12">
+    <AuthShell>
       <AuthForm mode="signin" action={signin} next={next} />
-    </div>
+    </AuthShell>
   );
 }

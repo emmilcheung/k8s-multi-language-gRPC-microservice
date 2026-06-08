@@ -116,7 +116,7 @@ export default async function SeatsPage({ params }: Props) {
           href={`/tickets/${ticketId}`}
           className={cn(
             buttonVariants({ variant: "ghost", size: "sm" }),
-            "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2"
+            "gap-1.5 text-mute hover:text-ink self-start -ml-2"
           )}
         >
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -124,7 +124,7 @@ export default async function SeatsPage({ params }: Props) {
         </Link>
         <div className="glass rounded-2xl p-8 text-center">
           <p className="text-destructive font-semibold">Seating plan unavailable</p>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-sm text-mute mt-1">
             The seating plan for this ticket could not be loaded. Please try again later.
           </p>
         </div>
@@ -139,7 +139,7 @@ export default async function SeatsPage({ params }: Props) {
           href={`/tickets/${ticketId}`}
           className={cn(
             buttonVariants({ variant: "ghost", size: "sm" }),
-            "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2"
+            "gap-1.5 text-mute hover:text-ink self-start -ml-2"
           )}
         >
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -147,7 +147,7 @@ export default async function SeatsPage({ params }: Props) {
         </Link>
         <div className="glass rounded-2xl p-8 text-center">
           <p className="text-destructive font-semibold">Ticket unavailable</p>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-sm text-mute mt-1">
             This seating plan is not active, so seats cannot be selected right now.
           </p>
         </div>
@@ -168,7 +168,7 @@ export default async function SeatsPage({ params }: Props) {
         href={`/tickets/${ticketId}`}
         className={cn(
           buttonVariants({ variant: "ghost", size: "sm" }),
-          "gap-1.5 text-muted-foreground hover:text-foreground self-start -ml-2"
+          "gap-1.5 text-mute hover:text-ink self-start -ml-2"
         )}
       >
         <ArrowLeft className="w-3.5 h-3.5" />
@@ -177,7 +177,7 @@ export default async function SeatsPage({ params }: Props) {
 
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-bold tracking-tight">{ticket.title}</h1>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-mute">
           {plan.name} — select your seats below
         </p>
       </div>
