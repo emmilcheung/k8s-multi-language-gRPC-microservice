@@ -56,7 +56,6 @@ func (s *swrSpyCache) TryRefreshTicket(_ context.Context, _ string) (bool, error
 	atomic.AddInt32(&s.refreshes, 1)
 	return true, nil
 }
-func (s *swrSpyCache) GetListSWRRefresh()                             {}
 func (s *swrSpyCache) TryRefreshList(_ context.Context) (bool, error) { return true, nil }
 
 func TestCachingRepo_SWR_FreshServedWithoutRefresh(t *testing.T) {

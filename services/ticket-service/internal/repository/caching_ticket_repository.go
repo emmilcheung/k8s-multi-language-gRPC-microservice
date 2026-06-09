@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/acme/ticket-service/internal/cache"
@@ -14,18 +15,27 @@ type CachingTicketRepository struct {
 	inner TicketRepository
 	cache cache.TicketCache
 	log   *zap.Logger
-	// load coalesces concurrent cold-miss loads per pod; refresh coalesces
-	// per-pod stale-refresh triggers. Both are stateless (no cached data), so
-	// they introduce no cross-pod incoherence.
-	load    singleflight.Group
-	refresh singleflight.Group
+	// load coalesces concurrent cold-miss loads per pod (stateless — holds no
+	// cached data, so no cross-pod incoherence). refreshing guards against
+	// spawning more than one in-flight background SWR refresh per key per pod.
+	load       singleflight.Group
+	refreshing sync.Map // map[string]struct{} — keys with an in-flight refresh
+
+	// loadTimeout bounds the detached shared load/refresh against a hung DB.
+	loadTimeout time.Duration
 }
+
+// Cached values are JSON-encoded Ticket structs. Note: Ticket carries only bson
+// tags, so json.Marshal uses Go field names ("ID", "Title", ...). Adding json
+// tags to Ticket would change cache key shape and invalidate every entry on
+// deploy — keep that in mind before tagging it.
 
 func NewCachingTicketRepository(inner TicketRepository, ticketCache cache.TicketCache, log *zap.Logger) *CachingTicketRepository {
 	return &CachingTicketRepository{
-		inner: inner,
-		cache: ticketCache,
-		log:   log,
+		inner:       inner,
+		cache:       ticketCache,
+		log:         log,
+		loadTimeout: 10 * time.Second,
 	}
 }
 
@@ -67,8 +77,13 @@ func (r *CachingTicketRepository) FindByID(ctx context.Context, id string) (*Tic
 	}
 
 	// --- Cold miss: coalesce the DB load + cache populate per pod ---
+	// The shared load detaches from the leader's request cancellation (keeping
+	// trace values) so one caller disconnecting cannot fail every coalesced
+	// waiter — which would re-create the stampede this cache exists to prevent.
 	loaded, err, _ := r.load.Do("ticket:"+id, func() (interface{}, error) {
-		ticket, err := r.inner.FindByID(ctx, id)
+		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.loadTimeout)
+		defer cancel()
+		ticket, err := r.inner.FindByID(loadCtx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -76,7 +91,7 @@ func (r *CachingTicketRepository) FindByID(ctx context.Context, id string) (*Tic
 		if err != nil {
 			return nil, err
 		}
-		if err := r.cache.SetTicket(ctx, id, encoded); err != nil {
+		if err := r.cache.SetTicket(loadCtx, id, encoded); err != nil {
 			r.log.Warn("failed to write ticket cache", zap.String("ticketId", id), zap.Error(err))
 		}
 		return encoded, nil
@@ -91,33 +106,37 @@ func (r *CachingTicketRepository) FindByID(ctx context.Context, id string) (*Tic
 	return &ticket, nil
 }
 
-// triggerTicketRefresh asynchronously rebuilds a stale ticket entry. The Redis
-// lock ensures only one pod fleet-wide refreshes; the per-pod singleflight
-// ensures only one in-flight refresh per key on this pod. The caller has
-// already been served the stale value, so this never blocks the request.
+// triggerTicketRefresh asynchronously rebuilds a stale ticket entry. The
+// per-pod in-flight guard ensures at most one refresh goroutine per key on this
+// pod (so a burst of stale reads doesn't spawn a goroutine each), and the Redis
+// lock ensures only one pod fleet-wide actually rebuilds. The caller has already
+// been served the stale value, so this never blocks the request. The refresh
+// runs on a detached context so it outlives the triggering request.
 func (r *CachingTicketRepository) triggerTicketRefresh(swr cache.SWRTicketCache, id string) {
+	key := "ticket:" + id
+	if _, inflight := r.refreshing.LoadOrStore(key, struct{}{}); inflight {
+		return // a refresh for this key is already running on this pod
+	}
 	go func() {
-		_, _, _ = r.refresh.Do("ticket:"+id, func() (interface{}, error) {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			acquired, err := swr.TryRefreshTicket(ctx, id)
-			if err != nil || !acquired {
-				return nil, nil
-			}
-			ticket, err := r.inner.FindByID(ctx, id)
-			if err != nil {
-				r.log.Warn("swr refresh: db read failed", zap.String("ticketId", id), zap.Error(err))
-				return nil, nil
-			}
-			encoded, err := json.Marshal(ticket)
-			if err != nil {
-				return nil, nil
-			}
-			if err := r.cache.SetTicket(ctx, id, encoded); err != nil {
-				r.log.Warn("swr refresh: cache write failed", zap.String("ticketId", id), zap.Error(err))
-			}
-			return nil, nil
-		})
+		defer r.refreshing.Delete(key)
+		ctx, cancel := context.WithTimeout(context.Background(), r.loadTimeout)
+		defer cancel()
+		acquired, err := swr.TryRefreshTicket(ctx, id)
+		if err != nil || !acquired {
+			return
+		}
+		ticket, err := r.inner.FindByID(ctx, id)
+		if err != nil {
+			r.log.Warn("swr refresh: db read failed", zap.String("ticketId", id), zap.Error(err))
+			return
+		}
+		encoded, err := json.Marshal(ticket)
+		if err != nil {
+			return
+		}
+		if err := r.cache.SetTicket(ctx, id, encoded); err != nil {
+			r.log.Warn("swr refresh: cache write failed", zap.String("ticketId", id), zap.Error(err))
+		}
 	}()
 }
 
@@ -145,7 +164,11 @@ func (r *CachingTicketRepository) FindAll(ctx context.Context, p PaginationParam
 	}
 
 	loaded, err, _ := r.load.Do("list", func() (interface{}, error) {
-		tickets, err := r.inner.FindAll(ctx, p)
+		// Detached from request cancellation (see FindByID) so a coalesced
+		// waiter is not failed by the leader's disconnect.
+		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.loadTimeout)
+		defer cancel()
+		tickets, err := r.inner.FindAll(loadCtx, p)
 		if err != nil {
 			return nil, err
 		}
@@ -153,7 +176,7 @@ func (r *CachingTicketRepository) FindAll(ctx context.Context, p PaginationParam
 		if err != nil {
 			return nil, err
 		}
-		if err := r.cache.SetList(ctx, encoded); err != nil {
+		if err := r.cache.SetList(loadCtx, encoded); err != nil {
 			r.log.Warn("failed to write tickets list cache", zap.Error(err))
 		}
 		return encoded, nil
