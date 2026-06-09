@@ -116,3 +116,57 @@ func (l *listInner) FindAll(_ context.Context, _ PaginationParams) ([]*Ticket, e
 
 // NewNoopAwareSpy returns a cache that always misses (forces the load path).
 func NewNoopAwareSpy() *swrSpyCache { return &swrSpyCache{} }
+
+// invSpy counts invalidations on top of the always-miss spy.
+type invSpy struct {
+	swrSpyCache
+	invTicket int32
+	invList   int32
+}
+
+func (s *invSpy) InvalidateTicket(_ context.Context, _ string) error {
+	atomic.AddInt32(&s.invTicket, 1)
+	return nil
+}
+func (s *invSpy) InvalidateList(_ context.Context) error {
+	atomic.AddInt32(&s.invList, 1)
+	return nil
+}
+
+func TestCachingRepo_ReservationLifecycle_DoesNotInvalidateMetadata(t *testing.T) {
+	spy := &invSpy{}
+	inner := &reservationInner{}
+	repo := NewCachingTicketRepository(inner, spy, zap.NewNop())
+
+	require.NoError(t, repo.ReserveTicket(context.Background(), "t1", "o1"))
+	require.NoError(t, repo.ReleaseTicket(context.Background(), "t1"))
+	require.NoError(t, repo.CreateReservation(context.Background(), &TicketReservation{TicketID: "t1"}))
+	require.NoError(t, repo.FinalizeReservation(context.Background(), "r1", "o1"))
+	require.NoError(t, repo.ReleaseReservation(context.Background(), "r1"))
+
+	assert.Equal(t, int32(0), atomic.LoadInt32(&spy.invTicket), "reservation lifecycle must not invalidate metadata")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&spy.invList))
+}
+
+func TestCachingRepo_OrganizerEdit_StillInvalidates(t *testing.T) {
+	spy := &invSpy{}
+	inner := &reservationInner{}
+	repo := NewCachingTicketRepository(inner, spy, zap.NewNop())
+
+	require.NoError(t, repo.Update(context.Background(), &Ticket{ID: "t1"}))
+	assert.Equal(t, int32(1), atomic.LoadInt32(&spy.invTicket), "organizer edit must invalidate the ticket")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&spy.invList))
+}
+
+// reservationInner is a no-op inner repo for reservation/update calls.
+type reservationInner struct{ TicketRepository }
+
+func (reservationInner) ReserveTicket(context.Context, string, string) error         { return nil }
+func (reservationInner) ReleaseTicket(context.Context, string) error                 { return nil }
+func (reservationInner) CreateReservation(context.Context, *TicketReservation) error { return nil }
+func (reservationInner) FinalizeReservation(context.Context, string, string) error   { return nil }
+func (reservationInner) ReleaseReservation(context.Context, string) error            { return nil }
+func (reservationInner) Update(context.Context, *Ticket) error                       { return nil }
+func (reservationInner) FindReservationByID(context.Context, string) (*TicketReservation, error) {
+	return &TicketReservation{TicketID: "t1"}, nil
+}
