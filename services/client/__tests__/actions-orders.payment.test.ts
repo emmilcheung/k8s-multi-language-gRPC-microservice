@@ -28,9 +28,11 @@ describe("submitPayment action", () => {
     const result = await submitPayment("order-1", {}, formData);
 
     expect(result).toEqual({});
-    expect(executeMutationMock).toHaveBeenCalledWith(expect.anything(), {
-      input: { orderId: "order-1", token: "pm_card_visa" },
-    });
+    expect(executeMutationMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { input: { orderId: "order-1", token: "pm_card_visa" } },
+      { timeoutMs: 20_000 }
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith("/orders/order-1");
   });
 
@@ -44,9 +46,11 @@ describe("submitPayment action", () => {
     const result = await submitPayment("order-2", {}, formData);
 
     expect(result).toEqual({});
-    expect(executeMutationMock).toHaveBeenCalledWith(expect.anything(), {
-      input: { orderId: "order-2", savedPaymentMethodId: "pm-saved-1" },
-    });
+    expect(executeMutationMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { input: { orderId: "order-2", savedPaymentMethodId: "pm-saved-1" } },
+      { timeoutMs: 20_000 }
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith("/orders/order-2");
   });
 });
