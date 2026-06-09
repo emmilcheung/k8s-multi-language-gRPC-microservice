@@ -196,3 +196,14 @@ export async function signout(): Promise<void> {
   cookieStore.delete(REFRESH_TOKEN_COOKIE);
   redirect("/auth/signin");
 }
+
+/**
+ * Returns whether the caller currently has a session. Reads the httpOnly access
+ * cookie server-side so the client NavBar can resolve login state at runtime —
+ * this keeps the root layout free of cookies(), so public pages stay statically
+ * renderable (ISR) and their HTML never bakes in per-user nav state.
+ */
+export async function getSessionState(): Promise<{ isLoggedIn: boolean }> {
+  const cookieStore = await cookies();
+  return { isLoggedIn: Boolean(cookieStore.get(ACCESS_TOKEN_COOKIE)?.value) };
+}

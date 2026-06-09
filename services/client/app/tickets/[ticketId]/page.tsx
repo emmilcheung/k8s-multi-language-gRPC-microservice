@@ -4,6 +4,14 @@
 
 export const revalidate = 30;
 
+// Opt this dynamic segment into static generation + ISR. Returning [] prerenders
+// no specific ticket at build time; with dynamicParams (default true), each
+// requested ticket is rendered on demand and then cached/revalidated — so the
+// CDN/Kong can serve it with public, s-maxage headers instead of private.
+export async function generateStaticParams(): Promise<{ ticketId: string }[]> {
+  return [];
+}
+
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ApiError } from "@/lib/api-error";

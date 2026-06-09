@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Button } from "@/components/ui/button";
-import { signout } from "@/app/actions/auth";
+import { getSessionState, signout } from "@/app/actions/auth";
 import { cn } from "@/lib/utils";
 import {
   Tag,
@@ -17,16 +17,28 @@ import {
   Home,
 } from "lucide-react";
 
-interface NavBarProps {
-  isLoggedIn: boolean;
-}
-
-export function NavBar({ isLoggedIn }: NavBarProps) {
+export function NavBar() {
   const [mounted, setMounted] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
+  // Resolve session state client-side so the root layout can stay free of
+  // cookies() (which would force every route dynamic and bake per-user nav
+  // into cacheable HTML). The nav fades in only once auth state is known.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMounted(true);
+    let active = true;
+    getSessionState()
+      .then((s) => {
+        if (active) {
+          setIsLoggedIn(s.isLoggedIn);
+          setMounted(true);
+        }
+      })
+      .catch(() => {
+        if (active) setMounted(true); // fall back to logged-out nav
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   return (

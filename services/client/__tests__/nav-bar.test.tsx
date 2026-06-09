@@ -20,11 +20,12 @@ vi.mock("next/link", () => ({
 
 vi.mock("@/app/actions/auth", () => ({
   signout: vi.fn(),
+  getSessionState: vi.fn().mockResolvedValue({ isLoggedIn: true }),
 }));
 
 describe("NavBar", () => {
   it("does not show scanner navigation globally", () => {
-    render(<NavBar isLoggedIn />);
+    render(<NavBar />);
 
     expect(screen.queryByRole("link", { name: /scanner/i })).not.toBeInTheDocument();
   });
