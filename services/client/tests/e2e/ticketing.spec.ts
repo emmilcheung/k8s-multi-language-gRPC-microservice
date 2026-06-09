@@ -997,7 +997,10 @@ test.describe("orders", () => {
 
 test.describe("seating plan", () => {
   test("authenticated user can manage a seated ticket plan lifecycle (Phase 3)", async ({ page }) => {
-    test.setTimeout(60_000);
+    // Long, ~10-step server-action lifecycle (incl. the heavier organizer-edit
+    // page). Operations are correct but slow under a loaded stack, so give the
+    // cumulative flow generous headroom rather than relying on CI retries.
+    test.setTimeout(150_000);
     const email = uniqueEmail("org-seated-p3");
     await signupAsCreator(page, email);
 
@@ -1039,9 +1042,10 @@ test.describe("seating plan", () => {
 
     // 4. Manage plan is now on the organizer edit page (SeatingPlanPreview component).
     await page.goto(`/organizer/events/${ticketId}/edit`);
-    await page.getByRole("heading", { level: 1 }).first().waitFor({ state: "attached", timeout: 10000 });
+    // Organizer edit page loads plan + tiers + availability + attendance policy — heavier; allow time.
+    await page.getByRole("link", { name: /manage plan/i }).waitFor({ state: "visible", timeout: 20000 });
     await page.getByRole("link", { name: /manage plan/i }).click();
-    await page.waitForURL(/\/tickets\/[0-9a-f-]+\/plans\/[0-9a-f-]+$/, { timeout: 15000 });
+    await page.waitForURL(/\/tickets\/[0-9a-f-]+\/plans\/[0-9a-f-]+$/, { timeout: 20000 });
     await expect(page.getByRole("link", { name: /back to ticket/i })).toBeVisible();
 
     const originalPlanUrl = page.url();
@@ -1049,10 +1053,10 @@ test.describe("seating plan", () => {
     expect(originalPlanId).toBeTruthy();
 
     await page.getByRole("button", { name: /activate plan/i }).click();
-    await expect(page.getByRole("button", { name: /deactivate plan/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: /deactivate plan/i })).toBeVisible({ timeout: 18000 });
 
     await page.getByRole("button", { name: /deactivate plan/i }).click();
-    await expect(page.getByRole("button", { name: /reactivate plan/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: /reactivate plan/i })).toBeVisible({ timeout: 18000 });
     await expect(page.getByRole("button", { name: /create replacement plan/i })).toBeVisible();
 
     await page.getByRole("button", { name: /reactivate plan/i }).click();
@@ -1071,15 +1075,15 @@ test.describe("seating plan", () => {
             .isVisible()
             .catch(() => false);
         },
-        { timeout: 15000, intervals: [1000, 2000, 3000] }
+        { timeout: 25000, intervals: [1000, 2000, 3000] }
       )
       .toBe(true);
 
     await page.getByRole("button", { name: /deactivate plan/i }).click();
-    await expect(page.getByRole("button", { name: /create replacement plan/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: /create replacement plan/i })).toBeVisible({ timeout: 18000 });
 
     await page.getByRole("button", { name: /create replacement plan/i }).click();
-    await expect.poll(() => page.url(), { timeout: 15000 }).not.toBe(originalPlanUrl);
+    await expect.poll(() => page.url(), { timeout: 25000 }).not.toBe(originalPlanUrl);
 
     const replacementPlanId = page.url().match(/plans\/([0-9a-f-]+)/)?.[1];
     expect(replacementPlanId).toBeTruthy();

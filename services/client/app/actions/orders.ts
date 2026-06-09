@@ -82,9 +82,10 @@ export async function submitPayment(
     const input = savedPaymentMethodId
       ? { orderId, savedPaymentMethodId }
       : { orderId, token: paymentMethodId };
-    await executeMutation(CreatePaymentDocument, {
-      input,
-    });
+    // Payments legitimately take longer than the 5s client default (PSP
+    // round-trip); under load a tight timeout surfaces as "operation aborted due
+    // to timeout" instead of the real charge result. Allow 20s for this op.
+    await executeMutation(CreatePaymentDocument, { input }, { timeoutMs: 20_000 });
     revalidatePath(`/orders/${orderId}`);
     return {};
   } catch (error) {
