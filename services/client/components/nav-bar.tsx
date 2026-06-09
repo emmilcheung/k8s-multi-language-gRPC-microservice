@@ -36,7 +36,6 @@ export function NavBar() {
       .some((c) => c.startsWith(`${LOGGED_IN_HINT_COOKIE}=`));
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoggedIn(loggedIn);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
   }, [pathname]);
 
