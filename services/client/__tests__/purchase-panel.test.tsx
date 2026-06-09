@@ -46,7 +46,6 @@ describe("PurchasePanel", () => {
         isSeated
         gaMaxQuantity={6}
         purchaseGate={null}
-        token="buyer-token"
       />
     );
 

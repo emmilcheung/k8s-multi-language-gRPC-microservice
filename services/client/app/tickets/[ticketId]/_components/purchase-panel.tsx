@@ -21,7 +21,8 @@ interface PurchasePanelProps {
     badgeClass: string;
     message: string;
   } | null;
-  token: string | undefined;
+  /** @deprecated Not used for rendering decisions; kept for compatibility until B4 drops it from the page. */
+  token?: string | undefined;
 }
 
 export function PurchasePanel({
@@ -30,7 +31,6 @@ export function PurchasePanel({
   isSeated,
   gaMaxQuantity,
   purchaseGate,
-  token,
 }: PurchasePanelProps) {
   if (isOwner) {
     return null; // Owner sees the edit form instead, handled in main page
@@ -39,7 +39,7 @@ export function PurchasePanel({
   const priceCents = Math.round(parseFloat(ticket.price) * 100);
   const renderPrimaryAction = () => {
     if (purchaseGate) {
-      if (purchaseGate.label === "Already Reserved" && token) {
+      if (purchaseGate.label === "Already Reserved") {
         return (
           <Link href="/orders" className="w-full">
             <Button variant="outline" className="w-full">
@@ -56,34 +56,16 @@ export function PurchasePanel({
     }
 
     if (isSeated) {
-      if (token) {
-        return (
-          <Link href={`/tickets/${ticket.id}/seats`} className="w-full">
-            <Button variant="primary" className="w-full">
-              Continue to seat map
-            </Button>
-          </Link>
-        );
-      }
       return (
-        <Link href="/auth/signin" className="w-full">
+        <Link href={`/tickets/${ticket.id}/seats`} className="w-full">
           <Button variant="primary" className="w-full">
-            Sign in to continue
+            Continue to seat map
           </Button>
         </Link>
       );
     }
 
-    if (token) {
-      return <PurchaseButton ticketId={ticket.id} maxQuantity={gaMaxQuantity} />;
-    }
-    return (
-      <Link href="/auth/signin" className="w-full">
-        <Button variant="primary" className="w-full">
-          Sign in to Purchase
-        </Button>
-      </Link>
-    );
+    return <PurchaseButton ticketId={ticket.id} maxQuantity={gaMaxQuantity} />;
   };
 
   return (
