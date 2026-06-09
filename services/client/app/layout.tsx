@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-import { cookies } from "next/headers";
 import { NavBar } from "@/components/nav-bar";
 import { currentTraceId } from "@/lib/tracing";
 
@@ -27,8 +26,6 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const cookieStore = await cookies();
-  const isLoggedIn = Boolean(cookieStore.get("token")?.value);
   const traceId = currentTraceId();
 
   return (
@@ -40,7 +37,7 @@ export default async function RootLayout({
         {traceId ? <meta name="x-trace-id" content={traceId} /> : null}
       </head>
       <body className="min-h-full flex flex-col bg-bg text-ink selection:bg-accent/20 selection:text-accent">
-        <NavBar isLoggedIn={isLoggedIn} />
+        <NavBar />
         <main className="flex-1 container mx-auto max-w-6xl px-4 pb-24 pt-6 md:py-10">
           {children}
         </main>

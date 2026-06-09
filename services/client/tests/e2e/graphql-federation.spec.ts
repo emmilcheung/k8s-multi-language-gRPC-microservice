@@ -133,11 +133,17 @@ async function createAttachedSeatedTicket(page: Page) {
     throw new Error("Failed to derive ticket ID from ticket URL");
   }
 
+  // The "Manage plan" link is now on the organizer edit page (SeatingPlanPreview component),
+  // not on the public ticket detail page.
+  await page.goto(`/organizer/events/${ticketId}/edit`);
+  // The organizer layout has its own h1 ("Organizer tools") + the page h1; use first().
+  await page.getByRole("heading", { level: 1 }).first().waitFor({ state: "attached", timeout: 15000 });
+
   const managePlanLink = page.getByRole("link", { name: /manage plan/i });
   await managePlanLink.waitFor({ state: "visible", timeout: 15000 });
   const managePlanHref = await managePlanLink.getAttribute("href");
   const planId = managePlanHref?.split("/").at(-1);
-  
+
   if (!planId) {
     throw new Error("Ticket does not have an auto-created seating plan");
   }

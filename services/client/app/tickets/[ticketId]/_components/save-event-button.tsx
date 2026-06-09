@@ -5,21 +5,23 @@ import { useEffect, useState, useTransition } from "react";
 import { Bookmark, BookmarkCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button-variants";
-import { saveEvent, unsaveEvent } from "@/app/actions/saved-events";
+import { getSavedState, saveEvent, unsaveEvent } from "@/app/actions/saved-events";
 
 interface SaveEventButtonProps {
   eventId: string;
-  initialSaved: boolean;
+  initialSaved?: boolean;
 }
 
 export function SaveEventButton({ eventId, initialSaved }: SaveEventButtonProps) {
-  const [isSaved, setIsSaved] = useState(initialSaved);
+  const [isSaved, setIsSaved] = useState(initialSaved ?? false);
   const [error, setError] = useState<string | undefined>();
   const [pending, startTransition] = useTransition();
 
   useEffect(() => {
-    setIsSaved(initialSaved);
-  }, [initialSaved]);
+    let active = true;
+    getSavedState(eventId).then((r) => { if (active) setIsSaved(r.savedByMe); });
+    return () => { active = false; };
+  }, [eventId]);
 
   const handleToggle = () => {
     startTransition(async () => {

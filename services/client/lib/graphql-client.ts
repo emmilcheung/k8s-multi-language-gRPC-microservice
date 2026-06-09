@@ -8,7 +8,7 @@ import {
   type Client,
 } from "urql";
 import { retryExchange } from "@urql/exchange-retry";
-import { ApiError } from "@/lib/api";
+import { ApiError } from "@/lib/api-error";
 import { traceHeaders } from "@/lib/tracing";
 
 // TODO(audit): PQ + introspection lockdown per 2026-04-20-graphql-federation.md §1.4

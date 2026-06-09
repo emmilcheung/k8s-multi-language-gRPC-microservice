@@ -17,6 +17,13 @@ export const ACCESS_TOKEN_COOKIE =
 export const REFRESH_TOKEN_COOKIE =
   process.env.REFRESH_COOKIE_NAME?.trim() || "refreshToken";
 
+// Non-httpOnly UI hint cookie. Lets the client NavBar render logged-in state
+// synchronously (no server round-trip), so the root layout never reads cookies()
+// (which would force every route dynamic and bake per-user nav into cacheable
+// HTML). NOT security-bearing — the httpOnly access token is the auth source of
+// truth; this only drives nav presentation.
+export const LOGGED_IN_HINT_COOKIE = "logged_in";
+
 const DEFAULT_REFRESH_SKEW_SECONDS = 30;
 
 export const REFRESH_SKEW_SECONDS = (() => {

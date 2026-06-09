@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Button } from "@/components/ui/button";
 import { signout } from "@/app/actions/auth";
+import { LOGGED_IN_HINT_COOKIE } from "@/lib/session-cookies";
 import { cn } from "@/lib/utils";
 import {
   Tag,
@@ -17,17 +19,25 @@ import {
   Home,
 } from "lucide-react";
 
-interface NavBarProps {
-  isLoggedIn: boolean;
-}
-
-export function NavBar({ isLoggedIn }: NavBarProps) {
+export function NavBar() {
   const [mounted, setMounted] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const pathname = usePathname();
 
+  // Resolve session state client-side from the non-httpOnly hint cookie so the
+  // root layout can stay free of cookies() (which would force every route
+  // dynamic and bake per-user nav into cacheable HTML). Reading document.cookie
+  // is synchronous — no server round-trip, no flash. Re-read on every navigation
+  // (pathname dep): the root layout persists across client-side navigation, so a
+  // one-time effect would miss login/logout state changes after signin/signout.
   useEffect(() => {
+    const loggedIn = document.cookie
+      .split("; ")
+      .some((c) => c.startsWith(`${LOGGED_IN_HINT_COOKIE}=`));
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsLoggedIn(loggedIn);
     setMounted(true);
-  }, []);
+  }, [pathname]);
 
   return (
     <header className="sticky top-0 z-50 bg-bg border-b border-line">

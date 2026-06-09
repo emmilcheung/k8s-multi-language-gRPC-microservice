@@ -24,7 +24,7 @@ vi.mock("@/app/actions/auth", () => ({
 
 describe("NavBar", () => {
   it("does not show scanner navigation globally", () => {
-    render(<NavBar isLoggedIn />);
+    render(<NavBar />);
 
     expect(screen.queryByRole("link", { name: /scanner/i })).not.toBeInTheDocument();
   });

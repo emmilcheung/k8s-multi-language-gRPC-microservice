@@ -1,29 +1,31 @@
-// app/tickets/[ticketId]/page.tsx — Ticket detail page.
-// Redesigned layout: hero band (left), quick facts, about section, purchase panel (sticky right).
-// Owner edit form and seating preview in right column.
+// app/tickets/[ticketId]/page.tsx — Ticket detail page (public ISR shell).
+// Buyer view only. Organizer editing lives at /organizer/events/[id]/edit.
+// No server-side cookies() usage — this page renders as ISR (revalidate = 30s).
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
-import { cookies } from "next/headers";
+// Opt this dynamic segment into static generation + ISR. Returning [] prerenders
+// no specific ticket at build time; with dynamicParams (default true), each
+// requested ticket is rendered on demand and then cached/revalidated — so the
+// CDN/Kong can serve it with public, s-maxage headers instead of private.
+export async function generateStaticParams(): Promise<{ ticketId: string }[]> {
+  return [];
+}
+
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ApiError, serverApi } from "@/lib/api";
-import { executeQuery } from "@/lib/graphql/execute";
+import { ApiError } from "@/lib/api-error";
+import { executePublicQuery } from "@/lib/graphql/execute-public";
 import {
-  TicketDetailDocument,
-  AttendancePolicyDocument,
+  TicketDetailPublicDocument,
   TicketsBrowseDocument,
 } from "@/lib/graphql/generated";
-import type { Ticket, SeatingPlan, PriceTier, AvailabilitySnapshot } from "@/lib/types";
+import type { Ticket } from "@/lib/types";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { EventPoster } from "@/components/system";
 import { cn } from "@/lib/utils";
-import { TicketForm } from "@/components/ticket-form";
-import { SeatingPlanPreview } from "@/components/seating-plan-preview";
-import { updateTicket } from "@/app/actions/tickets";
-import { fetchPriceTiers } from "@/app/actions/venues";
 import { PurchasePanel } from "./_components/purchase-panel";
 import { QuickFacts } from "./_components/quick-facts";
 import { SaveEventButton } from "./_components/save-event-button";
@@ -33,32 +35,21 @@ interface Props {
   params: Promise<{ ticketId: string }>;
 }
 
-function toDateTimeLocalInput(value?: string): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
+// Coarse availability bucket — never expose the raw remaining count on the
+// static shell (it is seconds-stale by design; the exact count is enforced
+// server-side at reservation time).
+type Availability = "on_sale" | "few_left" | "sold_out";
+const FEW_LEFT_THRESHOLD = 20;
+
+function coarseAvailability(remaining: number | null): Availability {
+  if (remaining == null) return "on_sale";
+  if (remaining <= 0) return "sold_out";
+  if (remaining <= FEW_LEFT_THRESHOLD) return "few_left";
+  return "on_sale";
 }
 
-function toTicketFormType(
-  ticket: Ticket,
-  attachedPlan: SeatingPlan | null
-): "GA" | "SEATED_MANUAL" | "SEATED_AUTO" {
-  if (ticket.ticketType === "SEATED_AUTO" || attachedPlan?.assignmentMode === "auto") {
-    return "SEATED_AUTO";
-  }
-  if (ticket.ticketType === "SEATED_MANUAL" || attachedPlan?.assignmentMode === "manual" || ticket.seatingPlanId) {
-    return "SEATED_MANUAL";
-  }
-  return "GA";
-}
-
-async function getTicket(ticketId: string): Promise<Ticket & { savedByMe: boolean }> {
-  const cookieStore = await cookies();
-  const cookieHeader = cookieStore.toString();
-
-  const data = await executeQuery(TicketDetailDocument, { id: ticketId }, { cookie: cookieHeader });
+async function getTicket(ticketId: string): Promise<Ticket> {
+  const data = await executePublicQuery(TicketDetailPublicDocument, { id: ticketId });
 
   if (!data.ticket) {
     notFound();
@@ -72,6 +63,7 @@ async function getTicket(ticketId: string): Promise<Ticket & { savedByMe: boolea
     price: gql.priceDecimal,
     userId: gql.userId,
     orderId: gql.orderId ?? undefined,
+    version: 0,
     quota: gql.quota,
     reserved: gql.reserved,
     sold: gql.sold,
@@ -79,7 +71,6 @@ async function getTicket(ticketId: string): Promise<Ticket & { savedByMe: boolea
     maxPerUser: gql.maxPerUser ?? undefined,
     ticketType: gql.ticketType,
     seatingPlanId: gql.seatingPlan?.id ?? undefined,
-    savedByMe: gql.savedByMe,
     event: gql.event
       ? {
           title: gql.event.title,
@@ -91,7 +82,7 @@ async function getTicket(ticketId: string): Promise<Ticket & { savedByMe: boolea
           venueAddress: gql.event.venueAddress ?? undefined,
         }
       : undefined,
-  } as Ticket & { savedByMe: boolean };
+  };
 }
 
 export async function generateMetadata() {
@@ -101,7 +92,7 @@ export async function generateMetadata() {
 export default async function TicketDetailPage({ params }: Props) {
   const { ticketId } = await params;
 
-  let ticket: Ticket & { savedByMe: boolean };
+  let ticket: Ticket;
   try {
     ticket = await getTicket(ticketId);
   } catch (error) {
@@ -111,74 +102,8 @@ export default async function TicketDetailPage({ params }: Props) {
     notFound();
   }
 
-  const cookieStore = await cookies();
-  const token = cookieStore.get("token")?.value;
-
-  // Extract user ID by decoding the JWT payload — no HTTP roundtrip needed (P-05).
-  // Kong already verified the token's signature; we only need the `sub` claim here
-  // for an owner check, so decoding without verification is safe in this context.
-  let currentUserId: string | null = null;
-  if (token) {
-    try {
-      const payloadB64 = token.split(".")[1];
-      if (payloadB64) {
-        const json = Buffer.from(payloadB64, "base64url").toString("utf-8");
-        const payload = JSON.parse(json) as { sub?: string };
-        currentUserId = payload.sub ?? null;
-      }
-    } catch {
-      // non-fatal — fall back to purchase-only view
-    }
-  }
-
-  const isOwner = currentUserId !== null && currentUserId === ticket.userId;
   const isSeated = Boolean(ticket.seatingPlanId);
-  // GA flow: reservation tracked in ticket.reserved counter (ticket.orderId is legacy).
-  // A ticket is considered reserved when either the legacy orderId is set OR the
-  // quota-based reserved counter is > 0 (meaning at least one active reservation exists).
-  const isReserved = !isSeated && (Boolean(ticket.orderId) || (ticket.reserved != null && ticket.reserved > 0));
-  const updateAction = updateTicket.bind(null, ticketId);
-  let defaultRequireQrForEntry = true;
-  const attendanceLocked = (ticket.sold ?? 0) > 0;
 
-  // When a plan is already attached, fetch its full details (sections included)
-  // so the organizer can see a read-only preview of what is attached.
-  let attachedPlan: SeatingPlan | null = null;
-  let attachedPlanTiers: PriceTier[] = [];
-  let attachedPlanAvailability: AvailabilitySnapshot | null = null;
-  if (ticket.seatingPlanId) {
-    const results = await Promise.allSettled([
-      serverApi<SeatingPlan>(`/api/seating-plans/${ticket.seatingPlanId}`),
-      serverApi<AvailabilitySnapshot>(`/api/seating-plans/${ticket.seatingPlanId}/availability`),
-      ...(isOwner ? [fetchPriceTiers(ticket.seatingPlanId)] : []),
-    ]);
-
-    if (results[0]?.status === "fulfilled") {
-      attachedPlan = results[0].value;
-    }
-    if (results[1]?.status === "fulfilled") {
-      attachedPlanAvailability = results[1].value;
-    }
-    if (isOwner && results[2]?.status === "fulfilled") {
-      attachedPlanTiers = results[2].value as PriceTier[];
-    }
-  }
-
-  if (isOwner) {
-    const policyResult = await executeQuery(
-      AttendancePolicyDocument,
-      { eventId: ticketId },
-      { cookie: `token=${token}` }
-    ).catch(() => null);
-    if (
-      policyResult?.attendancePolicy?.requireQrForEntry === true ||
-      policyResult?.attendancePolicy?.requireQrForEntry === false
-    ) {
-      defaultRequireQrForEntry = policyResult.attendancePolicy.requireQrForEntry;
-    }
-  }
-
-  // GA max-per-order: use ticket.quota if available, capped at 10, default 1.
   // GA max-per-order: honour maxPerUser if set; fall back to quota cap at 10; default 1.
   const gaMaxQuantity = ticket.quota
     ? Math.min(ticket.maxPerUser ?? ticket.quota, Math.min(ticket.quota, 10))
@@ -195,11 +120,7 @@ export default async function TicketDetailPage({ params }: Props) {
     } | null;
   }> = [];
   try {
-    const data = await executeQuery(
-      TicketsBrowseDocument,
-      { first: 4 },
-      { cookie: cookieStore.toString() }
-    );
+    const data = await executePublicQuery(TicketsBrowseDocument, { first: 4 });
     relatedEvents = (data?.ticketsConnection?.edges ?? [])
       .map((edge) => edge.node)
       .filter((node) => node.id !== ticket.id)
@@ -207,57 +128,35 @@ export default async function TicketDetailPage({ params }: Props) {
   } catch {
     relatedEvents = [];
   }
+
+  // GA availability: compute coarse bucket from quota counters.
+  // For seated tickets the seats page handles per-section availability.
   const gaRemaining =
     !isSeated && ticket.quota != null
       ? Math.max(0, ticket.quota - (ticket.reserved ?? 0) - (ticket.sold ?? 0))
       : null;
-  const seatedPlanInactive = isSeated && attachedPlan != null && attachedPlan.status !== "active";
-  const seatedSoldOut =
-    isSeated &&
-    attachedPlan?.status === "active" &&
-    attachedPlanAvailability != null &&
-    attachedPlanAvailability.counts.available === 0;
-  const gaUnavailable = !isSeated && gaRemaining != null && gaRemaining <= 0;
-  const purchaseGate = isSeated
-    ? seatedPlanInactive
+
+  const availability = coarseAvailability(isSeated ? null : gaRemaining);
+
+  // GA purchase gate: only block when sold out / unavailable at the coarse level.
+  // "isReserved" is not derivable without a cookie, so we skip that gate on the
+  // static shell — the PurchaseButton server action will catch double-reservations.
+  const purchaseGate =
+    !isSeated && availability === "sold_out"
       ? {
-          label: "Unavailable",
-          badge: "Unavailable",
-          badgeClass: "bg-subtle/40 text-mute border-line/20",
-          message: "This seating plan is not active, so this ticket cannot be purchased right now.",
-        }
-      : seatedSoldOut
-        ? {
-            label: "Sold Out",
-            badge: "Sold Out",
-            badgeClass: "bg-destructive/15 text-destructive border-destructive/20",
-            message: "No seats are currently available for this ticket.",
-          }
-        : null
-    : gaUnavailable
-      ? {
-          label: ticket.sold != null && ticket.quota != null && ticket.sold >= ticket.quota ? "Sold Out" : "Unavailable",
-          badge:
-            ticket.sold != null && ticket.quota != null && ticket.sold >= ticket.quota
-              ? "Sold Out"
-              : "Unavailable",
-          badgeClass:
-            ticket.sold != null && ticket.quota != null && ticket.sold >= ticket.quota
-              ? "bg-destructive/15 text-destructive border-destructive/20"
-              : "bg-subtle/40 text-mute border-line/20",
-          message:
-            ticket.sold != null && ticket.quota != null && ticket.sold >= ticket.quota
-              ? "This ticket is sold out."
-              : "All remaining tickets are currently reserved or unavailable.",
-        }
-      : isReserved
-      ? {
-          label: "Already Reserved",
-          badge: "Already Reserved",
-          badgeClass: "bg-subtle/40 text-mute border-line/20",
-          message: "You already have an active reservation for this ticket.",
+          label: "Sold Out",
+          badge: "Sold Out",
+          badgeClass: "bg-destructive/15 text-destructive border-destructive/20",
+          message: "This ticket is sold out.",
         }
       : null;
+
+  const availabilityLabel =
+    availability === "sold_out"
+      ? "Sold out"
+      : availability === "few_left"
+        ? "Few left"
+        : "On sale";
 
   return (
     <div className="flex flex-col gap-8 max-w-6xl mx-auto">
@@ -302,7 +201,7 @@ export default async function TicketDetailPage({ params }: Props) {
                 dot
                 className="bg-black/40 text-white border-white/25"
               >
-                {(ticket.available ?? 0) > 0 ? "On sale" : "Sold out"}
+                {availabilityLabel}
               </Badge>
               <Badge
                 tone="neutral"
@@ -310,14 +209,6 @@ export default async function TicketDetailPage({ params }: Props) {
               >
                 {ticket.ticketType ?? "General Admission"}
               </Badge>
-              {isOwner && (
-                <Badge
-                  tone="neutral"
-                  className="bg-black/40 text-white border-white/25"
-                >
-                  Your listing
-                </Badge>
-              )}
             </div>
 
             {/* Bottom-left text overlay */}
@@ -351,7 +242,7 @@ export default async function TicketDetailPage({ params }: Props) {
           </div>
 
           {/* Quick facts strip */}
-          <QuickFacts ticket={ticket} gaRemaining={gaRemaining} />
+          <QuickFacts ticket={ticket} gaRemaining={null} />
 
           {/* About section */}
           {ticket.event?.description ? (
@@ -364,7 +255,7 @@ export default async function TicketDetailPage({ params }: Props) {
             </p>
           )}
 
-          {/* Ticket-content card (for all viewers including owner) */}
+          {/* Ticket-content card (for all viewers) */}
           {isSeated ? (
             <Card>
               <CardHeader>
@@ -409,10 +300,10 @@ export default async function TicketDetailPage({ params }: Props) {
                     <span
                       className={cn(
                         "text-xs font-mono tabular-nums",
-                        gaRemaining != null && gaRemaining < 20 ? "text-bad" : "text-mute"
+                        availability === "few_left" ? "text-bad" : "text-mute"
                       )}
                     >
-                      {gaRemaining != null ? `${gaRemaining} remaining` : "—"}
+                      {availabilityLabel}
                     </span>
                     <Badge tone="accent" className="text-xs">
                       Selected
@@ -422,79 +313,6 @@ export default async function TicketDetailPage({ params }: Props) {
               </CardContent>
             </Card>
           )}
-
-          {/* Owner edit form */}
-          {isOwner ? (
-            <div className="flex flex-col gap-4">
-              <div className="bg-card border border-line rounded p-4 flex flex-col gap-3">
-                <p className="text-sm font-semibold">Attendance tools</p>
-                <p className="text-xs text-mute">
-                  Open attendance settings to view checked-in attendees and manage QR policy for this ticket.
-                </p>
-                <Link
-                  href={`/organizer/events/${ticketId}/attendance`}
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
-                >
-                  Attendance settings
-                </Link>
-                {defaultRequireQrForEntry && (
-                  <Link
-                    href={`/scan?eventId=${ticketId}`}
-                    className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
-                  >
-                    Open Scanner Console
-                  </Link>
-                )}
-              </div>
-
-              {!isReserved ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Manage event</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <TicketForm
-                      action={updateAction}
-                      defaultTitle={ticket.title}
-                      defaultPrice={ticket.price}
-                      defaultQuota={ticket.quota}
-                      defaultMaxPerUser={attachedPlan?.maxSeatsPerOrder ?? ticket.maxPerUser}
-                      defaultTicketType={toTicketFormType(ticket, attachedPlan)}
-                      defaultVenueId={attachedPlan?.venueId ?? undefined}
-                      defaultSeatingPlanId={attachedPlan?.id ?? ticket.seatingPlanId ?? undefined}
-                      defaultPricingMode={attachedPlan?.pricingMode}
-                      defaultStartsAt={toDateTimeLocalInput(ticket.event?.startsAt)}
-                      defaultEndsAt={toDateTimeLocalInput(ticket.event?.endsAt)}
-                      defaultEventTitle={ticket.event?.title ?? ""}
-                      defaultEventDescription={ticket.event?.description ?? ""}
-                      defaultEventImageUrl={ticket.event?.imageUrl ?? ""}
-                      defaultVenueName={ticket.event?.venueName ?? ""}
-                      defaultVenueAddress={ticket.event?.venueAddress ?? ""}
-                      defaultRequireQrForEntry={defaultRequireQrForEntry}
-                      attendanceLocked={attendanceLocked}
-                      submitLabel="Update Ticket"
-                    />
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Your listing</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-mute">
-                      This ticket is currently reserved and cannot be edited.
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Read-only preview of the attached seating plan */}
-              {attachedPlan && (
-                <SeatingPlanPreview plan={attachedPlan} priceTiers={attachedPlanTiers} />
-              )}
-            </div>
-          ) : null}
 
           {relatedEvents.length > 0 && (
             <section className="mt-4">
@@ -533,24 +351,15 @@ export default async function TicketDetailPage({ params }: Props) {
         </div>
 
         {/* Right column — sticky purchase panel */}
-        {!isOwner && (
-          <div className="flex flex-col gap-3">
-            {currentUserId && (
-              <SaveEventButton
-                eventId={ticketId}
-                initialSaved={ticket.savedByMe}
-              />
-            )}
-            <PurchasePanel
-              ticket={ticket}
-              isOwner={isOwner}
-              isSeated={isSeated}
-              gaMaxQuantity={gaMaxQuantity}
-              purchaseGate={purchaseGate}
-              token={token}
-            />
-          </div>
-        )}
+        <div className="flex flex-col gap-3">
+          <SaveEventButton eventId={ticketId} />
+          <PurchasePanel
+            ticket={ticket}
+            isSeated={isSeated}
+            gaMaxQuantity={gaMaxQuantity}
+            purchaseGate={purchaseGate}
+          />
+        </div>
       </div>
     </div>
   );

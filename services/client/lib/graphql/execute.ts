@@ -43,6 +43,13 @@ export async function executeQuery<TData, TVariables extends AnyVariables>(
   return result.data;
 }
 
+// Re-export the cookie-free query helper so callers that don't need ISR-safety
+// can import from either this file or lib/graphql/execute-public.ts.
+// The page at app/tickets/[ticketId]/page.tsx imports directly from
+// execute-public.ts to avoid pulling this module's cookies() import into the
+// ISR render tree.
+export { executePublicQuery } from "./execute-public";
+
 /**
  * Execute a typed GraphQL mutation from a Server Action.
  *

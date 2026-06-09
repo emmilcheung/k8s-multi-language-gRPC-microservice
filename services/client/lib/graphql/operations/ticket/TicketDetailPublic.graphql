@@ -1,0 +1,26 @@
+query TicketDetailPublic($id: ID!) {
+  ticket(id: $id) {
+    id
+    title
+    price
+    priceDecimal
+    userId
+    orderId
+    quota
+    reserved
+    sold
+    available
+    maxPerUser
+    ticketType
+    seatingPlan { id }
+    event {
+      title
+      description
+      startsAt
+      endsAt
+      imageUrl
+      venueName
+      venueAddress
+    }
+  }
+}

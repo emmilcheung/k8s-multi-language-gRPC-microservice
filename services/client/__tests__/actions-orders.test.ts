@@ -91,9 +91,11 @@ describe("order server actions", () => {
     const result = await submitPayment("order-3", {}, formData);
 
     expect(result).toEqual({});
-    expect(executeMutationMock).toHaveBeenCalledWith(expect.anything(), {
-      input: { orderId: "order-3", token: "pm_new_123" },
-    });
+    expect(executeMutationMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { input: { orderId: "order-3", token: "pm_new_123" } },
+      { timeoutMs: 20_000 }
+    );
   });
 
   it("submitPayment uses savedPaymentMethodId from formData in GraphQL payment mutation", async () => {
@@ -106,9 +108,11 @@ describe("order server actions", () => {
     const result = await submitPayment("order-4", {}, formData);
 
     expect(result).toEqual({});
-    expect(executeMutationMock).toHaveBeenCalledWith(expect.anything(), {
-      input: { orderId: "order-4", savedPaymentMethodId: "saved-pm-456" },
-    });
+    expect(executeMutationMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { input: { orderId: "order-4", savedPaymentMethodId: "saved-pm-456" } },
+      { timeoutMs: 20_000 }
+    );
   });
 
   it("createManualSeatedOrder uses the GraphQL seated-order mutation", async () => {

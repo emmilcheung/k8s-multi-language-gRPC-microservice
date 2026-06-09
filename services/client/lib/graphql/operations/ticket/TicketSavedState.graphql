@@ -1,0 +1,6 @@
+query TicketSavedState($id: ID!) {
+  ticket(id: $id) {
+    id
+    savedByMe
+  }
+}

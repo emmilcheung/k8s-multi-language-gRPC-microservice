@@ -250,7 +250,11 @@ func TestCachingRepo_Update_invalidates_ticket_and_list_cache(t *testing.T) {
 	assert.Equal(t, redis.Nil, err)
 }
 
-func TestCachingRepo_ReserveTicket_invalidates_ticket_and_list_cache(t *testing.T) {
+// Reservation lifecycle no longer invalidates the metadata cache: availability
+// is served coarsely from the quota gate and the short SWR soft TTL bounds
+// staleness. Invalidating here would keep a hot ticket's key permanently cold
+// during onsale. See docs/superpowers/specs/2026-06-09-multi-instance-read-cache-design.md.
+func TestCachingRepo_ReserveTicket_does_not_invalidate_cache(t *testing.T) {
 	cacheRepo, _, redisClient, cleanup := setupCachingRepo(t)
 	defer cleanup()
 
@@ -264,12 +268,12 @@ func TestCachingRepo_ReserveTicket_invalidates_ticket_and_list_cache(t *testing.
 	require.NoError(t, err)
 
 	_, err = redisClient.Get(context.Background(), "ticket-service:ticket:t-8").Result()
-	assert.Equal(t, redis.Nil, err)
+	assert.NoError(t, err, "reserve must not invalidate the ticket cache entry")
 	_, err = redisClient.Get(context.Background(), "ticket-service:tickets:list").Result()
-	assert.Equal(t, redis.Nil, err)
+	assert.NoError(t, err, "reserve must not invalidate the list cache entry")
 }
 
-func TestCachingRepo_ReleaseTicket_invalidates_ticket_and_list_cache(t *testing.T) {
+func TestCachingRepo_ReleaseTicket_does_not_invalidate_cache(t *testing.T) {
 	cacheRepo, _, redisClient, cleanup := setupCachingRepo(t)
 	defer cleanup()
 
@@ -285,9 +289,9 @@ func TestCachingRepo_ReleaseTicket_invalidates_ticket_and_list_cache(t *testing.
 	require.NoError(t, err)
 
 	_, err = redisClient.Get(context.Background(), "ticket-service:ticket:t-9").Result()
-	assert.Equal(t, redis.Nil, err)
+	assert.NoError(t, err, "release must not invalidate the ticket cache entry")
 	_, err = redisClient.Get(context.Background(), "ticket-service:tickets:list").Result()
-	assert.Equal(t, redis.Nil, err)
+	assert.NoError(t, err, "release must not invalidate the list cache entry")
 }
 
 func TestCachingRepo_FindByID_redis_failure_falls_through_to_mongo(t *testing.T) {
