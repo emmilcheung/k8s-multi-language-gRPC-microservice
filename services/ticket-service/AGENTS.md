@@ -13,7 +13,7 @@
 | **Framework** | Echo v4 (HTTP), gRPC server (serves `order-service`) |
 | **Module** | `github.com/acme/ticket-service` |
 | **Test tooling** | `testify` + `testcontainers-go` |
-| **Database** | PostgreSQL |
+| **Database** | MongoDB (official Go driver v2) |
 | **Messaging** | Kafka producer (`confluent-kafka-go/v2`) |
 | **gRPC** | Server — exposes `TicketService` (proto: `/proto/tickets/v1/`) |
 | **HTTP port** | 3001 |
@@ -54,7 +54,7 @@ internal/
   config/               ← env var parsing + validation (fail loudly at startup)
   handler/              ← Echo HTTP handlers (thin — delegate to service layer)
   service/              ← business logic
-  repository/           ← PostgreSQL data access (pgx or database/sql)
+  repository/           ← MongoDB data access (mongo-driver) + caching decorator
   kafka/                ← Kafka producer setup + message publishing
   grpc/                 ← gRPC server implementation (generated interface)
   cache/                ← Redis cache helpers
@@ -104,12 +104,12 @@ test/                   ← integration tests (Testcontainers)
 
 ## Database Rules
 
-- **Parameterised queries only.** Use `pgx` named parameters or `?` placeholders — never string-interpolate user data into SQL.
-- **Migrations** are managed by `golang-migrate` (or equivalent). Migration files are append-only and immutable after merge to `main`.
-- **UUID primary keys** (`google/uuid` package). No serial integers in the public API.
-- **Optimistic concurrency control (OCC):** ticket rows have a `version` column. Increment on every update; reject writes where the incoming version doesn't match (return `409 Conflict`).
-- **`SELECT *` is forbidden.** Name every column explicitly.
-- Index FK columns and any column used in `WHERE` / `ORDER BY`.
+- **MongoDB via the official Go driver** (`go.mongodb.org/mongo-driver/v2`). Build filters/updates with `bson.M`/`bson.D` — never string-concatenate user input into query documents (e.g. regex search input must be escaped).
+- **Schema enforcement lives in code:** collection `$jsonSchema` validators are created at repository startup — keep them in sync with the struct `bson` tags.
+- **UUID string primary keys** (`_id`). No serial integers in the public API.
+- **Optimistic concurrency control (OCC):** ticket documents carry a `version` field, incremented on every update; a conditional update that matches zero documents must surface a conflict (return `409 Conflict`).
+- **Counters are invariant-guarded:** inventory mutations use single-document conditional updates (`$expr` quota guards) — never read-modify-write.
+- Index every field used in filters and sorts.
 
 ---
 
@@ -137,7 +137,7 @@ test/                   ← integration tests (Testcontainers)
 ## Testing
 
 - **Unit tests** (`*_test.go` in `internal/`): mock DB and Kafka with interfaces. Use `testify/mock` or simple interface stubs.
-- **Integration tests** (`test/` directory): spin up PostgreSQL, Redis, Kafka and (optionally) a mock gRPC server via `testcontainers-go`. Clean up all created records in `t.Cleanup`.
+- **Integration tests** (`test/` directory): spin up MongoDB, Redis, Kafka and (optionally) a mock gRPC server via `testcontainers-go`. Clean up all created records in `t.Cleanup`.
 - Test name format: `TestDoSomething_ShouldBehave_WhenCondition`.
 - Use `-short` flag to skip Testcontainers tests in environments without Docker.
 - **No real external calls in tests.** Mock the Kafka producer interface; use `miniredis` for Redis unit tests.
@@ -150,7 +150,8 @@ Config is validated at startup — the service refuses to start on any missing o
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | PostgreSQL DSN |
+| `MONGO_URI` | MongoDB connection URI (required) |
+| `MONGO_DB` | MongoDB database name (default `tickets`) |
 | `REDIS_URL` | Redis URL (for caching) |
 | `KAFKA_BROKERS` | Comma-separated broker list |
 | `KAFKA_CLIENT_ID` | Producer client ID |
