@@ -12,8 +12,8 @@ import (
 	gqlhandler "github.com/99designs/gqlgen/graphql/handler"
 	"github.com/acme/ticket-service/internal/cache"
 	"github.com/acme/ticket-service/internal/config"
-	grpcserver "github.com/acme/ticket-service/internal/grpc"
 	gqlgraph "github.com/acme/ticket-service/internal/graphql"
+	grpcserver "github.com/acme/ticket-service/internal/grpc"
 	"github.com/acme/ticket-service/internal/handler"
 	"github.com/acme/ticket-service/internal/health"
 	"github.com/acme/ticket-service/internal/kafka"
@@ -101,7 +101,10 @@ func main() {
 		redisClient := redis.NewClient(redisOptions)
 		defer redisClient.Close() //nolint:errcheck
 
-		ticketCache := cache.NewRedisCache(redisClient)
+		// Shared-Redis stale-while-revalidate cache: hot-key reads serve from
+		// Redis and are refreshed by a single fleet-wide background worker, so
+		// no per-pod state and no cache-expiry stampede onto Mongo.
+		ticketCache := cache.NewRedisSWRCache(redisClient)
 		quotaManager := cache.NewRedisQuotaManager(redisClient)
 		// Attach the quota manager to mongoRepo so that reservation hot-path
 		// uses Redis Lua scripts; mongo stays the source of truth.
