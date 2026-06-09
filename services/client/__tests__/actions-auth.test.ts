@@ -25,6 +25,7 @@ vi.mock("@/lib/session-cookies", () => ({
   REFRESH_COOKIE_PATH: "/",
   ACCESS_COOKIE_SAME_SITE: "strict",
   REFRESH_COOKIE_SAME_SITE: "strict",
+  LOGGED_IN_HINT_COOKIE: "logged_in",
   parseAuthCookies: (...args: unknown[]) => parseAuthCookiesMock(...args),
   toCookieOptions: (...args: unknown[]) => toCookieOptionsMock(...args),
 }));
@@ -136,6 +137,11 @@ describe("auth server actions", () => {
         maxAge: 604800,
       })
     );
+    expect(cookieSet).toHaveBeenCalledWith(
+      "logged_in",
+      "1",
+      expect.objectContaining({ httpOnly: false, path: "/" })
+    );
     expect(redirectMock).toHaveBeenCalledWith("/");
   });
 
@@ -157,6 +163,7 @@ describe("auth server actions", () => {
     );
     expect(cookieDelete).toHaveBeenCalledWith("token");
     expect(cookieDelete).toHaveBeenCalledWith("refreshToken");
+    expect(cookieDelete).toHaveBeenCalledWith({ name: "logged_in", path: "/" });
     expect(redirectMock).toHaveBeenCalledWith("/auth/signin");
   });
 

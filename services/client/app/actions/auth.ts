@@ -8,6 +8,7 @@ import { base } from "@/lib/server-utils";
 import {
   ACCESS_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
+  LOGGED_IN_HINT_COOKIE,
   ACCESS_COOKIE_PATH,
   REFRESH_COOKIE_PATH,
   ACCESS_COOKIE_SAME_SITE,
@@ -34,6 +35,13 @@ async function persistAuthCookies(setCookieHeader: string | null): Promise<void>
         path: ACCESS_COOKIE_PATH,
       })
     );
+    // Non-httpOnly UI hint, readable by the client NavBar. Not security-bearing.
+    cookieStore.set(LOGGED_IN_HINT_COOKIE, "1", {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: ACCESS_COOKIE_SAME_SITE,
+      path: "/",
+    });
   }
 
   const refreshEntry = parsed[REFRESH_TOKEN_COOKIE];
@@ -194,16 +202,6 @@ export async function signout(): Promise<void> {
 
   cookieStore.delete(ACCESS_TOKEN_COOKIE);
   cookieStore.delete(REFRESH_TOKEN_COOKIE);
+  cookieStore.delete({ name: LOGGED_IN_HINT_COOKIE, path: "/" });
   redirect("/auth/signin");
-}
-
-/**
- * Returns whether the caller currently has a session. Reads the httpOnly access
- * cookie server-side so the client NavBar can resolve login state at runtime —
- * this keeps the root layout free of cookies(), so public pages stay statically
- * renderable (ISR) and their HTML never bakes in per-user nav state.
- */
-export async function getSessionState(): Promise<{ isLoggedIn: boolean }> {
-  const cookieStore = await cookies();
-  return { isLoggedIn: Boolean(cookieStore.get(ACCESS_TOKEN_COOKIE)?.value) };
 }

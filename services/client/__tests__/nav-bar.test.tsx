@@ -20,7 +20,6 @@ vi.mock("next/link", () => ({
 
 vi.mock("@/app/actions/auth", () => ({
   signout: vi.fn(),
-  getSessionState: vi.fn().mockResolvedValue({ isLoggedIn: true }),
 }));
 
 describe("NavBar", () => {
