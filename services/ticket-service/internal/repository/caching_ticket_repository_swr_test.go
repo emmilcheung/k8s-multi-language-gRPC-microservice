@@ -22,6 +22,7 @@ type swrSpyCache struct {
 	sets       int32
 	refreshes  int32
 	lockHeld   bool
+	listGets   int32
 }
 
 func (s *swrSpyCache) GetTicket(ctx context.Context, id string) ([]byte, error) {
@@ -36,7 +37,10 @@ func (s *swrSpyCache) SetTicket(_ context.Context, _ string, data []byte) error 
 	s.mu.Unlock()
 	return nil
 }
-func (s *swrSpyCache) GetList(ctx context.Context) ([]byte, error)        { return nil, nil }
+func (s *swrSpyCache) GetList(_ context.Context) ([]byte, error) {
+	atomic.AddInt32(&s.listGets, 1)
+	return nil, nil
+}
 func (s *swrSpyCache) SetList(_ context.Context, _ []byte) error          { return nil }
 func (s *swrSpyCache) InvalidateTicket(_ context.Context, _ string) error { return nil }
 func (s *swrSpyCache) InvalidateList(_ context.Context) error             { return nil }
@@ -115,6 +119,43 @@ func (l *listInner) FindAll(_ context.Context, _ PaginationParams) ([]*Ticket, e
 
 // NewNoopAwareSpy returns a cache that always misses (forces the load path).
 func NewNoopAwareSpy() *swrSpyCache { return &swrSpyCache{} }
+
+// findAllInner is a minimal inner repo that records FindAll calls.
+type findAllInner struct {
+	TicketRepository
+	calls int32
+}
+
+func (f *findAllInner) FindAll(_ context.Context, _ PaginationParams) ([]*Ticket, error) {
+	atomic.AddInt32(&f.calls, 1)
+	return []*Ticket{{ID: "t1"}}, nil
+}
+
+// A filtered list query must bypass the single-key list cache (otherwise it
+// would read/poison the shared unfiltered list — the browse-filter dup bug).
+func TestCachingRepo_FindAll_FilteredQuery_BypassesCache(t *testing.T) {
+	min, max := 0.0, 25.0
+	cases := []PaginationParams{
+		{MinPrice: &min},
+		{MaxPrice: &max},
+		{Category: "comedy"},
+		{Search: "taylor"},
+		{AvailableOnly: true},
+	}
+	for _, p := range cases {
+		spy := &swrSpyCache{}
+		inner := &findAllInner{}
+		repo := NewCachingTicketRepository(inner, spy, zap.NewNop())
+
+		_, err := repo.FindAll(context.Background(), p)
+		require.NoError(t, err)
+
+		assert.Equal(t, int32(0), atomic.LoadInt32(&spy.listGets),
+			"filtered query must not read the shared list cache: %+v", p)
+		assert.Equal(t, int32(1), atomic.LoadInt32(&inner.calls),
+			"filtered query must hit the inner repo directly: %+v", p)
+	}
+}
 
 // invSpy counts invalidations on top of the always-miss spy.
 type invSpy struct {

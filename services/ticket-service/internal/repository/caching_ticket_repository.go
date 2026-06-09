@@ -147,7 +147,13 @@ func (r *CachingTicketRepository) FindByIDs(ctx context.Context, ids []string) (
 }
 
 func (r *CachingTicketRepository) FindAll(ctx context.Context, p PaginationParams) ([]*Ticket, error) {
-	useCache := p.After == "" && (p.Limit <= 0 || p.Limit == 20) && !p.AvailableOnly
+	// Only the default, unfiltered first page is cacheable. The list cache uses a
+	// single key, so filtered queries (search/category/price/available) must
+	// bypass it — otherwise a filtered request would read or poison the shared
+	// unfiltered list, yielding wrong or duplicated results in browse filtering.
+	useCache := p.After == "" && (p.Limit <= 0 || p.Limit == 20) &&
+		!p.AvailableOnly && p.Search == "" && p.Category == "" &&
+		p.MinPrice == nil && p.MaxPrice == nil
 	if !useCache {
 		return r.inner.FindAll(ctx, p)
 	}
