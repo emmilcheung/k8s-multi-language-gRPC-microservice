@@ -109,7 +109,7 @@ type listInner struct {
 
 func (l *listInner) FindAll(_ context.Context, _ PaginationParams) ([]*Ticket, error) {
 	atomic.AddInt32(l.calls, 1)
-	<-l.fakeInnerRepo.release
+	<-l.release
 	return []*Ticket{{ID: "t1"}}, nil
 }
 
