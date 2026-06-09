@@ -128,36 +128,43 @@ func (r *CachingTicketRepository) FindByIDs(ctx context.Context, ids []string) (
 }
 
 func (r *CachingTicketRepository) FindAll(ctx context.Context, p PaginationParams) ([]*Ticket, error) {
-	// Cache is only used for the default first-page request (no cursor, default limit, no filter).
-	// Paginated pages beyond the first, filtered requests, or custom limits are fetched directly from the DB.
 	useCache := p.After == "" && (p.Limit <= 0 || p.Limit == 20) && !p.AvailableOnly
+	if !useCache {
+		return r.inner.FindAll(ctx, p)
+	}
 
-	if useCache {
-		if data, err := r.cache.GetList(ctx); err != nil {
-			r.log.Warn("failed to read tickets list cache", zap.Error(err))
-		} else if data != nil {
-			var cached []*Ticket
-			if err := json.Unmarshal(data, &cached); err != nil {
-				r.log.Warn("failed to decode cached tickets list", zap.Error(err))
-			} else {
-				return cached, nil
-			}
+	if data, err := r.cache.GetList(ctx); err != nil {
+		r.log.Warn("failed to read tickets list cache", zap.Error(err))
+	} else if data != nil {
+		var cached []*Ticket
+		if err := json.Unmarshal(data, &cached); err != nil {
+			r.log.Warn("failed to decode cached tickets list", zap.Error(err))
+		} else {
+			return cached, nil
 		}
 	}
 
-	tickets, err := r.inner.FindAll(ctx, p)
+	loaded, err, _ := r.load.Do("list", func() (interface{}, error) {
+		tickets, err := r.inner.FindAll(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		encoded, err := json.Marshal(tickets)
+		if err != nil {
+			return nil, err
+		}
+		if err := r.cache.SetList(ctx, encoded); err != nil {
+			r.log.Warn("failed to write tickets list cache", zap.Error(err))
+		}
+		return encoded, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	if useCache {
-		if data, err := json.Marshal(tickets); err != nil {
-			r.log.Warn("failed to encode tickets list for cache", zap.Error(err))
-		} else if err := r.cache.SetList(ctx, data); err != nil {
-			r.log.Warn("failed to write tickets list cache", zap.Error(err))
-		}
+	var tickets []*Ticket
+	if err := json.Unmarshal(loaded.([]byte), &tickets); err != nil {
+		return nil, err
 	}
-
 	return tickets, nil
 }
 

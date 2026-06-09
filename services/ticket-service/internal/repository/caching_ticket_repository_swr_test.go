@@ -87,3 +87,32 @@ func TestCachingRepo_SWR_StaleServedAndRefreshedOnce(t *testing.T) {
 		return atomic.LoadInt32(&spy.refreshes) == 1 && atomic.LoadInt32(&innerCalls) == 1
 	}, time.Second, 10*time.Millisecond, "exactly one background refresh must run")
 }
+
+func TestCachingRepo_FindAll_CoalescesConcurrentMisses(t *testing.T) {
+	var calls int32
+	inner := &fakeInnerRepo{release: make(chan struct{})}
+	// Override FindAll via a wrapper inner that counts and blocks.
+	wrapped := &listInner{fakeInnerRepo: inner, calls: &calls}
+	repo := NewCachingTicketRepository(wrapped, NewNoopAwareSpy(), zap.NewNop())
+
+	fireConcurrent(15, inner.release, func(i int) {
+		_, err := repo.FindAll(context.Background(), PaginationParams{})
+		require.NoError(t, err)
+	})
+	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "concurrent list misses collapse to one load")
+}
+
+// listInner adds a blocking, counting FindAll to fakeInnerRepo.
+type listInner struct {
+	*fakeInnerRepo
+	calls *int32
+}
+
+func (l *listInner) FindAll(_ context.Context, _ PaginationParams) ([]*Ticket, error) {
+	atomic.AddInt32(l.calls, 1)
+	<-l.fakeInnerRepo.release
+	return []*Ticket{{ID: "t1"}}, nil
+}
+
+// NewNoopAwareSpy returns a cache that always misses (forces the load path).
+func NewNoopAwareSpy() *swrSpyCache { return &swrSpyCache{} }
