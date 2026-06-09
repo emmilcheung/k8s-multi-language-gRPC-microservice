@@ -21,12 +21,49 @@ locals {
 }
 
 # AWS-managed policies (referenced by name so we don't hardcode IDs).
+# CachingOptimized (MinTTL=1s, no query strings in key) is ONLY safe for the
+# immutable /_next/static/* assets — never for HTML/API responses.
 data "aws_cloudfront_cache_policy" "caching_optimized" {
   name = "Managed-CachingOptimized"
 }
 
-data "aws_cloudfront_origin_request_policy" "all_viewer" {
-  name = "Managed-AllViewer"
+# Forwards everything EXCEPT the viewer Host header. Forwarding Host to a
+# custom origin (the Kong NLB) breaks TLS/host matching and routing — AWS's
+# recommended policy for custom origins.
+data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
+  name = "Managed-AllViewerExceptHostHeader"
+}
+
+# Cache policy for dynamic/SSR content that strictly honors origin Cache-Control.
+# MinTTL MUST be 0: with MinTTL > 0 CloudFront caches responses for MinTTL even
+# when the origin sends `private` / `no-cache` / `no-store` — a brief cross-user
+# leak window for personalized SSR pages. DefaultTTL 0 means nothing is cached
+# unless the origin explicitly opts in (the ISR pages' `public, s-maxage`).
+# Query strings are part of the cache key so parameterized pages can never serve
+# the wrong variant; cookies are excluded because the public shell does not vary
+# by cookie (per-user responses are `private` and therefore never cached).
+resource "aws_cloudfront_cache_policy" "honor_origin" {
+  name    = "${local.name}-honor-origin"
+  comment = "Honor origin Cache-Control exactly; query strings in cache key"
+
+  min_ttl     = 0
+  default_ttl = 0
+  max_ttl     = 31536000
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_gzip   = true
+    enable_accept_encoding_brotli = true
+
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "all"
+    }
+  }
 }
 
 resource "aws_cloudfront_distribution" "this" {
@@ -58,8 +95,8 @@ resource "aws_cloudfront_distribution" "this" {
     allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods           = ["GET", "HEAD"]
     compress                 = true
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_optimized.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    cache_policy_id          = aws_cloudfront_cache_policy.honor_origin.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
   }
 
   # Immutable Next.js build assets (hashed filenames) — long-lived edge cache.
@@ -71,7 +108,7 @@ resource "aws_cloudfront_distribution" "this" {
     cached_methods           = ["GET", "HEAD"]
     compress                 = true
     cache_policy_id          = data.aws_cloudfront_cache_policy.caching_optimized.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
   }
 
   restrictions {
