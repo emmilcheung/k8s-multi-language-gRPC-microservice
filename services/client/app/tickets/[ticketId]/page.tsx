@@ -1,6 +1,6 @@
 // app/tickets/[ticketId]/page.tsx — Ticket detail page.
 // Redesigned layout: hero band (left), quick facts, about section, purchase panel (sticky right).
-// Owner edit form and seating preview in right column.
+// Organizer editing lives at /organizer/events/[id]/edit (Task A3).
 
 export const dynamic = "force-dynamic";
 
@@ -11,19 +11,14 @@ import { ApiError, serverApi } from "@/lib/api";
 import { executeQuery } from "@/lib/graphql/execute";
 import {
   TicketDetailDocument,
-  AttendancePolicyDocument,
   TicketsBrowseDocument,
 } from "@/lib/graphql/generated";
-import type { Ticket, SeatingPlan, PriceTier, AvailabilitySnapshot } from "@/lib/types";
+import type { Ticket, SeatingPlan, AvailabilitySnapshot } from "@/lib/types";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { EventPoster } from "@/components/system";
 import { cn } from "@/lib/utils";
-import { TicketForm } from "@/components/ticket-form";
-import { SeatingPlanPreview } from "@/components/seating-plan-preview";
-import { updateTicket } from "@/app/actions/tickets";
-import { fetchPriceTiers } from "@/app/actions/venues";
 import { PurchasePanel } from "./_components/purchase-panel";
 import { QuickFacts } from "./_components/quick-facts";
 import { SaveEventButton } from "./_components/save-event-button";
@@ -31,27 +26,6 @@ import { ArrowLeft, MapPin } from "lucide-react";
 
 interface Props {
   params: Promise<{ ticketId: string }>;
-}
-
-function toDateTimeLocalInput(value?: string): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
-}
-
-function toTicketFormType(
-  ticket: Ticket,
-  attachedPlan: SeatingPlan | null
-): "GA" | "SEATED_MANUAL" | "SEATED_AUTO" {
-  if (ticket.ticketType === "SEATED_AUTO" || attachedPlan?.assignmentMode === "auto") {
-    return "SEATED_AUTO";
-  }
-  if (ticket.ticketType === "SEATED_MANUAL" || attachedPlan?.assignmentMode === "manual" || ticket.seatingPlanId) {
-    return "SEATED_MANUAL";
-  }
-  return "GA";
 }
 
 async function getTicket(ticketId: string): Promise<Ticket & { savedByMe: boolean }> {
@@ -137,20 +111,15 @@ export default async function TicketDetailPage({ params }: Props) {
   // A ticket is considered reserved when either the legacy orderId is set OR the
   // quota-based reserved counter is > 0 (meaning at least one active reservation exists).
   const isReserved = !isSeated && (Boolean(ticket.orderId) || (ticket.reserved != null && ticket.reserved > 0));
-  const updateAction = updateTicket.bind(null, ticketId);
-  let defaultRequireQrForEntry = true;
-  const attendanceLocked = (ticket.sold ?? 0) > 0;
 
   // When a plan is already attached, fetch its full details (sections included)
-  // so the organizer can see a read-only preview of what is attached.
+  // so the buyer seated view can derive availability state (seatedPlanInactive / seatedSoldOut).
   let attachedPlan: SeatingPlan | null = null;
-  let attachedPlanTiers: PriceTier[] = [];
   let attachedPlanAvailability: AvailabilitySnapshot | null = null;
   if (ticket.seatingPlanId) {
     const results = await Promise.allSettled([
       serverApi<SeatingPlan>(`/api/seating-plans/${ticket.seatingPlanId}`),
       serverApi<AvailabilitySnapshot>(`/api/seating-plans/${ticket.seatingPlanId}/availability`),
-      ...(isOwner ? [fetchPriceTiers(ticket.seatingPlanId)] : []),
     ]);
 
     if (results[0]?.status === "fulfilled") {
@@ -158,23 +127,6 @@ export default async function TicketDetailPage({ params }: Props) {
     }
     if (results[1]?.status === "fulfilled") {
       attachedPlanAvailability = results[1].value;
-    }
-    if (isOwner && results[2]?.status === "fulfilled") {
-      attachedPlanTiers = results[2].value as PriceTier[];
-    }
-  }
-
-  if (isOwner) {
-    const policyResult = await executeQuery(
-      AttendancePolicyDocument,
-      { eventId: ticketId },
-      { cookie: `token=${token}` }
-    ).catch(() => null);
-    if (
-      policyResult?.attendancePolicy?.requireQrForEntry === true ||
-      policyResult?.attendancePolicy?.requireQrForEntry === false
-    ) {
-      defaultRequireQrForEntry = policyResult.attendancePolicy.requireQrForEntry;
     }
   }
 
@@ -423,78 +375,15 @@ export default async function TicketDetailPage({ params }: Props) {
             </Card>
           )}
 
-          {/* Owner edit form */}
-          {isOwner ? (
-            <div className="flex flex-col gap-4">
-              <div className="bg-card border border-line rounded p-4 flex flex-col gap-3">
-                <p className="text-sm font-semibold">Attendance tools</p>
-                <p className="text-xs text-mute">
-                  Open attendance settings to view checked-in attendees and manage QR policy for this ticket.
-                </p>
-                <Link
-                  href={`/organizer/events/${ticketId}/attendance`}
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
-                >
-                  Attendance settings
-                </Link>
-                {defaultRequireQrForEntry && (
-                  <Link
-                    href={`/scan?eventId=${ticketId}`}
-                    className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
-                  >
-                    Open Scanner Console
-                  </Link>
-                )}
-              </div>
-
-              {!isReserved ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Manage event</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <TicketForm
-                      action={updateAction}
-                      defaultTitle={ticket.title}
-                      defaultPrice={ticket.price}
-                      defaultQuota={ticket.quota}
-                      defaultMaxPerUser={attachedPlan?.maxSeatsPerOrder ?? ticket.maxPerUser}
-                      defaultTicketType={toTicketFormType(ticket, attachedPlan)}
-                      defaultVenueId={attachedPlan?.venueId ?? undefined}
-                      defaultSeatingPlanId={attachedPlan?.id ?? ticket.seatingPlanId ?? undefined}
-                      defaultPricingMode={attachedPlan?.pricingMode}
-                      defaultStartsAt={toDateTimeLocalInput(ticket.event?.startsAt)}
-                      defaultEndsAt={toDateTimeLocalInput(ticket.event?.endsAt)}
-                      defaultEventTitle={ticket.event?.title ?? ""}
-                      defaultEventDescription={ticket.event?.description ?? ""}
-                      defaultEventImageUrl={ticket.event?.imageUrl ?? ""}
-                      defaultVenueName={ticket.event?.venueName ?? ""}
-                      defaultVenueAddress={ticket.event?.venueAddress ?? ""}
-                      defaultRequireQrForEntry={defaultRequireQrForEntry}
-                      attendanceLocked={attendanceLocked}
-                      submitLabel="Update Ticket"
-                    />
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Your listing</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-mute">
-                      This ticket is currently reserved and cannot be edited.
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Read-only preview of the attached seating plan */}
-              {attachedPlan && (
-                <SeatingPlanPreview plan={attachedPlan} priceTiers={attachedPlanTiers} />
-              )}
-            </div>
-          ) : null}
+          {/* Organizer shortcut — full editing lives at /organizer/events/[id]/edit */}
+          {isOwner && (
+            <Link
+              href={`/organizer/events/${ticketId}/edit`}
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "self-start")}
+            >
+              Manage this event
+            </Link>
+          )}
 
           {relatedEvents.length > 0 && (
             <section className="mt-4">
@@ -533,24 +422,22 @@ export default async function TicketDetailPage({ params }: Props) {
         </div>
 
         {/* Right column — sticky purchase panel */}
-        {!isOwner && (
-          <div className="flex flex-col gap-3">
-            {currentUserId && (
-              <SaveEventButton
-                eventId={ticketId}
-                initialSaved={ticket.savedByMe}
-              />
-            )}
-            <PurchasePanel
-              ticket={ticket}
-              isOwner={isOwner}
-              isSeated={isSeated}
-              gaMaxQuantity={gaMaxQuantity}
-              purchaseGate={purchaseGate}
-              token={token}
+        <div className="flex flex-col gap-3">
+          {currentUserId && (
+            <SaveEventButton
+              eventId={ticketId}
+              initialSaved={ticket.savedByMe}
             />
-          </div>
-        )}
+          )}
+          <PurchasePanel
+            ticket={ticket}
+            isOwner={isOwner}
+            isSeated={isSeated}
+            gaMaxQuantity={gaMaxQuantity}
+            purchaseGate={purchaseGate}
+            token={token}
+          />
+        </div>
       </div>
     </div>
   );

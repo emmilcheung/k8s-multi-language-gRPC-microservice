@@ -870,42 +870,36 @@ describe("TicketDetailPage", () => {
     );
     render(await TicketDetailPage({ params }));
 
+    // Owner editing has moved to /organizer/events/[id]/edit — no inline form on this page.
     expect(serverApiMock).not.toHaveBeenCalledWith("/api/tickets/ticket-uuid-1");
     expect(screen.queryByTestId("ticket-form")).not.toBeInTheDocument();
-    expect(screen.getByText(/cannot be edited/i)).toBeInTheDocument();
-  });
-
-  it("shows TicketForm when the viewer is the owner and ticket is not reserved", async () => {
-    const ticket = makeTicket({ userId: "owner-uuid" });
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
-    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
-
-    const { default: TicketDetailPage } = await import(
-      "@/app/tickets/[ticketId]/page"
-    );
-    render(await TicketDetailPage({ params }));
-
-    expect(screen.getByTestId("ticket-form")).toBeInTheDocument();
-    expect(screen.queryByTestId("purchase-button")).not.toBeInTheDocument();
-  });
-
-  it("shows an attendance settings link for owners", async () => {
-    const ticket = makeTicket({ userId: "owner-uuid" });
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
-    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
-
-    const { default: TicketDetailPage } = await import(
-      "@/app/tickets/[ticketId]/page"
-    );
-    render(await TicketDetailPage({ params }));
-
-    expect(screen.getByRole("link", { name: /attendance settings/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /manage this event/i })).toHaveAttribute(
       "href",
-      "/organizer/events/ticket-uuid-1/attendance"
+      "/organizer/events/ticket-uuid-1/edit"
     );
   });
 
-  it("shows 'cannot be edited' message when owner views reserved ticket", async () => {
+  it("shows a 'Manage this event' link for the owner instead of the inline edit form", async () => {
+    const ticket = makeTicket({ userId: "owner-uuid" });
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+
+    const { default: TicketDetailPage } = await import(
+      "@/app/tickets/[ticketId]/page"
+    );
+    render(await TicketDetailPage({ params }));
+
+    // Inline TicketForm has been removed; owner is directed to the organizer edit route.
+    expect(screen.queryByTestId("ticket-form")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /manage this event/i })).toHaveAttribute(
+      "href",
+      "/organizer/events/ticket-uuid-1/edit"
+    );
+    // Purchase panel is now shown to all viewers including the owner.
+    expect(screen.getByTestId("purchase-button")).toBeInTheDocument();
+  });
+
+  it("shows a 'Manage this event' link even when owner views a reserved ticket", async () => {
     const ticket = makeTicket({ userId: "owner-uuid", orderId: "order-1" });
     executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
@@ -916,11 +910,14 @@ describe("TicketDetailPage", () => {
     render(await TicketDetailPage({ params }));
 
     expect(screen.queryByTestId("ticket-form")).not.toBeInTheDocument();
-    expect(screen.getByText(/cannot be edited/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /manage this event/i })).toHaveAttribute(
+      "href",
+      "/organizer/events/ticket-uuid-1/edit"
+    );
   });
 
-  it("keeps attendance navigation visible for owners on reserved tickets", async () => {
-    const ticket = makeTicket({ userId: "owner-uuid", orderId: "order-1" });
+  it("does not show inline attendance tools or scanner links on the ticket page", async () => {
+    const ticket = makeTicket({ userId: "owner-uuid" });
     executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
@@ -929,14 +926,9 @@ describe("TicketDetailPage", () => {
     );
     render(await TicketDetailPage({ params }));
 
-    expect(screen.getByRole("link", { name: /attendance settings/i })).toHaveAttribute(
-      "href",
-      "/organizer/events/ticket-uuid-1/attendance"
-    );
-    expect(screen.getByRole("link", { name: /open scanner console/i })).toHaveAttribute(
-      "href",
-      "/scan?eventId=ticket-uuid-1"
-    );
+    // Attendance tools and scanner links have moved to the organizer edit route.
+    expect(screen.queryByRole("link", { name: /attendance settings/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /open scanner console/i })).not.toBeInTheDocument();
   });
 
   it("shows PurchaseButton for a signed-in buyer on an available ticket", async () => {
@@ -1017,7 +1009,7 @@ describe("TicketDetailPage", () => {
     expect(screen.getByTestId("purchase-button")).toBeInTheDocument();
   });
 
-  it("shows scanner entry point only for owner when attendance policy requires QR", async () => {
+  it("never shows a scanner console link on the ticket page (moved to organizer area)", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
     executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
@@ -1027,17 +1019,13 @@ describe("TicketDetailPage", () => {
     );
     render(await TicketDetailPage({ params }));
 
-    expect(screen.getByRole("link", { name: /open scanner console/i })).toHaveAttribute(
-      "href",
-      "/scan?eventId=ticket-uuid-1"
-    );
+    // Scanner console link has moved to /organizer/events/[id]/edit.
+    expect(screen.queryByRole("link", { name: /open scanner console/i })).not.toBeInTheDocument();
   });
 
-  it("hides scanner entry point when attendance policy does not require QR", async () => {
+  it("never shows a scanner console link regardless of attendance policy", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    executeQueryMock
-      .mockResolvedValueOnce({ ticket: makeTicketDetailGraphql(ticket) })
-      .mockResolvedValueOnce({ attendancePolicy: { eventId: "ticket-uuid-1", requireQrForEntry: false, allowManualOverride: false } });
+    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
     const { default: TicketDetailPage } = await import(
