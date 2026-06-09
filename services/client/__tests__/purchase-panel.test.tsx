@@ -42,7 +42,6 @@ describe("PurchasePanel", () => {
     render(
       <PurchasePanel
         ticket={makeTicket()}
-        isOwner={false}
         isSeated
         gaMaxQuantity={6}
         purchaseGate={null}

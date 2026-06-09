@@ -12,7 +12,6 @@ import type { Ticket } from "@/lib/types";
 
 interface PurchasePanelProps {
   ticket: Ticket;
-  isOwner: boolean;
   isSeated: boolean;
   gaMaxQuantity: number;
   purchaseGate: {
@@ -21,20 +20,14 @@ interface PurchasePanelProps {
     badgeClass: string;
     message: string;
   } | null;
-  /** @deprecated Not used for rendering decisions; kept for compatibility until B4 drops it from the page. */
-  token?: string | undefined;
 }
 
 export function PurchasePanel({
   ticket,
-  isOwner,
   isSeated,
   gaMaxQuantity,
   purchaseGate,
 }: PurchasePanelProps) {
-  if (isOwner) {
-    return null; // Owner sees the edit form instead, handled in main page
-  }
 
   const priceCents = Math.round(parseFloat(ticket.price) * 100);
   const renderPrimaryAction = () => {

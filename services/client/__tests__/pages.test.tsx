@@ -55,8 +55,13 @@ vi.mock("@/app/actions/tickets", () => ({
 }));
 
 const executeQueryMock = vi.fn();
+const executePublicQueryMock = vi.fn();
 vi.mock("@/lib/graphql/execute", () => ({
   executeQuery: (...args: unknown[]) => executeQueryMock(...args),
+  executePublicQuery: (...args: unknown[]) => executePublicQueryMock(...args),
+}));
+vi.mock("@/lib/graphql/execute-public", () => ({
+  executePublicQuery: (...args: unknown[]) => executePublicQueryMock(...args),
 }));
 
 const getSettingsDataMock = vi.fn();
@@ -144,18 +149,16 @@ vi.mock("@/components/deactivate-plan-button", () => ({
   ),
 }));
 
-// Note: isReserved is computed in the real page but passed implicitly via purchaseGate/token logic
+// PurchasePanel is buyer-only (B4): no isOwner, no token prop.
+// The panel always renders the purchase CTA (authentication happens inside PurchaseButton).
 vi.mock("@/app/tickets/[ticketId]/_components/purchase-panel", () => ({
   PurchasePanel: (props: {
-    ticket: { id: string; price: string; orderId?: string | null; reserved?: number };
-    token?: string;
-    isOwner: boolean;
+    ticket: { id: string; price: string };
     isSeated: boolean;
     gaMaxQuantity: number;
     purchaseGate?: { label: string };
   }) => {
-    const { ticket, token, purchaseGate, isSeated } = props;
-    const isReserved = Boolean(ticket.orderId) || (ticket.reserved != null && ticket.reserved > 0);
+    const { ticket, purchaseGate, isSeated } = props;
 
     // Calculate price in dollars
     const priceCents = Math.round(parseFloat(ticket.price) * 100);
@@ -165,29 +168,14 @@ vi.mock("@/app/tickets/[ticketId]/_components/purchase-panel", () => ({
     return (
       <div data-testid="purchase-panel">
         <div>{priceStr}</div>
-        {purchaseGate && (
-          purchaseGate.label === "Already Reserved" && token ? (
-            <button>View your orders</button>
-          ) : (
-            <button disabled>{purchaseGate.label}</button>
-          )
-        )}
-        {!purchaseGate && isReserved && (
-          <button disabled>Already Reserved</button>
-        )}
-        {!purchaseGate && !isReserved && !isSeated && !token && (
-          <a href="/auth/signin">Sign in to Purchase</a>
-        )}
-        {token && !purchaseGate && !isReserved && !isSeated && (
+        {purchaseGate ? (
+          <button disabled>{purchaseGate.label}</button>
+        ) : isSeated ? (
+          <a href={`/tickets/${ticket.id}/seats`}>Continue to seat map</a>
+        ) : (
           <button data-testid="purchase-button" data-ticket-id={ticket.id}>
             Purchase
           </button>
-        )}
-        {token && !purchaseGate && !isReserved && isSeated && (
-          <>
-            <button>Pick seats</button>
-            <button>Auto-assign</button>
-          </>
         )}
       </div>
     );
@@ -267,6 +255,7 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   };
 }
 
+// Shape returned by TicketDetailPublicDocument (no savedByMe — public query).
 function makeTicketDetailGraphql(ticket: Ticket) {
   return {
     id: ticket.id,
@@ -282,7 +271,6 @@ function makeTicketDetailGraphql(ticket: Ticket) {
       ticket.available ??
       Math.max((ticket.quota ?? 1) - (ticket.reserved ?? 0) - (ticket.sold ?? 0), 0),
     maxPerUser: ticket.maxPerUser ?? 1,
-    savedByMe: false,
     ticketType:
       ticket.ticketType === "SEATED_MANUAL" || ticket.ticketType === "SEATED_AUTO"
         ? "SEATED"
@@ -766,10 +754,11 @@ describe("TransferRefundPages", () => {
 // ── TicketDetailPage ──────────────────────────────────────────────────────────
 
 describe("TicketDetailPage", () => {
+  // B4: page is a public ISR shell — no cookies() usage, executePublicQuery only.
   beforeEach(() => {
     vi.clearAllMocks();
+    executePublicQueryMock.mockReset();
     executeQueryMock.mockReset();
-    // Default: no auth cookie
     cookieStoreMock.get.mockReturnValue(undefined);
   });
 
@@ -777,7 +766,7 @@ describe("TicketDetailPage", () => {
 
   it("shows ticket title and price", async () => {
     const ticket = makeTicket();
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
+    executePublicQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
 
     const { default: TicketDetailPage } = await import(
       "@/app/tickets/[ticketId]/page"
@@ -793,7 +782,7 @@ describe("TicketDetailPage", () => {
 
   it("renders related events row when browse data is available", async () => {
     const ticket = makeTicket({ id: "ticket-uuid-1" });
-    executeQueryMock
+    executePublicQueryMock
       .mockResolvedValueOnce({ ticket: makeTicketDetailGraphql(ticket) })
       .mockResolvedValueOnce({
         ticketsConnection: {
@@ -833,8 +822,7 @@ describe("TicketDetailPage", () => {
   });
 
   it("calls notFound() when the GraphQL query returns null", async () => {
-    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
-    executeQueryMock.mockResolvedValue({ ticket: null });
+    executePublicQueryMock.mockResolvedValue({ ticket: null });
 
     const { notFound } = await import("next/navigation");
     const { default: TicketDetailPage } = await import(
@@ -846,80 +834,40 @@ describe("TicketDetailPage", () => {
   }, 10000);
 
   it("does not add page-level retries when ticket detail GraphQL fails transiently", async () => {
-    executeQueryMock.mockRejectedValue(new Error("upstream timeout"));
+    executePublicQueryMock.mockRejectedValue(new Error("upstream timeout"));
 
     const { default: TicketDetailPage } = await import(
       "@/app/tickets/[ticketId]/page"
     );
 
     await expect(TicketDetailPage({ params })).rejects.toThrow("upstream timeout");
-    expect(executeQueryMock).toHaveBeenCalledTimes(1);
+    expect(executePublicQueryMock).toHaveBeenCalledTimes(1);
   });
 
   it("uses ticket detail GraphQL parity fields without REST fallback", async () => {
-    executeQueryMock.mockResolvedValue({
+    executePublicQueryMock.mockResolvedValue({
       ticket: makeTicketDetailGraphql(
         makeTicket({ userId: "owner-uuid", orderId: "order-1", reserved: 1, sold: 0 })
       ),
     });
     serverApiMock.mockRejectedValue(new Error("REST fallback should not be used"));
-    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
 
     const { default: TicketDetailPage } = await import(
       "@/app/tickets/[ticketId]/page"
     );
     render(await TicketDetailPage({ params }));
 
-    // Owner editing has moved to /organizer/events/[id]/edit — no inline form on this page.
-    expect(serverApiMock).not.toHaveBeenCalledWith("/api/tickets/ticket-uuid-1");
+    // Owner editing has moved to /organizer — no inline form and no "Manage" link on this page.
+    expect(serverApiMock).not.toHaveBeenCalled();
     expect(screen.queryByTestId("ticket-form")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /manage this event/i })).toHaveAttribute(
-      "href",
-      "/organizer/events/ticket-uuid-1/edit"
-    );
-  });
-
-  it("shows a 'Manage this event' link for the owner instead of the inline edit form", async () => {
-    const ticket = makeTicket({ userId: "owner-uuid" });
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
-    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
-
-    const { default: TicketDetailPage } = await import(
-      "@/app/tickets/[ticketId]/page"
-    );
-    render(await TicketDetailPage({ params }));
-
-    // Inline TicketForm has been removed; owner is directed to the organizer edit route.
-    expect(screen.queryByTestId("ticket-form")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /manage this event/i })).toHaveAttribute(
-      "href",
-      "/organizer/events/ticket-uuid-1/edit"
-    );
-    // Purchase panel is now shown to all viewers including the owner.
-    expect(screen.getByTestId("purchase-button")).toBeInTheDocument();
-  });
-
-  it("shows a 'Manage this event' link even when owner views a reserved ticket", async () => {
-    const ticket = makeTicket({ userId: "owner-uuid", orderId: "order-1" });
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
-    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
-
-    const { default: TicketDetailPage } = await import(
-      "@/app/tickets/[ticketId]/page"
-    );
-    render(await TicketDetailPage({ params }));
-
-    expect(screen.queryByTestId("ticket-form")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /manage this event/i })).toHaveAttribute(
-      "href",
-      "/organizer/events/ticket-uuid-1/edit"
-    );
+    expect(screen.queryByRole("link", { name: /manage this event/i })).not.toBeInTheDocument();
+    // Purchase panel always rendered (buyer-only shell)
+    expect(screen.getByTestId("purchase-panel")).toBeInTheDocument();
   });
 
   it("does not show inline attendance tools or scanner links on the ticket page", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
-    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+    executePublicQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
 
     const { default: TicketDetailPage } = await import(
       "@/app/tickets/[ticketId]/page"
@@ -931,10 +879,9 @@ describe("TicketDetailPage", () => {
     expect(screen.queryByRole("link", { name: /open scanner console/i })).not.toBeInTheDocument();
   });
 
-  it("shows PurchaseButton for a signed-in buyer on an available ticket", async () => {
+  it("shows PurchaseButton for any viewer on an available ticket", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
-    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+    executePublicQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
 
     const { default: TicketDetailPage } = await import(
       "@/app/tickets/[ticketId]/page"
@@ -948,71 +895,22 @@ describe("TicketDetailPage", () => {
     expect(screen.queryByRole("link", { name: /view admission pass/i })).not.toBeInTheDocument();
   });
 
-  it("does not show admission pass link when buyer has no completed order", async () => {
-    const ticket = makeTicket({ userId: "owner-uuid" });
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
-    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+  it("shows Sold Out gate when quota is exhausted", async () => {
+    // quota=5, reserved=0, sold=5 → gaRemaining=0 → sold_out
+    const ticket = makeTicket({ userId: "owner-uuid", quota: 5, reserved: 0, sold: 5, available: 0 });
+    executePublicQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
 
     const { default: TicketDetailPage } = await import(
       "@/app/tickets/[ticketId]/page"
     );
     render(await TicketDetailPage({ params }));
 
-    expect(screen.getByTestId("purchase-button")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /view admission pass/i })).not.toBeInTheDocument();
-  });
-
-  it("shows 'Sign in to Purchase' link for an unauthenticated buyer", async () => {
-    const ticket = makeTicket({ userId: "owner-uuid" });
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
-    cookieStoreMock.get.mockReturnValue(undefined);
-
-    const { default: TicketDetailPage } = await import(
-      "@/app/tickets/[ticketId]/page"
-    );
-    render(await TicketDetailPage({ params }));
-
-    const link = screen.getByRole("link", { name: /sign in to purchase/i });
-    expect(link).toBeInTheDocument();
-    expect(link).toHaveAttribute("href", "/auth/signin");
-  });
-
-  it("routes reserved buyers to orders from the purchase panel", async () => {
-    const ticket = makeTicket({ userId: "owner-uuid", orderId: "order-1" });
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
-    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
-
-    const { default: TicketDetailPage } = await import(
-      "@/app/tickets/[ticketId]/page"
-    );
-    render(await TicketDetailPage({ params }));
-
-    expect(screen.getByRole("button", { name: /view your orders/i })).toBeInTheDocument();
-  });
-
-  it("falls back to purchase view (non-owner) when JWT is malformed", async () => {
-    const ticket = makeTicket({ userId: "owner-uuid" });
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
-    // Malformed token — cannot decode payload
-    cookieStoreMock.get.mockReturnValue({ value: "not.a.real.jwt" });
-
-    const { default: TicketDetailPage } = await import(
-      "@/app/tickets/[ticketId]/page"
-    );
-    render(await TicketDetailPage({ params }));
-
-    // currentUserId will be null after parse failure — treated as buyer
-    expect(screen.queryByTestId("ticket-form")).not.toBeInTheDocument();
-    // Shows sign-in link because token cookie value is truthy but userId is null...
-    // Actually: token is truthy → PurchaseButton should render (not sign-in link)
-    // because the `token` variable itself is truthy even if decode fails.
-    expect(screen.getByTestId("purchase-button")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /sold out/i })).toBeDisabled();
   });
 
   it("never shows a scanner console link on the ticket page (moved to organizer area)", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
-    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+    executePublicQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
 
     const { default: TicketDetailPage } = await import(
       "@/app/tickets/[ticketId]/page"
@@ -1025,8 +923,7 @@ describe("TicketDetailPage", () => {
 
   it("never shows a scanner console link regardless of attendance policy", async () => {
     const ticket = makeTicket({ userId: "owner-uuid" });
-    executeQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
-    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+    executePublicQueryMock.mockResolvedValue({ ticket: makeTicketDetailGraphql(ticket) });
 
     const { default: TicketDetailPage } = await import(
       "@/app/tickets/[ticketId]/page"

@@ -5,6 +5,7 @@
 
 import { cookies } from "next/headers";
 import { traceHeaders } from "@/lib/tracing";
+import { ApiError } from "@/lib/api-error";
 
 // Paths whose responses are safe to cache via ISR (non-user-specific, read-only).
 // All other paths use cache:"no-store" to prevent stale user-specific data.
@@ -113,16 +114,7 @@ export async function serverApi<T = unknown>(
 }
 
 // ─── Shared error type ────────────────────────────────────────────────────────
-
-export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    public readonly body?: any
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
-}
+// Re-exported from lib/api-error.ts so modules that must not pull in
+// next/headers can import ApiError directly from there.
+export { ApiError } from "./api-error";
 
