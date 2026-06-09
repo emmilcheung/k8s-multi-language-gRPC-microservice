@@ -158,3 +158,23 @@ module "kong" {
 
   depends_on = [module.eks]
 }
+
+# Edge CDN (CloudFront) in front of the Kong NLB. Disabled by default so applies
+# succeed before the public domain / ACM cert exist; enable once DNS is ready.
+# Caches /_next/static/* and honors origin Cache-Control (ISR public, s-maxage
+# pages cached at the edge; private/no-store bypassed).
+module "cloudfront" {
+  count  = var.cloudfront_enabled ? 1 : 0
+  source = "../../modules/cloudfront"
+
+  project     = var.project
+  environment = "prod"
+
+  # Defaults to the Kong NLB hostname; override with a stable public domain when set.
+  origin_domain_name     = var.cloudfront_origin_domain_name != "" ? var.cloudfront_origin_domain_name : module.kong.proxy_url
+  origin_protocol_policy = var.cloudfront_origin_protocol_policy
+  aliases                = var.cloudfront_aliases
+  acm_certificate_arn    = var.cloudfront_acm_certificate_arn
+
+  depends_on = [module.kong]
+}
