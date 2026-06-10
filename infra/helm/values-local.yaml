@@ -233,6 +233,10 @@ client:
   image:
     repository: client
     tag: SET_BY_CI
+  # NetworkPolicy off locally (minikube CNI may not enforce policies; keeps
+  # local port-forward/dev access working). Enabled in values.yaml for cloud.
+  networkPolicy:
+    enabled: false
   env:
     NEXT_PUBLIC_API_URL: "http://localhost:8000"
     INTERNAL_API_URL: "http://ticketing-kong-proxy:8000"

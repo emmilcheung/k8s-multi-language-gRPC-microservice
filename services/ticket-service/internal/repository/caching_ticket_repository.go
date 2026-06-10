@@ -121,12 +121,13 @@ func (r *CachingTicketRepository) triggerTicketRefresh(swr cache.SWRTicketCache,
 		defer r.refreshing.Delete(key)
 		ctx, cancel := context.WithTimeout(context.Background(), r.loadTimeout)
 		defer cancel()
-		acquired, err := swr.TryRefreshTicket(ctx, id)
-		if err != nil || !acquired {
+		token, err := swr.TryRefreshTicket(ctx, id)
+		if err != nil || token == "" {
 			return
 		}
 		ticket, err := r.inner.FindByID(ctx, id)
 		if err != nil {
+			// Keep the lock: its TTL throttles refresh retries against a failing DB.
 			r.log.Warn("swr refresh: db read failed", zap.String("ticketId", id), zap.Error(err))
 			return
 		}
@@ -136,6 +137,12 @@ func (r *CachingTicketRepository) triggerTicketRefresh(swr cache.SWRTicketCache,
 		}
 		if err := r.cache.SetTicket(ctx, id, encoded); err != nil {
 			r.log.Warn("swr refresh: cache write failed", zap.String("ticketId", id), zap.Error(err))
+			return
+		}
+		// Successful rebuild: release the lock so the next staleness window can
+		// refresh immediately instead of waiting out the lock TTL.
+		if err := swr.ReleaseRefreshTicket(ctx, id, token); err != nil {
+			r.log.Warn("swr refresh: lock release failed", zap.String("ticketId", id), zap.Error(err))
 		}
 	}()
 }

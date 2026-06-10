@@ -57,11 +57,38 @@ func TestRedisSWRCache_TryRefresh_OnlyOneWinner(t *testing.T) {
 	c, _ := newSWR(t)
 	first, err := c.TryRefreshTicket(context.Background(), "t1")
 	require.NoError(t, err)
-	assert.True(t, first, "first caller acquires the refresh lock")
+	assert.NotEmpty(t, first, "first caller acquires the refresh lock and gets a token")
 
 	second, err := c.TryRefreshTicket(context.Background(), "t1")
 	require.NoError(t, err)
-	assert.False(t, second, "second caller must not acquire the lock while held")
+	assert.Empty(t, second, "second caller must not acquire the lock while held")
+}
+
+func TestRedisSWRCache_ReleaseRefresh_AllowsImmediateReacquire(t *testing.T) {
+	c, _ := newSWR(t)
+	token, err := c.TryRefreshTicket(context.Background(), "t1")
+	require.NoError(t, err)
+	require.NotEmpty(t, token)
+
+	require.NoError(t, c.ReleaseRefreshTicket(context.Background(), "t1", token))
+
+	again, err := c.TryRefreshTicket(context.Background(), "t1")
+	require.NoError(t, err)
+	assert.NotEmpty(t, again, "released lock must be immediately re-acquirable")
+}
+
+func TestRedisSWRCache_ReleaseRefresh_WrongTokenDoesNotUnlock(t *testing.T) {
+	c, _ := newSWR(t)
+	token, err := c.TryRefreshTicket(context.Background(), "t1")
+	require.NoError(t, err)
+	require.NotEmpty(t, token)
+
+	// A stale/foreign token must never delete the current holder's lock.
+	require.NoError(t, c.ReleaseRefreshTicket(context.Background(), "t1", "not-the-token"))
+
+	second, err := c.TryRefreshTicket(context.Background(), "t1")
+	require.NoError(t, err)
+	assert.Empty(t, second, "lock must still be held after a wrong-token release")
 }
 
 func TestRedisSWRCache_InvalidateRemovesEntry(t *testing.T) {

@@ -23,6 +23,7 @@ type swrSpyCache struct {
 	refreshes  int32
 	lockHeld   bool
 	listGets   int32
+	releases   int32
 }
 
 func (s *swrSpyCache) GetTicket(ctx context.Context, id string) ([]byte, error) {
@@ -50,17 +51,27 @@ func (s *swrSpyCache) GetTicketSWR(_ context.Context, _ string) ([]byte, bool, e
 	return s.ticketData, s.stale, nil
 }
 func (s *swrSpyCache) GetListSWR(_ context.Context) ([]byte, bool, error) { return nil, false, nil }
-func (s *swrSpyCache) TryRefreshTicket(_ context.Context, _ string) (bool, error) {
+func (s *swrSpyCache) TryRefreshTicket(_ context.Context, _ string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.lockHeld {
-		return false, nil
+		return "", nil
 	}
 	s.lockHeld = true
 	atomic.AddInt32(&s.refreshes, 1)
-	return true, nil
+	return "spy-token", nil
 }
-func (s *swrSpyCache) TryRefreshList(_ context.Context) (bool, error) { return true, nil }
+func (s *swrSpyCache) TryRefreshList(_ context.Context) (string, error) { return "spy-token", nil }
+func (s *swrSpyCache) ReleaseRefreshTicket(_ context.Context, _, token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if token == "spy-token" {
+		s.lockHeld = false
+		atomic.AddInt32(&s.releases, 1)
+	}
+	return nil
+}
+func (s *swrSpyCache) ReleaseRefreshList(_ context.Context, _ string) error { return nil }
 
 func TestCachingRepo_SWR_FreshServedWithoutRefresh(t *testing.T) {
 	spy := &swrSpyCache{ticketData: []byte(`{"ID":"t1","Title":"Hot"}`), stale: false}
@@ -87,7 +98,8 @@ func TestCachingRepo_SWR_StaleServedAndRefreshedOnce(t *testing.T) {
 	assert.Equal(t, "Stale", got.Title, "stale value is served immediately to the caller")
 
 	assert.Eventually(t, func() bool {
-		return atomic.LoadInt32(&spy.refreshes) == 1 && atomic.LoadInt32(&innerCalls) == 1
+		return atomic.LoadInt32(&spy.refreshes) == 1 && atomic.LoadInt32(&innerCalls) == 1 &&
+			atomic.LoadInt32(&spy.releases) == 1 // lock released after successful rebuild
 	}, time.Second, 10*time.Millisecond, "exactly one background refresh must run")
 }
 

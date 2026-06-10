@@ -2,7 +2,10 @@ package cache
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -65,8 +68,33 @@ func (c *RedisSWRCache) load(ctx context.Context, key string) (data []byte, stal
 	return env.Data, stale, nil
 }
 
-func (c *RedisSWRCache) tryRefreshLock(ctx context.Context, key string) (bool, error) {
-	return c.client.SetNX(ctx, lockKey(key), "1", refreshLockTTL).Result()
+// releaseLockScript deletes the lock only if it still holds the caller's token,
+// so one pod can never delete a lock acquired by another (or a successor lock
+// taken after this one's TTL lapsed).
+var releaseLockScript = redis.NewScript(
+	`if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end`)
+
+// tryRefreshLock acquires the per-key refresh lock with a random token and
+// returns the token, or "" when another holder has the lock. The token lets the
+// winner release the lock right after a successful refresh (instead of waiting
+// out the TTL, which would add up to refreshLockTTL of extra staleness before
+// the next refresh could start). The TTL remains the crash backstop.
+func (c *RedisSWRCache) tryRefreshLock(ctx context.Context, key string) (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate refresh lock token: %w", err)
+	}
+	token := hex.EncodeToString(buf)
+
+	acquired, err := c.client.SetNX(ctx, lockKey(key), token, refreshLockTTL).Result()
+	if err != nil || !acquired {
+		return "", err
+	}
+	return token, nil
+}
+
+func (c *RedisSWRCache) releaseRefreshLock(ctx context.Context, key, token string) error {
+	return releaseLockScript.Run(ctx, c.client, []string{lockKey(key)}, token).Err()
 }
 
 // --- TicketCache (plain, back-compatible) ---
@@ -107,12 +135,20 @@ func (c *RedisSWRCache) GetListSWR(ctx context.Context) ([]byte, bool, error) {
 	return c.load(ctx, listKey())
 }
 
-func (c *RedisSWRCache) TryRefreshTicket(ctx context.Context, id string) (bool, error) {
+func (c *RedisSWRCache) TryRefreshTicket(ctx context.Context, id string) (string, error) {
 	return c.tryRefreshLock(ctx, ticketKey(id))
 }
 
-func (c *RedisSWRCache) TryRefreshList(ctx context.Context) (bool, error) {
+func (c *RedisSWRCache) TryRefreshList(ctx context.Context) (string, error) {
 	return c.tryRefreshLock(ctx, listKey())
+}
+
+func (c *RedisSWRCache) ReleaseRefreshTicket(ctx context.Context, id, token string) error {
+	return c.releaseRefreshLock(ctx, ticketKey(id), token)
+}
+
+func (c *RedisSWRCache) ReleaseRefreshList(ctx context.Context, token string) error {
+	return c.releaseRefreshLock(ctx, listKey(), token)
 }
 
 var _ SWRTicketCache = (*RedisSWRCache)(nil)

@@ -25,6 +25,7 @@ import com.ticketing.orders.kafka.KafkaTraceContext;
 import com.ticketing.orders.repository.OrderRepository;
 import com.ticketing.orders.repository.OrderSeatRepository;
 import com.ticketing.orders.repository.OutboxRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -78,6 +79,7 @@ public class OrderService {
     private final ObjectMapper objectMapper;
     private final OrderTransactionService orderTransactionService;
     private final SeatedOrderTransactionService seatedOrderTransactionService;
+    private final MeterRegistry meterRegistry;
 
     public OrderService(
             OrderRepository orderRepository,
@@ -87,7 +89,8 @@ public class OrderService {
             VenueServiceClient venueServiceClient,
             ObjectMapper objectMapper,
             OrderTransactionService orderTransactionService,
-            SeatedOrderTransactionService seatedOrderTransactionService) {
+            SeatedOrderTransactionService seatedOrderTransactionService,
+            MeterRegistry meterRegistry) {
         this.orderRepository = orderRepository;
         this.orderSeatRepository = orderSeatRepository;
         this.outboxRepository = outboxRepository;
@@ -96,6 +99,24 @@ public class OrderService {
         this.objectMapper = objectMapper;
         this.orderTransactionService = orderTransactionService;
         this.seatedOrderTransactionService = seatedOrderTransactionService;
+        this.meterRegistry = meterRegistry;
+    }
+
+    /**
+     * Run a compensation release without letting its failure mask the original
+     * business exception. If the release itself fails, the reservation is NOT
+     * lost: ticket-service's expiry sweep reclaims holds past their
+     * {@code expiresAt}. We log loudly and count the failure so the condition
+     * is alertable instead of silent.
+     */
+    private void compensate(String flow, UUID reservationId, Runnable release) {
+        try {
+            release.run();
+        } catch (Exception compensationFailure) {
+            log.error("Compensation FAILED — reservation {} (flow={}) will be reclaimed by the expiry sweep",
+                    reservationId, flow, compensationFailure);
+            meterRegistry.counter("order.compensation.failures", "flow", flow).increment();
+        }
     }
 
     // ── Create (GA) ───────────────────────────────────────────────────────────
@@ -134,7 +155,8 @@ public class OrderService {
             // Compensation: release the reservation so inventory is returned immediately.
             log.error("Order TX failed after successful ReserveQuota — compensating reservationId={} ticketId={}",
                     reservationId, ticketId, e);
-            ticketServiceClient.releaseReservation(reservationId, "COMPENSATION");
+            compensate("ga", reservationId,
+                    () -> ticketServiceClient.releaseReservation(reservationId, "COMPENSATION"));
             throw e;
         }
     }
@@ -202,7 +224,8 @@ public class OrderService {
             } catch (Exception e) {
                 log.error("Seated order TX failed after ReserveHeldSeats — compensating "
                         + "reservationId={} ticketId={}", reservationId, ticketId, e);
-                venueServiceClient.releaseSeatReservation(reservationId, "COMPENSATION");
+                compensate("seated_manual", reservationId,
+                        () -> venueServiceClient.releaseSeatReservation(reservationId, "COMPENSATION"));
                 throw e;
             }
         }
@@ -222,7 +245,8 @@ public class OrderService {
         } catch (Exception e) {
             log.error("Seated order TX failed after AutoAssignAndReserve — compensating "
                     + "reservationId={} ticketId={}", reservationId, ticketId, e);
-            venueServiceClient.releaseSeatReservation(reservationId, "COMPENSATION");
+            compensate("seated_auto", reservationId,
+                    () -> venueServiceClient.releaseSeatReservation(reservationId, "COMPENSATION"));
             throw e;
         }
     }

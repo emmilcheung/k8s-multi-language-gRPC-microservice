@@ -147,6 +147,12 @@ client:
   image:
     repository: client
     tag: "SET_BY_CI"  # overridden to git SHA at deploy time; never use latest in any env (I-04)
+  # Restrict ingress to Kong: client pages decode the JWT without signature
+  # verification on the assumption that all traffic enters via Kong (which
+  # validates it). The NetworkPolicy enforces that assumption at the network
+  # layer. Explicitly disabled in values-local.yaml (minikube).
+  networkPolicy:
+    enabled: true
   env:
     NODE_ENV: production
     PORT: "4000"

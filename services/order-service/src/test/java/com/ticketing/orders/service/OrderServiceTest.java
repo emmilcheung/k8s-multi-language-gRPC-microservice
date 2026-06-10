@@ -23,6 +23,7 @@ import com.ticketing.orders.repository.OrderRepository;
 import com.ticketing.orders.repository.OrderSeatRepository;
 import com.ticketing.orders.repository.OrderTicketRepository;
 import com.ticketing.orders.repository.OutboxRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,6 +49,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -76,6 +78,7 @@ class OrderServiceTest {
     private OrderTransactionService orderTransactionService;
     private SeatedOrderTransactionService seatedOrderTransactionService;
     private OrderService orderService;
+    private SimpleMeterRegistry meterRegistry;
 
     private final UUID userId   = UUID.randomUUID();
     private final UUID ticketId = UUID.randomUUID();
@@ -96,10 +99,11 @@ class OrderServiceTest {
                 objectMapper);
         ReflectionTestUtils.setField(seatedOrderTransactionService, "expirationMinutes", 15);
 
+        meterRegistry = new SimpleMeterRegistry();
         orderService = new OrderService(
                 orderRepository, orderSeatRepository, outboxRepository, ticketServiceClient,
                 venueServiceClient, objectMapper, orderTransactionService,
-                seatedOrderTransactionService);
+                seatedOrderTransactionService, meterRegistry);
         ReflectionTestUtils.setField(orderService, "expirationMinutes", 15);
 
         ticket = new OrderTicket(ticketId, "Concert Ticket", new BigDecimal("49.99"));
@@ -169,6 +173,33 @@ class OrderServiceTest {
 
         // Compensation: releaseReservation must be called with reason "COMPENSATION"
         verify(ticketServiceClient).releaseReservation(any(UUID.class), eq("COMPENSATION"));
+    }
+
+    @Test
+    void createOrder_should_propagate_original_error_when_compensation_also_fails() {
+        UUID reservationId = UUID.randomUUID();
+        ReserveQuotaResponse reserveResponse = buildReserveResponse(reservationId, 1);
+
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+
+        when(ticketServiceClient.reserveQuota(
+                eq(ticketId.toString()), any(UUID.class), eq(userId), eq(1), any(Instant.class)))
+                .thenReturn(reserveResponse);
+        when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
+        when(orderRepository.save(any(Order.class))).thenThrow(new RuntimeException("db write failed"));
+        doThrow(new RuntimeException("ticket-service unavailable"))
+                .when(ticketServiceClient).releaseReservation(any(UUID.class), eq("COMPENSATION"));
+
+        // The ORIGINAL business failure must surface — the compensation failure
+        // must never mask it (the reservation is reclaimed by the expiry sweep).
+        assertThatThrownBy(() -> orderService.createOrder(userId, req))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("db write failed");
+
+        // And the failed compensation must be observable (alertable counter).
+        assertThat(meterRegistry.counter("order.compensation.failures", "flow", "ga").count())
+                .isEqualTo(1.0);
     }
 
     @Test
@@ -566,6 +597,48 @@ class OrderServiceTest {
                 .hasMessageContaining("db exploded");
 
         verify(venueServiceClient).releaseSeatReservation(any(UUID.class), eq("COMPENSATION"));
+    }
+
+    @Test
+    void createSeatedOrder_manual_should_propagate_original_error_when_compensation_also_fails() {
+        UUID seatId    = UUID.randomUUID();
+        UUID sectionId = UUID.randomUUID();
+        UUID planId    = UUID.randomUUID();
+
+        SeatDetail seatDetail = buildSeatDetail(seatId, sectionId, "B2");
+
+        ReserveHeldSeatsResponse reserveResponse = ReserveHeldSeatsResponse.newBuilder()
+                .setSuccess(true)
+                .setReservationId(UUID.randomUUID().toString())
+                .addSeats(seatDetail)
+                .build();
+
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+        req.setPlanId(planId.toString());
+        req.setSeatIds(List.of(seatId.toString()));
+        req.setQuantity(1);
+
+        GetSeatingPlanResponse planResponse = GetSeatingPlanResponse.newBuilder()
+                .setAssignmentMode("manual")
+                .build();
+        when(venueServiceClient.getSeatingPlan(planId.toString())).thenReturn(planResponse);
+        when(venueServiceClient.reserveHeldSeats(
+                eq(planId.toString()), eq(ticketId.toString()), any(UUID.class),
+                eq(userId), anyList(), any(Instant.class)))
+                .thenReturn(reserveResponse);
+        when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
+        when(orderRepository.save(any(Order.class))).thenThrow(new RuntimeException("db exploded"));
+        doThrow(new RuntimeException("venue-service unavailable"))
+                .when(venueServiceClient).releaseSeatReservation(any(UUID.class), eq("COMPENSATION"));
+
+        // Original failure surfaces; failed compensation is counted, not masking.
+        assertThatThrownBy(() -> orderService.createSeatedOrder(userId, req))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("db exploded");
+
+        assertThat(meterRegistry.counter("order.compensation.failures", "flow", "seated_manual").count())
+                .isEqualTo(1.0);
     }
 
     @Test

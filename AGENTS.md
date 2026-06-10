@@ -27,6 +27,7 @@
 |---|---|
 | [`docs/15-agent-hard-stops.md`](docs/15-agent-hard-stops.md) | Full detail on the 10 operations requiring user confirmation |
 | [`docs/17-agent-workflow.md`](docs/17-agent-workflow.md) | Post-harness validation loop (lint + E2E) |
+| [`docs/18-slos-and-load-testing.md`](docs/18-slos-and-load-testing.md) | Read-path SLOs, error budget, k6 load-test methodology |
 | [`docs/SUBAGENT_ORCHESTRATION.md`](docs/SUBAGENT_ORCHESTRATION.md) | Project-specific manager/worker patterns, dependency graph |
 
 ## Log
