@@ -15,6 +15,7 @@ services:
       context: ./services/queue-service/src/QueueService
     ports: ["4100:8080"]      # waiting page + API on a distinct host port
     environment:
+      ASPNETCORE_ENVIRONMENT: "Development"   # local only — allows the placeholder secret
       Queue__HmacSecret: "dev-secret-change-me-32-chars-minimum"
       Queue__RedisConnection: "queue-redis:6379"
     depends_on:

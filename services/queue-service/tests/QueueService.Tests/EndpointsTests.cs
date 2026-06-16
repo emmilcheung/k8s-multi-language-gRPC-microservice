@@ -1,9 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using QueueService.Options;
 using QueueService.Queue;
 using StackExchange.Redis;
 using Xunit;
@@ -19,6 +21,32 @@ public class StartupValidationTests
 
         var ex = Record.Exception(() => factory.Services.GetService<object>());
         Assert.NotNull(ex); // ValidateOnStart surfaces as OptionsValidationException
+    }
+
+    [Fact]
+    public void Startup_in_production_rejects_the_shipped_placeholder_secret()
+    {
+        var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
+        {
+            b.UseEnvironment("Production");
+            b.UseSetting("Queue:RedisConnection", "localhost:6379");
+            b.UseSetting("Queue:HmacSecret", QueueOptions.PlaceholderSecret);
+        });
+        var ex = Record.Exception(() => factory.Services.GetService<object>());
+        Assert.NotNull(ex);
+    }
+
+    [Fact]
+    public void Startup_in_development_allows_placeholder_secret()
+    {
+        var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
+        {
+            b.UseEnvironment("Development");
+            b.UseSetting("Queue:RedisConnection", "localhost:6379");
+            b.UseSetting("Queue:HmacSecret", QueueOptions.PlaceholderSecret);
+        });
+        var ex = Record.Exception(() => factory.Services.GetService<object>());
+        Assert.Null(ex); // local dev still works with the placeholder
     }
 }
 

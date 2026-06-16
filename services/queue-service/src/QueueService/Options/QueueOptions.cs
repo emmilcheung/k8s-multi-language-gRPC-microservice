@@ -6,6 +6,10 @@ public sealed class QueueOptions
 {
     public const string SectionName = "Queue";
 
+    /// The secret shipped in compose/.env/helm samples. Rejected at startup in
+    /// Production so a deployment cannot accidentally run with a known signing key.
+    public const string PlaceholderSecret = "dev-secret-change-me-32-chars-minimum";
+
     [Required, MinLength(32)]
     public string HmacSecret { get; set; } = string.Empty;
 

@@ -12,6 +12,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOptions<QueueOptions>()
     .Bind(builder.Configuration.GetSection(QueueOptions.SectionName))
     .ValidateDataAnnotations()
+    .Validate(o => !builder.Environment.IsProduction() || o.HmacSecret != QueueOptions.PlaceholderSecret,
+        "Queue:HmacSecret must be changed from the shipped placeholder in Production.")
     .ValidateOnStart();
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
