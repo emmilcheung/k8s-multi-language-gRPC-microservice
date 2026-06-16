@@ -859,6 +859,28 @@ services:
                       "Bearer {{ANONYMOUS_GRAPHQL_JWT}}"
                     )
                   end
+                - |
+                  -- Virtual waiting room backstop (inert unless armed).
+                  if "{{QUEUE_GATE_ARMED}}" ~= "true" then return end
+                  -- Only gate the reserve mutation; reads and SSR pass freely.
+                  local ok, body = pcall(function() return kong.request.get_raw_body() end)
+                  body = (ok and body) or ""
+                  if not body:find("reserve", 1, true) then return end
+                  local cookie = kong.request.get_header("Cookie") or ""
+                  local token = cookie:match("qq_pass=([^;]+)")
+                  if not token then
+                    return kong.response.exit(403, { message = "waiting room: pass required" })
+                  end
+                  local b64, sig = token:match("^([^%.]+)%.([^%.]+)$")
+                  if not b64 then
+                    return kong.response.exit(403, { message = "waiting room: malformed pass" })
+                  end
+                  local hmac = require("resty.openssl.hmac").new("{{QUEUE_HMAC_SECRET}}", "sha256")
+                  hmac:update(b64)
+                  local expected = ngx.encode_base64(hmac:final()):gsub("%+", "-"):gsub("/", "_"):gsub("=+$", "")
+                  if expected ~= sig then
+                    return kong.response.exit(403, { message = "waiting room: invalid pass" })
+                  end
           - name: jwt
             config:
               key_claim_name: iss
