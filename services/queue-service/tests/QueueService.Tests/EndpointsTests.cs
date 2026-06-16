@@ -88,6 +88,37 @@ public class QueueApiTests(RedisFixture fx)
         Assert.Contains(eid, html);
     }
 
+    [Fact]
+    public async Task Serving_for_unknown_event_returns_404_not_500()
+    {
+        await using var f = Factory();
+        var res = await f.CreateClient().GetAsync("/api/serving?e=does-not-exist");
+        Assert.Equal(HttpStatusCode.NotFound, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Status_with_forged_ticket_cookie_is_unauthorized()
+    {
+        await using var f = Factory();
+        var eid = await SeedEvent(f, openSecondsAgo: 5, rate: 100);
+        var client = f.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
+        var req = new HttpRequestMessage(HttpMethod.Get, $"/api/status?e={eid}");
+        req.Headers.Add("Cookie", "qq_ticket=forged.deadbeef");
+        var res = await client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.Unauthorized, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Claim_before_open_returns_425_too_early()
+    {
+        await using var f = Factory();
+        var eid = await SeedEvent(f, openSecondsAgo: -120, rate: 50); // opens in 2 min -> pre-queue
+        var client = f.CreateClient();
+        await client.PostAsync($"/api/enqueue?e={eid}", null); // sets the ticket cookie
+        var res = await client.PostAsync($"/api/claim?e={eid}", null);
+        Assert.Equal(425, (int)res.StatusCode);
+    }
+
     private static async Task<string> SeedEvent(WebApplicationFactory<Program> f, int openSecondsAgo, double rate)
     {
         var eid = "E-" + Guid.NewGuid().ToString("N");

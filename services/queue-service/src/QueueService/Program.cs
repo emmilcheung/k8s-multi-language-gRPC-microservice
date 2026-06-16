@@ -2,6 +2,7 @@ using QueueService.Endpoints;
 using QueueService.Options;
 using QueueService.Queue;
 using QueueService.Tokens;
+using QueueService.Web;
 using StackExchange.Redis;
 using Microsoft.Extensions.Options;
 
@@ -24,8 +25,11 @@ builder.Services.AddSingleton<TokenService>(sp =>
 builder.Services.AddSingleton<QueueCoordinator>();
 builder.Services.AddRazorPages();
 builder.Services.AddHealthChecks();
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<EventNotFoundExceptionHandler>();
 
 var app = builder.Build();
+app.UseExceptionHandler();
 app.UseStaticFiles();
 app.MapHealthChecks("/healthz");
 app.MapQueueApi();
