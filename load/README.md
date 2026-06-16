@@ -35,6 +35,27 @@ docker compose exec -T mongodb mongosh --quiet --eval 'print(JSON.stringify(db.s
 docker compose exec -T mongodb mongosh --quiet --eval 'print(JSON.stringify(db.serverStatus().opcounters))'
 ```
 
+## Onsale waiting room — `k6/onsale-queue.js`
+
+Polling storm against the standalone queue-service (`docker-compose.queue.yml`).
+The `serving` scenario hammers `GET /api/serving?e=<id>` — the cacheable hot path
+whose admission count is pure time-math (`floor(rate·(now−T0))`, no Redis), so its
+latency must stay flat regardless of VU count. The `flow` scenario exercises the
+per-visitor `enqueue → status` path.
+
+```bash
+docker compose -f docker-compose.queue.yml up -d
+# seed an already-open, high-rate event
+docker compose -f docker-compose.queue.yml exec -T queue-redis redis-cli \
+  HSET q:LOAD:cfg t0 $(( ($(date +%s) - 30) * 1000 )) rate 1000 armed 1
+k6 run -e QUEUE_EVENT=LOAD -e PEAK_VUS=400 load/k6/onsale-queue.js
+```
+
+Measured (2026-06-16, local M-series + Docker, 500 peak VUs / ~31k req/s): `serving`
+p95 19.5 ms / p99 26 ms, **0% failures across 901k requests; 2.44M checks 100% passed**
+— the time-math read path absorbs the storm with flat latency, evidencing the
+origin-load invariant for the gate.
+
 ## Caveats
 
 - **Kong's anonymous IP rate limit (6,000/min locally) throttles the `api`
