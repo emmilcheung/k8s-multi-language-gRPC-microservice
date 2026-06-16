@@ -65,6 +65,16 @@ public sealed class QueueCoordinator(
         return new ClaimResult(true, tokens.Sign(token), status.Ticket);
     }
 
+    /// Verifies an admission token (HMAC + expiry) and consumes its nonce once.
+    public async Task<RedeemOutcome> RedeemAsync(string token)
+    {
+        if (!tokens.TryVerify<AdmissionToken>(token, out var t) || t is null) return RedeemOutcome.Invalid;
+        var now = clock.GetUtcNow().ToUnixTimeSeconds();
+        if (t.Exp <= now) return RedeemOutcome.Invalid; // expired
+        var first = await store.TryConsumeNonceAsync(t.Nonce, (int)(t.Exp - now));
+        return first ? RedeemOutcome.Ok : RedeemOutcome.AlreadyUsed;
+    }
+
     public async Task<long> ServingAsync(string eid)
     {
         var cfg = await RequireConfigAsync(eid);

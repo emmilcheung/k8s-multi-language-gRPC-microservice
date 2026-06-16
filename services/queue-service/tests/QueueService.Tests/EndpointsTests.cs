@@ -143,6 +143,31 @@ public class QueueApiTests(RedisFixture fx)
         Assert.Equal(425, (int)res.StatusCode);
     }
 
+    [Fact]
+    public async Task Redeem_admission_token_is_single_use()
+    {
+        await using var f = Factory();
+        var eid = await SeedEvent(f, openSecondsAgo: 5, rate: 100);
+        var client = f.CreateClient();
+        await client.PostAsync($"/api/enqueue?e={eid}", null);
+        var claim = await client.PostAsync($"/api/claim?e={eid}", null);
+        var token = (await claim.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString();
+
+        var first = await client.PostAsJsonAsync("/api/redeem", new { token });
+        var second = await client.PostAsJsonAsync("/api/redeem", new { token });
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);        // first use accepted
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode); // replay rejected
+    }
+
+    [Fact]
+    public async Task Redeem_rejects_forged_token()
+    {
+        await using var f = Factory();
+        var res = await f.CreateClient().PostAsJsonAsync("/api/redeem", new { token = "forged.deadbeef" });
+        Assert.Equal(HttpStatusCode.Unauthorized, res.StatusCode);
+    }
+
     private static async Task<string> SeedEvent(WebApplicationFactory<Program> f, int openSecondsAgo, double rate)
     {
         var eid = "E-" + Guid.NewGuid().ToString("N");

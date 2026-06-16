@@ -11,6 +11,9 @@ public sealed class EventNotFoundException(string eid)
 public sealed class QueueFullException(string eid)
     : Exception($"event '{eid}' pre-queue is full");
 
+/// Outcome of redeeming a one-time admission token.
+public enum RedeemOutcome { Invalid, Ok, AlreadyUsed }
+
 public sealed record EnqueueResult(PreQueueTicket Ticket, string Phase, long? Position, EventConfig Config);
 public sealed record StatusResult(PreQueueTicket Ticket, long Position, long Serving, bool Admitted, double WaitSeconds);
 public sealed record ClaimResult(bool Admitted, string? Token, PreQueueTicket Ticket);

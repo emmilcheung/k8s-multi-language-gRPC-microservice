@@ -48,8 +48,21 @@ public static class QueueEndpoints
                 : Results.StatusCode(425); // Too Early — admitted boundary not reached
         });
 
+        app.MapPost("/api/redeem", async (RedeemRequest body, QueueCoordinator coord) =>
+        {
+            var outcome = await coord.RedeemAsync(body.Token ?? "");
+            return outcome switch
+            {
+                RedeemOutcome.Ok => Results.Ok(new { ok = true }),
+                RedeemOutcome.AlreadyUsed => Results.Conflict(new { error = "token already used" }),
+                _ => Results.Unauthorized(),
+            };
+        });
+
         return app;
     }
+
+    public sealed record RedeemRequest(string? Token);
 
     private static PreQueueTicket? ReadTicket(HttpRequest req, TokenService tokens, string eid)
     {

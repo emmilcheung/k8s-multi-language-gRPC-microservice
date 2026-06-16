@@ -107,4 +107,10 @@ return tonumber(pos)";
 
     public Task RefreshConfigTtlAsync(string eid, int ttlSeconds)
         => Db.KeyExpireAsync(Cfg(eid), TimeSpan.FromSeconds(ttlSeconds));
+
+    /// Consumes an admission-token nonce exactly once (SETNX with TTL).
+    /// Returns true on first use, false if the nonce was already consumed.
+    public Task<bool> TryConsumeNonceAsync(string nonce, int ttlSeconds)
+        => Db.StringSetAsync($"q:nonce:{nonce}", "1",
+            TimeSpan.FromSeconds(Math.Max(1, ttlSeconds)), When.NotExists);
 }

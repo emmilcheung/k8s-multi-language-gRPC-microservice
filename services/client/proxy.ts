@@ -14,6 +14,21 @@ import { gateDecision } from "@/lib/queue/gate";
 
 const QUEUE_PASS_COOKIE = process.env.QUEUE_PASS_COOKIE || "qq_pass";
 
+// Redeems a one-time admission token at the queue-service. 200 = first use (admit);
+// 401/409 = invalid or already used (reject); network failure = fail closed.
+async function redeemQpass(queueUrl: string, token: string): Promise<boolean> {
+  try {
+    const r = await fetch(`${queueUrl}/api/redeem`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
 // Virtual waiting room gate. Returns a response when the gate intercepts
 // (redirect to the waiting room, or accept a qpass), or null to pass through
 // (gate disarmed, misconfigured, or visitor already admitted).
@@ -40,6 +55,11 @@ async function applyQueueGate(request: NextRequest): Promise<NextResponse | null
     case "redirect-queue":
       return NextResponse.redirect(decision.location, 302);
     case "accept": {
+      // One-time redemption: a token leaked via logs/URL cannot be reused.
+      if (!(await redeemQpass(queueUrl, decision.cookieValue))) {
+        const target = encodeURIComponent(url.pathname + url.search);
+        return NextResponse.redirect(`${queueUrl}/wait?e=${eventId}&target=${target}`, 302);
+      }
       const res = NextResponse.redirect(new URL(decision.cleanUrl, request.url), 302);
       res.cookies.set(QUEUE_PASS_COOKIE, decision.cookieValue, {
         httpOnly: true, sameSite: "lax", path: "/",
