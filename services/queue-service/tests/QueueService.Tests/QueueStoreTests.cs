@@ -87,4 +87,29 @@ public class QueueStoreTests(RedisFixture fx)
         Assert.NotNull(ttl);
         Assert.InRange(ttl!.Value.TotalSeconds, 1, 120);
     }
+
+    [Fact]
+    public async Task Concurrent_distinct_late_enqueues_are_contiguous_and_unique()
+    {
+        var store = NewStore(out var eid);
+        const int n = 100;
+        var positions = await Task.WhenAll(
+            Enumerable.Range(0, n).Select(i => store.EnqueueLateAsync(eid, $"m{i}", 0, Ttl)));
+
+        Assert.Equal(n, positions.Distinct().Count());                 // no collisions
+        Assert.Equal(0, positions.Min());                              // contiguous from pqSize
+        Assert.Equal(n - 1, positions.Max());                          // no gaps
+    }
+
+    [Fact]
+    public async Task Concurrent_same_mid_late_enqueue_burns_no_sequence()
+    {
+        var store = NewStore(out var eid);
+        var positions = await Task.WhenAll(
+            Enumerable.Range(0, 50).Select(_ => store.EnqueueLateAsync(eid, "same", 10, Ttl)));
+
+        Assert.All(positions, p => Assert.Equal(10, p));               // all identical
+        var counter = (long)await fx.Mux.GetDatabase().StringGetAsync($"q:{eid}:late");
+        Assert.Equal(1, counter);                                      // exactly one slot consumed
+    }
 }

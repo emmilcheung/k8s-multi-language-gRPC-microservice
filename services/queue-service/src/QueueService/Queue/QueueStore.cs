@@ -25,6 +25,29 @@ redis.call('ZADD', KEYS[1], 'NX', ARGV[1], ARGV[2])
 redis.call('PEXPIRE', KEYS[1], ARGV[4])
 return 1";
 
+    // Atomic freeze: set pqsize once (to ZCARD) and return it. No check-then-set race.
+    // KEYS[1]=cfg hash, KEYS[2]=prequeue zset.
+    private const string FreezeLua = @"
+local existing = redis.call('HGET', KEYS[1], 'pqsize')
+if existing then return tonumber(existing) end
+local size = redis.call('ZCARD', KEYS[2])
+redis.call('HSET', KEYS[1], 'pqsize', size)
+return size";
+
+    // Atomic late-position assignment: one INCR per distinct mid, ever. Concurrent
+    // calls for the same mid return the same position and burn no sequence numbers.
+    // KEYS[1]=latepos hash, KEYS[2]=late counter. ARGV: mid, pqSize, ttlMs.
+    private const string EnqueueLateLua = @"
+local pos = redis.call('HGET', KEYS[1], ARGV[1])
+if not pos then
+  local n = redis.call('INCR', KEYS[2])
+  pos = tonumber(ARGV[2]) + (n - 1)
+  redis.call('HSET', KEYS[1], ARGV[1], pos)
+end
+redis.call('PEXPIRE', KEYS[1], ARGV[3])
+redis.call('PEXPIRE', KEYS[2], ARGV[3])
+return tonumber(pos)";
+
     public async Task SetConfigAsync(EventConfig c)
     {
         var entries = new List<HashEntry>
@@ -64,29 +87,22 @@ return 1";
     public Task<long?> RankInPreQueueAsync(string eid, string mid)
         => Db.SortedSetRankAsync(PreQueue(eid), mid);
 
-    /// Freezes (once) and returns the pre-queue size. Idempotent via HSETNX.
+    /// Freezes (once, atomically) and returns the pre-queue size.
     public async Task<long> FreezePreQueueSizeAsync(string eid)
     {
-        var existing = await Db.HashGetAsync(Cfg(eid), "pqsize");
-        if (existing.HasValue) return (long)existing;
-        var size = await Db.SortedSetLengthAsync(PreQueue(eid));
-        await Db.HashSetAsync(Cfg(eid), "pqsize", size, When.NotExists);
-        return (long)(await Db.HashGetAsync(Cfg(eid), "pqsize"));
+        var res = await Db.ScriptEvaluateAsync(FreezeLua,
+            new RedisKey[] { Cfg(eid), PreQueue(eid) });
+        return (long)res;
     }
 
     /// Stable FIFO position for a latecomer: pqSize + (1-based arrival - 1).
+    /// Atomic — concurrent calls for one mid never burn sequence numbers.
     public async Task<long> EnqueueLateAsync(string eid, string mid, long pqSize, int ttlSeconds)
     {
-        var existing = await Db.HashGetAsync(LatePos(eid), mid);
-        if (!existing.HasValue)
-        {
-            var n = await Db.StringIncrementAsync(LateCtr(eid)); // 1-based
-            await Db.HashSetAsync(LatePos(eid), mid, pqSize + (n - 1), When.NotExists);
-        }
-        var ttl = TimeSpan.FromSeconds(ttlSeconds);
-        await Db.KeyExpireAsync(LatePos(eid), ttl);
-        await Db.KeyExpireAsync(LateCtr(eid), ttl);
-        return (long)(await Db.HashGetAsync(LatePos(eid), mid));
+        var res = await Db.ScriptEvaluateAsync(EnqueueLateLua,
+            new RedisKey[] { LatePos(eid), LateCtr(eid) },
+            new RedisValue[] { mid, pqSize, (long)ttlSeconds * 1000 });
+        return (long)res;
     }
 
     public Task RefreshConfigTtlAsync(string eid, int ttlSeconds)
