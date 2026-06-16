@@ -1,6 +1,6 @@
 # Stage 1: build — Debian (glibc) required by confluent-kafka-go vendored librdkafka
 # Build context must be the repo root so Dockerfile paths resolve correctly.
-FROM golang:1.25-bookworm@sha256:e3a54b77385b4f8a31c1db4d12429ffb3718ea76865731a787c497755d409547 AS builder
+FROM golang:1.25-bookworm@sha256:bbb255b0e131db500cf0520adc97441d2260cf629c7fa7e39e025ddf53995a24 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*
 
