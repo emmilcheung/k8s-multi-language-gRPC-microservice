@@ -1,0 +1,32 @@
+image:
+  repository: queue-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 3   # stateless — admission is pure time-math, safe to scale
+
+queue:
+  # In real envs, set via --set or an external Secret; never commit a real secret.
+  hmacSecret: "dev-secret-change-me-32-chars-minimum"
+  admissionTtlSeconds: 600
+  slidingGraceSeconds: 60
+
+redis:
+  image: redis:7-alpine
+
+service:
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  host: queue.example.com
+
+resources:
+  requests:
+    cpu: "50m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"

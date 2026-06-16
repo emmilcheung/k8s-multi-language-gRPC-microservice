@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queue-service
+  labels: {{- include "queue-system.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: queue-service
+  template:
+    metadata:
+      labels:
+        app: queue-service
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: queue-service
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.targetPort }}
+          env:
+            - name: Queue__RedisConnection
+              value: "queue-redis:6379"
+            - name: Queue__AdmissionTtlSeconds
+              value: {{ .Values.queue.admissionTtlSeconds | quote }}
+            - name: Queue__SlidingGraceSeconds
+              value: {{ .Values.queue.slidingGraceSeconds | quote }}
+            - name: Queue__HmacSecret
+              valueFrom:
+                secretKeyRef:
+                  name: queue-secret
+                  key: hmac-secret
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.service.targetPort }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.service.targetPort }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
