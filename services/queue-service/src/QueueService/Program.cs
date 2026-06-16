@@ -1,11 +1,17 @@
 using QueueService.Endpoints;
 using QueueService.Options;
 using QueueService.Queue;
+using QueueService.Telemetry;
 using QueueService.Tokens;
 using QueueService.Web;
 using StackExchange.Redis;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using System.Threading.RateLimiting;
+using OpenTelemetry;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,7 +33,20 @@ builder.Services.AddSingleton<TokenService>(sp =>
     new TokenService(sp.GetRequiredService<IOptions<QueueOptions>>().Value.HmacSecret));
 builder.Services.AddSingleton<QueueCoordinator>();
 builder.Services.AddRazorPages();
-builder.Services.AddHealthChecks();
+
+// Observability (audit #12): metrics collected in-process; OTLP export when configured.
+builder.Services.AddMetrics();
+builder.Services.AddSingleton<QueueMetrics>();
+var otel = builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService("queue-service"))
+    .WithMetrics(m => m.AddAspNetCoreInstrumentation().AddMeter(QueueMetrics.MeterName))
+    .WithTracing(t => t.AddAspNetCoreInstrumentation());
+if (!string.IsNullOrEmpty(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
+    otel.UseOtlpExporter();
+
+// Liveness = process responds; readiness = Redis reachable (audit #7).
+builder.Services.AddHealthChecks()
+    .AddCheck<RedisHealthCheck>("redis", tags: new[] { "ready" });
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<EventNotFoundExceptionHandler>();
 builder.Services.AddRateLimiter(o =>
@@ -52,7 +71,8 @@ var app = builder.Build();
 app.UseExceptionHandler();
 app.UseRateLimiter();
 app.UseStaticFiles();
-app.MapHealthChecks("/healthz");
+app.MapHealthChecks("/healthz", new HealthCheckOptions { Predicate = _ => false });
+app.MapHealthChecks("/readyz", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") });
 app.MapQueueApi();
 app.MapRazorPages();
 app.Run();

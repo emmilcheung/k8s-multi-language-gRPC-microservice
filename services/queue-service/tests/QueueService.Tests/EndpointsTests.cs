@@ -117,6 +117,15 @@ public class QueueApiTests(RedisFixture fx)
     }
 
     [Fact]
+    public async Task Health_and_readiness_endpoints_ok_when_redis_up()
+    {
+        await using var f = Factory();
+        var client = f.CreateClient();
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/healthz")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/readyz")).StatusCode); // redis reachable
+    }
+
+    [Fact]
     public async Task Enqueue_is_rate_limited_per_ip()
     {
         await using var f = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>

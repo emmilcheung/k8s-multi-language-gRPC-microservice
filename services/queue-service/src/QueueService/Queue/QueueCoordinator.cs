@@ -2,13 +2,15 @@ using System.Security.Cryptography;
 using Microsoft.Extensions.Options;
 using QueueService.Admission;
 using QueueService.Options;
+using QueueService.Telemetry;
 using QueueService.Tokens;
 
 namespace QueueService.Queue;
 
 /// Orchestrates store + tokens + clock. Used by both the API and the Razor page.
 public sealed class QueueCoordinator(
-    QueueStore store, TokenService tokens, TimeProvider clock, IOptions<QueueOptions> options)
+    QueueStore store, TokenService tokens, TimeProvider clock, IOptions<QueueOptions> options,
+    QueueMetrics? metrics = null)
 {
     private readonly QueueOptions _opt = options.Value;
 
@@ -31,6 +33,7 @@ public sealed class QueueCoordinator(
             if (!added) throw new QueueFullException(eid);
             await store.RefreshConfigTtlAsync(eid, _opt.KeyTtlSeconds);
             var ticket = new PreQueueTicket(eid, mid, r, null, "pre", now.ToUnixTimeSeconds());
+            metrics?.Enqueued("pre");
             return new EnqueueResult(ticket, "pre", null, cfg);
         }
 
@@ -38,6 +41,7 @@ public sealed class QueueCoordinator(
         var pos = await store.EnqueueLateAsync(eid, mid, pqSize, _opt.KeyTtlSeconds);
         await store.RefreshConfigTtlAsync(eid, _opt.KeyTtlSeconds);
         var late = new PreQueueTicket(eid, mid, r, pos, "late", now.ToUnixTimeSeconds());
+        metrics?.Enqueued("late");
         return new EnqueueResult(late, "late", pos, cfg);
     }
 
@@ -47,16 +51,23 @@ public sealed class QueueCoordinator(
         var now = clock.GetUtcNow();
         var (position, updated) = await ResolvePositionAsync(eid, ticket, cfg, now);
         var serving = AdmissionCalculator.Serving(now, cfg.T0, cfg.Rate);
+        var wait = AdmissionCalculator.EstimatedWaitSeconds(position, serving, cfg.Rate);
+        metrics?.RecordWait(wait);
         return new StatusResult(
             updated, position, serving,
             AdmissionCalculator.IsAdmitted(position, serving),
-            AdmissionCalculator.EstimatedWaitSeconds(position, serving, cfg.Rate));
+            wait);
     }
 
     public async Task<ClaimResult> ClaimAsync(string eid, PreQueueTicket ticket)
     {
         var status = await GetStatusAsync(eid, ticket);
-        if (!status.Admitted) return new ClaimResult(false, null, status.Ticket);
+        if (!status.Admitted)
+        {
+            metrics?.ClaimRejected();
+            return new ClaimResult(false, null, status.Ticket);
+        }
+        metrics?.Admitted();
 
         var now = clock.GetUtcNow().ToUnixTimeSeconds();
         var token = new AdmissionToken(
