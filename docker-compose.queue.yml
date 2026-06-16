@@ -1,0 +1,22 @@
+# Isolated waiting-room group. Run separately from the main stack:
+#   docker compose -f docker-compose.queue.yml up --build
+name: queue
+services:
+  queue-redis:
+    image: redis:7-alpine
+    ports: ["6390:6379"]      # distinct host port — no clash with the main stack
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+  queue-service:
+    build:
+      context: ./services/queue-service/src/QueueService
+    ports: ["4100:8080"]      # waiting page + API on a distinct host port
+    environment:
+      Queue__HmacSecret: "dev-secret-change-me-32-chars-minimum"
+      Queue__RedisConnection: "queue-redis:6379"
+    depends_on:
+      queue-redis:
+        condition: service_healthy
