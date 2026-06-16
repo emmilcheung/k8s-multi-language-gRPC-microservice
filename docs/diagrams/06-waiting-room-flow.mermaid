@@ -1,0 +1,27 @@
+sequenceDiagram
+    autonumber
+    actor B as Buyer
+    participant C as Connector (Next.js proxy.ts)
+    participant Q as queue-service (queue.* domain)
+    participant R as Queue Redis
+    participant K as Kong + ticket-service
+
+    Note over C: onsale armed (QUEUE_GATE_ARMED=true)
+    B->>C: GET /tickets/123
+    C-->>B: 302 to queue/wait?e=E&target=/tickets/123 (no valid pass)
+    B->>Q: GET /wait (pre-queue)
+    Q->>R: ZADD prequeue (random score - fair draw)
+    Q-->>B: countdown page, polls /serving
+    loop until position < serving
+        B->>Q: GET /serving (cacheable, pure time-math)
+        Q-->>B: serving = floor(rate * (now - T0))
+    end
+    B->>Q: POST /claim
+    Q-->>B: signed admission token (HMAC, single-use nonce)
+    B->>C: 302 to /tickets/123?qpass={token}
+    C->>Q: POST /redeem (consume nonce once)
+    Q-->>C: 200 (first use only)
+    C-->>B: set qq_pass cookie, 302 /tickets/123 (clean URL)
+    B->>K: reserve mutation (qq_pass cookie)
+    Note over K: Kong backstop re-validates qq_pass HMAC
+    K-->>B: reserved
