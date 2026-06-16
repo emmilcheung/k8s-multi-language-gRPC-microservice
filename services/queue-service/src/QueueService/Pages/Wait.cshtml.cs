@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using QueueService.Endpoints;
 using QueueService.Queue;
 using QueueService.Tokens;
+using QueueService.Web;
 
 namespace QueueService.Pages;
 
@@ -15,6 +16,8 @@ public class WaitModel(QueueCoordinator coord, TokenService tokens) : PageModel
 
     public async Task<IActionResult> OnGetAsync()
     {
+        Target = RedirectSafety.SafeTarget(Target); // open-redirect / token-exfil guard
+
         var cfg = await coord.GetConfigOrNullAsync(Eid);
         if (cfg is null) return NotFound();
 
