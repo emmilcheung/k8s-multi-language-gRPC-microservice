@@ -76,6 +76,18 @@ public class QueueApiTests(RedisFixture fx)
         Assert.Equal(HttpStatusCode.Unauthorized, res.StatusCode);
     }
 
+    [Fact]
+    public async Task Wait_page_renders_with_poller_and_event_data()
+    {
+        await using var f = Factory();
+        var eid = await SeedEvent(f, openSecondsAgo: -120, rate: 50); // opens in 2 min
+        var html = await f.CreateClient().GetStringAsync($"/wait?e={eid}&target=%2Ftickets%2F123");
+
+        Assert.Contains("id=\"countdown\"", html);
+        Assert.Contains("/js/wait.js", html);
+        Assert.Contains(eid, html);
+    }
+
     private static async Task<string> SeedEvent(WebApplicationFactory<Program> f, int openSecondsAgo, double rate)
     {
         var eid = "E-" + Guid.NewGuid().ToString("N");

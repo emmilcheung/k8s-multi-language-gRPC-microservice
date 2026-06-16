@@ -1,0 +1,25 @@
+@page
+@model QueueService.Pages.WaitModel
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>You're in line</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 12vh auto; text-align: center; }
+    #wait, #pos { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body
+  data-eid="@Model.Eid"
+  data-target="@Model.Target"
+  data-t0="@Model.T0Unix"
+  data-rate="@Model.Rate">
+  <h1>You're in line</h1>
+  <p>Hold tight — you'll be let in automatically. You can close this tab and come back.</p>
+  <p>Sale starts in <span id="countdown">—</span></p>
+  <p>Position: <span id="pos">—</span> · Est. wait: <span id="wait">—</span></p>
+  <script src="/js/wait.js" defer></script>
+</body>
+</html>

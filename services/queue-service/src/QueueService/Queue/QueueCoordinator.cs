@@ -16,6 +16,8 @@ public sealed class QueueCoordinator(
         => await store.GetConfigAsync(eid)
            ?? throw new InvalidOperationException($"event '{eid}' not configured");
 
+    public Task<EventConfig?> GetConfigOrNullAsync(string eid) => store.GetConfigAsync(eid);
+
     public async Task<EnqueueResult> EnqueueAsync(string eid, PreQueueTicket? existing)
     {
         var cfg = await RequireConfigAsync(eid);
