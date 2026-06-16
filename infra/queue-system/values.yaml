@@ -3,7 +3,8 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
-replicaCount: 3   # stateless — admission is pure time-math, safe to scale
+# Used only when autoscaling.enabled is false.
+replicaCount: 3
 
 queue:
   # REQUIRED: set via --set queue.hmacSecret=... or an external Secret (min 32 chars).
@@ -13,8 +14,30 @@ queue:
   admissionTtlSeconds: 600
   slidingGraceSeconds: 60
 
+# Stateless app — admission is pure time-math, safe to scale horizontally.
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+
+# Keep capacity during voluntary disruptions (node drain, rollout).
+pdb:
+  enabled: true
+  minAvailable: 2
+
 redis:
   image: redis:7-alpine
+  # AOF persistence so a restart recovers queue state (avoids fail-open where an
+  # empty Redis + advancing serving(t) instantly admits everyone).
+  persistence:
+    enabled: true
+    size: 1Gi
+  # PRODUCTION: the in-chart single-pod Redis is a SPOF. Point this at a
+  # replicated/managed Redis (ElastiCache / MemoryStore / Sentinel) — when set,
+  # the in-chart Redis is not deployed and the service connects here instead.
+  external:
+    host: ""
 
 service:
   port: 80
