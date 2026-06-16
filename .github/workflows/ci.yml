@@ -60,6 +60,7 @@ jobs:
       ticket:     ${{ steps.filter.outputs.ticket }}
       user:       ${{ steps.filter.outputs.user }}
       venue:      ${{ steps.filter.outputs.venue }}
+      queue:      ${{ steps.filter.outputs.queue }}
       skip-ci:    ${{ steps.set-skip-ci.outputs.skip-ci }}
     steps:
       - uses: actions/checkout@v4
@@ -112,6 +113,10 @@ jobs:
             venue:
               - 'services/venue-service/**'
               - 'proto/**'
+              - '.github/workflows/ci.yml'
+            queue:
+              - 'services/queue-service/**'
+              - 'infra/queue-system/**'
               - '.github/workflows/ci.yml'
             # skip-ci: true if ONLY markdown/docs files changed (no code/config changes)
             ci-required:
@@ -467,6 +472,92 @@ jobs:
               --set global.imageRegistry='' \
               | kubeconform -summary -strict -ignore-missing-schemas
           done
+
+  # ── queue-service (.NET 10 / ASP.NET Core) — standalone virtual waiting room ──
+  # Self-contained subsystem (own Redis, own Helm chart); kept as its own CI block
+  # like the graphql/helm checks rather than wired into the platform jobs.
+  queue:
+    name: queue-service
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.queue == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/queue-service
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore
+        working-directory: services/queue-service
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+        working-directory: services/queue-service
+
+      - name: Test (unit + integration against Redis service)
+        run: dotnet test --no-build -c Release
+        working-directory: services/queue-service
+        env:
+          REDIS_TEST_CONNECTION: localhost:6379
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Lint + render queue-system chart
+        run: |
+          helm lint infra/queue-system
+          helm template queue infra/queue-system \
+            --set queue.hmacSecret=ci-secret-thirty-two-chars-minimum > /dev/null
+          echo "OK: queue-system chart lints and renders"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (chiseled, non-root)
+        uses: docker/build-push-action@v6
+        with:
+          context: services/queue-service/src/QueueService
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          outputs: type=docker,dest=/tmp/queue-service.tar
+
+      - name: Load image for scanning
+        run: docker load --input /tmp/queue-service.tar
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-results.sarif
 
   # ── order-service (Java 21 / Spring Boot / Maven) ──────────────────────────
   # Build context is the REPO ROOT — Dockerfile reads ../../proto/ for protobuf codegen.
@@ -1420,7 +1511,7 @@ jobs:
     name: CI
     runs-on: ubuntu-24.04
     if: always()
-    needs: [changes, auth, client, expiration, graphql, helm-validate, kong, order, payment, proto, ticket, user, venue, e2e]
+    needs: [changes, auth, client, expiration, graphql, helm-validate, queue, kong, order, payment, proto, ticket, user, venue, e2e]
     steps:
       - name: Check all jobs passed (or skip if only markdown changed)
         run: |
