@@ -89,6 +89,30 @@ public class QueueApiTests(RedisFixture fx)
     }
 
     [Fact]
+    public async Task Enqueue_is_rate_limited_per_ip()
+    {
+        await using var f = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
+        {
+            b.UseSetting("Queue:HmacSecret", new string('k', 32));
+            b.UseSetting("Queue:RedisConnection", "unused");
+            b.UseSetting("Queue:EnqueuePerMinutePerIp", "3");
+            b.ConfigureServices(s =>
+            {
+                s.RemoveAll(typeof(IConnectionMultiplexer));
+                s.AddSingleton(fx.Mux);
+            });
+        });
+        var eid = await SeedEvent(f, openSecondsAgo: 5, rate: 100);
+        var client = f.CreateClient();
+
+        var statuses = new System.Collections.Generic.List<HttpStatusCode>();
+        for (var i = 0; i < 4; i++)
+            statuses.Add((await client.PostAsync($"/api/enqueue?e={eid}", null)).StatusCode);
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, statuses[^1]); // 4th over a limit of 3
+    }
+
+    [Fact]
     public async Task Serving_for_unknown_event_returns_404_not_500()
     {
         await using var f = Factory();

@@ -27,13 +27,16 @@ public sealed class QueueCoordinator(
 
         if (now < cfg.T0)
         {
-            await store.EnqueuePreQueueAsync(eid, mid, r);
+            var added = await store.EnqueuePreQueueAsync(eid, mid, r, _opt.MaxPreQueueSize, _opt.KeyTtlSeconds);
+            if (!added) throw new QueueFullException(eid);
+            await store.RefreshConfigTtlAsync(eid, _opt.KeyTtlSeconds);
             var ticket = new PreQueueTicket(eid, mid, r, null, "pre", now.ToUnixTimeSeconds());
             return new EnqueueResult(ticket, "pre", null, cfg);
         }
 
         var pqSize = await store.FreezePreQueueSizeAsync(eid);
-        var pos = await store.EnqueueLateAsync(eid, mid, pqSize);
+        var pos = await store.EnqueueLateAsync(eid, mid, pqSize, _opt.KeyTtlSeconds);
+        await store.RefreshConfigTtlAsync(eid, _opt.KeyTtlSeconds);
         var late = new PreQueueTicket(eid, mid, r, pos, "late", now.ToUnixTimeSeconds());
         return new EnqueueResult(late, "late", pos, cfg);
     }

@@ -17,4 +17,13 @@ public sealed class QueueOptions
 
     [Range(1, 3600)]
     public int SlidingGraceSeconds { get; set; } = 60;
+
+    [Range(1, 100000)]
+    public int EnqueuePerMinutePerIp { get; set; } = 60;
+
+    [Range(1, int.MaxValue)]
+    public int MaxPreQueueSize { get; set; } = 1_000_000;
+
+    [Range(1, 2592000)]
+    public int KeyTtlSeconds { get; set; } = 86400;
 }

@@ -23,7 +23,7 @@ public static class QueueEndpoints
             var r = await coord.EnqueueAsync(e, existing);
             WriteTicket(res, tokens, r.Ticket);
             return Results.Ok(new { mid = r.Ticket.Mid, phase = r.Phase, position = r.Position });
-        });
+        }).RequireRateLimiting("enqueue");
 
         app.MapGet("/api/status", async (string e, HttpRequest req, HttpResponse res,
             QueueCoordinator coord, TokenService tokens) =>

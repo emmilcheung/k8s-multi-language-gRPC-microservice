@@ -7,6 +7,10 @@ namespace QueueService.Queue;
 public sealed class EventNotFoundException(string eid)
     : Exception($"event '{eid}' not configured");
 
+/// Thrown when the pre-queue is at its hard size cap. Mapped to HTTP 503.
+public sealed class QueueFullException(string eid)
+    : Exception($"event '{eid}' pre-queue is full");
+
 public sealed record EnqueueResult(PreQueueTicket Ticket, string Phase, long? Position, EventConfig Config);
 public sealed record StatusResult(PreQueueTicket Ticket, long Position, long Serving, bool Admitted, double WaitSeconds);
 public sealed record ClaimResult(bool Admitted, string? Token, PreQueueTicket Ticket);
