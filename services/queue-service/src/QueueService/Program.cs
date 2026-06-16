@@ -1,4 +1,9 @@
+using QueueService.Endpoints;
 using QueueService.Options;
+using QueueService.Queue;
+using QueueService.Tokens;
+using StackExchange.Redis;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -7,11 +12,24 @@ builder.Services.AddOptions<QueueOptions>()
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+{
+    var opt = sp.GetRequiredService<IOptions<QueueOptions>>().Value;
+    return ConnectionMultiplexer.Connect(opt.RedisConnection);
+});
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<QueueStore>();
+builder.Services.AddSingleton<TokenService>(sp =>
+    new TokenService(sp.GetRequiredService<IOptions<QueueOptions>>().Value.HmacSecret));
+builder.Services.AddSingleton<QueueCoordinator>();
+builder.Services.AddRazorPages();
 builder.Services.AddHealthChecks();
 
 var app = builder.Build();
+app.UseStaticFiles();
 app.MapHealthChecks("/healthz");
-app.MapGet("/", () => Results.Ok("queue-service"));
+app.MapQueueApi();
+app.MapRazorPages();
 app.Run();
 
 public partial class Program; // exposed for WebApplicationFactory in tests
