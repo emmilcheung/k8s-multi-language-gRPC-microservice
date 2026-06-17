@@ -16,7 +16,7 @@ COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build -o /expiration-service ./cmd/server
 
 # Stage 2: runtime
-FROM debian:bookworm-slim@sha256:4724b8cc51e33e398f0e2e15e18d5ec2851ff0c2280647e1310bc1642182655d AS runtime
+FROM debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716 AS runtime
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ca-certificates wget openssl libssl3 && \
     rm -rf /var/lib/apt/lists/* && \
