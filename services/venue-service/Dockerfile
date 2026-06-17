@@ -1,7 +1,7 @@
 # Stage 1: build — Debian (glibc) required by confluent-kafka-go vendored librdkafka
 # Build context must be the repo root (not the service directory) because
 # go.mod has a replace directive pointing to ../../libs/grpc-stubs/go.
-FROM golang:1.25-bookworm@sha256:154bd7001b6eb339e88c964442c0ad6ed5e53f09844cc818a41ce4ecb3ce3b43 AS builder
+FROM golang:1.25-bookworm@sha256:bbb255b0e131db500cf0520adc97441d2260cf629c7fa7e39e025ddf53995a24 AS builder
 
 # Install build dependencies needed by confluent-kafka-go (CGO-based)
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*
@@ -24,7 +24,7 @@ COPY services/venue-service /app/services/venue-service
 RUN CGO_ENABLED=1 GOOS=linux go build -o /venue-service ./cmd/server
 
 # Stage 2: runtime
-FROM debian:bookworm-slim@sha256:4724b8cc51e33e398f0e2e15e18d5ec2851ff0c2280647e1310bc1642182655d AS runtime
+FROM debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716 AS runtime
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ca-certificates wget openssl libssl3 && \
     rm -rf /var/lib/apt/lists/* && \
