@@ -39,4 +39,23 @@ public class RedirectSafetyTests
     public void Rejects_absolute_url_not_in_allowlist(string input, string? allowedOrigin)
         => Assert.Equal("/", RedirectSafety.SafeTarget(input,
             allowedOrigin is null ? null : [allowedOrigin]));
+
+    // Open-redirect bypass vectors that fool naive (substring / Host-only / StartsWith)
+    // allowlist checks. The browser navigates to evil.com in every case, so SafeTarget
+    // must reject them even though the allowlisted host appears in the string.
+    [Theory]
+    [InlineData("http://app.example.com@evil.com/path")]   // userinfo trick → real host is evil.com
+    [InlineData("https://app.example.com@evil.com")]
+    [InlineData("http://app.example.com.evil.com/x")]      // suffix trick → real host is *.evil.com
+    [InlineData("http://evil.com/app.example.com")]        // allowed origin only in the path
+    public void Rejects_origin_spoofing_bypasses(string input)
+        => Assert.Equal("/", RedirectSafety.SafeTarget(input,
+            ["http://app.example.com", "https://app.example.com"]));
+
+    // Case-insensitive host and default-port normalization must still resolve to a match.
+    [Theory]
+    [InlineData("http://APP.example.com/x",   "http://app.example.com")] // host case-folded
+    [InlineData("http://app.example.com:80/x", "http://app.example.com")] // default port stripped
+    public void Allows_normalized_origin_variants(string input, string allowedOrigin)
+        => Assert.Equal(input, RedirectSafety.SafeTarget(input, [allowedOrigin]));
 }
