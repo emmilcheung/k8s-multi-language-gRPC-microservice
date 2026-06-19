@@ -39,6 +39,7 @@ describe("verifyAdmission", () => {
 describe("gateDecision", () => {
   const base = {
     armed: true, eventId: "E1", secret: SECRET, queueUrl: "http://q:4100",
+    fullUrl: "http://app:4000/tickets/123",
     pathWithQuery: "/tickets/123", qpass: null as string | null,
     passCookie: null as string | null, nowSec: 2000,
   };
@@ -52,7 +53,7 @@ describe("gateDecision", () => {
     expect(d.kind).toBe("redirect-queue");
     if (d.kind === "redirect-queue") {
       expect(d.location).toContain("http://q:4100/wait?e=E1");
-      expect(d.location).toContain("target=%2Ftickets%2F123");
+      expect(d.location).toContain("target=http%3A%2F%2Fapp%3A4000%2Ftickets%2F123");
     }
   });
   it("accepts a valid qpass and strips it from the URL", async () => {
