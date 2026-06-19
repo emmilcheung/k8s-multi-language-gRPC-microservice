@@ -10,6 +10,9 @@ export type Decision =
 
 export interface GateInput {
   armed: boolean; eventId: string; secret: string; queueUrl: string;
+  /** Full absolute URL of the incoming request — used as the post-admission return target
+   *  so the queue page can cross-domain redirect back to the main site. */
+  fullUrl: string;
   pathWithQuery: string; qpass: string | null; passCookie: string | null; nowSec: number;
 }
 
@@ -70,7 +73,7 @@ export async function gateDecision(i: GateInput): Promise<Decision> {
     if (valid(p, i.eventId, i.nowSec)) return { kind: "pass" };
   }
 
-  const target = encodeURIComponent(i.pathWithQuery);
+  const target = encodeURIComponent(i.fullUrl);
   return { kind: "redirect-queue", location: `${i.queueUrl}/wait?e=${i.eventId}&target=${target}` };
 }
 

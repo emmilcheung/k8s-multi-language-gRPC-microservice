@@ -43,6 +43,7 @@ async function applyQueueGate(request: NextRequest): Promise<NextResponse | null
   const url = request.nextUrl;
   const decision = await gateDecision({
     armed: true, eventId, secret, queueUrl,
+    fullUrl: request.url,
     pathWithQuery: url.pathname + url.search,
     qpass: url.searchParams.get("qpass"),
     passCookie: request.cookies.get(QUEUE_PASS_COOKIE)?.value ?? null,
