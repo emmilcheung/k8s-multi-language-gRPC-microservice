@@ -30,4 +30,9 @@ public sealed class QueueOptions
 
     [Range(1, 2592000)]
     public int KeyTtlSeconds { get; set; } = 86400;
+
+    /// Origins (scheme + host + port) allowed as cross-domain admission redirect targets.
+    /// Example: [ "https://www.example.com", "http://localhost:4000" ].
+    /// Empty list means only same-origin relative paths are accepted.
+    public List<string> AllowedTargetOrigins { get; set; } = new();
 }

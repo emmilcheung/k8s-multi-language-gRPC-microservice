@@ -22,4 +22,21 @@ public class RedirectSafetyTests
     [InlineData("/foo\r\nLocation: evil")]  // CRLF / header-split style
     public void Collapses_unsafe_targets_to_root(string? input)
         => Assert.Equal("/", RedirectSafety.SafeTarget(input));
+
+    // ── Allowlist overload ────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("http://app.example.com/tickets/123",  "http://app.example.com")]
+    [InlineData("https://app.example.com/",            "https://app.example.com")]
+    [InlineData("http://localhost:4000/path?q=1",      "http://localhost:4000")]
+    public void Allows_absolute_url_when_origin_is_allowlisted(string input, string allowedOrigin)
+        => Assert.Equal(input, RedirectSafety.SafeTarget(input, [allowedOrigin]));
+
+    [Theory]
+    [InlineData("http://evil.com",  "http://app.example.com")] // wrong origin
+    [InlineData("http://evil.com",  null)]                     // empty allowlist
+    [InlineData("https://evil.com", "https://app.example.com")]
+    public void Rejects_absolute_url_not_in_allowlist(string input, string? allowedOrigin)
+        => Assert.Equal("/", RedirectSafety.SafeTarget(input,
+            allowedOrigin is null ? null : [allowedOrigin]));
 }

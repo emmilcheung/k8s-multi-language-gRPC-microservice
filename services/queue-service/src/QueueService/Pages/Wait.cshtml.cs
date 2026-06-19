@@ -1,13 +1,15 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.Extensions.Options;
 using QueueService.Endpoints;
+using QueueService.Options;
 using QueueService.Queue;
 using QueueService.Tokens;
 using QueueService.Web;
 
 namespace QueueService.Pages;
 
-public class WaitModel(QueueCoordinator coord, TokenService tokens) : PageModel
+public class WaitModel(QueueCoordinator coord, TokenService tokens, IOptions<QueueOptions> options) : PageModel
 {
     [BindProperty(SupportsGet = true, Name = "e")] public string Eid { get; set; } = "";
     [BindProperty(SupportsGet = true, Name = "target")] public string Target { get; set; } = "/";
@@ -16,7 +18,7 @@ public class WaitModel(QueueCoordinator coord, TokenService tokens) : PageModel
 
     public async Task<IActionResult> OnGetAsync()
     {
-        Target = RedirectSafety.SafeTarget(Target); // open-redirect / token-exfil guard
+        Target = RedirectSafety.SafeTarget(Target, options.Value.AllowedTargetOrigins);
 
         var cfg = await coord.GetConfigOrNullAsync(Eid);
         if (cfg is null) return NotFound();
