@@ -102,6 +102,65 @@ The embedded SVGs below are the local thumbnails from `docs/diagrams/`, but the 
 - **Asynchronous:** Kafka — all cross-service event fan-out (order created/cancelled,
   ticket created/updated, payment captured, expiration complete).
 
+### Virtual waiting room (onsale surge gate)
+
+A **separate, opt-in subsystem** (`services/queue-service`, .NET 10) that meters traffic
+into the buy path during a high-demand onsale. It runs on its **own domain, own pods, and
+own Redis** — isolated so a surge never competes with the platform for resources — and is
+**disarmed by default** (zero effect until an onsale is armed). The read path stays fully
+cached; only the scarce write path (reservation) is gated.
+
+How a buyer flows through it when armed:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor B as Buyer
+    participant C as Connector<br/>(Next.js proxy.ts)
+    participant Q as queue-service<br/>(queue.* domain)
+    participant R as Queue Redis
+    participant K as Kong + ticket-service
+
+    Note over C: onsale armed (QUEUE_GATE_ARMED=true)
+    B->>C: GET /tickets/123
+    C-->>B: 302 → queue/wait?e=E&target=/tickets/123  (no valid pass)
+    B->>Q: GET /wait  (pre-queue)
+    Q->>R: ZADD prequeue (random score — fair draw)
+    Q-->>B: countdown page, polls /serving
+    loop until position < serving
+        B->>Q: GET /serving   (cacheable, pure time-math)
+        Q-->>B: serving = ⌊rate·(now−T0)⌋
+    end
+    B->>Q: POST /claim
+    Q-->>B: signed admission token (HMAC, single-use nonce)
+    B->>C: 302 → /tickets/123?qpass={token}
+    C->>Q: POST /redeem   (consume nonce once)
+    Q-->>C: 200 (first use only)
+    C-->>B: set qq_pass cookie → 302 /tickets/123 (clean URL)
+    B->>K: reserve mutation (qq_pass cookie)
+    Note over K: Kong backstop re-validates qq_pass HMAC
+    K-->>B: reserved
+```
+
+**Admission is pure calculation** — `serving(t) = ⌊rate·(t − T0)⌋` — so the hot `/serving`
+endpoint does no Redis work and stays flat under load (measured: p95 **19.5 ms at 500 VUs /
+~31k req/s, 0 failures**). Fairness uses a pre-queue **randomized draw** at sale start, then
+FIFO; admission tokens are HMAC-signed and **single-use** (replay-proof).
+
+**Setup:**
+
+- **Local:** `docker compose -f docker-compose.queue.yml up` — own Redis on `:6390`, waiting
+  page + API on `:4100`. Arm the client gate via env (see `services/client/.env.example`):
+  `QUEUE_GATE_ARMED=true QUEUE_EVENT_ID=<id> QUEUE_URL=http://localhost:4100 QUEUE_HMAC_SECRET=<32+ chars>`.
+- **Kubernetes:** standalone chart `infra/queue-system/` (own namespace + Redis, HPA, PDB,
+  Ingress on the queue subdomain): `helm install queue infra/queue-system --set queue.hmacSecret=<secret>`.
+- **Arm/disarm:** flip `QUEUE_GATE_ARMED` on the connector and the event config — the gate and
+  the Kong reserve-mutation backstop are inert until armed.
+
+Design, plans, and the security/reliability remediation report live under
+[`docs/superpowers/specs/`](docs/superpowers/specs/) (`2026-06-16-virtual-waiting-room-design.md`,
+`2026-06-17-virtual-waiting-room-hardening.md`).
+
 ---
 
 ## 3. Services
@@ -118,6 +177,9 @@ The embedded SVGs below are the local thumbnails from `docs/diagrams/`, but the 
 | **client** | TypeScript | Next.js 16 | 4000 | — | App Router SSR frontend · Server Actions · shadcn/ui |
 | **apollo-router** | — | Apollo Router v2.1 | 4000 | — | GraphQL Federation v2 supergraph gateway (6 subgraphs) |
 | **kong-gateway** | — | Kong 3.9 | 8000 / 8443 | — (DB-less) | JWT auth · routing · rate-limiting · CSRF fix |
+| **queue-service** † | C# / .NET 10 | ASP.NET Core (Razor + Minimal API) | 8080 (own subdomain) | Redis (own) | **Separate** virtual waiting room — meters onsale surge into the buy path; disarmed by default |
+
+† Standalone subsystem, deployed **apart** from the platform (own domain, pods, and Redis; own Helm chart `infra/queue-system/`). See [Virtual waiting room](#virtual-waiting-room-onsale-surge-gate).
 
 ### Kafka event topology
 

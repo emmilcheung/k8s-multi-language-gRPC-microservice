@@ -1,0 +1,4 @@
+queue-system deployed. The waiting room is reachable at: https://{{ .Values.ingress.host }}
+
+Set Queue__HmacSecret to match the client QUEUE_HMAC_SECRET and the Kong
+QUEUE_HMAC_SECRET so admission tokens verify across all three.

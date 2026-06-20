@@ -130,6 +130,16 @@ compensating path, grounded in the actual code (topic names from
 A closing note documents the DLQ policy (`<topic>.dlq`, max 3 retries with
 exponential back-off), matching `docs/04-asynchronous-messaging.md`.
 
+### 6. Virtual waiting room flow (`06-waiting-room-flow.mermaid`)
+
+A sequence diagram for the **onsale surge gate** (`services/queue-service`, a standalone
+.NET 10 subsystem on its own domain/Redis). Shows the armed-onsale path: connector 302 →
+pre-queue randomized draw → rate-based admission by pure time-math (`serving(t)=⌊rate·(t−T0)⌋`)
+→ single-use HMAC token → connector redeems it and sets the `qq_pass` cookie → Kong
+reserve-mutation backstop. Pairs with "how would you protect the buy path under a
+Taylor-Swift-scale onsale" interview questions. Run `python3 render.py` to (re)wrap it
+into its HTML viewer and the landing page.
+
 ## Quick online verification
 
 If a Mermaid diagram doesn't render for you locally (some corporate networks

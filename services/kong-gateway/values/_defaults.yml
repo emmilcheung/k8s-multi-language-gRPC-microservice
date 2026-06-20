@@ -57,3 +57,10 @@ RATE_LIMIT_REDIS_PORT: 6379
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS: "*"
+
+# ── Virtual waiting room backstop ──────────────────────────────────────────────
+# Inert unless QUEUE_GATE_ARMED is "true". When armed, reserve mutations on
+# /graphql require a valid qq_pass cookie (HMAC-SHA256, shared with the
+# queue-service and client). Must equal the queue-service Queue__HmacSecret.
+QUEUE_GATE_ARMED: "false"
+QUEUE_HMAC_SECRET: "dev-secret-change-me-32-chars-minimum"

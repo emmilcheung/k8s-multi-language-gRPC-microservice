@@ -1,0 +1,67 @@
+{{- if not .Values.redis.external.host }}
+{{- if .Values.redis.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: queue-redis-data
+  labels: {{- include "queue-system.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.redis.persistence.size }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queue-redis
+  labels: {{- include "queue-system.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: queue-redis
+  template:
+    metadata:
+      labels:
+        app: queue-redis
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image | quote }}
+          args: ["--appendonly", "yes"]   # AOF persistence
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 2
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+          {{- if .Values.redis.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- end }}
+      {{- if .Values.redis.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: queue-redis-data
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: queue-redis
+  labels: {{- include "queue-system.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: queue-redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+{{- end }}
