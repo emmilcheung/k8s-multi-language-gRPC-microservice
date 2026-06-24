@@ -18,10 +18,10 @@ import (
 
 const testIndex = "tickets_test"
 
-// startOpenSearchContainer returns the OpenSearch URL to use for integration
+// requireOpenSearchURL returns the OpenSearch URL to use for integration
 // tests. It does NOT spin up a container — if OPENSEARCH_TEST_URL is set it
 // uses that; otherwise it skips the test with an instructive message.
-func startOpenSearchContainer(t *testing.T) string {
+func requireOpenSearchURL(t *testing.T) string {
 	t.Helper()
 	url := os.Getenv("OPENSEARCH_TEST_URL")
 	if url == "" {
@@ -59,7 +59,7 @@ func getMappingProperties(t *testing.T, url, index string) map[string]any {
 
 func TestEnsureIndex_CreatesMappingIdempotently(t *testing.T) {
 	ctx := context.Background()
-	url := startOpenSearchContainer(t)
+	url := requireOpenSearchURL(t)
 
 	// Ensure the test index does not exist before the test and is cleaned up after.
 	deleteTestIndex(t, url, testIndex)
@@ -79,6 +79,12 @@ func TestEnsureIndex_CreatesMappingIdempotently(t *testing.T) {
 	require.Equal(t, "text", props["eventTitle"].(map[string]any)["type"])
 	require.Equal(t, "keyword", props["category"].(map[string]any)["type"])
 	require.Equal(t, "date", props["createdAt"].(map[string]any)["type"])
+	// price uses scaled_float with scaling_factor=100 — the most unusual spec requirement.
+	priceProps := props["price"].(map[string]any)
+	require.Equal(t, "scaled_float", priceProps["type"])
+	require.Equal(t, float64(100), priceProps["scaling_factor"])
+	// ticketType must be keyword for exact-match filtering.
+	require.Equal(t, "keyword", props["ticketType"].(map[string]any)["type"])
 }
 
 // deleteTestIndex deletes the index if it exists; ignores 404.

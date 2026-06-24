@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -67,19 +68,20 @@ func (c *Client) EnsureIndex(ctx context.Context) error {
 
 	// Index does not exist — create it.
 	body := strings.NewReader(indexMapping)
-	createResp, createErr := c.api.Indices.Create(ctx, opensearchapi.IndicesCreateReq{
+	_, createErr := c.api.Indices.Create(ctx, opensearchapi.IndicesCreateReq{
 		Index: c.index,
 		Body:  body,
 	})
 	if createErr != nil {
 		// Treat "already exists" as success (race with a concurrent bootstrap).
-		if createResp != nil && createResp.Inspect().Response != nil &&
-			createResp.Inspect().Response.StatusCode == http.StatusBadRequest {
-			// resource_already_exists_exception returns 400
+		// Only swallow if the error type is resource_already_exists_exception;
+		// any other 400 (e.g. malformed mapping) must be returned as an error.
+		var structErr *opensearch.StructError
+		if errors.As(createErr, &structErr) && structErr.Err.Type == "resource_already_exists_exception" {
 			c.log.Info("opensearch: index already exists (concurrent create)", zap.String("index", c.index))
 			return nil
 		}
-		return fmt.Errorf("search.EnsureIndex: creating index %q: %w", c.index, createErr)
+		return fmt.Errorf("search.EnsureIndex create: %w", createErr)
 	}
 
 	c.log.Info("opensearch: index created", zap.String("index", c.index))
