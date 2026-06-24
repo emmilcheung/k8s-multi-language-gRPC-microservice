@@ -43,6 +43,14 @@ func (c kafkaHeaderCarrier) Keys() []string {
 }
 
 func startKafkaConsumerSpan(ctx context.Context, topic string, headers []confluent.Header) (context.Context, trace.Span) {
+	return StartKafkaConsumerSpan(ctx, topic, headers)
+}
+
+// StartKafkaConsumerSpan extracts the W3C trace context from Kafka message
+// headers and starts a consumer span as a child of the remote producer span.
+// Exported so that other internal packages (e.g. search.Indexer) can propagate
+// trace context from consumed messages without duplicating the carrier logic.
+func StartKafkaConsumerSpan(ctx context.Context, topic string, headers []confluent.Header) (context.Context, trace.Span) {
 	parent := otel.GetTextMapPropagator().Extract(ctx, kafkaHeaderCarrier{headers: &headers})
 	return otel.Tracer("ticket-service").Start(
 		parent,

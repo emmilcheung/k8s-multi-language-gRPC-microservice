@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -95,7 +96,7 @@ func (c *Client) Query(ctx context.Context, p QueryParams) ([]Hit, error) {
 		if colonIdx > 0 {
 			scoreStr := rest[:colonIdx]
 			afterID := rest[colonIdx+1:]
-			if score, err := strconv.ParseFloat(scoreStr, 64); err == nil && afterID != "" {
+			if score, err := strconv.ParseFloat(scoreStr, 64); err == nil && !math.IsNaN(score) && !math.IsInf(score, 0) && afterID != "" {
 				body["search_after"] = []any{score, afterID}
 			}
 		}

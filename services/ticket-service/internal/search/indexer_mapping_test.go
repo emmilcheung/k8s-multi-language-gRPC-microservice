@@ -5,6 +5,7 @@ import (
 
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestEventToDoc_MapsAllFields(t *testing.T) {
@@ -26,7 +27,7 @@ func TestEventToDoc_MapsAllFields(t *testing.T) {
 		},
 	}
 
-	doc := eventToDoc(data)
+	doc := eventToDoc(data, zap.NewNop())
 
 	require.Equal(t, "tk-abc", doc.ID)
 	require.Equal(t, 5, doc.Version)
@@ -55,7 +56,7 @@ func TestEventToDoc_NilEvent_ZeroesEventFields(t *testing.T) {
 		Event:     nil,
 	}
 
-	doc := eventToDoc(data)
+	doc := eventToDoc(data, zap.NewNop())
 
 	require.Equal(t, "tk-ga", doc.ID)
 	require.Equal(t, "GA Ticket", doc.Title)
@@ -75,7 +76,7 @@ func TestEventToDoc_InvalidPrice_DefaultsToZero(t *testing.T) {
 		Version: 1,
 	}
 
-	doc := eventToDoc(data)
+	doc := eventToDoc(data, zap.NewNop())
 
 	require.Equal(t, 0.0, doc.Price, "unparseable price must default to 0.0 without panicking")
 }

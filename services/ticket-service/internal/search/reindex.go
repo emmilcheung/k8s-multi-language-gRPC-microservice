@@ -22,8 +22,15 @@ type TicketRepository interface {
 // This mirrors eventToDoc but reads directly from the Mongo model rather than a
 // Kafka CloudEvent payload. Both paths must produce identical Doc values for the
 // same ticket state — do not add logic here that is absent from eventToDoc.
-func ticketToDoc(t *repository.Ticket) Doc {
-	price, _ := strconv.ParseFloat(t.Price, 64) //nolint:errcheck
+func ticketToDoc(t *repository.Ticket, log *zap.Logger) Doc {
+	price, priceErr := strconv.ParseFloat(t.Price, 64)
+	if priceErr != nil {
+		log.Warn("search reindex: failed to parse price; indexing as 0.0",
+			zap.String("ticketId", t.ID),
+			zap.String("rawPrice", t.Price),
+			zap.Error(priceErr),
+		)
+	}
 
 	doc := Doc{
 		ID:            t.ID,
@@ -72,7 +79,7 @@ func Reindex(ctx context.Context, repo TicketRepository, client *Client, pageSiz
 		}
 
 		for _, t := range page {
-			doc := ticketToDoc(t)
+			doc := ticketToDoc(t, client.log)
 			if upsertErr := client.UpsertTicket(ctx, doc); upsertErr != nil {
 				return fmt.Errorf("search.Reindex: upsert ticket %s: %w", t.ID, upsertErr)
 			}

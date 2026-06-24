@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
+
 const (
 	topicTicketCreated = "tickets.ticket.created"
 	topicTicketUpdated = "tickets.ticket.updated"
@@ -133,6 +134,11 @@ func (i *Indexer) Run(ctx context.Context) error {
 //
 // Returns non-nil only when DLQ routing itself fails (offset must NOT be committed).
 func (i *Indexer) processWithRetry(ctx context.Context, topic string, msg *confluentkafka.Message) error {
+	// Extract W3C trace context from Kafka headers so this span is a child of
+	// the producer span (docs/08: every Kafka consumer must propagate trace context).
+	ctx, span := kafka.StartKafkaConsumerSpan(ctx, topic, msg.Headers)
+	defer span.End()
+
 	// Step 1: decode — non-retriable.
 	doc, ticketID, ticketVersion, decErr := i.decodeMessage(msg.Value)
 	if decErr != nil {
@@ -231,7 +237,7 @@ func (i *Indexer) decodeMessage(payload []byte) (Doc, string, int, error) {
 		return Doc{}, "", 0, &decodeError{cause: fmt.Errorf("unmarshal ticket event data: %w", err)}
 	}
 
-	return eventToDoc(data), data.ID, data.Version, nil
+	return eventToDoc(data, i.log), data.ID, data.Version, nil
 }
 
 // indexerBackoffWithJitter returns a full-jitter exponential back-off duration.
@@ -247,10 +253,17 @@ func indexerBackoffWithJitter(attempt int, base, max time.Duration) time.Duratio
 }
 
 // eventToDoc maps a TicketEventData to a search Doc.
-// Price is parsed from the decimal string; a parse failure results in 0.0 (logged at
-// the caller level — never block indexing for a price format issue).
-func eventToDoc(d kafka.TicketEventData) Doc {
-	price, _ := strconv.ParseFloat(d.Price, 64) //nolint:errcheck
+// Price is parsed from the decimal string; a parse failure is logged at WARN
+// and price defaults to 0.0 — indexing is never blocked for a price format issue.
+func eventToDoc(d kafka.TicketEventData, log *zap.Logger) Doc {
+	price, priceErr := strconv.ParseFloat(d.Price, 64)
+	if priceErr != nil {
+		log.Warn("search indexer: failed to parse price; indexing as 0.0",
+			zap.String("ticketId", d.ID),
+			zap.String("rawPrice", d.Price),
+			zap.Error(priceErr),
+		)
+	}
 
 	doc := Doc{
 		ID:        d.ID,
