@@ -62,7 +62,3 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 10
             failureThreshold: 3
-
-{{- define "opensearch.fullname" -}}
-{{- printf "%s-opensearch" .Release.Name | trunc 63 | trimSuffix "-" }}
-{{- end }}

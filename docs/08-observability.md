@@ -44,7 +44,7 @@ The following Prometheus metrics are always registered at startup (present in `/
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `search_query_duration_seconds` | Histogram | `backend=opensearch\|mongo` | End-to-end latency of a ticket search query per backend. |
+| `search_query_duration_seconds` | Histogram | `backend=opensearch\|mongo` | End-to-end latency of a ticket search query per backend. Recorded per backend; NOT observed for requests that fully fall back to Mongo (the fallback path returns before the OpenSearch-duration observation point). |
 | `search_fallback_total` | Counter | — | Total times an OpenSearch failure caused a fallback to the Mongo path. |
 | `search_indexer_lag_seconds` | Histogram | — | Lag between a ticket event's `createdAt` and when the indexer processes it. |
 | `search_refill_iterations` | Histogram | — | Number of refill-loop iterations per `TicketsConnection` resolver call. |

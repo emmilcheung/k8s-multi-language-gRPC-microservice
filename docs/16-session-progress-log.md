@@ -36,7 +36,7 @@ Completed Task 8 (rollout hardening) of the OpenSearch search feature in ticket-
 
 | Commit | Scope | Summary |
 |---|---|---|
-| TBD | feat(search) | search metrics, opt-in opensearch helm subchart, docs |
+| `60962ec` | feat(search) | search metrics, opt-in opensearch helm subchart, docs |
 
 ---
 
