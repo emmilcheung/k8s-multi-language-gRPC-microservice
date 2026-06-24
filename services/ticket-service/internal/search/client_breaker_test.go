@@ -90,6 +90,33 @@ func TestNewClient_TransportTimeout_UsesResponseHeaderTimeout(t *testing.T) {
 	assert.Equal(t, opensearchHTTPTimeout, tr.ResponseHeaderTimeout)
 }
 
+// TestBreaker_ContextCanceled_DoesNotTripBreaker asserts that a user-aborted request
+// (context.Canceled) is NOT counted as a failure, so N canceled calls must leave the
+// breaker in the Closed state (healthy infra must not be penalised for client disconnects).
+func TestBreaker_ContextCanceled_DoesNotTripBreaker(t *testing.T) {
+	settings := gobreaker.Settings{
+		Name:        "opensearch-cancel-test",
+		Interval:    1 * time.Second,
+		Timeout:     60 * time.Second,
+		MaxRequests: 1,
+		IsSuccessful: func(err error) bool {
+			return !shouldCountOpenSearchFailure(err)
+		},
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.TotalFailures >= 3
+		},
+	}
+	breaker := gobreaker.NewCircuitBreaker[[]Hit](settings)
+
+	canceledFn := func() ([]Hit, error) { return nil, context.Canceled }
+	for i := 0; i < 5; i++ {
+		_, _ = breaker.Execute(canceledFn) //nolint:errcheck
+	}
+
+	assert.Equal(t, gobreaker.StateClosed, breaker.State(),
+		"breaker must stay Closed: context.Canceled is not a breaker failure")
+}
+
 func containsString(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(s) > 0 && len(sub) > 0 &&
 		func() bool {

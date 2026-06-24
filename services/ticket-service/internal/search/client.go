@@ -38,6 +38,9 @@ type Doc struct {
 
 const opensearchHTTPTimeout = 10 * time.Second
 
+// opensearchQueryTimeout is the hard per-call deadline applied to Query (docs/09: 10s outbound).
+const opensearchQueryTimeout = 10 * time.Second
+
 // Client wraps the OpenSearch API client and holds the target index name.
 type Client struct {
 	api     *opensearchapi.Client
@@ -70,6 +73,9 @@ func NewClient(url, index string, log *zap.Logger) (*Client, error) {
 		Interval:    30 * time.Second,
 		Timeout:     15 * time.Second,
 		MaxRequests: 1,
+		IsSuccessful: func(err error) bool {
+			return !shouldCountOpenSearchFailure(err)
+		},
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			if counts.Requests < 10 {
 				return false
@@ -131,6 +137,18 @@ func (c *Client) EnsureIndex(ctx context.Context) error {
 
 	c.log.Info("opensearch: index created", zap.String("index", c.index))
 	return nil
+}
+
+// shouldCountOpenSearchFailure mirrors venue_client.go's shouldCountVenueServiceFailure:
+// context.Canceled (user-aborted request) must not count as a breaker failure.
+func shouldCountOpenSearchFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	return true
 }
 
 // Ping checks cluster reachability via a HEAD / request.

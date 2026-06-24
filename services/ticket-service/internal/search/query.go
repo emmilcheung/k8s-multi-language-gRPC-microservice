@@ -107,8 +107,11 @@ func (c *Client) Query(ctx context.Context, p QueryParams) ([]Hit, error) {
 		return nil, fmt.Errorf("search.Query: marshal body: %w", err)
 	}
 
+	callCtx, cancel := context.WithTimeout(ctx, opensearchQueryTimeout)
+	defer cancel()
+
 	hits, err := c.breaker.Execute(func() ([]Hit, error) {
-		resp, searchErr := c.api.Search(ctx, &opensearchapi.SearchReq{
+		resp, searchErr := c.api.Search(callCtx, &opensearchapi.SearchReq{
 			Indices: []string{c.index},
 			Body:    bytes.NewReader(bodyBytes),
 		})
