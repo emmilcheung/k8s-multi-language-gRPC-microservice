@@ -278,6 +278,10 @@ client:
 # Enable with: helm upgrade --install ticketing ./infra/helm -f infra/helm/values-local.yaml --set opensearch.enabled=true
 opensearch:
   enabled: false
+  # Dev/local: disable the security plugin so opensearch starts without TLS certs.
+  # Never set this in staging/prod overlays.
+  security:
+    disabled: true
 
 observability:
   enabled: true

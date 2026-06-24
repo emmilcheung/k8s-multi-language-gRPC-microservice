@@ -61,8 +61,10 @@ ticket-service:
       memory: 256Mi
 
 # ── opensearch ────────────────────────────────────────────────────────────────
+# Disabled by default — enable only in staging/prod overlays or via --set.
+# See Chart.yaml: condition: opensearch.enabled.
 opensearch:
-  enabled: true
+  enabled: false
 
 # ── order-service ─────────────────────────────────────────────────────────────
 order-service:

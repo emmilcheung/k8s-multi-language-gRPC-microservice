@@ -19,17 +19,26 @@ spec:
         app.kubernetes.io/name: opensearch
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
-      # OpenSearch needs vm.max_map_count ≥ 262144. In a pod this is set via initContainer.
+      # OpenSearch requires vm.max_map_count >= 262144 for Lucene mmap.
+      # This sysctl must be set at the node level; in a pod it requires
+      # a privileged initContainer. The privilege is scoped to this init
+      # container only — the main opensearch container is unprivileged.
       initContainers:
         - name: sysctl
-          image: busybox:1.36
+          image: {{ .Values.busybox.image }}
           securityContext:
-            privileged: true
+            privileged: true   # Required — sysctl -w is a kernel-level write
           command: ["sysctl", "-w", "vm.max_map_count=262144"]
       containers:
         - name: opensearch
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
               containerPort: 9200
@@ -40,8 +49,12 @@ spec:
           env:
             - name: discovery.type
               value: single-node
+            {{- if .Values.security.disabled }}
+            # Dev/local only: disables TLS and authentication in the security plugin.
+            # Never set in production — always gate behind security.disabled=true in the overlay.
             - name: DISABLE_SECURITY_PLUGIN
               value: "true"
+            {{- end }}
             - name: OPENSEARCH_JAVA_OPTS
               value: {{ .Values.javaOpts | quote }}
           resources:
