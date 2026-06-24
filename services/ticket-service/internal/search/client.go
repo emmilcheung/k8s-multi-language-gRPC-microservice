@@ -1,7 +1,9 @@
 package search
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,8 +15,12 @@ import (
 )
 
 // Doc is the slim index document written to OpenSearch.
-// Fields are populated by Task 4 (search write path).
+// ID and Version are used as the document _id and external version for idempotent upserts;
+// they are NOT serialized into the document body (omitempty + "-" would be ideal but
+// the SDK serialises from the struct, so we strip them in UpsertTicket).
 type Doc struct {
+	ID            string  `json:"-"`
+	Version       int     `json:"-"`
 	EventTitle    string  `json:"eventTitle"`
 	Title         string  `json:"title"`
 	VenueName     string  `json:"venueName"`
@@ -24,8 +30,8 @@ type Doc struct {
 	TicketType    string  `json:"ticketType"`
 	SeatingPlanID string  `json:"seatingPlanId"`
 	Price         float64 `json:"price"`
-	StartsAt      string  `json:"startsAt"`
-	CreatedAt     string  `json:"createdAt"`
+	StartsAt      string  `json:"startsAt,omitempty"`
+	CreatedAt     string  `json:"createdAt,omitempty"`
 }
 
 // Client wraps the OpenSearch API client and holds the target index name.
@@ -93,6 +99,39 @@ func (c *Client) Ping(ctx context.Context) error {
 	_, err := c.api.Ping(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("search.Ping: %w", err)
+	}
+	return nil
+}
+
+// UpsertTicket writes d to the index using PUT /<index>/_doc/<id>?version=<Version>&version_type=external.
+// A version conflict (409 / version_conflict_engine_exception) is treated as success — a stale
+// event that arrived out of order must never overwrite a newer document.
+func (c *Client) UpsertTicket(ctx context.Context, d Doc) error {
+	body, err := json.Marshal(d)
+	if err != nil {
+		return fmt.Errorf("search.UpsertTicket: marshal doc: %w", err)
+	}
+
+	version := d.Version
+	_, err = c.api.Index(ctx, opensearchapi.IndexReq{
+		Index:      c.index,
+		DocumentID: d.ID,
+		Body:       bytes.NewReader(body),
+		Params: opensearchapi.IndexParams{
+			Version:     &version,
+			VersionType: "external",
+		},
+	})
+	if err != nil {
+		var structErr *opensearch.StructError
+		if errors.As(err, &structErr) && structErr.Err.Type == "version_conflict_engine_exception" {
+			c.log.Debug("search.UpsertTicket: stale version ignored",
+				zap.String("id", d.ID),
+				zap.Int("version", d.Version),
+			)
+			return nil
+		}
+		return fmt.Errorf("search.UpsertTicket: %w", err)
 	}
 	return nil
 }

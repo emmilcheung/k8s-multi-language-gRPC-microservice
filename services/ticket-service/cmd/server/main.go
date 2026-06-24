@@ -21,6 +21,7 @@ import (
 	"github.com/acme/ticket-service/internal/outbox"
 	"github.com/acme/ticket-service/internal/reconciler"
 	"github.com/acme/ticket-service/internal/repository"
+	"github.com/acme/ticket-service/internal/search"
 	"github.com/acme/ticket-service/internal/security"
 	"github.com/acme/ticket-service/internal/service"
 	"github.com/acme/ticket-service/internal/tracing"
@@ -156,6 +157,27 @@ func main() {
 	relayCtx, relayCancel := context.WithCancel(context.Background())
 	defer relayCancel()
 	go outboxRelay.Start(relayCtx)
+
+	if cfg.SearchBackend == "opensearch" {
+		searchClient, err := search.NewClient(cfg.OpenSearchURL, cfg.OpenSearchIndex, log)
+		if err != nil {
+			log.Fatal("failed to create search client", zap.Error(err))
+		}
+		if err := searchClient.EnsureIndex(context.Background()); err != nil {
+			log.Fatal("ensure search index", zap.Error(err))
+		}
+		indexer, err := search.NewIndexer(searchClient, cfg.KafkaBrokers, log, kafkaSecurity)
+		if err != nil {
+			log.Fatal("search indexer", zap.Error(err))
+		}
+		idxCtx, idxCancel := context.WithCancel(context.Background())
+		defer idxCancel()
+		go func() {
+			if err := indexer.Run(idxCtx); err != nil {
+				log.Error("search indexer stopped", zap.Error(err))
+			}
+		}()
+	}
 
 	// WS3: Venue-service gRPC client for fetching seating plan assignment mode
 	venueConn, err := grpc.NewClient(
