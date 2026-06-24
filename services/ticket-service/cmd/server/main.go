@@ -158,25 +158,17 @@ func main() {
 	defer relayCancel()
 	go outboxRelay.Start(relayCtx)
 
+	// Optionally initialise OpenSearch — search client is attached to svc after svc is created.
+	var openSearchClient *search.Client
 	if cfg.SearchBackend == "opensearch" {
-		searchClient, err := search.NewClient(cfg.OpenSearchURL, cfg.OpenSearchIndex, log)
+		sc, err := search.NewClient(cfg.OpenSearchURL, cfg.OpenSearchIndex, log)
 		if err != nil {
 			log.Fatal("failed to create search client", zap.Error(err))
 		}
-		if err := searchClient.EnsureIndex(context.Background()); err != nil {
+		if err := sc.EnsureIndex(context.Background()); err != nil {
 			log.Fatal("ensure search index", zap.Error(err))
 		}
-		indexer, err := search.NewIndexer(searchClient, cfg.KafkaBrokers, log, kafkaSecurity, producer)
-		if err != nil {
-			log.Fatal("search indexer", zap.Error(err))
-		}
-		idxCtx, idxCancel := context.WithCancel(context.Background())
-		defer idxCancel()
-		go func() {
-			if err := indexer.Run(idxCtx); err != nil {
-				log.Error("search indexer stopped", zap.Error(err))
-			}
-		}()
+		openSearchClient = sc
 	}
 
 	// WS3: Venue-service gRPC client for fetching seating plan assignment mode
@@ -199,6 +191,22 @@ func main() {
 
 	// Business logic service
 	svc := service.NewTicketService(ticketRepo, producer, log, venueClient, savedEventRepo)
+
+	// Wire search client + start indexer now that svc and Kafka producer exist.
+	if openSearchClient != nil {
+		svc.WithSearchClient(openSearchClient)
+		indexer, err := search.NewIndexer(openSearchClient, cfg.KafkaBrokers, log, kafkaSecurity, producer)
+		if err != nil {
+			log.Fatal("search indexer", zap.Error(err))
+		}
+		idxCtx, idxCancel := context.WithCancel(context.Background())
+		defer idxCancel()
+		go func() {
+			if err := indexer.Run(idxCtx); err != nil {
+				log.Error("search indexer stopped", zap.Error(err))
+			}
+		}()
+	}
 
 	// gRPC server — runs alongside HTTP in a separate goroutine
 	grpcCtx, grpcCancel := context.WithCancel(context.Background())
@@ -240,7 +248,7 @@ func main() {
 	// A per-request DataLoader middleware is wrapped around the handler so that
 	// every _entities batch call gets its own loader instance (prevents
 	// cross-request data leaks and keeps the per-request cache correct).
-	gqlResolver := &gqlgraph.Resolver{TicketService: svc}
+	gqlResolver := &gqlgraph.Resolver{TicketService: svc, Config: cfg, Log: log}
 	gqlSrv := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{Resolvers: gqlResolver}))
 	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		loader := gqlgraph.NewTicketLoader(svc)

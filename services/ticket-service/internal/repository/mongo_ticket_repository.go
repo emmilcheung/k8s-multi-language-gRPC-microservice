@@ -23,6 +23,14 @@ func EncodeCursor(createdAt time.Time, id string) string {
 
 // parseCursor decodes a compound cursor produced by EncodeCursor.
 func parseCursor(after string) (ms int64, id string, ok bool) {
+	return ParseCursor(after)
+}
+
+// ParseCursor is the exported variant of parseCursor for use by callers outside
+// this package (e.g. the GraphQL resolver and its tests). Returns ok=false for
+// any cursor that is not of the form "<unixMilli>:<id>" — including os:-prefixed
+// OpenSearch cursors.
+func ParseCursor(after string) (ms int64, id string, ok bool) {
 	idx := strings.IndexByte(after, ':')
 	if idx < 1 {
 		return 0, "", false

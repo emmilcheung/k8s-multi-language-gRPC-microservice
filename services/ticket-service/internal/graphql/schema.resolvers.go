@@ -12,7 +12,11 @@ import (
 
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
+	"go.uber.org/zap"
 )
+
+// maxRefill caps worst-case OpenSearch fan-out iterations in the refill loop.
+const maxRefill = 5
 
 // CreateTicket is the resolver for the createTicket field.
 func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketInput) (*Ticket, error) {
@@ -138,19 +142,12 @@ func (r *queryResolver) Tickets(ctx context.Context) ([]*Ticket, error) {
 	return result, nil
 }
 
-// TicketsConnection is the resolver for the ticketsConnection field.
-func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFilter, first *int, after *string) (*TicketConnection, error) {
-	limit := 20
-	if first != nil && *first > 0 {
-		limit = *first
-	}
-	if limit > 100 {
-		limit = 100
-	}
-
+// ticketsConnectionMongo runs the Mongo-backed tickets page and is the fallback
+// used by TicketsConnection when OpenSearch is unavailable or not configured.
+func (r *queryResolver) ticketsConnectionMongo(ctx context.Context, filter *TicketFilter, limit int, cursorIn string) (*TicketConnection, error) {
 	params := repository.PaginationParams{Limit: limit + 1}
-	if after != nil {
-		params.After = *after
+	if cursorIn != "" {
+		params.After = cursorIn
 	}
 	if filter != nil {
 		if filter.AvailableOnly != nil {
@@ -211,6 +208,103 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 		Edges:    edges,
 		PageInfo: &PageInfo{HasNextPage: hasNext, EndCursor: endCursor},
 	}, nil
+}
+
+// TicketsConnection is the resolver for the ticketsConnection field.
+// When SEARCH_BACKEND=opensearch and a search term is present, the resolver
+// uses SearchTickets with a refill loop to post-filter by ticketType and
+// accumulate a full page. On any SearchTickets error it falls back to the
+// Mongo path — the caller always gets a valid response.
+func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFilter, first *int, after *string) (*TicketConnection, error) {
+	limit := 20
+	if first != nil && *first > 0 {
+		limit = *first
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	cursorIn := ""
+	if after != nil {
+		cursorIn = *after
+	}
+
+	// OpenSearch refill loop: only when backend is configured and a search term is present.
+	useOpenSearch := r.Config != nil &&
+		r.Config.SearchBackend == "opensearch" &&
+		filter != nil &&
+		filter.Search != nil &&
+		*filter.Search != ""
+
+	if useOpenSearch {
+		params := repository.PaginationParams{
+			Limit:         limit,
+			AvailableOnly: filter.AvailableOnly != nil && *filter.AvailableOnly,
+			Search:        *filter.Search,
+		}
+		if filter.Category != nil {
+			params.Category = string(*filter.Category)
+		}
+		if filter.MinPrice != nil {
+			minPriceFloat := float64(*filter.MinPrice)
+			params.MinPrice = &minPriceFloat
+		}
+		if filter.MaxPrice != nil {
+			maxPriceFloat := float64(*filter.MaxPrice)
+			params.MaxPrice = &maxPriceFloat
+		}
+
+		type pageItem struct {
+			gql    *Ticket
+			cursor string
+		}
+		pageItems := make([]pageItem, 0, limit)
+		afterCursor := cursorIn
+		var endCursor string
+
+		for iter := 0; len(pageItems) < limit && iter < maxRefill; iter++ {
+			results, exhausted, err := r.TicketService.SearchTickets(ctx, params, afterCursor)
+			if err != nil {
+				log := r.Log
+				if log == nil {
+					log = zap.NewNop()
+				}
+				log.Warn("opensearch query failed; serving mongo fallback", zap.Error(err))
+				// Task 8 will increment search_fallback_total here
+				return r.ticketsConnectionMongo(ctx, filter, limit, cursorIn)
+			}
+			for _, res := range results {
+				if filter.TicketType == nil || string(res.Ticket.TicketType) == string(*filter.TicketType) {
+					pageItems = append(pageItems, pageItem{gql: mapTicketToGQL(res.Ticket), cursor: res.Cursor})
+					endCursor = res.Cursor
+					if len(pageItems) == limit {
+						break
+					}
+				}
+				afterCursor = res.Cursor
+			}
+			if exhausted {
+				break
+			}
+		}
+
+		edges := make([]*TicketEdge, len(pageItems))
+		for i, item := range pageItems {
+			edges[i] = &TicketEdge{Node: item.gql, Cursor: item.cursor}
+		}
+		var endCursorPtr *string
+		if endCursor != "" {
+			c := endCursor
+			endCursorPtr = &c
+		}
+		// hasNextPage: we don't know for certain without another query; report false (conservative).
+		return &TicketConnection{
+			Edges:    edges,
+			PageInfo: &PageInfo{HasNextPage: false, EndCursor: endCursorPtr},
+		}, nil
+	}
+
+	return r.ticketsConnectionMongo(ctx, filter, limit, cursorIn)
 }
 
 // Ticket is the resolver for the ticket field.

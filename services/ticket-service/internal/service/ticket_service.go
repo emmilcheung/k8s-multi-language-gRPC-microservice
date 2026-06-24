@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/repository"
+	"github.com/acme/ticket-service/internal/search"
 	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -73,6 +76,7 @@ type TicketService struct {
 	log                *zap.Logger
 	venueServiceClient SeatingPlanLookupClient // WS3: fetch seating plan assignment mode
 	savedEventRepo     repository.SavedEventRepository
+	searchClient       *search.Client // nil when search backend is mongo
 }
 
 // NewTicketService creates a new TicketService with the given dependencies.
@@ -84,6 +88,12 @@ func NewTicketService(repo repository.TicketRepository, publisher EventPublisher
 		venueServiceClient: venueClient,
 		savedEventRepo:     savedEventRepo,
 	}
+}
+
+// WithSearchClient attaches a search.Client to the service, enabling the
+// OpenSearch query path via SearchTickets.
+func (s *TicketService) WithSearchClient(c *search.Client) {
+	s.searchClient = c
 }
 
 func buildOutboxPayload(ticket *repository.Ticket) repository.TicketOutboxPayload {
@@ -359,6 +369,96 @@ func (s *TicketService) ListSavedEvents(ctx context.Context, userID, after strin
 			result = append(result, ticket)
 		}
 	}
-	
+
 	return result, nil
+}
+
+// SearchTickets executes an OpenSearch multi_match query and returns hydrated
+// search results with per-result cursors for keyset pagination.
+//
+// Availability filtering (AvailableOnly):
+//   - GA tickets: Sold < Quota
+//   - Seated tickets: SeatingPlanID != "" (venue-service manages inventory)
+//
+// exhausted is true when the index returned fewer hits than p.Limit, meaning
+// there are no further results to fetch.
+//
+// Returns an error when searchClient is nil (search backend not configured).
+func (s *TicketService) SearchTickets(ctx context.Context, p repository.PaginationParams, after string) ([]search.Result, bool, error) {
+	if s.searchClient == nil {
+		return nil, false, fmt.Errorf("SearchTickets: search client not configured")
+	}
+
+	hits, err := s.searchClient.Query(ctx, search.QueryParams{
+		Search:   p.Search,
+		Category: p.Category,
+		MinPrice: p.MinPrice,
+		MaxPrice: p.MaxPrice,
+		Limit:    p.Limit,
+		After:    after,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("SearchTickets: query: %w", err)
+	}
+
+	exhausted := len(hits) < p.Limit
+
+	if len(hits) == 0 {
+		return nil, exhausted, nil
+	}
+
+	// Hydrate: fetch tickets by ID in ranked order.
+	ids := make([]string, len(hits))
+	for i, h := range hits {
+		ids[i] = h.ID
+	}
+	tickets, err := s.repo.FindByIDs(ctx, ids)
+	if err != nil {
+		return nil, false, fmt.Errorf("SearchTickets: hydrate: %w", err)
+	}
+
+	// Build a lookup from id → hit (to get the sort tuple for cursor construction).
+	hitByID := make(map[string]search.Hit, len(hits))
+	for _, h := range hits {
+		hitByID[h.ID] = h
+	}
+
+	results := make([]search.Result, 0, len(tickets))
+	for _, ticket := range tickets {
+		if ticket == nil {
+			continue
+		}
+
+		// Apply availableOnly filter.
+		// GA tickets: must have sold < quota. Seated tickets: must have a non-empty SeatingPlanID
+		// (venue-service manages availability for them).
+		if p.AvailableOnly {
+			if ticket.SeatingPlanID == "" && ticket.Sold >= ticket.Quota {
+				continue // GA ticket with no remaining inventory
+			}
+		}
+
+		// Build the cursor from the sort tuple: "os:<score>:<id>".
+		cursor := buildOSCursor(hitByID[ticket.ID].Sort, ticket.ID)
+		results = append(results, search.Result{Ticket: ticket, Cursor: cursor})
+	}
+
+	return results, exhausted, nil
+}
+
+// buildOSCursor builds an "os:<score>:<id>" cursor from the OpenSearch sort tuple.
+// The sort tuple is [score, _id]; if absent or malformed we fall back to "os:0:<id>".
+func buildOSCursor(sort []any, id string) string {
+	if len(sort) >= 1 {
+		switch v := sort[0].(type) {
+		case float64:
+			return "os:" + strconv.FormatFloat(v, 'f', -1, 64) + ":" + id
+		case json.Number:
+			f, err := v.Float64()
+			if err == nil {
+				return "os:" + strconv.FormatFloat(f, 'f', -1, 64) + ":" + id
+			}
+		}
+	}
+	return "os:0:" + id
 }
