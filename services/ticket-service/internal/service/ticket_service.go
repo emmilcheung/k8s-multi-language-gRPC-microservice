@@ -380,13 +380,19 @@ func (s *TicketService) ListSavedEvents(ctx context.Context, userID, after strin
 //   - GA tickets: Sold < Quota
 //   - Seated tickets: SeatingPlanID != "" (venue-service manages inventory)
 //
+// nextCursor is the "os:<score>:<id>" cursor of the LAST RAW OpenSearch hit in
+// the batch, computed BEFORE the availableOnly post-filter.  The caller must
+// advance its search_after from nextCursor (not from the last survivor's cursor)
+// so that a batch whose hits are all filtered out still advances the window.
+// nextCursor is empty when no raw hits were returned.
+//
 // exhausted is true when the index returned fewer hits than p.Limit, meaning
 // there are no further results to fetch.
 //
 // Returns an error when searchClient is nil (search backend not configured).
-func (s *TicketService) SearchTickets(ctx context.Context, p repository.PaginationParams, after string) ([]search.Result, bool, error) {
+func (s *TicketService) SearchTickets(ctx context.Context, p repository.PaginationParams, after string) (results []search.Result, nextCursor string, exhausted bool, err error) {
 	if s.searchClient == nil {
-		return nil, false, fmt.Errorf("SearchTickets: search client not configured")
+		return nil, "", false, fmt.Errorf("SearchTickets: search client not configured")
 	}
 
 	hits, err := s.searchClient.Query(ctx, search.QueryParams{
@@ -398,17 +404,23 @@ func (s *TicketService) SearchTickets(ctx context.Context, p repository.Paginati
 		After:    after,
 	})
 	if err != nil {
-		return nil, false, fmt.Errorf("SearchTickets: query: %w", err)
+		return nil, "", false, fmt.Errorf("SearchTickets: query: %w", err)
 	}
 
 	// exhausted reflects raw index hits, not post-ticketType-filter survivors.
 	// Under heavy ticketType filtering, the resolver's maxRefill cap is best-effort;
 	// pushing ticketType into the OpenSearch query is a v1 out-of-scope item.
-	exhausted := len(hits) < p.Limit
+	exhausted = len(hits) < p.Limit
 
 	if len(hits) == 0 {
-		return nil, exhausted, nil
+		return nil, "", exhausted, nil
 	}
+
+	// Compute nextCursor from the last raw hit BEFORE any post-filter so the
+	// refill loop always advances past the current batch, even when every hit
+	// is filtered out by availableOnly.
+	lastHit := hits[len(hits)-1]
+	nextCursor = buildOSCursor(lastHit.Sort, lastHit.ID)
 
 	// Hydrate: fetch tickets by ID in ranked order.
 	ids := make([]string, len(hits))
@@ -417,7 +429,7 @@ func (s *TicketService) SearchTickets(ctx context.Context, p repository.Paginati
 	}
 	tickets, err := s.repo.FindByIDs(ctx, ids)
 	if err != nil {
-		return nil, false, fmt.Errorf("SearchTickets: hydrate: %w", err)
+		return nil, "", false, fmt.Errorf("SearchTickets: hydrate: %w", err)
 	}
 
 	// Build a lookup from id → hit (to get the sort tuple for cursor construction).
@@ -426,7 +438,7 @@ func (s *TicketService) SearchTickets(ctx context.Context, p repository.Paginati
 		hitByID[h.ID] = h
 	}
 
-	results := make([]search.Result, 0, len(tickets))
+	results = make([]search.Result, 0, len(tickets))
 	for _, ticket := range tickets {
 		if ticket == nil {
 			continue
@@ -446,7 +458,7 @@ func (s *TicketService) SearchTickets(ctx context.Context, p repository.Paginati
 		results = append(results, search.Result{Ticket: ticket, Cursor: cursor})
 	}
 
-	return results, exhausted, nil
+	return results, nextCursor, exhausted, nil
 }
 
 // buildOSCursor builds an "os:<score>:<id>" cursor from the OpenSearch sort tuple.

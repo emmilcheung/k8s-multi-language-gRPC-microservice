@@ -217,7 +217,7 @@ func TestSearch_TypoAndBoostAndRefill(t *testing.T) {
 	svc.WithSearchClient(c)
 
 	// ── Assert 1: typo-tolerant search ranks A before B ──────────────────────
-	res, exhausted, err := svc.SearchTickets(ctx, repository.PaginationParams{Search: "swfit", Limit: 10}, "")
+	res, _, exhausted, err := svc.SearchTickets(ctx, repository.PaginationParams{Search: "swfit", Limit: 10}, "")
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(res), 1, "expected at least one result")
 	require.Equal(t, "A", res[0].Ticket.ID, "eventTitle-boosted ticket must rank first")
@@ -275,5 +275,133 @@ func TestSearch_TypoAndBoostAndRefill(t *testing.T) {
 	for _, e := range edges {
 		require.True(t, availSet[e.Node.ID],
 			"returned ticket %q must be available (not sold-out)", e.Node.ID)
+	}
+}
+
+// TestSearch_ZeroSurvivorBatch asserts that the refill loop does NOT stall when
+// an entire raw batch from OpenSearch is filtered out by availableOnly.
+//
+// Setup: with limit=3, three sold-out tickets (a0,a1,a2) rank before three
+// available ones (b0,b1,b2) because OpenSearch breaks score ties by _id asc.
+// The first SearchTickets call returns the raw batch [a0,a1,a2]; after the
+// availableOnly post-filter, zero results survive.
+//
+// Without the fix the resolver's per-survivor cursor advance never runs, so
+// afterCursor stays at its initial value and the next iteration re-fetches the
+// identical [a0,a1,a2] batch — repeating until maxRefill, then returning an
+// empty page with hasNextPage=true (a stall the client cannot escape).
+//
+// With the fix, SearchTickets returns nextCursor = cursor of a2 (the last RAW
+// hit).  The resolver advances afterCursor to that cursor before iterating
+// results, so the second iteration fetches [b0,b1,b2] — all available — and
+// the page is filled correctly.
+func TestSearch_ZeroSurvivorBatch(t *testing.T) {
+	ctx := context.Background()
+	url := requireSearchTestURL(t)
+
+	const idx = "tickets_zero_survivor_test"
+	deleteTestIndex(t, url, idx)
+	t.Cleanup(func() { deleteTestIndex(t, url, idx) })
+
+	c, err := search.NewClient(url, idx, zap.NewNop())
+	require.NoError(t, err)
+	require.NoError(t, c.EnsureIndex(ctx))
+
+	// Seed: 3 sold-out tickets with ids a0,a1,a2 (rank first on tie-break by _id asc).
+	soldOutIDs := []string{"a0", "a1", "a2"}
+	allTickets := make([]*repository.Ticket, 0, 6)
+	for _, id := range soldOutIDs {
+		allTickets = append(allTickets, &repository.Ticket{
+			ID:    id,
+			Title: "Sold Out Show",
+			Quota: 3,
+			Sold:  3, // fully sold out — filtered by availableOnly
+		})
+		seedDoc(t, c, search.Doc{
+			ID:         id,
+			Version:    1,
+			EventTitle: "Zero Survivor Concert",
+			Title:      "Sold Out Show",
+			Price:      50.00,
+			Category:   "CONCERT",
+		})
+	}
+
+	// Seed: 3 available tickets with ids b0,b1,b2 (rank after a* on tie-break).
+	availIDs := []string{"b0", "b1", "b2"}
+	for i, id := range availIDs {
+		allTickets = append(allTickets, &repository.Ticket{
+			ID:    id,
+			Title: fmt.Sprintf("Available Show %d", i),
+			Quota: 10,
+			Sold:  0,
+		})
+		seedDoc(t, c, search.Doc{
+			ID:         id,
+			Version:    1,
+			EventTitle: "Zero Survivor Concert",
+			Title:      fmt.Sprintf("Available Show %d", i),
+			Price:      50.00,
+			Category:   "CONCERT",
+		})
+	}
+
+	refreshIndex(t, url, idx)
+
+	repo := newFakeTicketRepo(allTickets...)
+	svc := service.NewTicketService(repo, &noopPublisher{}, zap.NewNop(), &stubVenueClient{}, &stubSavedEventRepo{})
+	svc.WithSearchClient(c)
+
+	resolver := &graph.Resolver{
+		TicketService: svc,
+		Config: &config.Config{
+			SearchBackend: "opensearch",
+		},
+		Log: zap.NewNop(),
+	}
+	schema := graph.NewExecutableSchema(graph.Config{Resolvers: resolver})
+	srv := handler.NewDefaultServer(schema)
+
+	// limit=3 means the first raw batch is exactly [a0,a1,a2] — all sold-out,
+	// zero survivors.  The fix must advance the cursor past a2 so the second
+	// iteration fetches [b0,b1,b2].
+	body := `{"query":"{ ticketsConnection(filter: { search: \"zero survivor concert\", availableOnly: true }, first: 3) { edges { node { id } } pageInfo { hasNextPage endCursor } } }"}`
+	req := httptest.NewRequest(http.MethodPost, "/graphql", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req.WithContext(ctx))
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var gqlResp struct {
+		Data struct {
+			TicketsConnection struct {
+				Edges []struct {
+					Node struct {
+						ID string `json:"id"`
+					} `json:"node"`
+				} `json:"edges"`
+				PageInfo struct {
+					HasNextPage bool    `json:"hasNextPage"`
+					EndCursor   *string `json:"endCursor"`
+				} `json:"pageInfo"`
+			} `json:"ticketsConnection"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&gqlResp))
+	require.Empty(t, gqlResp.Errors, "no GraphQL errors expected: %v", gqlResp.Errors)
+
+	edges := gqlResp.Data.TicketsConnection.Edges
+	// Without the fix the loop stalls: afterCursor never advances (no survivor to
+	// update it from), maxRefill is hit, and 0 edges are returned.
+	require.Len(t, edges, 3, "refill loop must surface all 3 available tickets past the zero-survivor batch")
+
+	wantAvail := map[string]bool{"b0": true, "b1": true, "b2": true}
+	for _, e := range edges {
+		require.True(t, wantAvail[e.Node.ID],
+			"returned ticket %q must be from the available set (b0..b2), not a sold-out (a0..a2)", e.Node.ID)
 	}
 }

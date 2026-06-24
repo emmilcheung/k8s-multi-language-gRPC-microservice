@@ -264,7 +264,7 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 		exhausted := false
 
 		for iter := 0; len(pageItems) < limit && iter < maxRefill; iter++ {
-			results, ex, err := r.TicketService.SearchTickets(ctx, params, afterCursor)
+			results, batchNextCursor, ex, err := r.TicketService.SearchTickets(ctx, params, afterCursor)
 			exhausted = ex
 			if err != nil {
 				log := r.Log
@@ -275,10 +275,14 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 				// Task 8 will increment search_fallback_total here
 				return r.ticketsConnectionMongo(ctx, filter, limit, cursorIn)
 			}
+			// Advance afterCursor by the last RAW hit's cursor (returned before
+			// availableOnly filtering).  This ensures that a batch where every hit
+			// is filtered out still moves the window forward on the next iteration
+			// instead of re-fetching the same sold-out block indefinitely.
+			if batchNextCursor != "" {
+				afterCursor = batchNextCursor
+			}
 			for _, res := range results {
-				// M-1: advance afterCursor for every fetched item before the break check
-				// so the "advance cursor" invariant holds regardless of future loop changes.
-				afterCursor = res.Cursor
 				if filter.TicketType == nil || string(res.Ticket.TicketType) == string(*filter.TicketType) {
 					pageItems = append(pageItems, pageItem{gql: mapTicketToGQL(res.Ticket), cursor: res.Cursor})
 					endCursor = res.Cursor
@@ -300,7 +304,8 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 		// raw hits than the page size, so nothing more to fetch). If maxRefill was
 		// hit before filling the page, exhausted is still false — correctly signals
 		// more results exist. When the page is empty but !exhausted, use afterCursor
-		// as endCursor so pagination does not deadlock.
+		// (which is now the last raw hit's cursor) as endCursor so the client
+		// advances past the stalled block rather than re-requesting the same page.
 		hasNextPage := !exhausted
 		if endCursor == "" && hasNextPage && afterCursor != "" {
 			endCursor = afterCursor
