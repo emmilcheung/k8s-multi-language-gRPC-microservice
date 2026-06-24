@@ -497,6 +497,130 @@ describe("HomePage", () => {
 
     expect(screen.getByText(/no events available/i)).toBeInTheDocument();
   });
+
+  // ── spec §11: relevance order reaches the rendered grid ────────────────────
+
+  it("preserves server relevance order in grid when q is set and no explicit sort (spec §11)", async () => {
+    // Tickets are returned by the server in relevance order: C → A → B.
+    // Their date order would be A → B → C and price order would be B → A → C,
+    // so any client re-sort would produce a different sequence — making this
+    // assertion discriminating: it fails if shouldClientSort accidentally
+    // re-sorts when it should not.
+    const ticketC = makeTicket({
+      id: "t-c",
+      title: "Relevance-First C",
+      price: "99.99", // highest price
+      event: { title: "Relevance-First C", startsAt: "2099-12-01T20:00:00Z", venueName: "Venue C" },
+    });
+    const ticketA = makeTicket({
+      id: "t-a",
+      title: "Relevance-First A",
+      price: "59.99",
+      event: { title: "Relevance-First A", startsAt: "2099-10-01T20:00:00Z", venueName: "Venue A" },
+    });
+    const ticketB = makeTicket({
+      id: "t-b",
+      title: "Relevance-First B",
+      price: "19.99", // lowest price
+      event: { title: "Relevance-First B", startsAt: "2099-11-01T20:00:00Z", venueName: "Venue B" },
+    });
+
+    fetchTicketPageViaGraphQLMock.mockResolvedValue({
+      tickets: [ticketC, ticketA, ticketB],
+      cursor: null,
+      hasMore: false,
+    });
+
+    const { default: HomePage } = await import("@/app/page");
+    // q present, no sort param → shouldClientSort returns false → server order preserved
+    render(await HomePage({ searchParams: Promise.resolve({ q: "relevance" }) }));
+
+    // Filter out the grid-count h3 ("3 events") — only EventPoster titles remain
+    const headings = screen
+      .getAllByRole("heading", { level: 3 })
+      .map((h) => h.textContent ?? "")
+      .filter((t) => !/^\d+ events$/.test(t));
+    // With active filter (q set) there is no hero — all three appear in the grid
+    expect(headings).toEqual(["Relevance-First C", "Relevance-First A", "Relevance-First B"]);
+  });
+
+  it("reorders grid by date when q is set and sort=date (spec §11)", async () => {
+    // Server returns in relevance order: C (Dec) → A (Oct) → B (Nov).
+    // With sort=date the client must re-sort to Oct → Nov → Dec (A → B → C).
+    const ticketC = makeTicket({
+      id: "t-c",
+      title: "Sort-Date C",
+      price: "49.99",
+      event: { title: "Sort-Date C", startsAt: "2099-12-01T20:00:00Z", venueName: "Venue C" },
+    });
+    const ticketA = makeTicket({
+      id: "t-a",
+      title: "Sort-Date A",
+      price: "49.99",
+      event: { title: "Sort-Date A", startsAt: "2099-10-01T20:00:00Z", venueName: "Venue A" },
+    });
+    const ticketB = makeTicket({
+      id: "t-b",
+      title: "Sort-Date B",
+      price: "49.99",
+      event: { title: "Sort-Date B", startsAt: "2099-11-01T20:00:00Z", venueName: "Venue B" },
+    });
+
+    fetchTicketPageViaGraphQLMock.mockResolvedValue({
+      tickets: [ticketC, ticketA, ticketB],
+      cursor: null,
+      hasMore: false,
+    });
+
+    const { default: HomePage } = await import("@/app/page");
+    // q present + explicit sort=date → shouldClientSort returns true → sorted by startsAt
+    render(await HomePage({ searchParams: Promise.resolve({ q: "sort", sort: "date" }) }));
+
+    const headings = screen
+      .getAllByRole("heading", { level: 3 })
+      .map((h) => h.textContent ?? "")
+      .filter((t) => !/^\d+ events$/.test(t));
+    expect(headings).toEqual(["Sort-Date A", "Sort-Date B", "Sort-Date C"]);
+  });
+
+  it("reorders grid by price when q is set and sort=price (spec §11)", async () => {
+    // Server returns in relevance order: expensive → mid → cheap.
+    // With sort=price the client must re-sort cheapest first.
+    const ticketExp = makeTicket({
+      id: "t-exp",
+      title: "Sort-Price Expensive",
+      price: "99.99",
+      event: { title: "Sort-Price Expensive", startsAt: "2099-10-01T20:00:00Z", venueName: "Venue" },
+    });
+    const ticketMid = makeTicket({
+      id: "t-mid",
+      title: "Sort-Price Mid",
+      price: "49.99",
+      event: { title: "Sort-Price Mid", startsAt: "2099-10-02T20:00:00Z", venueName: "Venue" },
+    });
+    const ticketCheap = makeTicket({
+      id: "t-cheap",
+      title: "Sort-Price Cheap",
+      price: "9.99",
+      event: { title: "Sort-Price Cheap", startsAt: "2099-10-03T20:00:00Z", venueName: "Venue" },
+    });
+
+    fetchTicketPageViaGraphQLMock.mockResolvedValue({
+      tickets: [ticketExp, ticketMid, ticketCheap],
+      cursor: null,
+      hasMore: false,
+    });
+
+    const { default: HomePage } = await import("@/app/page");
+    // q present + explicit sort=price → shouldClientSort returns true → sorted by price asc
+    render(await HomePage({ searchParams: Promise.resolve({ q: "sort", sort: "price" }) }));
+
+    const headings = screen
+      .getAllByRole("heading", { level: 3 })
+      .map((h) => h.textContent ?? "")
+      .filter((t) => !/^\d+ events$/.test(t));
+    expect(headings).toEqual(["Sort-Price Cheap", "Sort-Price Mid", "Sort-Price Expensive"]);
+  });
 });
 
 // ── OrdersPage ───────────────────────────────────────────────────────────────
