@@ -166,7 +166,7 @@ func main() {
 		if err := searchClient.EnsureIndex(context.Background()); err != nil {
 			log.Fatal("ensure search index", zap.Error(err))
 		}
-		indexer, err := search.NewIndexer(searchClient, cfg.KafkaBrokers, log, kafkaSecurity)
+		indexer, err := search.NewIndexer(searchClient, cfg.KafkaBrokers, log, kafkaSecurity, producer)
 		if err != nil {
 			log.Fatal("search indexer", zap.Error(err))
 		}
