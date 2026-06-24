@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/acme/ticket-service/internal/repository"
 	"go.uber.org/zap"
@@ -31,7 +32,7 @@ func ticketToDoc(t *repository.Ticket) Doc {
 		TicketType:    t.TicketType,
 		SeatingPlanID: t.SeatingPlanID,
 		Price:         price,
-		CreatedAt:     t.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:     t.CreatedAt.UTC().Format(time.RFC3339),
 	}
 
 	if t.Event != nil {
@@ -39,7 +40,7 @@ func ticketToDoc(t *repository.Ticket) Doc {
 		doc.VenueName = t.Event.VenueName
 		doc.Description = t.Event.Description
 		doc.VenueAddress = t.Event.VenueAddress
-		doc.StartsAt = t.Event.StartsAt.Format("2006-01-02T15:04:05Z")
+		doc.StartsAt = t.Event.StartsAt.UTC().Format(time.RFC3339)
 	}
 
 	return doc
@@ -83,11 +84,6 @@ func Reindex(ctx context.Context, repo TicketRepository, client *Client, pageSiz
 			zap.Int("total_done", total),
 			zap.String("next_cursor", after),
 		)
-
-		// If the page was smaller than pageSize we've reached the last page.
-		if len(page) < pageSize {
-			break
-		}
 	}
 
 	client.log.Info("reindex complete", zap.Int("total_indexed", total))

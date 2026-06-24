@@ -5,67 +5,81 @@ package integration_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/search"
-	"github.com/opensearch-project/opensearch-go/v4"
-	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
-// fakeReindexRepo is a stub TicketRepository whose FindAll returns the seeded
-// tickets in a single page (no cursor paging needed for the test). All other
-// methods panic to surface accidental calls during the test run.
+// fakeReindexRepo implements search.TicketRepository only — FindAll with real cursor
+// paging and a hard cap of 100 items per call, mirroring MongoTicketRepository.FindAll.
+// Tickets are stored in newest-first order (descending createdAt).
 type fakeReindexRepo struct {
+	// tickets sorted newest-first (set once at construction; never mutated).
 	tickets []*repository.Ticket
-	called  bool // guard: FindAll is called at most once (empty cursor)
 }
 
+// FindAll honours After (compound cursor "<unixMilli>:<id>") and clamps Limit to 100,
+// exactly as MongoTicketRepository.FindAll does.  Tickets are returned newest-first.
 func (f *fakeReindexRepo) FindAll(_ context.Context, p repository.PaginationParams) ([]*repository.Ticket, error) {
-	if f.called {
-		// Second call means cursor paging — return empty to signal end of data.
+	limit := p.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+
+	start := 0
+	if p.After != "" {
+		ms, id, ok := repository.ParseCursor(p.After)
+		if !ok {
+			return nil, fmt.Errorf("fakeReindexRepo: invalid cursor %q", p.After)
+		}
+		// Skip until we find the ticket whose cursor was the last one seen.
+		for i, t := range f.tickets {
+			if t.CreatedAt.UnixMilli() == ms && t.ID == id {
+				start = i + 1
+				break
+			}
+		}
+	}
+
+	if start >= len(f.tickets) {
 		return nil, nil
 	}
-	f.called = true
-	return f.tickets, nil
+
+	end := start + limit
+	if end > len(f.tickets) {
+		end = len(f.tickets)
+	}
+	return f.tickets[start:end], nil
 }
 
-func (f *fakeReindexRepo) Create(_ context.Context, _ *repository.Ticket) error {
-	panic("fakeReindexRepo: Create not implemented")
+// makeTickets creates n tickets with descending createdAt (index 0 = newest).
+func makeTickets(n int) []*repository.Ticket {
+	base := time.Now().UTC().Truncate(time.Millisecond)
+	tickets := make([]*repository.Ticket, n)
+	for i := 0; i < n; i++ {
+		tickets[i] = &repository.Ticket{
+			ID:        fmt.Sprintf("t%04d", i),
+			Title:     fmt.Sprintf("Ticket %d", i),
+			Price:     "10.00",
+			UserID:    "u1",
+			Category:  "CONCERT",
+			Version:   1,
+			CreatedAt: base.Add(-time.Duration(i) * time.Second),
+		}
+	}
+	// Sort newest-first (index 0 = largest createdAt).
+	sort.Slice(tickets, func(a, b int) bool {
+		return tickets[a].CreatedAt.After(tickets[b].CreatedAt)
+	})
+	return tickets
 }
-func (f *fakeReindexRepo) FindByID(_ context.Context, _ string) (*repository.Ticket, error) {
-	panic("fakeReindexRepo: FindByID not implemented")
-}
-func (f *fakeReindexRepo) FindByIDs(_ context.Context, _ []string) ([]*repository.Ticket, error) {
-	panic("fakeReindexRepo: FindByIDs not implemented")
-}
-func (f *fakeReindexRepo) Update(_ context.Context, _ *repository.Ticket) error {
-	panic("fakeReindexRepo: Update not implemented")
-}
-func (f *fakeReindexRepo) ReserveTicket(_ context.Context, _, _ string) error {
-	panic("fakeReindexRepo: ReserveTicket not implemented")
-}
-func (f *fakeReindexRepo) ReleaseTicket(_ context.Context, _ string) error {
-	panic("fakeReindexRepo: ReleaseTicket not implemented")
-}
-func (f *fakeReindexRepo) CreateReservation(_ context.Context, _ *repository.TicketReservation) error {
-	panic("fakeReindexRepo: CreateReservation not implemented")
-}
-func (f *fakeReindexRepo) FindReservationByID(_ context.Context, _ string) (*repository.TicketReservation, error) {
-	panic("fakeReindexRepo: FindReservationByID not implemented")
-}
-func (f *fakeReindexRepo) ReleaseReservation(_ context.Context, _ string) error {
-	panic("fakeReindexRepo: ReleaseReservation not implemented")
-}
-func (f *fakeReindexRepo) FinalizeReservation(_ context.Context, _, _ string) error {
-	panic("fakeReindexRepo: FinalizeReservation not implemented")
-}
-func (f *fakeReindexRepo) Ping(_ context.Context) error { return nil }
-func (f *fakeReindexRepo) Close(_ context.Context) error { return nil }
 
 // countDocs returns the number of documents in the given index via the count API.
 func countDocs(t *testing.T, url, index string) int64 {
@@ -87,16 +101,19 @@ func countDocs(t *testing.T, url, index string) int64 {
 	return body.Count
 }
 
-// requireOpenSearchAPIClient builds a low-level OpenSearch API client for the given URL.
-func requireOpenSearchAPIClient(t *testing.T, url string) *opensearchapi.Client {
-	t.Helper()
-	api, err := opensearchapi.NewClient(opensearchapi.Config{
-		Client: opensearch.Config{Addresses: []string{url}},
-	})
-	require.NoError(t, err)
-	return api
-}
-
+// TestReindex_PopulatesIndexFromMongo verifies that Reindex pages all tickets
+// through the cursor loop and lands every one in the index.
+//
+// WHY this catches the critical paging bug:
+//   - We seed 150 tickets and pass pageSize=500.
+//   - FindAll clamps Limit to 100, so the first page returns 100 items.
+//   - Under the OLD code (early-exit when len(page) < pageSize), 100 < 500 == true,
+//     so the loop exits after the first page → only 100 tickets indexed.
+//   - Under the FIXED code (exit only on empty page), the loop issues a second call
+//     with the cursor from item 100, gets items 101-150, then a third call returns
+//     empty → loop exits with 150 indexed.
+//   - The assertion `countDocs == 150` therefore FAILS under the old code and PASSES
+//     only after the fix.
 func TestReindex_PopulatesIndexFromMongo(t *testing.T) {
 	ctx := context.Background()
 	url := requireSearchTestURL(t)
@@ -109,51 +126,11 @@ func TestReindex_PopulatesIndexFromMongo(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, c.EnsureIndex(ctx))
 
-	now := time.Now().UTC()
-	repo := &fakeReindexRepo{
-		tickets: []*repository.Ticket{
-			{
-				ID:        "r1",
-				Title:     "Rock Concert",
-				Price:     "50.00",
-				UserID:    "u1",
-				Category:  "CONCERT",
-				Quota:     100,
-				Sold:      0,
-				Version:   1,
-				CreatedAt: now.Add(-3 * time.Hour),
-				Event: &repository.TicketEvent{
-					Title:        "Rock Night",
-					VenueName:    "Arena",
-					VenueAddress: "123 Main St",
-					StartsAt:     now.Add(24 * time.Hour),
-				},
-			},
-			{
-				ID:        "r2",
-				Title:     "Jazz Evening",
-				Price:     "30.00",
-				UserID:    "u2",
-				Category:  "OTHER",
-				Quota:     50,
-				Sold:      5,
-				Version:   2,
-				CreatedAt: now.Add(-2 * time.Hour),
-			},
-			{
-				ID:        "r3",
-				Title:     "Comedy Show",
-				Price:     "20.00",
-				UserID:    "u3",
-				Category:  "COMEDY",
-				Quota:     200,
-				Sold:      10,
-				Version:   3,
-				CreatedAt: now.Add(-1 * time.Hour),
-			},
-		},
-	}
+	const total = 150
+	repo := &fakeReindexRepo{tickets: makeTickets(total)}
 
+	// pageSize=500 triggers the bug: FindAll caps to 100, so 100 < 500 was always true.
 	require.NoError(t, search.Reindex(ctx, repo, c, 500))
-	require.Equal(t, int64(3), countDocs(t, url, idx))
+	require.Equal(t, int64(total), countDocs(t, url, idx),
+		"expected all %d tickets to be indexed; early-exit bug would produce only 100", total)
 }

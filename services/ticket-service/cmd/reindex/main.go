@@ -44,7 +44,10 @@ func main() {
 
 	pageSize := 500
 	if ps := os.Getenv("REINDEX_PAGE_SIZE"); ps != "" {
-		if n, err := strconv.Atoi(ps); err == nil && n > 0 {
+		n, err := strconv.Atoi(ps)
+		if err != nil || n <= 0 {
+			fmt.Fprintf(os.Stderr, "WARN: REINDEX_PAGE_SIZE=%q is invalid (must be a positive integer); using default %d\n", ps, pageSize)
+		} else {
 			pageSize = n
 		}
 	}
