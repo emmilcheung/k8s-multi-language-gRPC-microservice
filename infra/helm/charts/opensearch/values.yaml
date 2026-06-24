@@ -12,7 +12,7 @@ image:
 # when upgrading busybox. Run:
 #   docker pull busybox:1.36 && docker inspect busybox:1.36 --format '{{index .RepoDigests 0}}'
 busybox:
-  image: "busybox:1.36@sha256:9ae97d36d26566ff84e8893c64a6dc4fe8ca6d1144bf5b87b2b85a32def253c7"
+  image: "busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
 
 # Single-node mode: no cluster formation, no inter-node TLS.
 singleNode: true
