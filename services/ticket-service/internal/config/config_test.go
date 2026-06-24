@@ -113,3 +113,22 @@ func TestLoad_KafkaSASLConfig(t *testing.T) {
 	assert.Equal(t, "secret", cfg.KafkaSASLPassword)
 	assert.Equal(t, "/etc/ssl/certs/ca.pem", cfg.KafkaSSLCALocation)
 }
+
+func TestConfig_SearchBackendOpensearch_RequiresValidURL(t *testing.T) {
+	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	t.Setenv("SEARCH_BACKEND", "opensearch")
+	t.Setenv("OPENSEARCH_URL", "") // missing
+	_, err := Load()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "OPENSEARCH_URL")
+}
+
+func TestConfig_DefaultsToMongoBackend(t *testing.T) {
+	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, "mongo", cfg.SearchBackend)
+	require.Equal(t, "tickets", cfg.OpenSearchIndex)
+}

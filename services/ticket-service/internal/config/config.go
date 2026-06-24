@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -25,6 +26,9 @@ type Config struct {
 	KafkaSSLCALocation    string
 	RedisURL              string
 	VenueServiceAddr      string // WS3: gRPC address of venue-service (e.g. "localhost:9091")
+	SearchBackend         string // "mongo" (default) | "opensearch"
+	OpenSearchURL         string
+	OpenSearchIndex       string
 }
 
 // Load reads configuration from environment variables and validates all required fields.
@@ -84,6 +88,15 @@ func Load() (*Config, error) {
 
 	venueServiceAddr := getEnv("VENUE_SERVICE_ADDR", "localhost:9091")
 
+	searchBackend := getEnv("SEARCH_BACKEND", "mongo")
+	openSearchURL := os.Getenv("OPENSEARCH_URL")
+	openSearchIndex := getEnv("OPENSEARCH_INDEX", "tickets")
+	if searchBackend == "opensearch" {
+		if _, err := url.ParseRequestURI(openSearchURL); err != nil {
+			errs = append(errs, fmt.Sprintf("SEARCH_BACKEND=opensearch requires a valid OPENSEARCH_URL: %v", err))
+		}
+	}
+
 	if len(errs) > 0 {
 		return nil, errors.New(strings.Join(errs, "; "))
 	}
@@ -103,6 +116,9 @@ func Load() (*Config, error) {
 		KafkaSSLCALocation:    kafkaSSLCALocation,
 		RedisURL:              redisURL,
 		VenueServiceAddr:      venueServiceAddr,
+		SearchBackend:         searchBackend,
+		OpenSearchURL:         openSearchURL,
+		OpenSearchIndex:       openSearchIndex,
 	}, nil
 }
 
