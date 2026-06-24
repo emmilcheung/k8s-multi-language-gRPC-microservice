@@ -401,6 +401,9 @@ func (s *TicketService) SearchTickets(ctx context.Context, p repository.Paginati
 		return nil, false, fmt.Errorf("SearchTickets: query: %w", err)
 	}
 
+	// exhausted reflects raw index hits, not post-ticketType-filter survivors.
+	// Under heavy ticketType filtering, the resolver's maxRefill cap is best-effort;
+	// pushing ticketType into the OpenSearch query is a v1 out-of-scope item.
 	exhausted := len(hits) < p.Limit
 
 	if len(hits) == 0 {

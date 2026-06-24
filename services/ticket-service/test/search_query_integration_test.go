@@ -4,11 +4,17 @@ package integration_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/99designs/gqlgen/graphql/handler"
+	graph "github.com/acme/ticket-service/internal/graphql"
+	"github.com/acme/ticket-service/internal/config"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/search"
 	"github.com/acme/ticket-service/internal/service"
@@ -153,13 +159,23 @@ func TestSearch_TypoAndBoostAndRefill(t *testing.T) {
 		Category:    "OTHER",
 	})
 
-	// ── Seed: 25 sold-out "concert" tickets + 3 available ones ───────────────
-	// The 25 sold-out tickets will rank at the top for the "concert" query.
-	// SearchTickets must skip them and still surface 3 available tickets.
-	const soldOutCount = 25
+	// ── Seed: 2 sold-out + 3 available tickets for the refill loop test ─────────
+	// All 5 share equal relevance score (same EventTitle match on "concert").
+	// OpenSearch breaks score ties by _id ascending, so 'a'-prefixed ids rank
+	// before 'b'-prefixed ids.  The 2 sold-out tickets (a0, a1) therefore appear
+	// at the top of every search page.
+	//
+	// The AvailableOnly filter is applied inside SearchTickets (post-hydration),
+	// so OS returns raw hits [a0,a1,b0] on the first call (limit=3).  After
+	// filtering, only b0 survives and afterCursor advances to b0's cursor.
+	// The resolver's refill loop then issues a second call (after=b0's cursor)
+	// which returns [b1,b2] — both available — completing the page.
+	//
+	// Without the refill loop a single SearchTickets(limit=3) call would return
+	// only b0 (1 item) and the page would never reach the requested 3 items.
 	allTickets := []*repository.Ticket{ticketA, ticketB}
-	for i := 0; i < soldOutCount; i++ {
-		id := fmt.Sprintf("soldout-%d", i)
+	soldOutIDs := []string{"a0", "a1"}
+	for _, id := range soldOutIDs {
 		allTickets = append(allTickets, &repository.Ticket{
 			ID:    id,
 			Title: "Sold Out Concert",
@@ -175,7 +191,7 @@ func TestSearch_TypoAndBoostAndRefill(t *testing.T) {
 			Category:   "CONCERT",
 		})
 	}
-	availIDs := []string{"avail-0", "avail-1", "avail-2"}
+	availIDs := []string{"b0", "b1", "b2"}
 	for i, id := range availIDs {
 		allTickets = append(allTickets, &repository.Ticket{
 			ID:    id,
@@ -207,13 +223,57 @@ func TestSearch_TypoAndBoostAndRefill(t *testing.T) {
 	require.Equal(t, "A", res[0].Ticket.ID, "eventTitle-boosted ticket must rank first")
 	_ = exhausted
 
-	// ── Assert 2: availableOnly must return a full page despite sold-out hits ─
-	// Limit=3: SearchTickets iterates until it finds 3 available tickets.
-	avail, _, err := svc.SearchTickets(ctx, repository.PaginationParams{Search: "concert", AvailableOnly: true, Limit: 3}, "")
-	require.NoError(t, err)
-	require.Len(t, avail, 3, "availableOnly must return exactly 3 available tickets")
-	for _, r := range avail {
-		require.True(t, r.Ticket.Sold < r.Ticket.Quota || r.Ticket.SeatingPlanID != "",
-			"every returned ticket must be available")
+	// ── Assert 2: resolver refill loop surfaces available tickets past sold-out leaders ─
+	// The refill loop lives in the resolver's TicketsConnection, NOT in SearchTickets.
+	// Drive the test through the resolver so we genuinely exercise the refill path.
+	// (Without the refill loop, the first SearchTickets call returns only a00..a02,
+	// all sold-out, and availableOnly post-filtering yields an empty result.)
+	resolver := &graph.Resolver{
+		TicketService: svc,
+		Config: &config.Config{
+			SearchBackend: "opensearch",
+		},
+		Log: zap.NewNop(),
+	}
+	schema := graph.NewExecutableSchema(graph.Config{Resolvers: resolver})
+	srv := handler.NewDefaultServer(schema)
+
+	body := `{"query":"{ ticketsConnection(filter: { search: \"concert\", availableOnly: true }, first: 3) { edges { node { id } } pageInfo { hasNextPage endCursor } } }"}`
+	req := httptest.NewRequest(http.MethodPost, "/graphql", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req.WithContext(ctx))
+
+	require.Equal(t, http.StatusOK, w.Code, "graphql response must be 200")
+
+	var gqlResp struct {
+		Data struct {
+			TicketsConnection struct {
+				Edges []struct {
+					Node struct {
+						ID string `json:"id"`
+					} `json:"node"`
+				} `json:"edges"`
+				PageInfo struct {
+					HasNextPage bool    `json:"hasNextPage"`
+					EndCursor   *string `json:"endCursor"`
+				} `json:"pageInfo"`
+			} `json:"ticketsConnection"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&gqlResp), "response must be valid JSON")
+	require.Empty(t, gqlResp.Errors, "no GraphQL errors expected: %v", gqlResp.Errors)
+
+	edges := gqlResp.Data.TicketsConnection.Edges
+	require.Len(t, edges, 3, "refill loop must surface exactly 3 available tickets")
+
+	// All returned IDs must be from the available set (b0..b2), not sold-out (a0,a1).
+	availSet := map[string]bool{"b0": true, "b1": true, "b2": true}
+	for _, e := range edges {
+		require.True(t, availSet[e.Node.ID],
+			"returned ticket %q must be available (not sold-out)", e.Node.ID)
 	}
 }

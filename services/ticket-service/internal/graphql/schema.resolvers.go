@@ -261,9 +261,11 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 		pageItems := make([]pageItem, 0, limit)
 		afterCursor := cursorIn
 		var endCursor string
+		exhausted := false
 
 		for iter := 0; len(pageItems) < limit && iter < maxRefill; iter++ {
-			results, exhausted, err := r.TicketService.SearchTickets(ctx, params, afterCursor)
+			results, ex, err := r.TicketService.SearchTickets(ctx, params, afterCursor)
+			exhausted = ex
 			if err != nil {
 				log := r.Log
 				if log == nil {
@@ -274,6 +276,9 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 				return r.ticketsConnectionMongo(ctx, filter, limit, cursorIn)
 			}
 			for _, res := range results {
+				// M-1: advance afterCursor for every fetched item before the break check
+				// so the "advance cursor" invariant holds regardless of future loop changes.
+				afterCursor = res.Cursor
 				if filter.TicketType == nil || string(res.Ticket.TicketType) == string(*filter.TicketType) {
 					pageItems = append(pageItems, pageItem{gql: mapTicketToGQL(res.Ticket), cursor: res.Cursor})
 					endCursor = res.Cursor
@@ -281,7 +286,6 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 						break
 					}
 				}
-				afterCursor = res.Cursor
 			}
 			if exhausted {
 				break
@@ -292,15 +296,23 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 		for i, item := range pageItems {
 			edges[i] = &TicketEdge{Node: item.gql, Cursor: item.cursor}
 		}
+		// C-1: hasNextPage = !exhausted (exhausted means the index returned fewer
+		// raw hits than the page size, so nothing more to fetch). If maxRefill was
+		// hit before filling the page, exhausted is still false — correctly signals
+		// more results exist. When the page is empty but !exhausted, use afterCursor
+		// as endCursor so pagination does not deadlock.
+		hasNextPage := !exhausted
+		if endCursor == "" && hasNextPage && afterCursor != "" {
+			endCursor = afterCursor
+		}
 		var endCursorPtr *string
 		if endCursor != "" {
 			c := endCursor
 			endCursorPtr = &c
 		}
-		// hasNextPage: we don't know for certain without another query; report false (conservative).
 		return &TicketConnection{
 			Edges:    edges,
-			PageInfo: &PageInfo{HasNextPage: false, EndCursor: endCursorPtr},
+			PageInfo: &PageInfo{HasNextPage: hasNextPage, EndCursor: endCursorPtr},
 		}, nil
 	}
 
