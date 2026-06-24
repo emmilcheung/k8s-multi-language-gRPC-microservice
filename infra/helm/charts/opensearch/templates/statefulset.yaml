@@ -1,5 +1,5 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: {{ include "opensearch.fullname" . }}
   namespace: {{ .Release.Namespace }}
@@ -8,7 +8,11 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicas | default 1 }}
+  # serviceName must reference the headless service so the StatefulSet
+  # controller can form stable pod DNS entries (<pod>.<svc>.<ns>.svc.cluster.local).
+  # The client-facing ClusterIP service (service.yaml) is kept separate.
+  serviceName: {{ include "opensearch.fullname" . }}-headless
   selector:
     matchLabels:
       app.kubernetes.io/name: opensearch
@@ -86,6 +90,9 @@ spec:
               value: {{ .Values.javaOpts | quote }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/opensearch/data
           {{- if .Values.security.disabled }}
           readinessProbe:
             httpGet:
@@ -133,3 +140,18 @@ spec:
             timeoutSeconds: 10
             failureThreshold: 3
           {{- end }}
+  # volumeClaimTemplates provision one PVC per pod.
+  # For single-node (replicas=1) this is a single 10 Gi volume (configurable).
+  # StorageClass defaults to "" (cluster default); override via persistence.storageClass.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ .Values.persistence.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size | default "10Gi" }}

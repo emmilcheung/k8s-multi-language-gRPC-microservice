@@ -38,6 +38,20 @@ busybox:
 # Introduce these only if and when a multi-node topology is adopted.
 singleNode: true
 
+# Number of StatefulSet replicas. Default 1 — single-node by design (footprint).
+# Multi-node requires additional cluster discovery configuration (not in scope here).
+replicas: 1
+
+# Persistent volume configuration for the OpenSearch data directory.
+# Data is stored at /usr/share/opensearch/data inside the pod.
+# With a PVC, pod restarts recover without requiring a reindex.
+persistence:
+  # Size of the PVC. Tune to your index size; 10Gi covers ~5M typical ticket docs.
+  size: 10Gi
+  # Storage class. Empty string = use the cluster's default StorageClass.
+  # Override for a specific provisioner (e.g. "gp3" on EKS, "standard" on GKE).
+  storageClass: ""
+
 # Graceful shutdown budget: allow JVM + flush to complete before SIGKILL.
 # Override with --set terminationGracePeriodSeconds=<n> if workloads need longer.
 terminationGracePeriodSeconds: 120
@@ -78,6 +92,46 @@ networkPolicy:
   # Restricts ingress on 9200 to ticket-service pods only.
   # This is the primary authz boundary for this chart (docs/06:50).
   enabled: true
+
+# Reindex Job — gated, opt-in, NOT auto-run on every upgrade.
+# Enable only to backfill or after a mapping change requiring full reindex.
+#
+# Production rollout order:
+#   1. Deploy the StatefulSet (opensearch.enabled=true).
+#   2. Enable this Job once to backfill (reindex.enabled=true, then disable again).
+#   3. Flip SEARCH_BACKEND=opensearch on ticket-service.
+#
+# Availability posture (single-node, durable storage):
+#   - Pod restarts recover from the PVC — no reindex required for routine restarts.
+#   - A node-down window degrades gracefully to the Mongo-regex fallback in
+#     ticket-service (SEARCH_BACKEND=mongo is the default; no hard failure).
+#   - Multi-node HA is a future option via replicas + cluster discovery config.
+reindex:
+  # Gate — must be explicitly set true to render the Job.
+  enabled: false
+  # Secret that contains MONGO_URI — same Secret ticket-service uses (ticket-service-secrets).
+  mongoSecretName: "ticket-service-secrets"
+  # Key inside the Secret that holds the MongoDB connection URI.
+  mongoSecretKey: "MONGO_URI"
+  # OpenSearch URL for the reindex job to connect to.
+  # Defaults to the ClusterIP service URL built from the release name.
+  opensearchURL: ""
+  # Index name to reindex into. Matches ticket-service's OPENSEARCH_INDEX default.
+  opensearchIndex: "tickets"
+  # Number of times the Job container will be retried on failure.
+  backoffLimit: 3
+  # Image for the reindex job — must be the ticket-service image (contains cmd/reindex).
+  image:
+    repository: ticket-service
+    tag: SET_BY_CI
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
 
 # global is populated by the umbrella chart (infra/helm). These defaults allow
 # the chart to be linted and templated in isolation without failing on nil-pointer
