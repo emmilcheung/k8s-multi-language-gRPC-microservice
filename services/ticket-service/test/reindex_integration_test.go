@@ -18,19 +18,20 @@ import (
 )
 
 // fakeReindexRepo implements search.TicketRepository only — FindAll with real cursor
-// paging and a hard cap of 100 items per call, mirroring MongoTicketRepository.FindAll.
+// paging, mirroring MongoTicketRepository.FindAll's out-of-range fallback behaviour.
 // Tickets are stored in newest-first order (descending createdAt).
 type fakeReindexRepo struct {
 	// tickets sorted newest-first (set once at construction; never mutated).
 	tickets []*repository.Ticket
 }
 
-// FindAll honours After (compound cursor "<unixMilli>:<id>") and clamps Limit to 100,
-// exactly as MongoTicketRepository.FindAll does.  Tickets are returned newest-first.
+// FindAll honours After (compound cursor "<unixMilli>:<id>") and mirrors the REAL
+// MongoTicketRepository.FindAll contract: limit <=0 or >100 silently becomes 20
+// (NOT 100).  Callers must pass a value in [1, 100] to get the intended page size.
 func (f *fakeReindexRepo) FindAll(_ context.Context, p repository.PaginationParams) ([]*repository.Ticket, error) {
 	limit := p.Limit
 	if limit <= 0 || limit > 100 {
-		limit = 100
+		limit = 20
 	}
 
 	start := 0
@@ -102,18 +103,14 @@ func countDocs(t *testing.T, url, index string) int64 {
 }
 
 // TestReindex_PopulatesIndexFromMongo verifies that Reindex pages all tickets
-// through the cursor loop and lands every one in the index.
+// through the cursor loop and lands every one in the index, regardless of the
+// effective page size used by FindAll.
 //
-// WHY this catches the critical paging bug:
-//   - We seed 150 tickets and pass pageSize=500.
-//   - FindAll clamps Limit to 100, so the first page returns 100 items.
-//   - Under the OLD code (early-exit when len(page) < pageSize), 100 < 500 == true,
-//     so the loop exits after the first page → only 100 tickets indexed.
-//   - Under the FIXED code (exit only on empty page), the loop issues a second call
-//     with the cursor from item 100, gets items 101-150, then a third call returns
-//     empty → loop exits with 150 indexed.
-//   - The assertion `countDocs == 150` therefore FAILS under the old code and PASSES
-//     only after the fix.
+// WHY pageSize=500 is used deliberately:
+//   - The fake FindAll mirrors the real MongoTicketRepository: limit >100 silently
+//     becomes 20.  So 150 tickets take 8 pages of 20 (last page has 10).
+//   - The loop must exit only on an empty page, not when len(page) < pageSize.
+//   - The assertion countDocs==150 therefore catches any early-exit regression.
 func TestReindex_PopulatesIndexFromMongo(t *testing.T) {
 	ctx := context.Background()
 	url := requireSearchTestURL(t)
@@ -129,8 +126,9 @@ func TestReindex_PopulatesIndexFromMongo(t *testing.T) {
 	const total = 150
 	repo := &fakeReindexRepo{tickets: makeTickets(total)}
 
-	// pageSize=500 triggers the bug: FindAll caps to 100, so 100 < 500 was always true.
-	require.NoError(t, search.Reindex(ctx, repo, c, 500))
+	// pageSize=500 is out-of-range: the fake (mirroring real FindAll) falls back to 20
+	// docs/page.  The cursor loop must still exhaust all pages and index every ticket.
+	require.NoError(t, search.Reindex(ctx, repo, c, 500, nil))
 	require.Equal(t, int64(total), countDocs(t, url, idx),
-		"expected all %d tickets to be indexed; early-exit bug would produce only 100", total)
+		"expected all %d tickets to be indexed regardless of page size", total)
 }

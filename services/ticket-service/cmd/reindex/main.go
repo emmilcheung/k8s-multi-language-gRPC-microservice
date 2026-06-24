@@ -42,12 +42,16 @@ func main() {
 	openSearchIndex := getEnv("OPENSEARCH_INDEX", "tickets")
 	logLevel := getEnv("LOG_LEVEL", "info")
 
-	pageSize := 500
+	pageSize := 100
 	if ps := os.Getenv("REINDEX_PAGE_SIZE"); ps != "" {
 		n, err := strconv.Atoi(ps)
 		if err != nil || n <= 0 {
 			fmt.Fprintf(os.Stderr, "WARN: REINDEX_PAGE_SIZE=%q is invalid (must be a positive integer); using default %d\n", ps, pageSize)
 		} else {
+			if n > 100 {
+				fmt.Fprintf(os.Stderr, "WARN: REINDEX_PAGE_SIZE=%d exceeds FindAll max of 100; clamping to 100\n", n)
+				n = 100
+			}
 			pageSize = n
 		}
 	}

@@ -49,7 +49,9 @@ func ticketToDoc(t *repository.Ticket) Doc {
 
 // Reindex pages through ALL tickets via repo.FindAll (cursor paging, newest-first)
 // and upserts each one into the OpenSearch index via client.UpsertTicket.
-// pageSize controls how many tickets are fetched per page (capped at 100 by FindAll).
+// pageSize controls how many tickets are fetched per page; valid range is 1–100.
+// FindAll silently falls back to 20 for any value <=0 or >100, so callers must
+// pass a value in [1, 100] to get the intended page size.
 // Progress is logged per page as "reindex_progress" and set on m.ReindexProgress (nil-safe).
 func Reindex(ctx context.Context, repo TicketRepository, client *Client, pageSize int, m *metrics.SearchMetrics) error {
 	var (
