@@ -132,3 +132,14 @@ func TestConfig_DefaultsToMongoBackend(t *testing.T) {
 	require.Equal(t, "mongo", cfg.SearchBackend)
 	require.Equal(t, "tickets", cfg.OpenSearchIndex)
 }
+
+func TestLoad_InvalidSearchBackend_IsRejected(t *testing.T) {
+	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	t.Setenv("SEARCH_BACKEND", "elastic")
+
+	_, err := Load()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "SEARCH_BACKEND")
+	require.Contains(t, err.Error(), `"elastic"`)
+}

@@ -91,6 +91,12 @@ func Load() (*Config, error) {
 	searchBackend := getEnv("SEARCH_BACKEND", "mongo")
 	openSearchURL := os.Getenv("OPENSEARCH_URL")
 	openSearchIndex := getEnv("OPENSEARCH_INDEX", "tickets")
+	switch searchBackend {
+	case "mongo", "opensearch":
+		// valid
+	default:
+		errs = append(errs, fmt.Sprintf("SEARCH_BACKEND must be one of \"mongo\" or \"opensearch\", got %q", searchBackend))
+	}
 	if searchBackend == "opensearch" {
 		if _, err := url.ParseRequestURI(openSearchURL); err != nil {
 			errs = append(errs, fmt.Sprintf("SEARCH_BACKEND=opensearch requires a valid OPENSEARCH_URL: %v", err))
