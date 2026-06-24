@@ -169,8 +169,13 @@ func (c *Client) UpsertTicket(ctx context.Context, d Doc) error {
 		return fmt.Errorf("search.UpsertTicket: marshal doc: %w", err)
 	}
 
+	// Apply the same per-call deadline as Query (docs/09: 10 s outbound timeout).
+	// Both the Indexer and reindex call sites inherit this from here.
+	callCtx, cancel := context.WithTimeout(ctx, opensearchQueryTimeout)
+	defer cancel()
+
 	version := d.Version
-	_, err = c.api.Index(ctx, opensearchapi.IndexReq{
+	_, err = c.api.Index(callCtx, opensearchapi.IndexReq{
 		Index:      c.index,
 		DocumentID: d.ID,
 		Body:       bytes.NewReader(body),

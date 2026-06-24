@@ -32,7 +32,15 @@ busybox:
   image: "busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
 
 # Single-node mode: no cluster formation, no inter-node TLS.
+# HA controls (PodDisruptionBudget, multi-node topology, topologySpreadConstraints,
+# podAntiAffinity) are intentionally out of scope: a PDB on 1 replica is a no-op
+# or blocks all evictions; spread/anti-affinity constraints require ≥2 replicas.
+# Introduce these only if and when a multi-node topology is adopted.
 singleNode: true
+
+# Graceful shutdown budget: allow JVM + flush to complete before SIGKILL.
+# Override with --set terminationGracePeriodSeconds=<n> if workloads need longer.
+terminationGracePeriodSeconds: 120
 
 service:
   port: 9200
@@ -70,3 +78,11 @@ networkPolicy:
   # Restricts ingress on 9200 to ticket-service pods only.
   # This is the primary authz boundary for this chart (docs/06:50).
   enabled: true
+
+# global is populated by the umbrella chart (infra/helm). These defaults allow
+# the chart to be linted and templated in isolation without failing on nil-pointer
+# access into global.serviceMesh.* — the real values always come from the umbrella.
+global:
+  serviceMesh:
+    enabled: false
+    provider: ""

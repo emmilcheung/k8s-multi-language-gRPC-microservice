@@ -7,12 +7,6 @@ metadata:
     app.kubernetes.io/name: opensearch
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
-  annotations:
-    # Linkerd mesh injection: skip port 9300 (transport) — mesh handles mTLS on 9200.
-    # Remove this annotation block if Linkerd is not installed; it is a no-op when
-    # the mesh is absent. See docs/06-security.md:50 for the posture rationale.
-    config.linkerd.io/skip-inbound-ports: "9300"
-    config.linkerd.io/skip-outbound-ports: "9300"
 spec:
   replicas: 1
   selector:
@@ -24,7 +18,21 @@ spec:
       labels:
         app.kubernetes.io/name: opensearch
         app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        {{- if and .Values.global.serviceMesh.enabled (eq .Values.global.serviceMesh.provider "linkerd") }}
+        # Inject the Linkerd sidecar at the pod level — per repo convention (matches
+        # ticket-service and other charts). Namespace-level injection is NOT used here
+        # (only skip-outbound-ports=9092 is applied at the namespace for Kafka).
+        # Port 9300 (inter-node transport) is skipped: this is a single-node deployment
+        # so 9300 carries no real traffic, but skipping keeps it out of the mesh to
+        # match the single-node intent and avoid spurious mTLS errors if the port ever
+        # receives a probe. Port 9200 (HTTP) is meshed normally.
+        linkerd.io/inject: enabled
+        config.linkerd.io/skip-inbound-ports: "9300"
+        config.linkerd.io/skip-outbound-ports: "9300"
+        {{- end }}
     spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 120 }}
       # OpenSearch requires vm.max_map_count >= 262144 for Lucene mmap.
       # This sysctl must be set at the node level; in a pod it requires
       # a privileged initContainer. The privilege is scoped to this init
@@ -96,6 +104,14 @@ spec:
             timeoutSeconds: 10
             failureThreshold: 3
           {{- else }}
+          # Secure-mode probes: curl -k is used intentionally here.
+          # This is a loopback self-probe (127.0.0.1 / localhost) — there is no
+          # MITM surface between the kubelet exec and the OpenSearch process on the
+          # same pod. Inter-pod and external TLS is the service mesh's responsibility
+          # (Linkerd, docs/06). Resolving the probe to a verifiable CA would require
+          # mounting the operator-supplied CA into the container and using
+          # --resolve to map the service DNS to 127.0.0.1, adding operator ceremony
+          # for no security benefit on loopback. -k is acceptable in this scope only.
           readinessProbe:
             exec:
               command:
