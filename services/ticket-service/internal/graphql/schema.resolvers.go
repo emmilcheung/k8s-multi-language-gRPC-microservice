@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
@@ -144,7 +145,12 @@ func (r *queryResolver) Tickets(ctx context.Context) ([]*Ticket, error) {
 
 // ticketsConnectionMongo runs the Mongo-backed tickets page and is the fallback
 // used by TicketsConnection when OpenSearch is unavailable or not configured.
+// It observes search_query_duration_seconds{backend="mongo"} when SearchMetrics is wired.
 func (r *queryResolver) ticketsConnectionMongo(ctx context.Context, filter *TicketFilter, limit int, cursorIn string) (*TicketConnection, error) {
+	if r.SearchMetrics != nil {
+		t0 := time.Now()
+		defer func() { r.SearchMetrics.QueryDuration.WithLabelValues("mongo").Observe(time.Since(t0).Seconds()) }()
+	}
 	params := repository.PaginationParams{Limit: limit + 1}
 	if cursorIn != "" {
 		params.After = cursorIn
@@ -237,6 +243,12 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 		*filter.Search != ""
 
 	if useOpenSearch {
+		// Observe total OpenSearch path latency (includes all refill iterations).
+		var osT0 time.Time
+		if r.SearchMetrics != nil {
+			osT0 = time.Now()
+		}
+
 		params := repository.PaginationParams{
 			Limit:         limit,
 			AvailableOnly: filter.AvailableOnly != nil && *filter.AvailableOnly,
@@ -263,7 +275,8 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 		var endCursor string
 		exhausted := false
 
-		for iter := 0; len(pageItems) < limit && iter < maxRefill; iter++ {
+		var iter int
+		for iter = 0; len(pageItems) < limit && iter < maxRefill; iter++ {
 			results, batchNextCursor, ex, err := r.TicketService.SearchTickets(ctx, params, afterCursor)
 			exhausted = ex
 			if err != nil {
@@ -272,7 +285,9 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 					log = zap.NewNop()
 				}
 				log.Warn("opensearch query failed; serving mongo fallback", zap.Error(err))
-				// Task 8 will increment search_fallback_total here
+				if r.SearchMetrics != nil {
+					r.SearchMetrics.Fallback.Inc()
+				}
 				return r.ticketsConnectionMongo(ctx, filter, limit, cursorIn)
 			}
 			// Advance afterCursor by the last RAW hit's cursor (returned before
@@ -294,6 +309,11 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 			if exhausted {
 				break
 			}
+		}
+
+		if r.SearchMetrics != nil {
+			r.SearchMetrics.QueryDuration.WithLabelValues("opensearch").Observe(time.Since(osT0).Seconds())
+			r.SearchMetrics.RefillIterations.Observe(float64(iter))
 		}
 
 		edges := make([]*TicketEdge, len(pageItems))

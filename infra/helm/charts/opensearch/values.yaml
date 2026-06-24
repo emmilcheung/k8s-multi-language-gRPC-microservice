@@ -1,0 +1,24 @@
+# OpenSearch single-node deployment values.
+# Security is disabled (demo mode) — not suitable for production without TLS + auth.
+
+image:
+  repository: opensearchproject/opensearch
+  tag: "2.19.1"
+  pullPolicy: IfNotPresent
+
+# Single-node mode: no cluster formation, no inter-node TLS.
+singleNode: true
+
+service:
+  port: 9200
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# Java heap — kept at half the memory limit.
+javaOpts: "-Xms512m -Xmx512m"

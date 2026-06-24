@@ -9,6 +9,37 @@
 
 ---
 
+## Session: 2026-06-24 — feat(search): metrics, opt-in OpenSearch Helm subchart, docs ✅ COMPLETE
+
+**Branch:** `feat/opensearch-ticket-search`
+
+### What was done
+
+Completed Task 8 (rollout hardening) of the OpenSearch search feature in ticket-service.
+
+#### Summary
+
+- **New dependency:** `github.com/prometheus/client_golang v1.23.2` promoted from indirect to direct in `go.mod` (already present as a transitive dep of `echo-contrib`).
+- **New search dependency (Tasks 1–7):** `github.com/opensearch-project/opensearch-go/v4 v4.6.0` — added in earlier tasks; no new deps added this session.
+- **New package:** `internal/metrics/` — `SearchMetrics` struct with five Prometheus instruments registered on a caller-supplied registry (testable without the global default).
+- **Metric wiring:**
+  - `search_query_duration_seconds{backend}`: observed on the OpenSearch path (wraps entire refill loop) and the Mongo fallback path in `schema.resolvers.go`.
+  - `search_fallback_total`: incremented in the `TicketsConnection` resolver when an OpenSearch error triggers the Mongo fallback.
+  - `search_refill_iterations`: observed at the end of each resolver refill loop.
+  - `search_indexer_lag_seconds`: observed in `search.Indexer.processWithRetry` after a successful decode, measuring `now - event.CreatedAt`.
+  - `reindex_progress`: set as a gauge in `search.Reindex` after each page is upserted.
+- **Helm subchart:** `infra/helm/charts/opensearch/` — single-node Deployment (`discovery.type=single-node`, `DISABLE_SECURITY_PLUGIN=true`, 512Mi req / 1Gi limit), ClusterIP Service on 9200. Declared in umbrella `Chart.yaml` with `condition: opensearch.enabled`. Disabled locally (`values-local.yaml`), documented in `values.yaml`.
+- **Docs:** `docs/08-observability.md` (soft-dep exception + search metrics table), `README.md` (port 9200 + `docker compose --profile search`).
+- **Test:** `TestSearchMetrics_Registered` in `internal/metrics/search_test.go` — no external deps, verifies all five instruments register and Counter increments correctly.
+
+#### Commits on this branch (this session)
+
+| Commit | Scope | Summary |
+|---|---|---|
+| TBD | feat(search) | search metrics, opt-in opensearch helm subchart, docs |
+
+---
+
 ## Session: 2026-05-22 — runbook(graphql): add explicit migration revert sequence ✅ COMPLETE
 
 **Branch:** `feat/client-graphql-foundation`

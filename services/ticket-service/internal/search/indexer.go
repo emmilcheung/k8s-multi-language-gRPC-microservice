@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/acme/ticket-service/internal/kafka"
+	"github.com/acme/ticket-service/internal/metrics"
 	confluentkafka "github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"go.uber.org/zap"
 )
@@ -39,6 +40,13 @@ type Indexer struct {
 	consumer *confluentkafka.Consumer
 	producer dlqPublisher // nil disables DLQ routing (not recommended in production)
 	log      *zap.Logger
+	metrics  *metrics.SearchMetrics // nil until WithMetrics is called
+}
+
+// WithMetrics wires Prometheus search metrics into the indexer.
+// Call before Run — safe to skip (metrics are no-ops when nil).
+func (i *Indexer) WithMetrics(m *metrics.SearchMetrics) {
+	i.metrics = m
 }
 
 // NewIndexer creates a Kafka consumer subscribed to the ticket event topics and
@@ -133,6 +141,14 @@ func (i *Indexer) processWithRetry(ctx context.Context, topic string, msg *confl
 			zap.Error(decErr),
 		)
 		return i.publishToDLQ(ctx, topic, msg, decErr)
+	}
+
+	// Observe indexer lag: wall-clock time between when the ticket event was created
+	// and now. Requires a parseable RFC3339 CreatedAt in the doc.
+	if i.metrics != nil && doc.CreatedAt != "" {
+		if eventTime, parseErr := time.Parse(time.RFC3339, doc.CreatedAt); parseErr == nil {
+			i.metrics.IndexerLag.Observe(time.Since(eventTime).Seconds())
+		}
 	}
 
 	// Step 2: upsert — retriable.

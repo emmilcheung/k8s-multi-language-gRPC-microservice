@@ -82,7 +82,7 @@ func main() {
 		zap.Int("page_size", pageSize),
 	)
 
-	if err := search.Reindex(ctx, repo, client, pageSize); err != nil {
+	if err := search.Reindex(ctx, repo, client, pageSize, nil); err != nil {
 		log.Fatal("reindex failed", zap.Error(err))
 	}
 

@@ -393,11 +393,20 @@ docker compose down
 | PostgreSQL (users) | 5436 |
 | Redis | 6379 |
 | Schema Registry | 8081 |
+| **OpenSearch** (opt-in, `--profile search`) | **9200** |
 | Prometheus (separate observability compose) | 9090 |
 | Jaeger (separate observability compose) | 16686 |
 | Grafana (separate observability compose) | 3004 |
 | OTel Collector (gRPC, separate observability compose) | 4317 |
 | OTel Collector (HTTP, separate observability compose) | 4318 |
+
+**To start OpenSearch** (adds single-node OpenSearch to the compose network, binds port 9200):
+
+```bash
+docker compose --profile search up -d opensearch
+```
+
+Then set `SEARCH_BACKEND=opensearch` and `OPENSEARCH_URL=http://localhost:9200` on ticket-service to activate the search path.
 
 All traffic from the browser goes through Kong on port **8000**.
 

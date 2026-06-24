@@ -62,8 +62,11 @@ dependencies:
 - name: cp-kafka
   repository: file://charts/cp-kafka
   version: 0.1.0
+- name: opensearch
+  repository: file://charts/opensearch
+  version: 0.1.0
 - name: kong
   repository: https://charts.konghq.com
   version: 2.48.0
-digest: sha256:ef4eeda61a3b14bc62e7c216eecf3a485ee98f730b02f6f53427ced06db147f4
-generated: "2026-05-08T19:05:14.645285+08:00"
+digest: sha256:e0f87b3083845614a473d204fe7fb6e0eadf0cb99bc5785459e9c1ba2f49da8e
+generated: "2026-06-24T14:20:25.019065+08:00"

@@ -17,6 +17,7 @@ import (
 	"github.com/acme/ticket-service/internal/handler"
 	"github.com/acme/ticket-service/internal/health"
 	"github.com/acme/ticket-service/internal/kafka"
+	"github.com/acme/ticket-service/internal/metrics"
 	"github.com/acme/ticket-service/internal/middleware"
 	"github.com/acme/ticket-service/internal/outbox"
 	"github.com/acme/ticket-service/internal/reconciler"
@@ -27,6 +28,7 @@ import (
 	"github.com/acme/ticket-service/internal/tracing"
 	"github.com/acme/ticket-service/pkg/logger"
 	"github.com/labstack/echo-contrib/echoprometheus"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
@@ -158,6 +160,11 @@ func main() {
 	defer relayCancel()
 	go outboxRelay.Start(relayCtx)
 
+	// Register search Prometheus metrics on the default registry.
+	// These are always registered regardless of SEARCH_BACKEND so that the
+	// metric descriptors are present at startup (avoids "metric not found" gaps).
+	searchMetrics := metrics.NewSearchMetrics(prometheus.DefaultRegisterer)
+
 	// Optionally initialise OpenSearch — search client is attached to svc after svc is created.
 	var openSearchClient *search.Client
 	if cfg.SearchBackend == "opensearch" {
@@ -199,6 +206,7 @@ func main() {
 		if err != nil {
 			log.Fatal("search indexer", zap.Error(err))
 		}
+		indexer.WithMetrics(searchMetrics)
 		idxCtx, idxCancel := context.WithCancel(context.Background())
 		defer idxCancel()
 		go func() {
@@ -248,7 +256,7 @@ func main() {
 	// A per-request DataLoader middleware is wrapped around the handler so that
 	// every _entities batch call gets its own loader instance (prevents
 	// cross-request data leaks and keeps the per-request cache correct).
-	gqlResolver := &gqlgraph.Resolver{TicketService: svc, Config: cfg, Log: log}
+	gqlResolver := &gqlgraph.Resolver{TicketService: svc, Config: cfg, Log: log, SearchMetrics: searchMetrics}
 	gqlSrv := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{Resolvers: gqlResolver}))
 	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		loader := gqlgraph.NewTicketLoader(svc)

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/acme/ticket-service/internal/metrics"
 	"github.com/acme/ticket-service/internal/repository"
 	"go.uber.org/zap"
 )
@@ -49,8 +50,8 @@ func ticketToDoc(t *repository.Ticket) Doc {
 // Reindex pages through ALL tickets via repo.FindAll (cursor paging, newest-first)
 // and upserts each one into the OpenSearch index via client.UpsertTicket.
 // pageSize controls how many tickets are fetched per page (capped at 100 by FindAll).
-// Progress is logged per page as "reindex_progress".
-func Reindex(ctx context.Context, repo TicketRepository, client *Client, pageSize int) error {
+// Progress is logged per page as "reindex_progress" and set on m.ReindexProgress (nil-safe).
+func Reindex(ctx context.Context, repo TicketRepository, client *Client, pageSize int, m *metrics.SearchMetrics) error {
 	var (
 		after string
 		total int
@@ -79,6 +80,9 @@ func Reindex(ctx context.Context, repo TicketRepository, client *Client, pageSiz
 		last := page[len(page)-1]
 		after = repository.EncodeCursor(last.CreatedAt, last.ID)
 
+		if m != nil {
+			m.ReindexProgress.Set(float64(total))
+		}
 		client.log.Info("reindex_progress",
 			zap.Int("page_size", len(page)),
 			zap.Int("total_done", total),

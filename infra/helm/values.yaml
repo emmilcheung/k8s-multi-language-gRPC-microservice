@@ -48,6 +48,10 @@ ticket-service:
     LOG_LEVEL: info
     REDIS_URL: ""
     VENUE_SERVICE_ADDR: "venue-service:50052"
+    # When opensearch.enabled=true, set these via overlay or --set at deploy time:
+    #   SEARCH_BACKEND: opensearch
+    #   OPENSEARCH_URL: "http://ticketing-opensearch:9200"
+    #   OPENSEARCH_INDEX: tickets
   resources:
     requests:
       cpu: 100m
@@ -55,6 +59,10 @@ ticket-service:
     limits:
       cpu: 500m
       memory: 256Mi
+
+# ── opensearch ────────────────────────────────────────────────────────────────
+opensearch:
+  enabled: true
 
 # ── order-service ─────────────────────────────────────────────────────────────
 order-service:
