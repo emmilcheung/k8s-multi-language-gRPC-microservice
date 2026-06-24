@@ -7,6 +7,12 @@ metadata:
     app.kubernetes.io/name: opensearch
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    # Linkerd mesh injection: skip port 9300 (transport) — mesh handles mTLS on 9200.
+    # Remove this annotation block if Linkerd is not installed; it is a no-op when
+    # the mesh is absent. See docs/06-security.md:50 for the posture rationale.
+    config.linkerd.io/skip-inbound-ports: "9300"
+    config.linkerd.io/skip-outbound-ports: "9300"
 spec:
   replicas: 1
   selector:
@@ -50,15 +56,29 @@ spec:
             - name: discovery.type
               value: single-node
             {{- if .Values.security.disabled }}
-            # Dev/local only: disables TLS and authentication in the security plugin.
-            # Never set in production — always gate behind security.disabled=true in the overlay.
+            # Security plugin is OFF (default posture): in-cluster derived read-model,
+            # transport security via Linkerd mesh + NetworkPolicy authz (docs/06:50).
             - name: DISABLE_SECURITY_PLUGIN
               value: "true"
+            {{- else }}
+            # Security plugin is ON (opt-in): TLS + auth enforced by the plugin.
+            # Admin credentials are sourced from the operator-supplied Secret.
+            - name: OS_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "security.adminSecret.name is required when security.disabled=false" .Values.security.adminSecret.name }}
+                  key: {{ .Values.security.adminSecret.usernameKey }}
+            - name: OS_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.security.adminSecret.name }}
+                  key: {{ .Values.security.adminSecret.passwordKey }}
             {{- end }}
             - name: OPENSEARCH_JAVA_OPTS
               value: {{ .Values.javaOpts | quote }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.security.disabled }}
           readinessProbe:
             httpGet:
               path: /_cluster/health
@@ -75,3 +95,25 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 10
             failureThreshold: 3
+          {{- else }}
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'curl -fsS -k -u "$OS_ADMIN_USER:$OS_ADMIN_PASSWORD" https://localhost:9200/_cluster/health'
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'curl -fsS -k -u "$OS_ADMIN_USER:$OS_ADMIN_PASSWORD" https://localhost:9200/_cluster/health'
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 3
+          {{- end }}

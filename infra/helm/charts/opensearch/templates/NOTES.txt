@@ -1,0 +1,56 @@
+OpenSearch — {{ .Release.Name }} — {{ .Chart.Version }}
+
+Security posture: plugin OFF (default) + NetworkPolicy authz + Linkerd mesh mTLS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This is an in-cluster, single-node, NetworkPolicy-isolated derived read-model
+holding only public catalogue data (no PII). Per docs/06-security.md:50:
+
+  "All traffic inside the cluster: mTLS via a service mesh (Linkerd) —
+   services do not implement mTLS themselves."
+
+Default posture (security.disabled=true):
+  • OpenSearch security plugin is OFF — no TLS bolt-on per-chart.
+  • NetworkPolicy restricts ingress on :9200 to ticket-service pods only.
+  • Linkerd sidecar injection provides in-cluster mTLS when the mesh is active.
+  • Probes: plain httpGet on /_cluster/health (port 9200).
+
+To enable the security plugin (OPT-IN — exposed/multi-node/compliance):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Create the admin credential Secret:
+
+   kubectl create secret generic opensearch-admin \
+     --namespace {{ .Release.Namespace }} \
+     --from-literal=username=admin \
+     --from-literal=password=<strong-password>
+
+2. Mount TLS certificates into the pod (add volumeMounts/volumes in your overlay).
+
+3. Install with:
+
+   helm upgrade --install {{ .Release.Name }} ./infra/helm/charts/opensearch \
+     --set security.disabled=false \
+     --set security.adminSecret.name=opensearch-admin
+
+When security.disabled=false:
+  • The DISABLE_SECURITY_PLUGIN env var is NOT set — the plugin enforces TLS + auth.
+  • Probes auto-switch to authenticated exec (curl with OS_ADMIN_USER/OS_ADMIN_PASSWORD
+    sourced from the admin Secret). No plain-HTTP probe is rendered.
+
+Linkerd mesh injection:
+━━━━━━━━━━━━━━━━━━━━━━
+
+The Deployment carries Linkerd skip-port annotations for port 9300 (transport).
+If Linkerd is not installed, these annotations are a no-op. When Linkerd IS
+installed, inject the namespace/pod as usual — the mesh will handle mTLS on :9200.
+
+  kubectl annotate namespace {{ .Release.Namespace }} \
+    linkerd.io/inject=enabled
+
+Service endpoint: {{ include "opensearch.fullname" . }}:9200
+{{- if .Values.security.disabled }}
+Protocol: HTTP (security plugin off — in-cluster only, mesh mTLS + NetworkPolicy)
+{{- else }}
+Protocol: HTTPS (security plugin on — authenticate with admin credentials)
+{{- end }}

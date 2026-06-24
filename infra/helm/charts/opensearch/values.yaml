@@ -1,6 +1,20 @@
 # OpenSearch single-node deployment values.
-# Security plugin is ENABLED by default (secure-by-default).
-# Set security.disabled=true only in dev/local overlays.
+#
+# Default security posture: plugin OFF + NetworkPolicy authz + Linkerd mesh mTLS (docs/06:50).
+#
+# This chart deploys an in-cluster, single-node, NetworkPolicy-isolated derived
+# read-model holding only public catalogue data (no PII). Per docs/06-security.md:50,
+# in-cluster transport security is the service mesh's (Linkerd's) responsibility —
+# services do NOT implement mTLS themselves. The security plugin is therefore OFF by
+# default; NetworkPolicy provides the authz boundary; Linkerd provides transport
+# encryption when the mesh is installed.
+#
+# To enable the security plugin (OPT-IN — for exposed, multi-node, or compliance deployments):
+#   security.disabled: false
+# When enabled you MUST also supply:
+#   - TLS certificates (mounted into the container)
+#   - An admin credential Secret referenced by security.adminSecret.name
+#   - Probes will automatically switch to authenticated exec (no manual config needed)
 
 image:
   repository: opensearchproject/opensearch
@@ -35,11 +49,24 @@ resources:
 javaOpts: "-Xms512m -Xmx512m"
 
 security:
-  # Set to true ONLY in dev/local overlays to disable the OpenSearch security plugin.
-  # Production must keep this false (security plugin on = TLS + auth enforced).
-  disabled: false
+  # Default: plugin OFF. Transport security is the service mesh's (Linkerd's) job (docs/06:50).
+  # Set to false to enable the security plugin (OPT-IN for exposed/multi-node/compliance deployments).
+  # When disabled=false you MUST supply TLS certs and the admin credential Secret below.
+  disabled: true
+
+  # adminSecret: operator-supplied Secret containing OpenSearch admin credentials.
+  # Required ONLY when security.disabled=false.
+  # Example:
+  #   kubectl create secret generic opensearch-admin \
+  #     --from-literal=username=admin \
+  #     --from-literal=password=<strong-password>
+  # Then set: security.adminSecret.name=opensearch-admin
+  adminSecret:
+    name: ""          # Name of the Secret; must be in the same namespace as the release
+    usernameKey: username
+    passwordKey: password
 
 networkPolicy:
   # Restricts ingress on 9200 to ticket-service pods only.
-  # Disable only if a different network layer (e.g. service mesh) enforces isolation.
+  # This is the primary authz boundary for this chart (docs/06:50).
   enabled: true

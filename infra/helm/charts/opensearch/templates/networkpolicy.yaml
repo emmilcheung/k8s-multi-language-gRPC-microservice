@@ -1,4 +1,8 @@
 {{- if .Values.networkPolicy.enabled }}
+# NetworkPolicy for opensearch (I-01)
+# Ingress: ticket-service pods on 9200 only.
+# This policy is the primary authz boundary for this chart per docs/06-security.md:50.
+# In-cluster transport security is provided by the Linkerd service mesh.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -16,10 +20,14 @@ spec:
   policyTypes:
     - Ingress
   ingress:
-    # Allow ingress on 9200 only from ticket-service pods.
-    # ticket-service pods carry app.kubernetes.io/name=ticket-service (see charts/ticket-service/templates/_helpers.tpl).
+    # Allow ingress on 9200 only from ticket-service pods in the release namespace.
+    # namespaceSelector + podSelector are ANDed: only ticket-service pods in this
+    # namespace can reach OpenSearch (prevents cross-namespace bypass).
     - from:
-        - podSelector:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
             matchLabels:
               app.kubernetes.io/name: ticket-service
               app.kubernetes.io/instance: {{ .Release.Name }}
