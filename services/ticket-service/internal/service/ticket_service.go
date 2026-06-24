@@ -95,6 +95,7 @@ func buildOutboxPayload(ticket *repository.Ticket) repository.TicketOutboxPayloa
 		SeatingPlanID: ticket.SeatingPlanID,
 		TicketType:    ticket.TicketType,
 		Version:       ticket.Version,
+		Category:      ticket.Category,
 	}
 	if ticket.Event != nil {
 		var endsAt string

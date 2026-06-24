@@ -230,3 +230,13 @@ func TestBackoffDelay_ShouldCapAtMaximum(t *testing.T) {
 	assert.Equal(t, time.Second, backoffDelay(2))
 	assert.Equal(t, 30*time.Second, backoffDelay(10))
 }
+
+func TestRelay_TicketEventData_CarriesCategoryAndCreatedAt(t *testing.T) {
+	created := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	payload := repository.TicketOutboxPayload{
+		ID: "tk_1", Title: "Eras Tour", Category: "MUSIC", CreatedAt: created,
+	}
+	got := buildTicketEventData(payload) // the relay's payload->event mapper (see Step 3)
+	require.Equal(t, "MUSIC", got.Category)
+	require.Equal(t, created.Format(time.RFC3339), got.CreatedAt)
+}

@@ -108,6 +108,8 @@ type TicketOutboxPayload struct {
 	MaxPerUser    int                 `bson:"maxPerUser"`
 	Version       int                 `bson:"version"`
 	Event         *TicketOutboxDetail `bson:"event,omitempty"`
+	Category      string              `bson:"category,omitempty"`
+	CreatedAt     time.Time           `bson:"createdAt"`
 }
 
 // TicketOutboxDetail stores optional event metadata in durable form.
@@ -164,6 +166,8 @@ func normalizePendingOutboxEvent(ticket *Ticket, event *TicketOutboxEvent) {
 	event.Payload.Sold = ticket.Sold
 	event.Payload.MaxPerUser = ticket.MaxPerUser
 	event.Payload.Version = ticket.Version
+	event.Payload.Category = ticket.Category
+	event.Payload.CreatedAt = ticket.CreatedAt
 	if ticket.Event != nil && event.Payload.Event == nil {
 		var endsAt string
 		if ticket.Event.EndsAt != nil {

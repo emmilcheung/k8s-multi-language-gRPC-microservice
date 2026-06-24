@@ -113,31 +113,38 @@ func (r *Relay) processClaimedEvent(ctx context.Context, item repository.Claimed
 	return err
 }
 
-func (r *Relay) publish(ctx context.Context, event repository.TicketOutboxEvent) error {
-	payload := kafka.TicketEventData{
-		ID:            event.Payload.ID,
-		Title:         event.Payload.Title,
-		Price:         event.Payload.Price,
-		UserID:        event.Payload.UserID,
-		SeatingPlanID: event.Payload.SeatingPlanID,
-		TicketType:    event.Payload.TicketType,
-		Quota:         event.Payload.Quota,
-		Reserved:      event.Payload.Reserved,
-		Sold:          event.Payload.Sold,
-		MaxPerUser:    event.Payload.MaxPerUser,
-		Version:       event.Payload.Version,
+func buildTicketEventData(payload repository.TicketOutboxPayload) kafka.TicketEventData {
+	data := kafka.TicketEventData{
+		ID:            payload.ID,
+		Title:         payload.Title,
+		Price:         payload.Price,
+		UserID:        payload.UserID,
+		SeatingPlanID: payload.SeatingPlanID,
+		TicketType:    payload.TicketType,
+		Quota:         payload.Quota,
+		Reserved:      payload.Reserved,
+		Sold:          payload.Sold,
+		MaxPerUser:    payload.MaxPerUser,
+		Version:       payload.Version,
+		Category:      payload.Category,
+		CreatedAt:     payload.CreatedAt.Format(time.RFC3339),
 	}
-	if event.Payload.Event != nil {
-		payload.Event = &kafka.EventData{
-			Title:        event.Payload.Event.Title,
-			Description:  event.Payload.Event.Description,
-			StartsAt:     event.Payload.Event.StartsAt,
-			EndsAt:       event.Payload.Event.EndsAt,
-			ImageURL:     event.Payload.Event.ImageURL,
-			VenueName:    event.Payload.Event.VenueName,
-			VenueAddress: event.Payload.Event.VenueAddress,
+	if payload.Event != nil {
+		data.Event = &kafka.EventData{
+			Title:        payload.Event.Title,
+			Description:  payload.Event.Description,
+			StartsAt:     payload.Event.StartsAt,
+			EndsAt:       payload.Event.EndsAt,
+			ImageURL:     payload.Event.ImageURL,
+			VenueName:    payload.Event.VenueName,
+			VenueAddress: payload.Event.VenueAddress,
 		}
 	}
+	return data
+}
+
+func (r *Relay) publish(ctx context.Context, event repository.TicketOutboxEvent) error {
+	payload := buildTicketEventData(event.Payload)
 
 	switch event.Type {
 	case repository.OutboxEventTypeTicketCreated:
