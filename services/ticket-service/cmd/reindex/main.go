@@ -77,7 +77,6 @@ func main() {
 	}
 
 	log.Info("starting reindex",
-		zap.String("mongo_uri", mongoURI),
 		zap.String("opensearch_url", openSearchURL),
 		zap.String("index", openSearchIndex),
 		zap.Int("page_size", pageSize),
