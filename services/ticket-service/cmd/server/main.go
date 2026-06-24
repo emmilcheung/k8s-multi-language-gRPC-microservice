@@ -172,7 +172,9 @@ func main() {
 		if err != nil {
 			log.Fatal("failed to create search client", zap.Error(err))
 		}
-		if err := sc.EnsureIndex(context.Background()); err != nil {
+		ensureCtx, ensureCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer ensureCancel()
+		if err := sc.EnsureIndex(ensureCtx); err != nil {
 			log.Fatal("ensure search index", zap.Error(err))
 		}
 		openSearchClient = sc

@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/opensearch-project/opensearch-go/v4"
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
+	"github.com/sony/gobreaker/v2"
 	"go.uber.org/zap"
 )
 
@@ -34,24 +36,61 @@ type Doc struct {
 	CreatedAt     string  `json:"createdAt,omitempty"`
 }
 
+const opensearchHTTPTimeout = 10 * time.Second
+
 // Client wraps the OpenSearch API client and holds the target index name.
 type Client struct {
-	api   *opensearchapi.Client
-	index string
-	log   *zap.Logger
+	api     *opensearchapi.Client
+	breaker *gobreaker.CircuitBreaker[[]Hit]
+	index   string
+	log     *zap.Logger
 }
 
 // NewClient creates an OpenSearch client for plain HTTP with no auth.
+// A 10-second timeout is enforced at the transport layer (docs/09 requirement).
 func NewClient(url, index string, log *zap.Logger) (*Client, error) {
 	api, err := opensearchapi.NewClient(opensearchapi.Config{
 		Client: opensearch.Config{
 			Addresses: []string{url},
+			Transport: &http.Transport{
+				// Wrap inside an http.Transport so we can set ResponseHeaderTimeout.
+				// The per-request deadline is enforced via the context passed to each
+				// API call, but the transport-level timeout prevents hung connections
+				// when no context deadline is set (e.g. EnsureIndex at startup).
+				ResponseHeaderTimeout: opensearchHTTPTimeout,
+			},
 		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("search.NewClient: %w", err)
 	}
-	return &Client{api: api, index: index, log: log}, nil
+
+	settings := gobreaker.Settings{
+		Name:        "opensearch",
+		Interval:    30 * time.Second,
+		Timeout:     15 * time.Second,
+		MaxRequests: 1,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			if counts.Requests < 10 {
+				return false
+			}
+			return float64(counts.TotalFailures)/float64(counts.Requests) >= 0.5
+		},
+		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+			log.Warn("opensearch circuit breaker state changed",
+				zap.String("dependency", name),
+				zap.String("from", from.String()),
+				zap.String("to", to.String()),
+			)
+		},
+	}
+
+	return &Client{
+		api:     api,
+		breaker: gobreaker.NewCircuitBreaker[[]Hit](settings),
+		index:   index,
+		log:     log,
+	}, nil
 }
 
 // EnsureIndex creates the tickets index with the defined mapping if it does not

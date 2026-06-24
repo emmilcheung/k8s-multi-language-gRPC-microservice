@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/search"
@@ -76,7 +77,9 @@ func main() {
 		log.Fatal("create search client", zap.Error(err))
 	}
 
-	if err := client.EnsureIndex(ctx); err != nil {
+	ensureCtx, ensureCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer ensureCancel()
+	if err := client.EnsureIndex(ensureCtx); err != nil {
 		log.Fatal("ensure index", zap.Error(err))
 	}
 

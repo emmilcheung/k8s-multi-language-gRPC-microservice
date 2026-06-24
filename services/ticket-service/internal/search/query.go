@@ -106,17 +106,22 @@ func (c *Client) Query(ctx context.Context, p QueryParams) ([]Hit, error) {
 		return nil, fmt.Errorf("search.Query: marshal body: %w", err)
 	}
 
-	resp, err := c.api.Search(ctx, &opensearchapi.SearchReq{
-		Indices: []string{c.index},
-		Body:    bytes.NewReader(bodyBytes),
+	hits, err := c.breaker.Execute(func() ([]Hit, error) {
+		resp, searchErr := c.api.Search(ctx, &opensearchapi.SearchReq{
+			Indices: []string{c.index},
+			Body:    bytes.NewReader(bodyBytes),
+		})
+		if searchErr != nil {
+			return nil, searchErr
+		}
+		result := make([]Hit, len(resp.Hits.Hits))
+		for i, h := range resp.Hits.Hits {
+			result[i] = Hit{ID: h.ID, Sort: h.Sort}
+		}
+		return result, nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("search.Query: %w", err)
-	}
-
-	hits := make([]Hit, len(resp.Hits.Hits))
-	for i, h := range resp.Hits.Hits {
-		hits[i] = Hit{ID: h.ID, Sort: h.Sort}
 	}
 	return hits, nil
 }
