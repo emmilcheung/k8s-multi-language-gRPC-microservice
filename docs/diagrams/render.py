@@ -79,6 +79,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <a href="02-data-model.html">Data Model</a>
     <a href="03-c4-container.html">C4 Container</a>
     <a href="04-data-flow-sequence.html">Data Flow</a>
+    <a href="05-auth-flows.html">Auth Flows</a>
+    <a href="06-waiting-room-flow.html">Waiting Room</a>
+    <a href="07-search-dataflow.html">Search Dataflow</a>
   </div>
   <header>
     <h1>{title}</h1>
@@ -147,8 +150,9 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
 <body>
   <main>
     <h1>Ticketing Platform — Architecture Diagrams</h1>
-    <p class="sub">Four diagrams covering AWS infrastructure, per-service data ownership,
-      C4 container topology, and the end-to-end reservation + payment saga.</p>
+    <p class="sub">Diagrams covering AWS infrastructure, per-service data ownership,
+      C4 container topology, the reservation + payment saga, auth flows, the virtual
+      waiting room, and the OpenSearch search dataflow. Generated from source — kept in sync with the code.</p>
     <div class="grid">
       <a class="tile" href="01-aws-infrastructure.svg">
         <span class="badge b-aws">Graphviz · SVG/PNG</span>
@@ -173,6 +177,24 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
         <h2>4 · Data Flow / Saga</h2>
         <p>Full reservation → payment → finalize / expire flow with
           CloudEvents on MSK, transactional outbox, DLQ.</p>
+      </a>
+      <a class="tile" href="05-auth-flows.html">
+        <span class="badge b-mer">Mermaid · Sequence</span>
+        <h2>5 · Auth Flows</h2>
+        <p>Signup / login / refresh, RS256 JWT issuance, and JWKS
+          distribution to Kong for gateway-side verification.</p>
+      </a>
+      <a class="tile" href="06-waiting-room-flow.html">
+        <span class="badge b-mer">Mermaid · Sequence</span>
+        <h2>6 · Virtual Waiting Room</h2>
+        <p>Onsale surge gate: pre-queue fair draw, rate-based admission,
+          single-use HMAC pass, clean-URL redemption.</p>
+      </a>
+      <a class="tile" href="07-search-dataflow.html">
+        <span class="badge b-mer">Mermaid · Sequence</span>
+        <h2>7 · Search Dataflow</h2>
+        <p>OpenSearch CQRS read model: Kafka-fed index path and the
+          ranked query path with live Mongo hydration + regex fallback.</p>
       </a>
     </div>
   </main>
