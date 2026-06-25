@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Virtual Waiting Room — onsale surge gate flow</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: #F7F8FA;
+      color: #232F3E;
+    }
+    header {
+      max-width: 1400px;
+      margin: 0 auto 16px auto;
+    }
+    header h1 { margin: 0 0 4px 0; font-size: 20px; }
+    header p { margin: 0; color: #556070; font-size: 13px; }
+    .card {
+      background: #fff;
+      border: 1px solid #E5E7EB;
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 1400px;
+      margin: 0 auto;
+      overflow-x: auto;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .nav {
+      max-width: 1400px;
+      margin: 0 auto 12px auto;
+      font-size: 13px;
+    }
+    .nav a { color: #1A73E8; text-decoration: none; margin-right: 12px; }
+    .nav a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="index.html">← Index</a>
+    <a href="01-aws-infrastructure.svg">AWS Infra (SVG)</a>
+    <a href="02-data-model.html">Data Model</a>
+    <a href="03-c4-container.html">C4 Container</a>
+    <a href="04-data-flow-sequence.html">Data Flow</a>
+  </div>
+  <header>
+    <h1>Virtual Waiting Room — onsale surge gate flow</h1>
+    <p>Rendered client-side via Mermaid 11. Source: <code>06-waiting-room-flow.mermaid</code></p>
+  </header>
+  <div class="card">
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor B as Buyer
+    participant C as Connector (Next.js proxy.ts)
+    participant Q as queue-service (queue.* domain)
+    participant R as Queue Redis
+    participant K as Kong + ticket-service
+
+    Note over C: onsale armed (QUEUE_GATE_ARMED=true)
+    B->>C: GET /tickets/123
+    C-->>B: 302 to queue/wait?e=E&target=/tickets/123 (no valid pass)
+    B->>Q: GET /wait (pre-queue)
+    Q->>R: ZADD prequeue (random score - fair draw)
+    Q-->>B: countdown page, polls /serving
+    loop until position < serving
+        B->>Q: GET /serving (cacheable, pure time-math)
+        Q-->>B: serving = floor(rate * (now - T0))
+    end
+    B->>Q: POST /claim
+    Q-->>B: signed admission token (HMAC, single-use nonce)
+    B->>C: 302 to /tickets/123?qpass={token}
+    C->>Q: POST /redeem (consume nonce once)
+    Q-->>C: 200 (first use only)
+    C-->>B: set qq_pass cookie, 302 /tickets/123 (clean URL)
+    B->>K: reserve mutation (qq_pass cookie)
+    Note over K: Kong backstop re-validates qq_pass HMAC
+    K-->>B: reserved
+
+    </pre>
+  </div>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: "base",
+      securityLevel: "loose",
+      er: { useMaxWidth: true },
+      sequence: { useMaxWidth: true, actorMargin: 60, messageAlign: "center" },
+      flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" }
+    });
+  </script>
+</body>
+</html>

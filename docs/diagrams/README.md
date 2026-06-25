@@ -1,6 +1,6 @@
 # Architecture Diagrams — v2
 
-Four production-grade diagrams for the ticketing platform, reverse-engineered from
+Six production-grade diagrams for the ticketing platform, reverse-engineered from
 the current codebase (9 services, real Kafka topics, real gRPC APIs, Terraform
 modules under `infra/terraform/`).
 
@@ -14,7 +14,7 @@ it stays in sync with the code and survives PR review.
 | **Graphviz (Python)** | Dense hierarchical graphs, precise layout, deterministic SVG/PNG — no CDN needed | `01-aws-infrastructure` |
 | **Mermaid ER** | Concise entity-relationship notation with identifying / non-identifying lines | `02-data-model` |
 | **Mermaid Flowchart** | C4-container style with domain grouping, multiple protocol labels | `03-c4-container` |
-| **Mermaid Sequence** | Saga/state-machine style, readable autonumbered steps, par/alt branches | `04-data-flow-sequence` |
+| **Mermaid Sequence** | Saga/state-machine style, readable autonumbered steps, par/alt branches | `04-data-flow-sequence`, `06-waiting-room-flow`, `07-search-dataflow` |
 
 Other options considered (PlantUML, the `diagrams` Python library, D2) were dropped
 because the sandbox has no outbound PyPI/npm access. Graphviz is preinstalled and
@@ -33,8 +33,14 @@ v2/
 ├── 03-c4-container.html
 ├── 04-data-flow-sequence.mermaid
 ├── 04-data-flow-sequence.html
+├── 05-auth-flows.mermaid
+├── 05-auth-flows.html
+├── 06-waiting-room-flow.mermaid
+├── 06-waiting-room-flow.html
+├── 07-search-dataflow.mermaid      # OpenSearch CQRS index + query sequence
+├── 07-search-dataflow.html
 ├── render.py                       # regenerates everything
-├── index.html                      # landing page linking all four
+├── index.html                      # landing page linking all diagrams
 └── README.md                       # this file
 ```
 
@@ -129,6 +135,15 @@ compensating path, grounded in the actual code (topic names from
 
 A closing note documents the DLQ policy (`<topic>.dlq`, max 3 retries with
 exponential back-off), matching `docs/04-asynchronous-messaging.md`.
+
+### 7. Search Dataflow — CQRS index + query (`07-search-dataflow.mermaid`)
+
+A two-phase sequence diagram for the OpenSearch-backed ticket search read model:
+
+- **Phase A — Index (CQRS write):** ticket create/update writes Mongo txn + transactional outbox → outbox relay publishes `tickets.ticket.{created,updated}` to Kafka → ticket-service's embedded search-indexer upserts into OpenSearch (external-version idempotency; DLQ + retry on parse/transient failure, never silently dropped).
+- **Phase B — Query (read + fallback):** `TicketsConnection(filter:{search})` → if `SEARCH_BACKEND=opensearch` and a query is present, OpenSearch `multi_match` (fuzziness AUTO, boosted fields) + filters return ranked IDs → ticket-service hydrates the page from Mongo (canonical data + live availability) → refill loop applies `ticketType`. Falls back to Mongo regex path on OpenSearch error or when the flag is unset — never hard-fails.
+
+Pairs with "how would you build a search feature on top of a Mongo-backed microservice with a write model already in place" interview questions.
 
 ### 6. Virtual waiting room flow (`06-waiting-room-flow.mermaid`)
 

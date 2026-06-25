@@ -23,6 +23,12 @@ MERMAID_DIAGRAMS = [
      "C4 Container — service topology & protocols"),
     ("04-data-flow-sequence.mermaid", "04-data-flow-sequence.html",
      "Data Flow — reservation + payment saga (sequence)"),
+    ("05-auth-flows.mermaid", "05-auth-flows.html",
+     "Auth Flows — signup, login, JWT refresh"),
+    ("06-waiting-room-flow.mermaid", "06-waiting-room-flow.html",
+     "Virtual Waiting Room — onsale surge gate flow"),
+    ("07-search-dataflow.mermaid", "07-search-dataflow.html",
+     "Search Dataflow — CQRS index + query (with Mongo fallback)"),
 ]
 
 

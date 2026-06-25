@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Search Dataflow — CQRS index + query (with Mongo fallback)</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: #F7F8FA;
+      color: #232F3E;
+    }
+    header {
+      max-width: 1400px;
+      margin: 0 auto 16px auto;
+    }
+    header h1 { margin: 0 0 4px 0; font-size: 20px; }
+    header p { margin: 0; color: #556070; font-size: 13px; }
+    .card {
+      background: #fff;
+      border: 1px solid #E5E7EB;
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 1400px;
+      margin: 0 auto;
+      overflow-x: auto;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .nav {
+      max-width: 1400px;
+      margin: 0 auto 12px auto;
+      font-size: 13px;
+    }
+    .nav a { color: #1A73E8; text-decoration: none; margin-right: 12px; }
+    .nav a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="index.html">← Index</a>
+    <a href="01-aws-infrastructure.svg">AWS Infra (SVG)</a>
+    <a href="02-data-model.html">Data Model</a>
+    <a href="03-c4-container.html">C4 Container</a>
+    <a href="04-data-flow-sequence.html">Data Flow</a>
+  </div>
+  <header>
+    <h1>Search Dataflow — CQRS index + query (with Mongo fallback)</h1>
+    <p>Rendered client-side via Mermaid 11. Source: <code>07-search-dataflow.mermaid</code></p>
+  </header>
+  <div class="card">
+    <pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#FF9900','primaryBorderColor':'#232F3E','primaryTextColor':'#232F3E','lineColor':'#232F3E','actorBkg':'#FF9900','actorBorder':'#232F3E','actorTextColor':'#232F3E','noteBkgColor':'#FDF6E3','noteTextColor':'#232F3E','noteBorderColor':'#232F3E','fontFamily':'Helvetica, Arial, sans-serif','background':'#FFF'},'themeCSS':'.root { background-color: #ffffff; }'}}}%%
+sequenceDiagram
+    autonumber
+    actor C as Customer / Client
+    participant K as kong-gateway
+    participant TS as ticket-service (Go)
+    participant MG as Mongo (ticket_db)
+    participant MQ as MSK Kafka
+    participant OS as OpenSearch
+
+    %% ----------- PHASE A: Index (CQRS write) --------------------------------
+    rect rgb(250,243,219)
+    Note over C,OS: Phase A — Index (CQRS write path)
+    C->>K: POST /tickets (create or update)
+    K->>TS: JWT verified — forward
+    TS->>MG: BEGIN txn — INSERT/UPDATE ticket + INSERT outbox row
+    MG-->>TS: txn committed
+    TS-->>K: 201 / 200 OK
+    K-->>C: response
+    TS->>MQ: outbox relay publishes tickets.ticket.created or .updated (CloudEvents, key=ticket_id)
+    Note right of MQ: Transactional outbox guarantees at-least-once delivery to Kafka
+    MQ-->>TS: search-indexer consumer receives event
+    TS->>OS: UpsertTicket (external version = Kafka offset, idempotent)
+    alt parse error or transient failure
+        OS-->>TS: error
+        TS->>MQ: route to .dlq + schedule retry (max 3, exp back-off — never silently dropped)
+    else success
+        OS-->>TS: 200 OK
+    end
+    end
+
+    %% ----------- PHASE B: Query (read + graceful fallback) ------------------
+    rect rgb(234,242,251)
+    Note over C,OS: Phase B — Query (read path, with graceful fallback)
+    C->>K: GET /graphql TicketsConnection with search filter
+    K->>TS: JWT verified — forward
+    alt SEARCH_BACKEND opensearch and search query present
+        TS->>OS: multi_match query (fuzziness AUTO, boost eventTitle/title/venueName) + filters
+        OS-->>TS: ranked ticketIds[]
+        TS->>MG: FindByIDs — hydrate canonical data + live availability
+        MG-->>TS: ticket docs (authoritative)
+        TS->>TS: refill loop — apply ticketType filter, fill page to requested size
+        TS-->>K: ranked page (OpenSearch order preserved)
+    else Mongo backend, or OpenSearch error / circuit-open
+        Note over TS: Graceful fallback — never hard-fails
+        TS->>MG: regex search on title and description (degraded relevance)
+        MG-->>TS: ticket docs
+        TS-->>K: page (Mongo ordering)
+    end
+    K-->>C: TicketsConnection response
+    end
+
+    Note over MG,OS: Availability is hydrated live from Mongo, never from the index. Authoritative gate stays at reservation time.
+
+    </pre>
+  </div>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: "base",
+      securityLevel: "loose",
+      er: { useMaxWidth: true },
+      sequence: { useMaxWidth: true, actorMargin: 60, messageAlign: "center" },
+      flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" }
+    });
+  </script>
+</body>
+</html>

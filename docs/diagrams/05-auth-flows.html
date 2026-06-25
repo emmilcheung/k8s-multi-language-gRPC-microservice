@@ -3,81 +3,56 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Auth &amp; Credentials — Ticketing Platform</title>
-  <link rel="stylesheet" href="style.css" />
-  <script src="zoom.js"></script>
+  <title>Auth Flows — signup, login, JWT refresh</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: #F7F8FA;
+      color: #232F3E;
+    }
+    header {
+      max-width: 1400px;
+      margin: 0 auto 16px auto;
+    }
+    header h1 { margin: 0 0 4px 0; font-size: 20px; }
+    header p { margin: 0; color: #556070; font-size: 13px; }
+    .card {
+      background: #fff;
+      border: 1px solid #E5E7EB;
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 1400px;
+      margin: 0 auto;
+      overflow-x: auto;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .nav {
+      max-width: 1400px;
+      margin: 0 auto 12px auto;
+      font-size: 13px;
+    }
+    .nav a { color: #1A73E8; text-decoration: none; margin-right: 12px; }
+    .nav a:hover { text-decoration: underline; }
+  </style>
 </head>
 <body>
-<div class="page">
-
-  <nav class="sidebar">
-    <div class="sidebar-brand">
-      <a class="sidebar-back" href="index.html">← All diagrams</a>
-      <div class="sidebar-brand-title">Ticketing Platform</div>
-      <div class="sidebar-brand-sub">Architecture Diagrams</div>
-    </div>
-    <div class="sidebar-nav">
-      <div class="sidebar-nav-label">Diagrams</div>
-
-      <a class="sidebar-item" href="01-aws-infrastructure.html">
-        <span class="sidebar-dot" style="background:#FF9900;"></span>
-        <span class="sidebar-item-label">
-          AWS Infrastructure
-          <span class="sidebar-item-sub">Graphviz · SVG</span>
-        </span>
-      </a>
-
-      <a class="sidebar-item" href="02-data-model.html">
-        <span class="sidebar-dot" style="background:#2563EB;"></span>
-        <span class="sidebar-item-label">
-          Data Model
-          <span class="sidebar-item-sub">Mermaid · ER</span>
-        </span>
-      </a>
-
-      <a class="sidebar-item" href="03-c4-container.html">
-        <span class="sidebar-dot" style="background:#8B5CF6;"></span>
-        <span class="sidebar-item-label">
-          C4 Container
-          <span class="sidebar-item-sub">Mermaid · Flowchart</span>
-        </span>
-      </a>
-
-      <a class="sidebar-item" href="04-data-flow-sequence.html">
-        <span class="sidebar-dot" style="background:#10B981;"></span>
-        <span class="sidebar-item-label">
-          Data Flow / Saga
-          <span class="sidebar-item-sub">Mermaid · Sequence</span>
-        </span>
-      </a>
-
-      <a class="sidebar-item active" href="05-auth-flows.html">
-        <span class="sidebar-dot" style="background:#EF4444;"></span>
-        <span class="sidebar-item-label">
-          Auth &amp; Credentials
-          <span class="sidebar-item-sub">Mermaid · Sequence</span>
-        </span>
-      </a>
-    </div>
-  </nav>
-
-  <div class="main">
-    <div class="main-header">
-      <h1>Auth &amp; Credentials — login, OAuth2, MCP, refresh tokens</h1>
-      <p>Six flows showing how identity moves through the system: browser login (cookie), refresh rotation, OAuth2 Authorization Code + PKCE for agents,
-        MCP tool calls with Bearer JWT, internal gRPC trust, and Stripe webhook signatures.
-        Source: <code>05-auth-flows.mermaid</code></p>
-    </div>
-    <div class="diagram-wrapper">
-      <div class="zoom-bar">
-        <button class="zoom-btn" id="zoom-out"   title="Zoom out (−)">&#x2212;</button>
-        <span class="zoom-level" id="zoom-level">100%</span>
-        <button class="zoom-btn" id="zoom-in"    title="Zoom in (+)">+</button>
-        <button class="zoom-btn zoom-btn-reset" id="zoom-reset" title="Reset (0)">&#x21BA;</button>
-      </div>
-      <div class="diagram-card">
-        <pre class="mermaid">
-%%{init: {'theme':'base','themeVariables':{'primaryColor':'#FF9900','primaryBorderColor':'#232F3E','primaryTextColor':'#232F3E','lineColor':'#232F3E','actorBkg':'#FF9900','actorBorder':'#232F3E','actorTextColor':'#232F3E','noteBkgColor':'#FDF6E3','noteTextColor':'#232F3E','noteBorderColor':'#232F3E','fontFamily':'Helvetica, Arial, sans-serif'}}}%%
+  <div class="nav">
+    <a href="index.html">← Index</a>
+    <a href="01-aws-infrastructure.svg">AWS Infra (SVG)</a>
+    <a href="02-data-model.html">Data Model</a>
+    <a href="03-c4-container.html">C4 Container</a>
+    <a href="04-data-flow-sequence.html">Data Flow</a>
+  </div>
+  <header>
+    <h1>Auth Flows — signup, login, JWT refresh</h1>
+    <p>Rendered client-side via Mermaid 11. Source: <code>05-auth-flows.mermaid</code></p>
+  </header>
+  <div class="card">
+    <pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#FF9900','primaryBorderColor':'#232F3E','primaryTextColor':'#232F3E','lineColor':'#232F3E','actorBkg':'#FF9900','actorBorder':'#232F3E','actorTextColor':'#232F3E','noteBkgColor':'#FDF6E3','noteTextColor':'#232F3E','noteBorderColor':'#232F3E','fontFamily':'Helvetica, Arial, sans-serif','background':'#FFF'},'themeCSS':'.root { background-color: #ffffff; }'}}}%%
 sequenceDiagram
     autonumber
     actor U as Customer (browser)
@@ -100,7 +75,7 @@ sequenceDiagram
     FE->>K: POST /auth/login (no JWT required)
     K->>AS: forward (rate-limited)
     AS->>AS: bcrypt verify · sign RS256 JWT (15m, sub, email, jti, iss=auth-service)
-    AS->>RD: SET refresh:&lt;jti&gt; {userId, family} TTL 7d
+    AS->>RD: SET refresh:<jti> {userId, family} TTL 7d
     AS-->>K: Set-Cookie: access_token (HttpOnly, Secure, SameSite=Lax, 15m)<br/>Set-Cookie: refresh_token (HttpOnly, /auth/refresh, 7d)
     K-->>FE: cookies forwarded
     FE-->>U: 302 / (logged in)
@@ -112,9 +87,9 @@ sequenceDiagram
     U->>K: any request → 401 (JWT expired)
     FE->>K: POST /auth/refresh (refresh_token cookie)
     K->>AS: forward
-    AS->>RD: GET refresh:&lt;jti&gt; · validate family · DEL old jti
+    AS->>RD: GET refresh:<jti> · validate family · DEL old jti
     AS->>AS: issue new JWT + new refresh (rotated jti, same family)
-    AS->>RD: SET refresh:&lt;new_jti&gt; TTL 7d
+    AS->>RD: SET refresh:<new_jti> TTL 7d
     AS-->>FE: new cookies
     Note right of AS: Reuse of revoked refresh token → revoke entire family<br/>(token theft detection)
     end
@@ -127,7 +102,7 @@ sequenceDiagram
     MCP->>MCP: generate code_verifier · S256(code_verifier) → code_challenge<br/>start loopback listener http://127.0.0.1:19836/callback
     MCP->>DEV: print authorize URL (browser opens)
     DEV->>U: paste / auto-open in browser
-    U->>K: GET /oauth/authorize?client_id=ticketing-mcp&amp;code_challenge=...&amp;scope=orders:create+...
+    U->>K: GET /oauth/authorize?client_id=ticketing-mcp&code_challenge=...&scope=orders:create+...
     K->>AS: forward (JWT cookie validated — user must be logged in)
     alt first-party (ticketing-mcp)
       AS->>AS: auto-approve
@@ -135,16 +110,16 @@ sequenceDiagram
       AS->>RD: store PendingConsent (TTL 10m) → request_id
       AS-->>U: 302 /oauth/consent?request_id=...
       U->>FE: render scope card · click Allow
-      FE->>K: POST /oauth/consent/&lt;id&gt; (JWT cookie)
+      FE->>K: POST /oauth/consent/<id> (JWT cookie)
       K->>AS: forward · resolve consent
     end
-    AS->>RD: SET oauth:code:&lt;code&gt; {clientId, userId, scope, code_challenge} TTL 600s
-    AS-->>U: 302 http://127.0.0.1:19836/callback?code=&lt;code&gt;
+    AS->>RD: SET oauth:code:<code> {clientId, userId, scope, code_challenge} TTL 600s
+    AS-->>U: 302 http://127.0.0.1:19836/callback?code=<code>
     U-->>MCP: browser hits loopback listener
     MCP->>K: POST /oauth/token (code, code_verifier, client_id)
     K->>AS: forward (no JWT — public endpoint)
-    AS->>RD: GET + DEL oauth:code:&lt;code&gt; · verify S256(code_verifier)==stored challenge
-    AS->>RD: SET refresh:&lt;jti&gt; + oauth:session-scope:&lt;sid&gt; {scope, clientId} TTL 24h
+    AS->>RD: GET + DEL oauth:code:<code> · verify S256(code_verifier)==stored challenge
+    AS->>RD: SET refresh:<jti> + oauth:session-scope:<sid> {scope, clientId} TTL 24h
     AS-->>MCP: { access_token (15m, +scope+client_id claims), refresh_token, expires_in, scope }
     MCP->>KC: store tokens in OS keychain (never on disk)
     end
@@ -161,7 +136,7 @@ sequenceDiagram
       AS-->>MCP: new { access_token, refresh_token }
       MCP->>KC: update keychain
     end
-    MCP->>K: POST /orders<br/>Authorization: Bearer &lt;jwt&gt;
+    MCP->>K: POST /orders<br/>Authorization: Bearer <jwt>
     K->>K: jwt plugin · verify RS256 via JWKS (kid match) · check exp/iss
     K->>K: jwt-scope.lua · require "orders:create" in token.scope
     K->>K: jwt-sub.lua · inject X-User-Id, X-User-Email, X-Client-Id
@@ -185,26 +160,23 @@ sequenceDiagram
     K->>K: route bypasses jwt plugin (allowlist) · forward
     K->>DS: payment-service receives raw body
     DS->>DS: verify HMAC · idempotency on stripe_event_id · UPSERT payment_webhooks
-    DS-->>K: 200 OK (must respond &lt;5s)
+    DS-->>K: 200 OK (must respond <5s)
     end
 
     Note over K: Token security · access JWT 15m · refresh 7d (browser) / 24h (MCP)<br/>RS256 keypair rotated quarterly · JWKS at /.well-known/jwks.json<br/>All 4xx/5xx auth failures audited to CloudWatch · brute-force throttled per IP+user
-        </pre>
-      </div>
-    </div>
-  </div>
 
-</div>
-<script type="module">
-  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-  mermaid.initialize({
-    startOnLoad: true,
-    theme: "base",
-    securityLevel: "loose",
-    er: { useMaxWidth: true },
-    sequence: { useMaxWidth: true, actorMargin: 60, messageAlign: "center" },
-    flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" }
-  });
-</script>
+    </pre>
+  </div>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: "base",
+      securityLevel: "loose",
+      er: { useMaxWidth: true },
+      sequence: { useMaxWidth: true, actorMargin: 60, messageAlign: "center" },
+      flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" }
+    });
+  </script>
 </body>
 </html>
