@@ -30,3 +30,22 @@ Every service must expose:
 - `GET /healthz/live` — liveness: returns `200` if the process is alive (no external dependency checks).
 - `GET /healthz/ready` — readiness: returns `200` only when all dependencies (DB, Kafka, gRPC upstreams) are reachable. Returns `503` otherwise.
 - Configure Kubernetes `livenessProbe` and `readinessProbe` against these endpoints.
+
+### Soft-dependency exceptions to the readiness rule
+
+**OpenSearch** is a soft dependency of ticket-service. It is opt-in (`SEARCH_BACKEND=opensearch`), and the service automatically falls back to the Mongo query path if OpenSearch is unavailable or not configured. Therefore:
+
+- `/healthz/ready` does **not** check OpenSearch reachability. A cluster where OpenSearch is down or absent still serves all traffic correctly via the Mongo fallback.
+- Operators can monitor OpenSearch availability separately via its own `/_cluster/health` endpoint (exposed on port 9200 by the `opensearch` Helm subchart).
+
+## Search Metrics (ticket-service)
+
+The following Prometheus metrics are always registered at startup (present in `/metrics` regardless of `SEARCH_BACKEND`). They are only actively observed when `SEARCH_BACKEND=opensearch`.
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `search_query_duration_seconds` | Histogram | `backend=opensearch\|mongo` | End-to-end latency of a ticket search query per backend. Recorded per backend; NOT observed for requests that fully fall back to Mongo (the fallback path returns before the OpenSearch-duration observation point). |
+| `search_fallback_total` | Counter | — | Total times an OpenSearch failure caused a fallback to the Mongo path. |
+| `search_indexer_lag_seconds` | Histogram | — | Lag between a ticket event's `createdAt` and when the indexer processes it. |
+| `search_refill_iterations` | Histogram | — | Number of refill-loop iterations per `TicketsConnection` resolver call. |
+| `reindex_progress` | Gauge | — | Documents upserted so far in the current `Reindex` run. |

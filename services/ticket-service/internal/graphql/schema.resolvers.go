@@ -9,10 +9,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
+	"go.uber.org/zap"
 )
+
+// maxRefill caps worst-case OpenSearch fan-out iterations in the refill loop.
+const maxRefill = 5
 
 // CreateTicket is the resolver for the createTicket field.
 func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketInput) (*Ticket, error) {
@@ -138,19 +143,17 @@ func (r *queryResolver) Tickets(ctx context.Context) ([]*Ticket, error) {
 	return result, nil
 }
 
-// TicketsConnection is the resolver for the ticketsConnection field.
-func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFilter, first *int, after *string) (*TicketConnection, error) {
-	limit := 20
-	if first != nil && *first > 0 {
-		limit = *first
+// ticketsConnectionMongo runs the Mongo-backed tickets page and is the fallback
+// used by TicketsConnection when OpenSearch is unavailable or not configured.
+// It observes search_query_duration_seconds{backend="mongo"} when SearchMetrics is wired.
+func (r *queryResolver) ticketsConnectionMongo(ctx context.Context, filter *TicketFilter, limit int, cursorIn string) (*TicketConnection, error) {
+	if r.SearchMetrics != nil {
+		t0 := time.Now()
+		defer func() { r.SearchMetrics.QueryDuration.WithLabelValues("mongo").Observe(time.Since(t0).Seconds()) }()
 	}
-	if limit > 100 {
-		limit = 100
-	}
-
 	params := repository.PaginationParams{Limit: limit + 1}
-	if after != nil {
-		params.After = *after
+	if cursorIn != "" {
+		params.After = cursorIn
 	}
 	if filter != nil {
 		if filter.AvailableOnly != nil {
@@ -211,6 +214,134 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 		Edges:    edges,
 		PageInfo: &PageInfo{HasNextPage: hasNext, EndCursor: endCursor},
 	}, nil
+}
+
+// TicketsConnection is the resolver for the ticketsConnection field.
+// When SEARCH_BACKEND=opensearch and a search term is present, the resolver
+// uses SearchTickets with a refill loop to post-filter by ticketType and
+// accumulate a full page. On any SearchTickets error it falls back to the
+// Mongo path — the caller always gets a valid response.
+func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFilter, first *int, after *string) (*TicketConnection, error) {
+	limit := 20
+	if first != nil && *first > 0 {
+		limit = *first
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	cursorIn := ""
+	if after != nil {
+		cursorIn = *after
+	}
+
+	// OpenSearch refill loop: only when backend is configured and a search term is present.
+	useOpenSearch := r.Config != nil &&
+		r.Config.SearchBackend == "opensearch" &&
+		filter != nil &&
+		filter.Search != nil &&
+		*filter.Search != ""
+
+	if useOpenSearch {
+		// Observe total OpenSearch path latency (includes all refill iterations).
+		var osT0 time.Time
+		if r.SearchMetrics != nil {
+			osT0 = time.Now()
+		}
+
+		params := repository.PaginationParams{
+			Limit:         limit,
+			AvailableOnly: filter.AvailableOnly != nil && *filter.AvailableOnly,
+			Search:        *filter.Search,
+		}
+		if filter.Category != nil {
+			params.Category = string(*filter.Category)
+		}
+		if filter.MinPrice != nil {
+			minPriceFloat := float64(*filter.MinPrice)
+			params.MinPrice = &minPriceFloat
+		}
+		if filter.MaxPrice != nil {
+			maxPriceFloat := float64(*filter.MaxPrice)
+			params.MaxPrice = &maxPriceFloat
+		}
+
+		type pageItem struct {
+			gql    *Ticket
+			cursor string
+		}
+		pageItems := make([]pageItem, 0, limit)
+		afterCursor := cursorIn
+		var endCursor string
+		exhausted := false
+
+		var iter int
+		for iter = 0; len(pageItems) < limit && iter < maxRefill; iter++ {
+			results, batchNextCursor, ex, err := r.TicketService.SearchTickets(ctx, params, afterCursor)
+			exhausted = ex
+			if err != nil {
+				log := r.Log
+				if log == nil {
+					log = zap.NewNop()
+				}
+				log.Warn("opensearch query failed; serving mongo fallback", zap.Error(err))
+				if r.SearchMetrics != nil {
+					r.SearchMetrics.Fallback.Inc()
+				}
+				return r.ticketsConnectionMongo(ctx, filter, limit, cursorIn)
+			}
+			// Advance afterCursor by the last RAW hit's cursor (returned before
+			// availableOnly filtering).  This ensures that a batch where every hit
+			// is filtered out still moves the window forward on the next iteration
+			// instead of re-fetching the same sold-out block indefinitely.
+			if batchNextCursor != "" {
+				afterCursor = batchNextCursor
+			}
+			for _, res := range results {
+				if filter.TicketType == nil || string(res.Ticket.TicketType) == string(*filter.TicketType) {
+					pageItems = append(pageItems, pageItem{gql: mapTicketToGQL(res.Ticket), cursor: res.Cursor})
+					endCursor = res.Cursor
+					if len(pageItems) == limit {
+						break
+					}
+				}
+			}
+			if exhausted {
+				break
+			}
+		}
+
+		if r.SearchMetrics != nil {
+			r.SearchMetrics.QueryDuration.WithLabelValues("opensearch").Observe(time.Since(osT0).Seconds())
+			r.SearchMetrics.RefillIterations.Observe(float64(iter))
+		}
+
+		edges := make([]*TicketEdge, len(pageItems))
+		for i, item := range pageItems {
+			edges[i] = &TicketEdge{Node: item.gql, Cursor: item.cursor}
+		}
+		// C-1: hasNextPage = !exhausted (exhausted means the index returned fewer
+		// raw hits than the page size, so nothing more to fetch). If maxRefill was
+		// hit before filling the page, exhausted is still false — correctly signals
+		// more results exist. When the page is empty but !exhausted, use afterCursor
+		// (which is now the last raw hit's cursor) as endCursor so the client
+		// advances past the stalled block rather than re-requesting the same page.
+		hasNextPage := !exhausted
+		if endCursor == "" && hasNextPage && afterCursor != "" {
+			endCursor = afterCursor
+		}
+		var endCursorPtr *string
+		if endCursor != "" {
+			c := endCursor
+			endCursorPtr = &c
+		}
+		return &TicketConnection{
+			Edges:    edges,
+			PageInfo: &PageInfo{HasNextPage: hasNextPage, EndCursor: endCursorPtr},
+		}, nil
+	}
+
+	return r.ticketsConnectionMongo(ctx, filter, limit, cursorIn)
 }
 
 // Ticket is the resolver for the ticket field.

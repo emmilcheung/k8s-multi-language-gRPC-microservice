@@ -168,7 +168,7 @@ Design, plans, and the security/reliability remediation report live under
 | Service | Language | Framework | Port | Database | Responsibility |
 |---|---|---|---|---|---|
 | **auth-service** | TypeScript / Node.js 24 | NestJS 10 | 3000 | PostgreSQL 16 | Signup · signin · signout · RS256 JWT issuance · JWKS endpoint |
-| **ticket-service** | Go 1.23+ | Echo v4 | 8080 / **50051** gRPC | MongoDB 7 | Ticket CRUD · Kafka producer · gRPC server |
+| **ticket-service** | Go 1.23+ | Echo v4 | 8080 / **50051** gRPC | MongoDB 7 + OpenSearch (opt-in read model) | Ticket CRUD · Kafka producer · gRPC server · OpenSearch-backed search (CQRS read model, flag-gated) |
 | **order-service** | Java 21 | Spring Boot 4 | 8080 | PostgreSQL 16 | Order lifecycle · gRPC client · transactional outbox |
 | **payment-service** | TypeScript / Node.js 24 | NestJS 10 | 3000 | PostgreSQL 16 | Payment creation · Stripe (stubbed Phase 1) · Kafka |
 | **expiration-service** | Go 1.23+ | — (worker) | 8080 (health) | Redis | Delayed job queue · publishes expiration events |
@@ -245,6 +245,7 @@ Java (order-service) generates stubs at Maven build time via the `protobuf-maven
 | **Observability** | OTel Collector → AMP + AMG + AWS X-Ray | Fully managed — no self-hosted Prometheus/Grafana pods. Deferred to Milestone 7. |
 | **Stripe** | Phase 1 stubbed · Phase 2 Payment Intents | Phase 1 always succeeds to keep scope tight. Real Stripe integration (Elements + webhooks) is Phase 2. |
 | **Cost consideration** | Phase 1 Strimzi (free) → Phase 2 MSK | Kafka on EKS costs ~$0 extra vs MSK ~$200/mo. Config is written to be MSK-compatible so migration is a broker URL swap. MongoDB self-hosted on EKS rather than Atlas for the same reason. |
+| **Search** | OpenSearch (self-hosted, Apache-2.0) | CQRS read model fed by Kafka — ticket-service search-indexer upserts a slim doc on every ticket create/update. Flag-gated via `SEARCH_BACKEND` (default `mongo`; set `opensearch` to enable); falls back to Mongo regex on outage. Same engine planned for logs (EFK) later. |
 
 ---
 
@@ -254,7 +255,9 @@ Java (order-service) generates stubs at Maven build time via the `protobuf-maven
 /
 ├── services/
 │   ├── auth-service/           TypeScript · NestJS · PostgreSQL
-│   ├── ticket-service/         Go · Echo · MongoDB · gRPC server
+│   ├── ticket-service/         Go · Echo · MongoDB · gRPC server · OpenSearch search indexer
+│   │   ├── internal/search/    client, indexer, query, reindex (CQRS read model)
+│   │   └── cmd/reindex/        backfill CLI — upserts all tickets into OpenSearch
 │   ├── order-service/          Java · Spring Boot · PostgreSQL · gRPC client
 │   ├── payment-service/        TypeScript · NestJS · PostgreSQL
 │   ├── expiration-service/     Go worker · Redis · Kafka
@@ -279,7 +282,8 @@ Java (order-service) generates stubs at Maven build time via the `protobuf-maven
 │   │   ├── Chart.yaml              declares all sub-chart dependencies
 │   │   ├── values.yaml             production defaults
 │   │   ├── values-local.yaml       minikube overrides (1 replica, small resources)
-│   │   └── charts/cp-kafka/        custom Confluent cp-kafka sub-chart
+│   │   ├── charts/cp-kafka/        custom Confluent cp-kafka sub-chart
+│   │   └── charts/opensearch/      opt-in OpenSearch subchart (StatefulSet + PVC; plugin-off + NetworkPolicy)
 │   ├── local/
 │   │   ├── Makefile                day-to-day minikube commands (make up, make deploy, …)
 │   │   ├── setup.sh                idempotent 7-step bootstrap script
@@ -393,11 +397,38 @@ docker compose down
 | PostgreSQL (users) | 5436 |
 | Redis | 6379 |
 | Schema Registry | 8081 |
+| **OpenSearch** (opt-in, `--profile search`) | **9200** |
 | Prometheus (separate observability compose) | 9090 |
 | Jaeger (separate observability compose) | 16686 |
 | Grafana (separate observability compose) | 3004 |
 | OTel Collector (gRPC, separate observability compose) | 4317 |
 | OTel Collector (HTTP, separate observability compose) | 4318 |
+
+#### Enable indexed search (OpenSearch)
+
+Start the single-node OpenSearch container (adds it to the compose network on `:9200`):
+
+```bash
+docker compose --profile search up -d opensearch
+```
+
+Set the following env vars on ticket-service (see `.env.example` for the entries):
+
+```
+SEARCH_BACKEND=opensearch
+OPENSEARCH_URL=http://opensearch:9200
+OPENSEARCH_INDEX=tickets
+```
+
+The search-indexer starts automatically and creates the index + begins consuming Kafka `tickets.ticket.{created,updated}`. Backfill existing tickets:
+
+```bash
+cd services/ticket-service
+go run ./cmd/reindex
+# requires OPENSEARCH_URL and MONGO_URI to be set; or use the gated Helm reindex Job
+```
+
+If OpenSearch is down or `SEARCH_BACKEND` is unset, search degrades automatically to the Mongo regex path — the service never hard-fails.
 
 All traffic from the browser goes through Kong on port **8000**.
 
@@ -671,6 +702,7 @@ pnpm exec playwright test
 | Docker Compose (local dev) | ✅ Running | `docker compose up --build` |
 | Local Kubernetes (minikube) | ✅ Running | `make -C infra/local up`; 13/13 pods Running |
 | Helm umbrella chart | ✅ Complete | Bitnami sub-charts + custom cp-kafka + venue-service subchart |
+| Indexed search (OpenSearch CQRS read model) | ✅ Complete | Flag-gated (`SEARCH_BACKEND=opensearch`); Kafka-fed indexer; Mongo-regex fallback; opt-in Helm subchart |
 | Terraform modules | ✅ Scaffolded | vpc, eks, rds, elasticache, msk, kong; **not applied to real AWS** |
 | CI/CD pipelines | ⏳ Pending | `.github/workflows/` is empty |
 | EKS deployment | ⏳ Pending | Terraform apply deferred; local minikube is the active env |

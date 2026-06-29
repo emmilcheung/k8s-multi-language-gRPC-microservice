@@ -59,6 +59,7 @@ ticket-service:
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
     OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     OTEL_SERVICE_NAME: ticket-service
+    # SEARCH_BACKEND/OPENSEARCH_URL not set locally — ticket-service uses the Mongo path.
   resources:
     requests:
       cpu: 50m
@@ -272,6 +273,15 @@ client:
     periodSeconds: 15
     timeoutSeconds: 5
     failureThreshold: 3
+
+# Disabled locally — protects the 7 GB minikube memory budget.
+# Enable with: helm upgrade --install ticketing ./infra/helm -f infra/helm/values-local.yaml --set opensearch.enabled=true
+opensearch:
+  enabled: false
+  # security.disabled=true is the chart default (plugin OFF + NetworkPolicy + mesh mTLS).
+  # No override needed here — left explicit for clarity.
+  security:
+    disabled: true
 
 observability:
   enabled: true

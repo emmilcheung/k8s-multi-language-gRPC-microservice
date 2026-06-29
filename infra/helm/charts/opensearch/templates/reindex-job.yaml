@@ -1,0 +1,62 @@
+{{- if .Values.reindex.enabled }}
+# Reindex Job — bulk-loads all existing tickets from MongoDB into OpenSearch.
+# Gate: reindex.enabled=false by default — opt-in, NOT auto-run on every upgrade.
+#
+# Production rollout order:
+#   1. Deploy the OpenSearch StatefulSet (helm upgrade with opensearch.enabled=true).
+#   2. Run this Job to backfill (--set opensearch.reindex.enabled=true).
+#   3. Flip SEARCH_BACKEND=opensearch on ticket-service.
+#
+# After backfill completes, disable the Job again (reindex.enabled=false).
+# Re-enable only for full reindex (e.g. mapping change, disaster recovery).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "opensearch.fullname" . }}-reindex
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: opensearch-reindex
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    # Prevent automatic re-run on helm upgrade.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  # Small backoff limit — reindex failures are operator-investigated, not retried blindly.
+  backoffLimit: {{ .Values.reindex.backoffLimit | default 3 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opensearch-reindex
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: reindex
+          # Runs the cmd/reindex entrypoint built into the ticket-service image.
+          image: "{{ .Values.reindex.image.repository }}:{{ .Values.reindex.image.tag }}"
+          imagePullPolicy: {{ .Values.reindex.image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          command: ["/reindex"]
+          env:
+            - name: OPENSEARCH_URL
+              value: {{ .Values.reindex.opensearchURL | default (printf "http://%s:%d" (include "opensearch.fullname" .) (.Values.service.port | int)) | quote }}
+            - name: OPENSEARCH_INDEX
+              value: {{ .Values.reindex.opensearchIndex | default "tickets" | quote }}
+            # MONGO_URI is sourced from the same Secret that ticket-service uses
+            # (ticket-service-secrets) — keeps secret management in one place.
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "reindex.mongoSecretName is required when reindex.enabled=true" .Values.reindex.mongoSecretName }}
+                  key: {{ .Values.reindex.mongoSecretKey | default "MONGO_URI" }}
+          resources:
+            {{- toYaml .Values.reindex.resources | nindent 12 }}
+{{- end }}

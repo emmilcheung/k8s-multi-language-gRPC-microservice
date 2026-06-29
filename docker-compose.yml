@@ -348,6 +348,15 @@ services:
       VENUE_SERVICE_ADDR: venue-service:50052
       X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      # Search backend — defaults to mongo (CI-safe; no OpenSearch required).
+      # Enable indexed search with:
+      #   SEARCH_BACKEND=opensearch docker compose --profile search up
+      # (starts the opensearch service on :9200; start it before flipping the flag).
+      # Intentionally NO depends_on opensearch: it is profile-gated, and an
+      # always-on service cannot hard-depend on a profile-disabled one.
+      SEARCH_BACKEND: "${SEARCH_BACKEND:-mongo}"
+      OPENSEARCH_URL: "${OPENSEARCH_URL:-http://opensearch:9200}"
+      OPENSEARCH_INDEX: "${OPENSEARCH_INDEX:-tickets}"
     depends_on:
       mongodb:
         condition: service_healthy
@@ -647,6 +656,22 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    networks:
+      - microservices-net
+
+  opensearch:
+    image: opensearchproject/opensearch:2.17.1
+    profiles: ["search"]
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports: ["9200:9200"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
       - microservices-net
 

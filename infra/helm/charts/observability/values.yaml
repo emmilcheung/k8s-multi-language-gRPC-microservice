@@ -167,6 +167,55 @@ prometheus:
       # Keep this file mounted so the chart wiring is already in place, then
       # replace the empty rule set once the metrics land.
       groups: []
+    search-alerts.yml: |-
+      groups:
+        - name: search
+          rules:
+            - alert: SearchFallbackActive
+              expr: rate(search_fallback_total[5m]) > 0
+              for: 10m
+              labels:
+                severity: warning
+                category: reliability
+                service: ticket-service
+              annotations:
+                summary: "Ticket search is serving the degraded Mongo fallback"
+                description: "ticket-service has been incrementing search_fallback_total for at least 10 minutes; the OpenSearch query path is failing and all search requests are being served by the slower Mongo regex fallback. Check OpenSearch cluster health, network connectivity from ticket-service, and recent indexer errors."
+                first_step: "Check OpenSearch cluster health via its REST API (_cluster/health), then inspect ticket-service pod logs for OpenSearch client errors and confirm the OPENSEARCH_URL env var is reachable."
+
+            - alert: SearchIndexStale
+              expr: |
+                histogram_quantile(
+                  0.95,
+                  rate(search_indexer_lag_seconds_bucket[10m])
+                ) > 300
+              for: 15m
+              labels:
+                severity: warning
+                category: reliability
+                service: ticket-service
+              annotations:
+                summary: "Search index lag p95 > 5 minutes"
+                description: "The p95 event-to-index lag recorded by search_indexer_lag_seconds has exceeded 300 seconds for 15 minutes. Search results may be stale relative to the MongoDB source of truth. Check the indexer pipeline, OpenSearch ingest throughput, and any backpressure from the cluster."
+                first_step: "Inspect ticket-service indexer logs for slow batch flushes or errors, then check OpenSearch _cat/indices for shard health and indexing rate."
+
+            - alert: SearchQueryLatencyHigh
+              expr: |
+                histogram_quantile(
+                  0.95,
+                  rate(search_query_duration_seconds_bucket{backend="opensearch"}[5m])
+                ) > 1
+                and
+                sum(rate(search_query_duration_seconds_count{backend="opensearch"}[5m])) > 0.1
+              for: 10m
+              labels:
+                severity: warning
+                category: latency
+                service: ticket-service
+              annotations:
+                summary: "OpenSearch search query p95 latency above 1 second"
+                description: "ticket-service is observing p95 OpenSearch query latency above 1 second (search_query_duration_seconds{backend=\"opensearch\"}) for 10 minutes. This will degrade user-facing ticket search response times. Check OpenSearch node JVM heap, shard sizes, query complexity, and cluster CPU."
+                first_step: "Open the Prometheus graph for histogram_quantile(0.95, rate(search_query_duration_seconds_bucket{backend=\"opensearch\"}[5m])), then inspect OpenSearch _nodes/stats for hot threads and heap pressure."
   config: |-
     global:
       scrape_interval: 15s

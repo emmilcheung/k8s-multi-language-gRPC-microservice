@@ -1,0 +1,157 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "opensearch.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: opensearch
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.replicas | default 1 }}
+  # serviceName must reference the headless service so the StatefulSet
+  # controller can form stable pod DNS entries (<pod>.<svc>.<ns>.svc.cluster.local).
+  # The client-facing ClusterIP service (service.yaml) is kept separate.
+  serviceName: {{ include "opensearch.fullname" . }}-headless
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opensearch
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opensearch
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        {{- if and .Values.global.serviceMesh.enabled (eq .Values.global.serviceMesh.provider "linkerd") }}
+        # Inject the Linkerd sidecar at the pod level — per repo convention (matches
+        # ticket-service and other charts). Namespace-level injection is NOT used here
+        # (only skip-outbound-ports=9092 is applied at the namespace for Kafka).
+        # Port 9300 (inter-node transport) is skipped: this is a single-node deployment
+        # so 9300 carries no real traffic, but skipping keeps it out of the mesh to
+        # match the single-node intent and avoid spurious mTLS errors if the port ever
+        # receives a probe. Port 9200 (HTTP) is meshed normally.
+        linkerd.io/inject: enabled
+        config.linkerd.io/skip-inbound-ports: "9300"
+        config.linkerd.io/skip-outbound-ports: "9300"
+        {{- end }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 120 }}
+      # OpenSearch requires vm.max_map_count >= 262144 for Lucene mmap.
+      # This sysctl must be set at the node level; in a pod it requires
+      # a privileged initContainer. The privilege is scoped to this init
+      # container only — the main opensearch container is unprivileged.
+      initContainers:
+        - name: sysctl
+          image: {{ .Values.busybox.image }}
+          securityContext:
+            privileged: true   # Required — sysctl -w is a kernel-level write
+          command: ["sysctl", "-w", "vm.max_map_count=262144"]
+      containers:
+        - name: opensearch
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 9200
+              protocol: TCP
+            - name: transport
+              containerPort: 9300
+              protocol: TCP
+          env:
+            - name: discovery.type
+              value: single-node
+            {{- if .Values.security.disabled }}
+            # Security plugin is OFF (default posture): in-cluster derived read-model,
+            # transport security via Linkerd mesh + NetworkPolicy authz (docs/06:50).
+            - name: DISABLE_SECURITY_PLUGIN
+              value: "true"
+            {{- else }}
+            # Security plugin is ON (opt-in): TLS + auth enforced by the plugin.
+            # Admin credentials are sourced from the operator-supplied Secret.
+            - name: OS_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "security.adminSecret.name is required when security.disabled=false" .Values.security.adminSecret.name }}
+                  key: {{ .Values.security.adminSecret.usernameKey }}
+            - name: OS_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.security.adminSecret.name }}
+                  key: {{ .Values.security.adminSecret.passwordKey }}
+            {{- end }}
+            - name: OPENSEARCH_JAVA_OPTS
+              value: {{ .Values.javaOpts | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/opensearch/data
+          {{- if .Values.security.disabled }}
+          readinessProbe:
+            httpGet:
+              path: /_cluster/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /_cluster/health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 3
+          {{- else }}
+          # Secure-mode probes: curl -k is used intentionally here.
+          # This is a loopback self-probe (127.0.0.1 / localhost) — there is no
+          # MITM surface between the kubelet exec and the OpenSearch process on the
+          # same pod. Inter-pod and external TLS is the service mesh's responsibility
+          # (Linkerd, docs/06). Resolving the probe to a verifiable CA would require
+          # mounting the operator-supplied CA into the container and using
+          # --resolve to map the service DNS to 127.0.0.1, adding operator ceremony
+          # for no security benefit on loopback. -k is acceptable in this scope only.
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'curl -fsS -k -u "$OS_ADMIN_USER:$OS_ADMIN_PASSWORD" https://localhost:9200/_cluster/health'
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'curl -fsS -k -u "$OS_ADMIN_USER:$OS_ADMIN_PASSWORD" https://localhost:9200/_cluster/health'
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 3
+          {{- end }}
+  # volumeClaimTemplates provision one PVC per pod.
+  # For single-node (replicas=1) this is a single 10 Gi volume (configurable).
+  # StorageClass defaults to "" (cluster default); override via persistence.storageClass.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ .Values.persistence.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size | default "10Gi" }}

@@ -54,6 +54,8 @@ type TicketEventData struct {
 	MaxPerUser    int        `json:"maxPerUser"`
 	Version       int        `json:"version"`
 	Event         *EventData `json:"event,omitempty"` // WS8: nullable event metadata
+	Category      string     `json:"category,omitempty"`
+	CreatedAt     string     `json:"createdAt,omitempty"` // RFC3339
 }
 
 // EventData is the event metadata payload in Kafka events.

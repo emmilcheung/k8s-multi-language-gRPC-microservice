@@ -9,6 +9,11 @@ import BrowseFiltersClient from "@/app/_components/browse-filters";
 import { cn } from "@/lib/utils";
 import type { TicketFilter, TicketCategory } from "@/lib/graphql/generated";
 
+export function shouldClientSort(q: string, rawSort: unknown): boolean {
+  const explicitSort = rawSort === "date" || rawSort === "price";
+  return !q || explicitSort;
+}
+
 const CATEGORIES = [
   { name: "Concerts", value: "concert" },
   { name: "Sports", value: "sport" },
@@ -121,37 +126,39 @@ export default async function HomePage({ searchParams }: HomePageProps = {}) {
   const now = new Date();
 
   // Client-side filtering: only date filtering (search and price are server-side now)
-  const tickets = firstPage.tickets
-    .filter((ticket) => {
-      if (!dateFilter) return true;
-      if (!ticket.event?.startsAt) return false;
-      const startsAt = new Date(ticket.event.startsAt);
-      if (Number.isNaN(startsAt.getTime())) return false;
-      if (dateFilter === "tonight") {
-        return startsAt.toDateString() === now.toDateString();
-      }
-      if (dateFilter === "weekend") {
-        const day = startsAt.getDay();
-        return day === 0 || day === 6;
-      }
-      if (dateFilter === "week") {
-        const diffTime = startsAt.getTime() - now.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        return diffDays > 0 && diffDays <= 7;
-      }
-      if (dateFilter === "month") {
-        return startsAt.getMonth() === now.getMonth() && startsAt.getFullYear() === now.getFullYear();
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      if (sort === "price") {
-        return parseFloat(a.price) - parseFloat(b.price);
-      }
-      const aTs = a.event?.startsAt ? new Date(a.event.startsAt).getTime() : Number.MAX_SAFE_INTEGER;
-      const bTs = b.event?.startsAt ? new Date(b.event.startsAt).getTime() : Number.MAX_SAFE_INTEGER;
-      return aTs - bTs;
-    });
+  const filtered = firstPage.tickets.filter((ticket) => {
+    if (!dateFilter) return true;
+    if (!ticket.event?.startsAt) return false;
+    const startsAt = new Date(ticket.event.startsAt);
+    if (Number.isNaN(startsAt.getTime())) return false;
+    if (dateFilter === "tonight") {
+      return startsAt.toDateString() === now.toDateString();
+    }
+    if (dateFilter === "weekend") {
+      const day = startsAt.getDay();
+      return day === 0 || day === 6;
+    }
+    if (dateFilter === "week") {
+      const diffTime = startsAt.getTime() - now.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return diffDays > 0 && diffDays <= 7;
+    }
+    if (dateFilter === "month") {
+      return startsAt.getMonth() === now.getMonth() && startsAt.getFullYear() === now.getFullYear();
+    }
+    return true;
+  });
+
+  const tickets = shouldClientSort(q, resolvedParams.sort)
+    ? filtered.sort((a, b) => {
+        if (sort === "price") {
+          return parseFloat(a.price) - parseFloat(b.price);
+        }
+        const aTs = a.event?.startsAt ? new Date(a.event.startsAt).getTime() : Number.MAX_SAFE_INTEGER;
+        const bTs = b.event?.startsAt ? new Date(b.event.startsAt).getTime() : Number.MAX_SAFE_INTEGER;
+        return aTs - bTs;
+      })
+    : filtered;
 
   // Fix hero-steals-result bug: only show hero on unfiltered default view
   const hasActiveFilter = Boolean(q || categoryParam || priceParam || maxPriceChip || availabilityParam || dateFilter);

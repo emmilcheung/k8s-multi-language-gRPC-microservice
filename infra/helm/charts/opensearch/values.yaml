@@ -1,0 +1,142 @@
+# OpenSearch single-node deployment values.
+#
+# Default security posture: plugin OFF + NetworkPolicy authz + Linkerd mesh mTLS (docs/06:50).
+#
+# This chart deploys an in-cluster, single-node, NetworkPolicy-isolated derived
+# read-model holding only public catalogue data (no PII). Per docs/06-security.md:50,
+# in-cluster transport security is the service mesh's (Linkerd's) responsibility —
+# services do NOT implement mTLS themselves. The security plugin is therefore OFF by
+# default; NetworkPolicy provides the authz boundary; Linkerd provides transport
+# encryption when the mesh is installed.
+#
+# To enable the security plugin (OPT-IN — for exposed, multi-node, or compliance deployments):
+#   security.disabled: false
+# When enabled you MUST also supply:
+#   - TLS certificates (mounted into the container)
+#   - An admin credential Secret referenced by security.adminSecret.name
+#   - Probes will automatically switch to authenticated exec (no manual config needed)
+
+image:
+  repository: opensearchproject/opensearch
+  # Pinned to a digest for supply-chain integrity (docs/06). Verify and update the digest
+  # when upgrading. Run:
+  #   docker pull opensearchproject/opensearch:2.19.1 && docker inspect opensearchproject/opensearch:2.19.1 --format '{{index .RepoDigests 0}}'
+  tag: "2.19.1@sha256:72fe2fc84be8295906b8efca020b46c58ed45c8da60cd9b8b49e1991e38e89a4"
+  pullPolicy: IfNotPresent
+
+# initContainer image for sysctl vm.max_map_count.
+# Pinned to a digest for supply-chain integrity. Verify and update the digest
+# when upgrading busybox. Run:
+#   docker pull busybox:1.36 && docker inspect busybox:1.36 --format '{{index .RepoDigests 0}}'
+busybox:
+  image: "busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
+
+# Single-node mode: no cluster formation, no inter-node TLS.
+# HA controls (PodDisruptionBudget, multi-node topology, topologySpreadConstraints,
+# podAntiAffinity) are intentionally out of scope: a PDB on 1 replica is a no-op
+# or blocks all evictions; spread/anti-affinity constraints require ≥2 replicas.
+# Introduce these only if and when a multi-node topology is adopted.
+singleNode: true
+
+# Number of StatefulSet replicas. Default 1 — single-node by design (footprint).
+# Multi-node requires additional cluster discovery configuration (not in scope here).
+replicas: 1
+
+# Persistent volume configuration for the OpenSearch data directory.
+# Data is stored at /usr/share/opensearch/data inside the pod.
+# With a PVC, pod restarts recover without requiring a reindex.
+persistence:
+  # Size of the PVC. Tune to your index size; 10Gi covers ~5M typical ticket docs.
+  size: 10Gi
+  # Storage class. Empty string = use the cluster's default StorageClass.
+  # Override for a specific provisioner (e.g. "gp3" on EKS, "standard" on GKE).
+  storageClass: ""
+
+# Graceful shutdown budget: allow JVM + flush to complete before SIGKILL.
+# Override with --set terminationGracePeriodSeconds=<n> if workloads need longer.
+terminationGracePeriodSeconds: 120
+
+service:
+  port: 9200
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# Java heap — kept at half the memory limit.
+javaOpts: "-Xms512m -Xmx512m"
+
+security:
+  # Default: plugin OFF. Transport security is the service mesh's (Linkerd's) job (docs/06:50).
+  # Set to false to enable the security plugin (OPT-IN for exposed/multi-node/compliance deployments).
+  # When disabled=false you MUST supply TLS certs and the admin credential Secret below.
+  disabled: true
+
+  # adminSecret: operator-supplied Secret containing OpenSearch admin credentials.
+  # Required ONLY when security.disabled=false.
+  # Example:
+  #   kubectl create secret generic opensearch-admin \
+  #     --from-literal=username=admin \
+  #     --from-literal=password=<strong-password>
+  # Then set: security.adminSecret.name=opensearch-admin
+  adminSecret:
+    name: ""          # Name of the Secret; must be in the same namespace as the release
+    usernameKey: username
+    passwordKey: password
+
+networkPolicy:
+  # Restricts ingress on 9200 to ticket-service pods only.
+  # This is the primary authz boundary for this chart (docs/06:50).
+  enabled: true
+
+# Reindex Job — gated, opt-in, NOT auto-run on every upgrade.
+# Enable only to backfill or after a mapping change requiring full reindex.
+#
+# Production rollout order:
+#   1. Deploy the StatefulSet (opensearch.enabled=true).
+#   2. Enable this Job once to backfill (reindex.enabled=true, then disable again).
+#   3. Flip SEARCH_BACKEND=opensearch on ticket-service.
+#
+# Availability posture (single-node, durable storage):
+#   - Pod restarts recover from the PVC — no reindex required for routine restarts.
+#   - A node-down window degrades gracefully to the Mongo-regex fallback in
+#     ticket-service (SEARCH_BACKEND=mongo is the default; no hard failure).
+#   - Multi-node HA is a future option via replicas + cluster discovery config.
+reindex:
+  # Gate — must be explicitly set true to render the Job.
+  enabled: false
+  # Secret that contains MONGO_URI — same Secret ticket-service uses (ticket-service-secrets).
+  mongoSecretName: "ticket-service-secrets"
+  # Key inside the Secret that holds the MongoDB connection URI.
+  mongoSecretKey: "MONGO_URI"
+  # OpenSearch URL for the reindex job to connect to.
+  # Defaults to the ClusterIP service URL built from the release name.
+  opensearchURL: ""
+  # Index name to reindex into. Matches ticket-service's OPENSEARCH_INDEX default.
+  opensearchIndex: "tickets"
+  # Number of times the Job container will be retried on failure.
+  backoffLimit: 3
+  # Image for the reindex job — must be the ticket-service image (contains cmd/reindex).
+  image:
+    repository: ticket-service
+    tag: SET_BY_CI
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# global is populated by the umbrella chart (infra/helm). These defaults allow
+# the chart to be linted and templated in isolation without failing on nil-pointer
+# access into global.serviceMesh.* — the real values always come from the umbrella.
+global:
+  serviceMesh:
+    enabled: false
+    provider: ""

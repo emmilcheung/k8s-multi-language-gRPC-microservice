@@ -158,6 +158,9 @@ Config is validated at startup — the service refuses to start on any missing o
 | `GRPC_PORT` | Port to listen for gRPC connections |
 | `HTTP_PORT` | Port for Echo HTTP server (default 3001) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTel Collector endpoint |
+| `SEARCH_BACKEND` | Search backend selector: `mongo` (default) or `opensearch` |
+| `OPENSEARCH_URL` | OpenSearch base URL (required when `SEARCH_BACKEND=opensearch`) |
+| `OPENSEARCH_INDEX` | OpenSearch index name (default `tickets`) |
 
 ---
 

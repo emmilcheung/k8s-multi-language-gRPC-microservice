@@ -10,6 +10,7 @@ import (
 	graph "github.com/acme/ticket-service/internal/graphql"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/security"
+	"github.com/stretchr/testify/require"
 )
 
 // TestSchemaWiring verifies that the GraphQL schema and resolver plumbing compile
@@ -202,6 +203,14 @@ func TestUnsaveEventMutation_RequiresAuth(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "unauthorized") {
 		t.Errorf("expected 'unauthorized' in response, got: %s", w.Body.String())
 	}
+}
+
+// TestParseCursor_OSPrefix_RestartsOnMongoPath verifies that an "os:"-prefixed
+// OpenSearch cursor handed to the Mongo path is treated as invalid — pagination
+// restarts at page 1 rather than producing duplicate or skipped results.
+func TestParseCursor_OSPrefix_RestartsOnMongoPath(t *testing.T) {
+	_, _, ok := repository.ParseCursor("os:1.5:tk1") // os: cursor handed to the Mongo path
+	require.False(t, ok)                             // => pagination restarts at page 1, no dup/skip
 }
 
 // TestSavedEventsQuery_RequiresAuth verifies savedEvents returns an error without a user.

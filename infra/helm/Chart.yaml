@@ -88,6 +88,15 @@ dependencies:
     repository: "file://charts/cp-kafka"
     condition: cp-kafka.enabled
 
+  # ── Search (opt-in) ───────────────────────────────────────────────────────
+  # Disabled by default (opensearch.enabled=false in values-local.yaml) to
+  # protect the 7 GB minikube memory budget. Enable in staging/prod via
+  # opensearch.enabled=true or --set opensearch.enabled=true at deploy time.
+  - name: opensearch
+    version: "0.1.0"
+    repository: "file://charts/opensearch"
+    condition: opensearch.enabled
+
   # ── API Gateway ───────────────────────────────────────────────────────────
   - name: kong
     version: "2.48.0"

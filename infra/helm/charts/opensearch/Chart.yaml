@@ -1,0 +1,6 @@
+apiVersion: v2
+name: opensearch
+description: Single-node OpenSearch deployment for the ticket-service search index (opt-in).
+type: application
+version: 0.1.0
+appVersion: "2.19.1"

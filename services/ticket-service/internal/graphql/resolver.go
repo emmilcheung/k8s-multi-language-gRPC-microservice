@@ -4,13 +4,19 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/acme/ticket-service/internal/config"
+	"github.com/acme/ticket-service/internal/metrics"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/service"
+	"go.uber.org/zap"
 )
 
 // Resolver is the root resolver that holds service dependencies.
 type Resolver struct {
 	TicketService *service.TicketService
+	Config        *config.Config
+	Log           *zap.Logger
+	SearchMetrics *metrics.SearchMetrics
 }
 
 // mapTicketToGQL converts a repository.Ticket to the generated GQL Ticket model.

@@ -11,14 +11,17 @@
       "@protobufjs/utf8": "1.1.1",
       "yaml": "2.8.3",
       "picomatch": "2.3.2",
-      "protobufjs": "7.5.8",
+      "protobufjs": "7.6.3",
       "qs": "6.15.2",
       "uuid": "14.0.0",
       "vite": "8.0.5",
       "fast-uri": "3.1.2",
       "undici": "6.24.0",
       "lodash": "^4.18.1",
-      "ws": "8.20.1"
+      "ws": "8.21.0",
+      "multer": "2.2.0",
+      "@grpc/grpc-js": "1.14.4",
+      "@opentelemetry/core": "2.8.0"
     }
   },
   "engines": {

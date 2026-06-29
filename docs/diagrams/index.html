@@ -3,79 +3,90 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Ticketing Platform — Architecture Diagrams</title>
-  <link rel="stylesheet" href="style.css" />
+  <title>Ticketing Platform — Architecture Diagrams (v2)</title>
+  <style>
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      padding: 48px 24px;
+      background: #F7F8FA;
+      color: #232F3E;
+    }}
+    main {{ max-width: 960px; margin: 0 auto; }}
+    h1 {{ font-size: 28px; margin: 0 0 8px 0; }}
+    p.sub {{ color: #556070; margin: 0 0 28px 0; }}
+    .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }}
+    .tile {{
+      background: #fff;
+      border: 1px solid #E5E7EB;
+      border-radius: 12px;
+      padding: 20px 22px;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color .15s, transform .15s;
+      display: block;
+    }}
+    .tile:hover {{ border-color: #FF9900; transform: translateY(-2px); }}
+    .tile h2 {{ margin: 0 0 6px 0; font-size: 16px; color: #232F3E; }}
+    .tile p {{ margin: 0; color: #556070; font-size: 13px; }}
+    .badge {{
+      display: inline-block; font-size: 11px; padding: 2px 8px;
+      border-radius: 999px; margin-bottom: 8px; font-weight: 600;
+    }}
+    .b-aws {{ background: #FFE6BF; color: #8A4B00; }}
+    .b-mer {{ background: #D9E8FC; color: #0B3D91; }}
+  </style>
 </head>
 <body>
-
-  <div class="topbar">
-    <span class="topbar-brand">Ticketing Platform</span>
-    <a class="topbar-link" href="https://github.com/emmilcheung/k8s-multi-language-gRPC-microservice" target="_blank" rel="noopener">
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8"/></svg>
-      GitHub
-    </a>
-  </div>
-
-  <div class="hero">
-    <div class="hero-text">
-      <h1>Architecture Diagrams</h1>
-      <p>10 microservices · Production-grade distributed system · 5 diagrams</p>
+  <main>
+    <h1>Ticketing Platform — Architecture Diagrams</h1>
+    <p class="sub">Diagrams covering AWS infrastructure, per-service data ownership,
+      C4 container topology, the reservation + payment saga, auth flows, the virtual
+      waiting room, and the OpenSearch search dataflow. Generated from source — kept in sync with the code.</p>
+    <div class="grid">
+      <a class="tile" href="01-aws-infrastructure.svg">
+        <span class="badge b-aws">Graphviz · SVG/PNG</span>
+        <h2>1 · AWS Infrastructure</h2>
+        <p>Reference production architecture on EKS: VPC, MSK, RDS Multi-AZ,
+          ElastiCache, Kong, edge services, observability, IRSA.</p>
+      </a>
+      <a class="tile" href="02-data-model.html">
+        <span class="badge b-mer">Mermaid · ER</span>
+        <h2>2 · Data Model</h2>
+        <p>Per-service database ownership. Dotted lines mark
+          <i>logical</i> cross-service references (no enforced FKs).</p>
+      </a>
+      <a class="tile" href="03-c4-container.html">
+        <span class="badge b-mer">Mermaid · C4</span>
+        <h2>3 · C4 Container Diagram</h2>
+        <p>All 10 services grouped by domain (Identity · Catalog · Transaction),
+          showing REST, gRPC, GraphQL Federation and Kafka protocols.</p>
+      </a>
+      <a class="tile" href="04-data-flow-sequence.html">
+        <span class="badge b-mer">Mermaid · Sequence</span>
+        <h2>4 · Data Flow / Saga</h2>
+        <p>Full reservation → payment → finalize / expire flow with
+          CloudEvents on MSK, transactional outbox, DLQ.</p>
+      </a>
+      <a class="tile" href="05-auth-flows.html">
+        <span class="badge b-mer">Mermaid · Sequence</span>
+        <h2>5 · Auth Flows</h2>
+        <p>Signup / login / refresh, RS256 JWT issuance, and JWKS
+          distribution to Kong for gateway-side verification.</p>
+      </a>
+      <a class="tile" href="06-waiting-room-flow.html">
+        <span class="badge b-mer">Mermaid · Sequence</span>
+        <h2>6 · Virtual Waiting Room</h2>
+        <p>Onsale surge gate: pre-queue fair draw, rate-based admission,
+          single-use HMAC pass, clean-URL redemption.</p>
+      </a>
+      <a class="tile" href="07-search-dataflow.html">
+        <span class="badge b-mer">Mermaid · Sequence</span>
+        <h2>7 · Search Dataflow</h2>
+        <p>OpenSearch CQRS read model: Kafka-fed index path and the
+          ranked query path with live Mongo hydration + regex fallback.</p>
+      </a>
     </div>
-    <div class="tech-badges">
-      <span class="tech-badge badge-gray">Go 1.23</span>
-      <span class="tech-badge badge-gray">Java 21</span>
-      <span class="tech-badge badge-gray">NestJS 10</span>
-      <span class="tech-badge badge-gray">Next.js 16</span>
-      <span class="tech-badge badge-orange">EKS</span>
-      <span class="tech-badge badge-orange">MSK · Kafka</span>
-      <span class="tech-badge badge-blue">gRPC</span>
-      <span class="tech-badge badge-blue">GraphQL Federation</span>
-      <span class="tech-badge badge-purple">Saga pattern</span>
-      <span class="tech-badge badge-green">Transactional outbox</span>
-    </div>
-  </div>
-
-  <div class="diagrams-section">
-    <div class="section-label">Architecture Diagrams</div>
-    <div class="diagrams-grid">
-
-      <a class="diagram-tile" href="01-aws-infrastructure.html" style="border-left-color: #FF9900;">
-        <div class="tile-num">01</div>
-        <div class="tile-title">AWS Infrastructure</div>
-        <div class="tile-desc">Reference production architecture on EKS — VPC, MSK, RDS Multi-AZ, ElastiCache, Kong, IRSA, and observability stack.</div>
-        <span class="tile-tech badge-orange">Graphviz · SVG</span>
-      </a>
-
-      <a class="diagram-tile" href="02-data-model.html" style="border-left-color: #2563EB;">
-        <div class="tile-num">02</div>
-        <div class="tile-title">Data Model</div>
-        <div class="tile-desc">Per-service database ownership. Dotted lines mark <em>logical</em> cross-service references — no enforced foreign keys.</div>
-        <span class="tile-tech badge-blue">Mermaid · ER</span>
-      </a>
-
-      <a class="diagram-tile" href="03-c4-container.html" style="border-left-color: #8B5CF6;">
-        <div class="tile-num">03</div>
-        <div class="tile-title">C4 Container</div>
-        <div class="tile-desc">All 10 services grouped by domain — Identity, Catalog, Transaction — with REST, gRPC, GraphQL Federation, and Kafka edges.</div>
-        <span class="tile-tech badge-purple">Mermaid · Flowchart</span>
-      </a>
-
-      <a class="diagram-tile" href="04-data-flow-sequence.html" style="border-left-color: #10B981;">
-        <div class="tile-num">04</div>
-        <div class="tile-title">Data Flow / Saga</div>
-        <div class="tile-desc">Full 5-phase reservation → payment → finalize / expire flow with CloudEvents on MSK, transactional outbox, and DLQ.</div>
-        <span class="tile-tech badge-green">Mermaid · Sequence</span>
-      </a>
-
-      <a class="diagram-tile" href="05-auth-flows.html" style="border-left-color: #EF4444;">
-        <div class="tile-num">05</div>
-        <div class="tile-title">Auth &amp; Credentials</div>
-        <div class="tile-desc">Browser login, refresh-token rotation, OAuth2 + PKCE for agents, MCP Bearer tokens, internal gRPC trust, and Stripe webhook signatures.</div>
-        <span class="tile-tech badge-rose">Mermaid · Sequence</span>
-      </a>
-
-    </div>
-  </div>
-
+  </main>
 </body>
 </html>

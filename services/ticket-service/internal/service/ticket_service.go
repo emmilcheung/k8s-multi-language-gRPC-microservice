@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/repository"
+	"github.com/acme/ticket-service/internal/search"
 	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -36,8 +39,8 @@ type CreateTicketInput struct {
 	Title      string
 	Price      string
 	UserID     string
-	Quota      int // defaults to 1 if 0
-	MaxPerUser int // defaults to 1 if 0
+	Quota      int    // defaults to 1 if 0
+	MaxPerUser int    // defaults to 1 if 0
 	Category   string // optional; defaults to "OTHER" if empty
 	Event      *repository.TicketEvent
 }
@@ -73,6 +76,7 @@ type TicketService struct {
 	log                *zap.Logger
 	venueServiceClient SeatingPlanLookupClient // WS3: fetch seating plan assignment mode
 	savedEventRepo     repository.SavedEventRepository
+	searchClient       *search.Client // nil when search backend is mongo
 }
 
 // NewTicketService creates a new TicketService with the given dependencies.
@@ -86,6 +90,12 @@ func NewTicketService(repo repository.TicketRepository, publisher EventPublisher
 	}
 }
 
+// WithSearchClient attaches a search.Client to the service, enabling the
+// OpenSearch query path via SearchTickets.
+func (s *TicketService) WithSearchClient(c *search.Client) {
+	s.searchClient = c
+}
+
 func buildOutboxPayload(ticket *repository.Ticket) repository.TicketOutboxPayload {
 	payload := repository.TicketOutboxPayload{
 		ID:            ticket.ID,
@@ -95,6 +105,7 @@ func buildOutboxPayload(ticket *repository.Ticket) repository.TicketOutboxPayloa
 		SeatingPlanID: ticket.SeatingPlanID,
 		TicketType:    ticket.TicketType,
 		Version:       ticket.Version,
+		Category:      ticket.Category,
 	}
 	if ticket.Event != nil {
 		var endsAt string
@@ -334,23 +345,23 @@ func (s *TicketService) ListSavedEvents(ctx context.Context, userID, after strin
 	if err != nil {
 		return nil, fmt.Errorf("list saved events: %w", err)
 	}
-	
+
 	if len(savedEvents) == 0 {
 		return []*repository.Ticket{}, nil
 	}
-	
+
 	// Extract event IDs (ticket IDs in v1)
 	eventIDs := make([]string, len(savedEvents))
 	for i, se := range savedEvents {
 		eventIDs[i] = se.EventID
 	}
-	
+
 	// Batch-fetch tickets
 	tickets, err := s.repo.FindByIDs(ctx, eventIDs)
 	if err != nil {
 		return nil, fmt.Errorf("list saved events: fetch tickets: %w", err)
 	}
-	
+
 	// Filter out nil tickets (deleted) and preserve saved order
 	result := make([]*repository.Ticket, 0, len(tickets))
 	for _, ticket := range tickets {
@@ -358,6 +369,111 @@ func (s *TicketService) ListSavedEvents(ctx context.Context, userID, after strin
 			result = append(result, ticket)
 		}
 	}
-	
+
 	return result, nil
+}
+
+// SearchTickets executes an OpenSearch multi_match query and returns hydrated
+// search results with per-result cursors for keyset pagination.
+//
+// Availability filtering (AvailableOnly):
+//   - GA tickets: Sold < Quota
+//   - Seated tickets: SeatingPlanID != "" (venue-service manages inventory)
+//
+// nextCursor is the "os:<score>:<id>" cursor of the LAST RAW OpenSearch hit in
+// the batch, computed BEFORE the availableOnly post-filter.  The caller must
+// advance its search_after from nextCursor (not from the last survivor's cursor)
+// so that a batch whose hits are all filtered out still advances the window.
+// nextCursor is empty when no raw hits were returned.
+//
+// exhausted is true when the index returned fewer hits than p.Limit, meaning
+// there are no further results to fetch.
+//
+// Returns an error when searchClient is nil (search backend not configured).
+func (s *TicketService) SearchTickets(ctx context.Context, p repository.PaginationParams, after string) (results []search.Result, nextCursor string, exhausted bool, err error) {
+	if s.searchClient == nil {
+		return nil, "", false, fmt.Errorf("SearchTickets: search client not configured")
+	}
+
+	hits, err := s.searchClient.Query(ctx, search.QueryParams{
+		Search:   p.Search,
+		Category: p.Category,
+		MinPrice: p.MinPrice,
+		MaxPrice: p.MaxPrice,
+		Limit:    p.Limit,
+		After:    after,
+	})
+	if err != nil {
+		return nil, "", false, fmt.Errorf("SearchTickets: query: %w", err)
+	}
+
+	// exhausted reflects raw index hits, not post-ticketType-filter survivors.
+	// Under heavy ticketType filtering, the resolver's maxRefill cap is best-effort;
+	// pushing ticketType into the OpenSearch query is a v1 out-of-scope item.
+	exhausted = len(hits) < p.Limit
+
+	if len(hits) == 0 {
+		return nil, "", exhausted, nil
+	}
+
+	// Compute nextCursor from the last raw hit BEFORE any post-filter so the
+	// refill loop always advances past the current batch, even when every hit
+	// is filtered out by availableOnly.
+	lastHit := hits[len(hits)-1]
+	nextCursor = buildOSCursor(lastHit.Sort, lastHit.ID)
+
+	// Hydrate: fetch tickets by ID in ranked order.
+	ids := make([]string, len(hits))
+	for i, h := range hits {
+		ids[i] = h.ID
+	}
+	tickets, err := s.repo.FindByIDs(ctx, ids)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("SearchTickets: hydrate: %w", err)
+	}
+
+	// Build a lookup from id → hit (to get the sort tuple for cursor construction).
+	hitByID := make(map[string]search.Hit, len(hits))
+	for _, h := range hits {
+		hitByID[h.ID] = h
+	}
+
+	results = make([]search.Result, 0, len(tickets))
+	for _, ticket := range tickets {
+		if ticket == nil {
+			continue
+		}
+
+		// Apply availableOnly filter.
+		// GA tickets: must have sold < quota. Seated tickets: must have a non-empty SeatingPlanID
+		// (venue-service manages availability for them).
+		if p.AvailableOnly {
+			if ticket.SeatingPlanID == "" && ticket.Sold >= ticket.Quota {
+				continue // GA ticket with no remaining inventory
+			}
+		}
+
+		// Build the cursor from the sort tuple: "os:<score>:<id>".
+		cursor := buildOSCursor(hitByID[ticket.ID].Sort, ticket.ID)
+		results = append(results, search.Result{Ticket: ticket, Cursor: cursor})
+	}
+
+	return results, nextCursor, exhausted, nil
+}
+
+// buildOSCursor builds an "os:<score>:<id>" cursor from the OpenSearch sort tuple.
+// The sort tuple is [score, _id]; if absent or malformed we fall back to "os:0:<id>".
+func buildOSCursor(sort []any, id string) string {
+	if len(sort) >= 1 {
+		switch v := sort[0].(type) {
+		case float64:
+			return "os:" + strconv.FormatFloat(v, 'f', -1, 64) + ":" + id
+		case json.Number:
+			f, err := v.Float64()
+			if err == nil {
+				return "os:" + strconv.FormatFloat(f, 'f', -1, 64) + ":" + id
+			}
+		}
+	}
+	return "os:0:" + id
 }

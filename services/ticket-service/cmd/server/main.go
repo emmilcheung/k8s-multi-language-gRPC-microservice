@@ -17,10 +17,12 @@ import (
 	"github.com/acme/ticket-service/internal/handler"
 	"github.com/acme/ticket-service/internal/health"
 	"github.com/acme/ticket-service/internal/kafka"
+	"github.com/acme/ticket-service/internal/metrics"
 	"github.com/acme/ticket-service/internal/middleware"
 	"github.com/acme/ticket-service/internal/outbox"
 	"github.com/acme/ticket-service/internal/reconciler"
 	"github.com/acme/ticket-service/internal/repository"
+	"github.com/acme/ticket-service/internal/search"
 	"github.com/acme/ticket-service/internal/security"
 	"github.com/acme/ticket-service/internal/service"
 	"github.com/acme/ticket-service/internal/tracing"
@@ -29,6 +31,7 @@ import (
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -157,6 +160,26 @@ func main() {
 	defer relayCancel()
 	go outboxRelay.Start(relayCtx)
 
+	// Register search Prometheus metrics on the default registry.
+	// These are always registered regardless of SEARCH_BACKEND so that the
+	// metric descriptors are present at startup (avoids "metric not found" gaps).
+	searchMetrics := metrics.NewSearchMetrics(prometheus.DefaultRegisterer)
+
+	// Optionally initialise OpenSearch — search client is attached to svc after svc is created.
+	var openSearchClient *search.Client
+	if cfg.SearchBackend == "opensearch" {
+		sc, err := search.NewClient(cfg.OpenSearchURL, cfg.OpenSearchIndex, log)
+		if err != nil {
+			log.Fatal("failed to create search client", zap.Error(err))
+		}
+		ensureCtx, ensureCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer ensureCancel()
+		if err := sc.EnsureIndex(ensureCtx); err != nil {
+			log.Fatal("ensure search index", zap.Error(err))
+		}
+		openSearchClient = sc
+	}
+
 	// WS3: Venue-service gRPC client for fetching seating plan assignment mode
 	venueConn, err := grpc.NewClient(
 		cfg.VenueServiceAddr,
@@ -177,6 +200,23 @@ func main() {
 
 	// Business logic service
 	svc := service.NewTicketService(ticketRepo, producer, log, venueClient, savedEventRepo)
+
+	// Wire search client + start indexer now that svc and Kafka producer exist.
+	if openSearchClient != nil {
+		svc.WithSearchClient(openSearchClient)
+		indexer, err := search.NewIndexer(openSearchClient, cfg.KafkaBrokers, log, kafkaSecurity, producer)
+		if err != nil {
+			log.Fatal("search indexer", zap.Error(err))
+		}
+		indexer.WithMetrics(searchMetrics)
+		idxCtx, idxCancel := context.WithCancel(context.Background())
+		defer idxCancel()
+		go func() {
+			if err := indexer.Run(idxCtx); err != nil {
+				log.Error("search indexer stopped", zap.Error(err))
+			}
+		}()
+	}
 
 	// gRPC server — runs alongside HTTP in a separate goroutine
 	grpcCtx, grpcCancel := context.WithCancel(context.Background())
@@ -218,7 +258,7 @@ func main() {
 	// A per-request DataLoader middleware is wrapped around the handler so that
 	// every _entities batch call gets its own loader instance (prevents
 	// cross-request data leaks and keeps the per-request cache correct).
-	gqlResolver := &gqlgraph.Resolver{TicketService: svc}
+	gqlResolver := &gqlgraph.Resolver{TicketService: svc, Config: cfg, Log: log, SearchMetrics: searchMetrics}
 	gqlSrv := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{Resolvers: gqlResolver}))
 	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		loader := gqlgraph.NewTicketLoader(svc)

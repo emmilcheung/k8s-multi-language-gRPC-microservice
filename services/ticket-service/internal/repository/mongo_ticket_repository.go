@@ -23,6 +23,14 @@ func EncodeCursor(createdAt time.Time, id string) string {
 
 // parseCursor decodes a compound cursor produced by EncodeCursor.
 func parseCursor(after string) (ms int64, id string, ok bool) {
+	return ParseCursor(after)
+}
+
+// ParseCursor is the exported variant of parseCursor for use by callers outside
+// this package (e.g. the GraphQL resolver and its tests). Returns ok=false for
+// any cursor that is not of the form "<unixMilli>:<id>" — including os:-prefixed
+// OpenSearch cursors.
+func ParseCursor(after string) (ms int64, id string, ok bool) {
 	idx := strings.IndexByte(after, ':')
 	if idx < 1 {
 		return 0, "", false
@@ -108,6 +116,8 @@ type TicketOutboxPayload struct {
 	MaxPerUser    int                 `bson:"maxPerUser"`
 	Version       int                 `bson:"version"`
 	Event         *TicketOutboxDetail `bson:"event,omitempty"`
+	Category      string              `bson:"category,omitempty"`
+	CreatedAt     time.Time           `bson:"createdAt"`
 }
 
 // TicketOutboxDetail stores optional event metadata in durable form.
@@ -164,6 +174,8 @@ func normalizePendingOutboxEvent(ticket *Ticket, event *TicketOutboxEvent) {
 	event.Payload.Sold = ticket.Sold
 	event.Payload.MaxPerUser = ticket.MaxPerUser
 	event.Payload.Version = ticket.Version
+	event.Payload.Category = ticket.Category
+	event.Payload.CreatedAt = ticket.CreatedAt
 	if ticket.Event != nil && event.Payload.Event == nil {
 		var endsAt string
 		if ticket.Event.EndsAt != nil {
@@ -250,13 +262,13 @@ var ErrOwnership = errors.New("caller does not own this ticket")
 // Category filters by the event category enum value.
 // MinPrice and MaxPrice filter by price range in whole dollars.
 type PaginationParams struct {
-	After         string     // compound cursor "<unixMilli>:<id>"; empty = start from beginning
-	Limit         int        // max results per page
-	AvailableOnly bool       // if true, filter out sold-out tickets
-	Search        string     // case-insensitive title search
-	Category      string     // event category filter
-	MinPrice      *float64   // minimum price in dollars
-	MaxPrice      *float64   // maximum price in dollars
+	After         string   // compound cursor "<unixMilli>:<id>"; empty = start from beginning
+	Limit         int      // max results per page
+	AvailableOnly bool     // if true, filter out sold-out tickets
+	Search        string   // case-insensitive title search
+	Category      string   // event category filter
+	MinPrice      *float64 // minimum price in dollars
+	MaxPrice      *float64 // maximum price in dollars
 }
 
 // TicketRepository defines the storage interface.

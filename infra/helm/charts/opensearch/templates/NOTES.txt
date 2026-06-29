@@ -1,0 +1,103 @@
+OpenSearch — {{ .Release.Name }} — {{ .Chart.Version }}
+
+Security posture: plugin OFF (default) + NetworkPolicy authz + Linkerd mesh mTLS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This is an in-cluster, single-node, NetworkPolicy-isolated derived read-model
+holding only public catalogue data (no PII). Per docs/06-security.md:50:
+
+  "All traffic inside the cluster: mTLS via a service mesh (Linkerd) —
+   services do not implement mTLS themselves."
+
+Default posture (security.disabled=true):
+  • OpenSearch security plugin is OFF — no TLS bolt-on per-chart.
+  • NetworkPolicy restricts ingress on :9200 to ticket-service pods only.
+  • Linkerd sidecar injection provides in-cluster mTLS when the mesh is active.
+  • Probes: plain httpGet on /_cluster/health (port 9200).
+
+Storage (StatefulSet with PVC):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  • Data is persisted at /usr/share/opensearch/data via a {{ .Values.persistence.size }} PVC.
+  • Pod restarts recover from the PVC — no reindex required for routine restarts.
+  • StorageClass: {{ if .Values.persistence.storageClass }}{{ .Values.persistence.storageClass }}{{ else }}(cluster default){{ end }}
+
+Production rollout order:
+━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Deploy the OpenSearch StatefulSet (this chart, opensearch.enabled=true).
+     Wait for the pod to reach Running and the readinessProbe to pass:
+
+       kubectl rollout status statefulset/{{ include "opensearch.fullname" . }} \
+         --namespace {{ .Release.Namespace }}
+
+  2. Run the reindex Job to backfill all existing tickets from MongoDB:
+
+       helm upgrade --install {{ .Release.Name }} ./infra/helm \
+         --set opensearch.reindex.enabled=true \
+         --set opensearch.reindex.image.tag=<current-ticket-service-sha>
+
+     Wait for the Job to complete, then disable it again:
+
+       helm upgrade --install {{ .Release.Name }} ./infra/helm \
+         --set opensearch.reindex.enabled=false
+
+  3. Flip SEARCH_BACKEND on ticket-service to activate OpenSearch queries:
+
+       helm upgrade --install {{ .Release.Name }} ./infra/helm \
+         --set ticket-service.env.SEARCH_BACKEND=opensearch \
+         --set ticket-service.env.OPENSEARCH_URL=http://{{ include "opensearch.fullname" . }}:9200
+
+Availability posture (single-node by design):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  • DURABLE storage: the StatefulSet PVC survives pod restarts and rescheduling.
+    Routine restarts (OOM kill, node drain, upgrade) recover from disk with no
+    operator intervention and no reindex required.
+  • A node-down window (pod not Running) degrades gracefully: ticket-service
+    falls back to the Mongo-regex search path — no hard failure, no 500s.
+    This is the designed degraded mode (SEARCH_BACKEND=mongo).
+  • Multi-node HA is a future option: increase replicas + add cluster discovery
+    configuration (cluster.name, network.host, discovery.seed_hosts) in values.
+    Current single-node posture is intentional — footprint vs. redundancy tradeoff.
+
+To enable the security plugin (OPT-IN — exposed/multi-node/compliance):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Create the admin credential Secret:
+
+   kubectl create secret generic opensearch-admin \
+     --namespace {{ .Release.Namespace }} \
+     --from-literal=username=admin \
+     --from-literal=password=<strong-password>
+
+2. Mount TLS certificates into the pod (add volumeMounts/volumes in your overlay).
+
+3. Install with:
+
+   helm upgrade --install {{ .Release.Name }} ./infra/helm/charts/opensearch \
+     --set security.disabled=false \
+     --set security.adminSecret.name=opensearch-admin
+
+When security.disabled=false:
+  • The DISABLE_SECURITY_PLUGIN env var is NOT set — the plugin enforces TLS + auth.
+  • Probes auto-switch to authenticated exec (curl with OS_ADMIN_USER/OS_ADMIN_PASSWORD
+    sourced from the admin Secret). No plain-HTTP probe is rendered.
+
+Linkerd mesh injection:
+━━━━━━━━━━━━━━━━━━━━━━
+
+The StatefulSet pod template carries Linkerd skip-port annotations for port 9300
+(transport). If Linkerd is not installed, these annotations are a no-op. When
+Linkerd IS installed, inject the namespace/pod as usual — the mesh will handle
+mTLS on :9200.
+
+  kubectl annotate namespace {{ .Release.Namespace }} \
+    linkerd.io/inject=enabled
+
+Services:
+  Client access (ClusterIP): {{ include "opensearch.fullname" . }}:9200
+  Headless (StatefulSet DNS): {{ include "opensearch.fullname" . }}-headless (not for clients)
+
+{{- if .Values.security.disabled }}
+Protocol: HTTP (security plugin off — in-cluster only, mesh mTLS + NetworkPolicy)
+{{- else }}
+Protocol: HTTPS (security plugin on — authenticate with admin credentials)
+{{- end }}

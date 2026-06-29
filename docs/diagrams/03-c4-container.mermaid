@@ -47,7 +47,9 @@ flowchart TB
         ticket_db[(ticket_db<br/>MongoDB 7)]:::db
         venue_db[(venue_db<br/>RDS PostgreSQL)]:::db
         venue_redis[(ElastiCache Redis<br/>seat hold hot path)]:::db
+        opensearch[(OpenSearch<br/>tickets search index<br/><i>CQRS read model</i>)]:::search
         ticket --- ticket_db
+        ticket -. "index upsert + search query<br/>(SEARCH_BACKEND=opensearch)" .-> opensearch
         venue --- venue_db
         venue --- venue_redis
     end
@@ -108,7 +110,7 @@ flowchart TB
 
     %% ===== Asynchronous edges (Kafka) =====
     order -- "produces<br/>orders.order.{created,cancelled,completed}" --> kafka
-    kafka -- "consumes" --> ticket
+    kafka -- "consumes<br/>(search indexer)" --> ticket
     kafka -- "consumes" --> venue
     kafka -- "consumes" --> expiration
     kafka -- "consumes" --> payment
@@ -123,3 +125,4 @@ flowchart TB
     classDef edge fill:#232F3E,stroke:#232F3E,stroke-width:1.5px,color:#FFFFFF;
     classDef ext fill:#7AA116,stroke:#232F3E,stroke-width:1.5px,color:#FFFFFF;
     classDef person fill:#FDF6E3,stroke:#232F3E,stroke-width:1.5px,color:#232F3E;
+    classDef search fill:#00BFB3,stroke:#232F3E,stroke-width:1.5px,color:#232F3E;

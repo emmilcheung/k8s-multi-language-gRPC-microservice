@@ -1,0 +1,104 @@
+package search
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"time"
+
+	"github.com/acme/ticket-service/internal/metrics"
+	"github.com/acme/ticket-service/internal/repository"
+	"go.uber.org/zap"
+)
+
+// TicketRepository is the subset of repository.TicketRepository used by Reindex.
+// Using a local interface keeps the search package free of a hard dependency on
+// the full repository interface and makes it straightforward to stub in tests.
+type TicketRepository interface {
+	FindAll(ctx context.Context, p repository.PaginationParams) ([]*repository.Ticket, error)
+}
+
+// ticketToDoc maps a repository.Ticket to a search Doc.
+// This mirrors eventToDoc but reads directly from the Mongo model rather than a
+// Kafka CloudEvent payload. Both paths must produce identical Doc values for the
+// same ticket state — do not add logic here that is absent from eventToDoc.
+func ticketToDoc(t *repository.Ticket, log *zap.Logger) Doc {
+	price, priceErr := strconv.ParseFloat(t.Price, 64)
+	if priceErr != nil {
+		log.Warn("search reindex: failed to parse price; indexing as 0.0",
+			zap.String("ticketId", t.ID),
+			zap.String("rawPrice", t.Price),
+			zap.Error(priceErr),
+		)
+	}
+
+	doc := Doc{
+		ID:            t.ID,
+		Version:       t.Version,
+		Title:         t.Title,
+		Category:      t.Category,
+		TicketType:    t.TicketType,
+		SeatingPlanID: t.SeatingPlanID,
+		Price:         price,
+		CreatedAt:     t.CreatedAt.UTC().Format(time.RFC3339),
+	}
+
+	if t.Event != nil {
+		doc.EventTitle = t.Event.Title
+		doc.VenueName = t.Event.VenueName
+		doc.Description = t.Event.Description
+		doc.VenueAddress = t.Event.VenueAddress
+		doc.StartsAt = t.Event.StartsAt.UTC().Format(time.RFC3339)
+	}
+
+	return doc
+}
+
+// Reindex pages through ALL tickets via repo.FindAll (cursor paging, newest-first)
+// and upserts each one into the OpenSearch index via client.UpsertTicket.
+// pageSize controls how many tickets are fetched per page; valid range is 1–100.
+// FindAll silently falls back to 20 for any value <=0 or >100, so callers must
+// pass a value in [1, 100] to get the intended page size.
+// Progress is logged per page as "reindex_progress" and set on m.ReindexProgress (nil-safe).
+func Reindex(ctx context.Context, repo TicketRepository, client *Client, pageSize int, m *metrics.SearchMetrics) error {
+	var (
+		after string
+		total int
+	)
+
+	for {
+		page, err := repo.FindAll(ctx, repository.PaginationParams{
+			After: after,
+			Limit: pageSize,
+		})
+		if err != nil {
+			return fmt.Errorf("search.Reindex: FindAll (after=%q): %w", after, err)
+		}
+		if len(page) == 0 {
+			break
+		}
+
+		for _, t := range page {
+			doc := ticketToDoc(t, client.log)
+			if upsertErr := client.UpsertTicket(ctx, doc); upsertErr != nil {
+				return fmt.Errorf("search.Reindex: upsert ticket %s: %w", t.ID, upsertErr)
+			}
+		}
+
+		total += len(page)
+		last := page[len(page)-1]
+		after = repository.EncodeCursor(last.CreatedAt, last.ID)
+
+		if m != nil {
+			m.ReindexProgress.Set(float64(total))
+		}
+		client.log.Info("reindex_progress",
+			zap.Int("page_size", len(page)),
+			zap.Int("total_done", total),
+			zap.String("next_cursor", after),
+		)
+	}
+
+	client.log.Info("reindex complete", zap.Int("total_indexed", total))
+	return nil
+}
