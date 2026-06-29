@@ -15,7 +15,6 @@ import (
 	"go.uber.org/zap"
 )
 
-
 const (
 	topicTicketCreated = "tickets.ticket.created"
 	topicTicketUpdated = "tickets.ticket.updated"
@@ -266,14 +265,14 @@ func eventToDoc(d kafka.TicketEventData, log *zap.Logger) Doc {
 	}
 
 	doc := Doc{
-		ID:        d.ID,
-		Version:   d.Version,
-		Title:     d.Title,
-		Category:  d.Category,
-		TicketType: d.TicketType,
+		ID:            d.ID,
+		Version:       d.Version,
+		Title:         d.Title,
+		Category:      d.Category,
+		TicketType:    d.TicketType,
 		SeatingPlanID: d.SeatingPlanID,
-		Price:     price,
-		CreatedAt: d.CreatedAt,
+		Price:         price,
+		CreatedAt:     d.CreatedAt,
 	}
 
 	if d.Event != nil {

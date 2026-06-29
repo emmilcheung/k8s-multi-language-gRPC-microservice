@@ -210,7 +210,7 @@ func TestUnsaveEventMutation_RequiresAuth(t *testing.T) {
 // restarts at page 1 rather than producing duplicate or skipped results.
 func TestParseCursor_OSPrefix_RestartsOnMongoPath(t *testing.T) {
 	_, _, ok := repository.ParseCursor("os:1.5:tk1") // os: cursor handed to the Mongo path
-	require.False(t, ok)                              // => pagination restarts at page 1, no dup/skip
+	require.False(t, ok)                             // => pagination restarts at page 1, no dup/skip
 }
 
 // TestSavedEventsQuery_RequiresAuth verifies savedEvents returns an error without a user.

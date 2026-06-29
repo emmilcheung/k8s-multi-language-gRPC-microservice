@@ -13,8 +13,8 @@ import (
 	"testing"
 
 	"github.com/99designs/gqlgen/graphql/handler"
-	graph "github.com/acme/ticket-service/internal/graphql"
 	"github.com/acme/ticket-service/internal/config"
+	graph "github.com/acme/ticket-service/internal/graphql"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/search"
 	"github.com/acme/ticket-service/internal/service"
@@ -77,7 +77,7 @@ func (f *fakeTicketRepo) ReleaseReservation(_ context.Context, _ string) error {
 func (f *fakeTicketRepo) FinalizeReservation(_ context.Context, _, _ string) error {
 	panic("fakeTicketRepo: FinalizeReservation not implemented")
 }
-func (f *fakeTicketRepo) Ping(_ context.Context) error { return nil }
+func (f *fakeTicketRepo) Ping(_ context.Context) error  { return nil }
 func (f *fakeTicketRepo) Close(_ context.Context) error { return nil }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

@@ -262,13 +262,13 @@ var ErrOwnership = errors.New("caller does not own this ticket")
 // Category filters by the event category enum value.
 // MinPrice and MaxPrice filter by price range in whole dollars.
 type PaginationParams struct {
-	After         string     // compound cursor "<unixMilli>:<id>"; empty = start from beginning
-	Limit         int        // max results per page
-	AvailableOnly bool       // if true, filter out sold-out tickets
-	Search        string     // case-insensitive title search
-	Category      string     // event category filter
-	MinPrice      *float64   // minimum price in dollars
-	MaxPrice      *float64   // maximum price in dollars
+	After         string   // compound cursor "<unixMilli>:<id>"; empty = start from beginning
+	Limit         int      // max results per page
+	AvailableOnly bool     // if true, filter out sold-out tickets
+	Search        string   // case-insensitive title search
+	Category      string   // event category filter
+	MinPrice      *float64 // minimum price in dollars
+	MaxPrice      *float64 // maximum price in dollars
 }
 
 // TicketRepository defines the storage interface.

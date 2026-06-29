@@ -39,8 +39,8 @@ type CreateTicketInput struct {
 	Title      string
 	Price      string
 	UserID     string
-	Quota      int // defaults to 1 if 0
-	MaxPerUser int // defaults to 1 if 0
+	Quota      int    // defaults to 1 if 0
+	MaxPerUser int    // defaults to 1 if 0
 	Category   string // optional; defaults to "OTHER" if empty
 	Event      *repository.TicketEvent
 }
@@ -345,23 +345,23 @@ func (s *TicketService) ListSavedEvents(ctx context.Context, userID, after strin
 	if err != nil {
 		return nil, fmt.Errorf("list saved events: %w", err)
 	}
-	
+
 	if len(savedEvents) == 0 {
 		return []*repository.Ticket{}, nil
 	}
-	
+
 	// Extract event IDs (ticket IDs in v1)
 	eventIDs := make([]string, len(savedEvents))
 	for i, se := range savedEvents {
 		eventIDs[i] = se.EventID
 	}
-	
+
 	// Batch-fetch tickets
 	tickets, err := s.repo.FindByIDs(ctx, eventIDs)
 	if err != nil {
 		return nil, fmt.Errorf("list saved events: fetch tickets: %w", err)
 	}
-	
+
 	// Filter out nil tickets (deleted) and preserve saved order
 	result := make([]*repository.Ticket, 0, len(tickets))
 	for _, ticket := range tickets {

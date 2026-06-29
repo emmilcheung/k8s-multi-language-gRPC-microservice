@@ -121,33 +121,33 @@ func TestQuery_CategoryAndPriceFilters(t *testing.T) {
 // TestQuery_CursorParsing exercises the search_after cursor logic.
 func TestQuery_CursorParsing(t *testing.T) {
 	tests := []struct {
-		name           string
-		after          string
+		name            string
+		after           string
 		wantSearchAfter bool
 	}{
 		{
-			name:           "empty after — no search_after in body",
-			after:          "",
+			name:            "empty after — no search_after in body",
+			after:           "",
 			wantSearchAfter: false,
 		},
 		{
-			name:           "valid os cursor — search_after injected",
-			after:          "os:1.5:ticket-id-123",
+			name:            "valid os cursor — search_after injected",
+			after:           "os:1.5:ticket-id-123",
 			wantSearchAfter: true,
 		},
 		{
-			name:           "non-numeric score — search_after omitted",
-			after:          "os:NaN:ticket-id-123",
+			name:            "non-numeric score — search_after omitted",
+			after:           "os:NaN:ticket-id-123",
 			wantSearchAfter: false,
 		},
 		{
-			name:           "malformed prefix — search_after omitted",
-			after:          "mongo:somecursor",
+			name:            "malformed prefix — search_after omitted",
+			after:           "mongo:somecursor",
 			wantSearchAfter: false,
 		},
 		{
-			name:           "os: prefix with no colon after score — search_after omitted",
-			after:          "os:1.5",
+			name:            "os: prefix with no colon after score — search_after omitted",
+			after:           "os:1.5",
 			wantSearchAfter: false,
 		},
 	}

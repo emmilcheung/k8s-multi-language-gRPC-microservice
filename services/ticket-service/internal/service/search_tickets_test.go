@@ -68,7 +68,7 @@ func (s *stubSearchRepo) ReleaseReservation(_ context.Context, _ string) error {
 func (s *stubSearchRepo) FinalizeReservation(_ context.Context, _, _ string) error {
 	panic("stubSearchRepo: FinalizeReservation not implemented")
 }
-func (s *stubSearchRepo) Ping(_ context.Context) error { return nil }
+func (s *stubSearchRepo) Ping(_ context.Context) error  { return nil }
 func (s *stubSearchRepo) Close(_ context.Context) error { return nil }
 
 // buildOSResponse constructs a minimal OpenSearch _search response JSON with
