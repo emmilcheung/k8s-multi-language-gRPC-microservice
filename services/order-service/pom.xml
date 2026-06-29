@@ -32,6 +32,8 @@
     <opentelemetry.version>1.62.0</opentelemetry.version>
     <!-- CVE-2026-22737/22735/22745/22741: spring-webmvc info disclosure + SSE corruption -->
     <spring-framework.version>7.0.7</spring-framework.version>
+    <!-- CVE-2026-41731/41726: spring-kafka deserialization + listener CVEs -->
+    <spring-kafka.version>4.0.6</spring-kafka.version>
   </properties>
 
   <dependencyManagement>
