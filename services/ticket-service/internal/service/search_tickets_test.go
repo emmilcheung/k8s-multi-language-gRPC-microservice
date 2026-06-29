@@ -3,7 +3,6 @@ package service_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -213,7 +212,7 @@ func TestSearchTickets_CursorBuilding(t *testing.T) {
 	assert.Equal(t, "os:1:t2", results[1].Cursor)
 
 	// nextCursor is the last raw hit cursor (t2).
-	assert.Equal(t, fmt.Sprintf("os:1:t2"), nextCursor)
+	assert.Equal(t, "os:1:t2", nextCursor)
 }
 
 // TestSearchTickets_NoSearchClient_ReturnsError verifies that calling

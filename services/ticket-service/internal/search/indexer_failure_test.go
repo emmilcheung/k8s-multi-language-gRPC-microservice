@@ -37,20 +37,6 @@ func (f *fakeDLQPublisher) PublishToDLQ(_ context.Context, _ string, _, _ []byte
 	return nil
 }
 
-// newTestIndexer builds an Indexer with a fake upserter and DLQ publisher,
-// bypassing the real Kafka consumer (consumer field is nil — only processWithRetry
-// and decodeMessage are exercised in unit tests).
-func newTestIndexer(upserter *fakeUpserter, dlq *fakeDLQPublisher) *Indexer {
-	return &Indexer{
-		client: &Client{
-			// Replace the embedded *opensearchapi.Client with nil; the fakeUpserter
-			// is injected via the clientUpserter field below.
-		},
-		producer: dlq,
-		log:      zap.NewNop(),
-	}
-}
-
 // indexerWithUpserter replaces the Indexer's UpsertTicket call path by wrapping
 // processWithRetry tests through a helper that calls fake.UpsertTicket directly.
 // We test processWithRetry's contract via a thin wrapper that substitutes the
