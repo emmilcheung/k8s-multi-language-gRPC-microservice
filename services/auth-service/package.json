@@ -90,7 +90,7 @@
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.0",
     "@types/ms": "^2.1.0",
-    "@types/node": "^22.10.7",
+    "@types/node": "^26.1.1",
     "@types/pg": "^8.18.0",
     "@types/supertest": "^6.0.3",
     "@vitest/coverage-v8": "^4.1.0",
