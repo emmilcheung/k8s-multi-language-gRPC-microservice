@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.uber.org/zap"
 )
 
 // EncodeCursor encodes a (createdAt, id) pair as a compound cursor string.
@@ -323,6 +324,7 @@ type MongoTicketRepository struct {
 	collection   *mongo.Collection
 	reservations *mongo.Collection
 	quota        cache.QuotaManager // optional; nil means no Redis quota gate
+	log          *zap.Logger        // never nil; defaults to a no-op logger
 }
 
 // Option is a functional option for NewMongoTicketRepository.
@@ -333,6 +335,16 @@ type Option func(*MongoTicketRepository)
 // Redis Lua scripts as the hot-path gate; Mongo remains the source of truth.
 func WithQuotaManager(qm cache.QuotaManager) Option {
 	return func(r *MongoTicketRepository) { r.quota = qm }
+}
+
+// WithLogger attaches a structured logger used to surface compensation and
+// other non-fatal failures that would otherwise be swallowed.
+func WithLogger(log *zap.Logger) Option {
+	return func(r *MongoTicketRepository) {
+		if log != nil {
+			r.log = log
+		}
+	}
 }
 
 // NewMongoTicketRepository creates a new repository, verifying connectivity at construction time.
@@ -373,6 +385,7 @@ func NewMongoTicketRepository(ctx context.Context, uri, dbName string, opts ...O
 		client:       client,
 		collection:   coll,
 		reservations: resvColl,
+		log:          zap.NewNop(),
 	}
 	for _, o := range opts {
 		o(repo)
@@ -1017,9 +1030,23 @@ func (r *MongoTicketRepository) CreateReservation(ctx context.Context, res *Tick
 			"$inc": bson.M{"reserved": -res.Quantity, "version": 1},
 			"$set": bson.M{"updatedAt": time.Now().UTC()},
 		}
-		_, _ = r.collection.UpdateOne(ctx, compensateFilter, compensateUpdate)
+		if _, compErr := r.collection.UpdateOne(ctx, compensateFilter, compensateUpdate); compErr != nil {
+			// The counter rollback failed: `reserved` is now inflated and will
+			// undersell this ticket until reconciled. Surface loudly — a silent
+			// failure here drifts inventory with no signal (docs/09).
+			r.log.Error("failed to compensate ticket reserved counter after reservation insert failure",
+				zap.String("ticketId", res.TicketID),
+				zap.Int("quantity", res.Quantity),
+				zap.Error(compErr))
+		}
 		if redisReserved {
-			_ = r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity)
+			if relErr := r.quota.Release(ctx, res.TicketID, res.UserID, res.Quantity); relErr != nil {
+				r.log.Error("failed to release Redis quota after reservation insert failure",
+					zap.String("ticketId", res.TicketID),
+					zap.String("userId", res.UserID),
+					zap.Int("quantity", res.Quantity),
+					zap.Error(relErr))
+			}
 		}
 		return fmt.Errorf("insert reservation: %w", insErr)
 	}
