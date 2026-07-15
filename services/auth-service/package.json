@@ -92,7 +92,7 @@
     "@types/ms": "^2.1.0",
     "@types/node": "^22.10.7",
     "@types/pg": "^8.18.0",
-    "@types/supertest": "^6.0.3",
+    "@types/supertest": "^7.2.1",
     "@vitest/coverage-v8": "^4.1.0",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.18.0",
