@@ -1,0 +1,81 @@
+version: 2
+# Automated dependency updates (docs/06-security.md §Supply Chain).
+# Grouped weekly PRs keep noise low while surfacing CVE fixes; pair with the
+# blocking Trivy image scan in ci.yml (fails on fixable HIGH/CRITICAL).
+updates:
+  # ── GitHub Actions ──────────────────────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # ── Go services (+ shared grpc stubs) ───────────────────────────────────────
+  - package-ecosystem: gomod
+    directories:
+      - /libs/grpc-stubs/go
+      - /services/attendance-service
+      - /services/expiration-service
+      - /services/ticket-service
+      - /services/venue-service
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      go-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # ── Node / TypeScript services ──────────────────────────────────────────────
+  - package-ecosystem: npm
+    directories:
+      - /packages/ticketing-mcp-server
+      - /services/auth-service
+      - /services/client
+      - /services/payment-service
+      - /services/user-service
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # ── Java (order-service) ────────────────────────────────────────────────────
+  - package-ecosystem: maven
+    directory: /services/order-service
+    schedule:
+      interval: weekly
+    groups:
+      maven-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # ── .NET (queue-service) ────────────────────────────────────────────────────
+  - package-ecosystem: nuget
+    directory: /services/queue-service
+    schedule:
+      interval: weekly
+    groups:
+      nuget-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # ── Container base images ───────────────────────────────────────────────────
+  - package-ecosystem: docker
+    directories:
+      - /services/apollo-router
+      - /services/attendance-service
+      - /services/auth-service
+      - /services/client
+      - /services/expiration-service
+      - /services/kong-gateway
+      - /services/order-service
+      - /services/payment-service
+      - /services/ticket-service
+      - /services/user-service
+      - /services/venue-service
+    schedule:
+      interval: weekly
+    groups:
+      docker-images:
+        patterns: ["*"]

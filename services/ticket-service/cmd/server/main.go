@@ -82,7 +82,7 @@ func main() {
 	defer mongoClient.Disconnect(context.Background()) //nolint:errcheck
 
 	// MongoDB repositories
-	mongoRepo, err := repository.NewMongoTicketRepository(context.Background(), cfg.MongoURI, cfg.MongoDB)
+	mongoRepo, err := repository.NewMongoTicketRepository(context.Background(), cfg.MongoURI, cfg.MongoDB, repository.WithLogger(log))
 	if err != nil {
 		log.Fatal("failed to initialize ticket repository", zap.Error(err))
 	}

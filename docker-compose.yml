@@ -480,6 +480,7 @@ services:
       PORT: 3004
       DATABASE_URL: postgresql://users_user:users_pass@postgres-users:5432/users_db
       DB_POOL_MAX: 20
+      X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
     depends_on:
       postgres-users:
         condition: service_healthy

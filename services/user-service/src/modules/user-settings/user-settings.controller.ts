@@ -7,7 +7,9 @@ import {
   HttpCode,
   HttpStatus,
   Put,
+  UseGuards,
 } from "@nestjs/common";
+import { UserIdSigRestGuard } from "../../common/security/user-id-sig-rest.guard";
 import {
   UpdateBillingAddressDto,
   UpdatePreferencesDto,
@@ -16,6 +18,7 @@ import {
 import { UserSettingsService } from "./user-settings.service";
 
 @Controller("api/user-settings")
+@UseGuards(UserIdSigRestGuard)
 export class UserSettingsController {
   constructor(private readonly userSettingsService: UserSettingsService) {}
 

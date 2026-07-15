@@ -51,6 +51,33 @@ func TestLoad_QRSigningKeyTooShort(t *testing.T) {
 	assert.Contains(t, err.Error(), "QR_SIGNING_KEY must be at least 32 characters")
 }
 
+func TestLoad_UserIDSigningKeyRequiredInProduction(t *testing.T) {
+	validEnv(t)
+	t.Setenv("APP_ENV", "production")
+	os.Unsetenv("X_USER_ID_SIGNING_KEY")
+	_, err := config.Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "X_USER_ID_SIGNING_KEY must be at least 32 characters in production")
+}
+
+func TestLoad_UserIDSigningKeyTooShortInProduction(t *testing.T) {
+	validEnv(t)
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("X_USER_ID_SIGNING_KEY", "tooshort")
+	_, err := config.Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "X_USER_ID_SIGNING_KEY must be at least 32 characters in production")
+}
+
+func TestLoad_UserIDSigningKeyOptionalOutsideProduction(t *testing.T) {
+	validEnv(t)
+	t.Setenv("APP_ENV", "development")
+	os.Unsetenv("X_USER_ID_SIGNING_KEY")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.UserIDSigningKey)
+}
+
 func TestLoad_InvalidHTTPPort(t *testing.T) {
 	validEnv(t)
 	t.Setenv("HTTP_PORT", "not-a-port")

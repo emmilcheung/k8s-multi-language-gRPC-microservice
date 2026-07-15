@@ -98,6 +98,9 @@ func Load() (*Config, error) {
 	}
 
 	userIDSigningKey := getEnv("X_USER_ID_SIGNING_KEY", "")
+	if env == "production" && len(userIDSigningKey) < minSigningKeyLength {
+		errs = append(errs, fmt.Sprintf("X_USER_ID_SIGNING_KEY must be at least %d characters in production, got %d", minSigningKeyLength, len(userIDSigningKey)))
+	}
 
 	otelEndpoint := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
 	if otelEndpoint != "" {

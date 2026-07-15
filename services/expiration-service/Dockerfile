@@ -1,5 +1,5 @@
 # Stage 1: build — Debian (glibc) required by confluent-kafka-go vendored librdkafka
-FROM golang:1.25-bookworm@sha256:bbb255b0e131db500cf0520adc97441d2260cf629c7fa7e39e025ddf53995a24 AS builder
+FROM golang:1.25-bookworm@sha256:ea341baa9bd5ba6784f6d7161ace70544349a6242d54d34a0fbfd2c4d51c9d58 AS builder
 
 # Install build dependencies needed by confluent-kafka-go (CGO-based)
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*
