@@ -210,6 +210,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -306,6 +309,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -383,6 +389,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -557,6 +566,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -624,6 +636,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -702,6 +717,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -777,6 +795,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -940,6 +961,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -1017,6 +1041,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
