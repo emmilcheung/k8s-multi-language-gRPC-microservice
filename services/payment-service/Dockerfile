@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
 
 # ── Stage 1: build ────────────────────────────────────────────────────────────
-FROM node:24-alpine@sha256:01743339035a5c3c11a373cd7c83aeab6ed1457b55da6a69e014a95ac4e4700b AS builder
+FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951032d7ac1a66 AS builder
 
 WORKDIR /app
 
-# Enable corepack for pnpm
-RUN corepack enable
+# node:26 images no longer bundle corepack; install pnpm directly.
+RUN npm install -g pnpm@10.32.1
 
 # Install dependencies first (layer cached unless manifest changes)
 COPY package.json pnpm-lock.yaml ./
@@ -22,7 +22,7 @@ RUN pnpm build
 RUN pnpm prune --prod --silent
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM node:24-alpine@sha256:01743339035a5c3c11a373cd7c83aeab6ed1457b55da6a69e014a95ac4e4700b AS runtime
+FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951032d7ac1a66 AS runtime
 
 # Refresh OS packages; remove npm (not used at runtime — eliminates CVE-2026-33671/33672/33750).
 RUN apk upgrade --no-cache && \
