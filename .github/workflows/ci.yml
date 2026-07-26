@@ -61,6 +61,7 @@ jobs:
       user:       ${{ steps.filter.outputs.user }}
       venue:      ${{ steps.filter.outputs.venue }}
       queue:      ${{ steps.filter.outputs.queue }}
+      mcp:        ${{ steps.filter.outputs.mcp }}
       skip-ci:    ${{ steps.set-skip-ci.outputs.skip-ci }}
     steps:
       - uses: actions/checkout@v4
@@ -118,9 +119,13 @@ jobs:
               - 'services/queue-service/**'
               - 'infra/queue-system/**'
               - '.github/workflows/ci.yml'
+            mcp:
+              - 'packages/ticketing-mcp-server/**'
+              - '.github/workflows/ci.yml'
             # skip-ci: true if ONLY markdown/docs files changed (no code/config changes)
             ci-required:
               - 'services/**'
+              - 'packages/**'
               - 'proto/**'
               - 'infra/**'
               - '.github/workflows/ci.yml'
@@ -778,6 +783,37 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
+
+  # ── ticketing-mcp-server (TypeScript / pnpm / Vitest) ──────────────────────
+  # No image is built for this package — it ships to npm, so there is no Trivy
+  # image scan step here.
+  mcp:
+    name: ticketing-mcp-server
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.mcp == 'true'
+    defaults:
+      run:
+        working-directory: packages/ticketing-mcp-server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile --silent
+
+      - name: Build
+        run: pnpm build
+
+      - name: Unit tests
+        run: pnpm test
 
   # ── proto (buf lint + breaking change detection) ────────────────────────────
   proto:
@@ -1511,7 +1547,7 @@ jobs:
     name: CI
     runs-on: ubuntu-24.04
     if: always()
-    needs: [changes, auth, client, expiration, graphql, helm-validate, queue, kong, order, payment, proto, ticket, user, venue, e2e]
+    needs: [changes, auth, client, expiration, graphql, helm-validate, queue, kong, mcp, order, payment, proto, ticket, user, venue, e2e]
     steps:
       - name: Check all jobs passed (or skip if only markdown changed)
         run: |
