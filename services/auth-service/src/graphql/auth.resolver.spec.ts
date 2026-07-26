@@ -116,7 +116,7 @@ describe('SessionResolver', () => {
           cookies: { refreshToken: 'cookie' },
         },
       };
-      const out = await resolver.sessions(ctx as any);
+      const out = await resolver.sessions(ctx);
       expect(out).toHaveLength(2);
       expect(out[0]).toMatchObject({
         id: 'sess-1',
@@ -146,7 +146,7 @@ describe('SessionResolver', () => {
           cookies: { refreshToken: 'my-rt' },
         },
       };
-      const out = await resolver.sessions(ctx as any);
+      const out = await resolver.sessions(ctx);
       expect(out[0]).toMatchObject({ id: 'sess-1', current: true });
     });
 
@@ -169,7 +169,7 @@ describe('SessionResolver', () => {
           headers: { 'x-user-id': 'u-1' },
         },
       };
-      const out = await resolver.userLookup('x@y', undefined, ctx as any);
+      const out = await resolver.userLookup('x@y', undefined, ctx);
       expect(out).toEqual({ id: 'u', email: 'x@y' });
     });
 
@@ -177,7 +177,7 @@ describe('SessionResolver', () => {
       const ctx = {
         req: { headers: {} },
       };
-      const out = await resolver.userLookup('x@y', undefined, ctx as any);
+      const out = await resolver.userLookup('x@y', undefined, ctx);
       expect(out).toBeNull();
       expect(mockAuthService.lookupUserByEmail).not.toHaveBeenCalled();
     });
@@ -187,7 +187,7 @@ describe('SessionResolver', () => {
     it('delegates to refreshTokenService.revokeSession', async () => {
       mockRefreshTokenService.revokeSession.mockResolvedValue(true);
       const ctx = { req: { headers: { 'x-user-id': 'u-1' } } };
-      const out = await resolver.revokeSession('sess-1', ctx as any);
+      const out = await resolver.revokeSession('sess-1', ctx);
       expect(mockRefreshTokenService.revokeSession).toHaveBeenCalledWith(
         'u-1',
         'sess-1',

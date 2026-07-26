@@ -90,9 +90,7 @@ describe('PaymentResolver', () => {
       });
 
       const result = await resolver.resolveReference(
-        { __typename: 'Payment', orderId: 'ord_123' } as Parameters<
-          PaymentResolver['resolveReference']
-        >[0],
+        { __typename: 'Payment', orderId: 'ord_123' },
         { req: { headers: { 'x-user-id': 'user_123' } } },
       );
 
@@ -112,9 +110,7 @@ describe('PaymentResolver', () => {
       });
 
       const result = await resolver.resolveReference(
-        { __typename: 'Payment', orderId: 'ord_123' } as Parameters<
-          PaymentResolver['resolveReference']
-        >[0],
+        { __typename: 'Payment', orderId: 'ord_123' },
         { req: { headers: { 'x-user-id': 'other-user' } } },
       );
 
@@ -127,9 +123,7 @@ describe('PaymentResolver', () => {
       mockPaymentsService.findByOrderId.mockRejectedValue(new NotFoundException());
 
       const result = await resolver.resolveReference(
-        { __typename: 'Payment', orderId: 'ord_123' } as Parameters<
-          PaymentResolver['resolveReference']
-        >[0],
+        { __typename: 'Payment', orderId: 'ord_123' },
         { req: { headers: { 'x-user-id': 'user_123' } } },
       );
 

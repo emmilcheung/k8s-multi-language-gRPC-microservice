@@ -275,8 +275,7 @@ describe('GraphQL query { sessions }', () => {
     expect(signupRes.status).toBe(201);
 
     const setCookieHeaders = signupRes.headers['set-cookie'] as unknown as
-      | string[]
-      | undefined;
+      string[] | undefined;
     const refreshTokenValue = getCookieValue(setCookieHeaders, 'refreshToken');
     const accessTokenValue = getCookieValue(setCookieHeaders, 'token');
     expect(refreshTokenValue).toBeDefined();

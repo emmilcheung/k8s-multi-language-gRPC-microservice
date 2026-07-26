@@ -57,7 +57,7 @@ export async function withKafkaConsumerSpan<T>(
   headers: IHeaders | undefined,
   callback: () => Promise<T>,
 ): Promise<T> {
-  const parentContext = extractTraceContext(headers as Record<string, unknown> | undefined);
+  const parentContext = extractTraceContext(headers);
   const span = trace
     .getTracer('payment-service')
     .startSpan(name, { kind: SpanKind.CONSUMER }, parentContext);
@@ -92,7 +92,7 @@ export async function withKafkaProducerSpan<T>(
     return await context.with(spanContext, async () => {
       const carrier: HeaderCarrier = {};
       propagation.inject(spanContext, carrier, kafkaHeaderSetter);
-      return callback(carrier as IHeaders);
+      return callback(carrier);
     });
   } catch (error) {
     span.recordException(error as Error);

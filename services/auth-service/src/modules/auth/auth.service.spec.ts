@@ -238,8 +238,7 @@ describe('AuthService', () => {
         'Auth audit event',
       );
       const signupAudit = loggerMock.info.mock.lastCall?.[0] as
-        | { emailHash?: unknown }
-        | undefined;
+        { emailHash?: unknown } | undefined;
       expectSha256Hex(signupAudit?.emailHash);
       expect(result.accessToken).toBe('signed.jwt.token');
       expect(result.refreshToken).toBe('opaque-refresh-token');
@@ -263,8 +262,7 @@ describe('AuthService', () => {
         'Auth audit event',
       );
       const signupConflictAudit = loggerMock.warn.mock.lastCall?.[0] as
-        | { emailHash?: unknown }
-        | undefined;
+        { emailHash?: unknown } | undefined;
       expectSha256Hex(signupConflictAudit?.emailHash);
     });
 
@@ -333,8 +331,7 @@ describe('AuthService', () => {
         'Auth audit event',
       );
       const signinAudit = loggerMock.info.mock.lastCall?.[0] as
-        | { emailHash?: unknown }
-        | undefined;
+        { emailHash?: unknown } | undefined;
       expectSha256Hex(signinAudit?.emailHash);
       expect(result.accessToken).toBe('signed.jwt.token');
       expect(result.refreshToken).toBe('opaque-refresh-token');
@@ -366,8 +363,7 @@ describe('AuthService', () => {
         'Auth audit event',
       );
       const signinFailedAudit = loggerMock.warn.mock.lastCall?.[0] as
-        | { emailHash?: unknown }
-        | undefined;
+        { emailHash?: unknown } | undefined;
       expectSha256Hex(signinFailedAudit?.emailHash);
     });
 

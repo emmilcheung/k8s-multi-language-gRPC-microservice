@@ -219,8 +219,7 @@ describe('POST /api/users/signup returns 201 Created given valid credentials', (
     expect(res.status).toBe(201);
     expect(res.body.currentUser.email).toBe('signup@example.com');
     const setCookieHeaders = res.headers['set-cookie'] as unknown as
-      | string[]
-      | undefined;
+      string[] | undefined;
     expect(setCookieHeaders).toBeDefined();
     const tokenCookie = setCookieHeaders!.find((c) => c.startsWith('token='));
     expect(tokenCookie).toBeDefined();
@@ -234,8 +233,7 @@ describe('POST /api/users/signup returns 201 Created given valid credentials', (
 
     expect(res.status).toBe(201);
     const setCookieHeaders = res.headers['set-cookie'] as unknown as
-      | string[]
-      | undefined;
+      string[] | undefined;
     expect(setCookieHeaders).toBeDefined();
     const refreshCookie = setCookieHeaders!.find((c) =>
       c.startsWith('refreshToken='),
@@ -305,8 +303,7 @@ describe('POST /api/users/signin returns 200 OK given valid credentials', () => 
 
     expect(res.status).toBe(200);
     const setCookieHeaders = res.headers['set-cookie'] as unknown as
-      | string[]
-      | undefined;
+      string[] | undefined;
     expect(setCookieHeaders).toBeDefined();
     const tokenCookie = setCookieHeaders!.find((c) => c.startsWith('token='));
     const refreshCookie = setCookieHeaders!.find((c) =>

@@ -142,7 +142,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           partitionKey: row.partitionKey,
           cloudEventType:
             typeof row.payload === 'object' && row.payload !== null && 'type' in row.payload
-              ? (row.payload.type as string)
+              ? row.payload.type
               : undefined,
           ...this.errorAuditDetails(err),
         });
