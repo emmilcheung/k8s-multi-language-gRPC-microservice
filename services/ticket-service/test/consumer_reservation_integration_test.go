@@ -19,6 +19,8 @@ import (
 	"time"
 
 	confluent "github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -408,7 +410,12 @@ func startKafkaForConsumerTests(t *testing.T) (string, func()) {
 
 	req := testcontainers.ContainerRequest{
 		Image:        "apache/kafka:3.7.0",
-		ExposedPorts: []string{hostPort + ":9092/tcp"},
+		ExposedPorts: []string{"9092/tcp"},
+		HostConfigModifier: func(hc *container.HostConfig) {
+			hc.PortBindings = network.PortMap{
+				network.MustParsePort("9092/tcp"): []network.PortBinding{{HostPort: hostPort}},
+			}
+		},
 		Env: map[string]string{
 			"KAFKA_NODE_ID":                                  "1",
 			"KAFKA_PROCESS_ROLES":                            "broker,controller",
