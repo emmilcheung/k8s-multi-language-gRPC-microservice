@@ -4,7 +4,7 @@ FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951
 
 WORKDIR /app
 
-RUN corepack enable
+RUN npm install -g pnpm@10.32.1
 
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --silent

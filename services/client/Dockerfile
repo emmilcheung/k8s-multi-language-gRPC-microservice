@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1
 # ─── Stage 1: dependencies ─────────────────────────────────────────────────────
 FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951032d7ac1a66 AS deps
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN npm install -g pnpm@10.32.1
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod=false
 
 # ─── Stage 2: build ────────────────────────────────────────────────────────────
 FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951032d7ac1a66 AS builder
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN npm install -g pnpm@10.32.1
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .

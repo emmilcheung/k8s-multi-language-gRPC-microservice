@@ -5,8 +5,8 @@ FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951
 
 WORKDIR /app
 
-# Enable corepack for pnpm
-RUN corepack enable
+# node:26 images no longer bundle corepack; install pnpm directly.
+RUN npm install -g pnpm@10.32.1
 
 # Install dependencies first (layer cached unless manifest changes)
 COPY package.json pnpm-lock.yaml ./
