@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 type HoldTimerRibbonProps = {
@@ -22,39 +22,37 @@ export function HoldTimerRibbon({
   className,
 }: HoldTimerRibbonProps) {
   const [remaining, setRemaining] = useState<number | null>(null);
-  const [hasExpired, setHasExpired] = useState(false);
-  const [onExpireCalled, setOnExpireCalled] = useState(false);
 
-  // Initialize remaining time on mount
+  // Kept in a ref so a new inline onExpire callback does not restart the timer.
+  const onExpireRef = useRef(onExpire);
   useEffect(() => {
-    setRemaining(computeInitialRemaining(expiresAt));
+    onExpireRef.current = onExpire;
+  }, [onExpire]);
+
+  // A single interval owns both the countdown and the one-shot expiry callback.
+  // The first tick is deferred (setTimeout 0) rather than run inline so the
+  // server-rendered and first client-rendered markup stay identical.
+  useEffect(() => {
+    let expired = false;
+
+    const tick = () => {
+      const next = computeInitialRemaining(expiresAt);
+      setRemaining(next);
+      if (next === 0 && !expired) {
+        expired = true;
+        clearInterval(interval);
+        onExpireRef.current?.();
+      }
+    };
+
+    const first = setTimeout(tick, 0);
+    const interval = setInterval(tick, 1000);
+
+    return () => {
+      clearTimeout(first);
+      clearInterval(interval);
+    };
   }, [expiresAt]);
-
-  // Tick every second
-  useEffect(() => {
-    if (remaining === null) return;
-    if (hasExpired) return;
-
-    const interval = setInterval(() => {
-      setRemaining((prev) => {
-        if (prev === null || prev <= 0) {
-          setHasExpired(true);
-          return 0;
-        }
-        return Math.max(0, prev - 1000);
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [remaining, hasExpired]);
-
-  // Call onExpire exactly once when we hit 0
-  useEffect(() => {
-    if (hasExpired && !onExpireCalled && onExpire) {
-      setOnExpireCalled(true);
-      onExpire();
-    }
-  }, [hasExpired, onExpireCalled, onExpire]);
 
   // Avoid hydration mismatch
   if (remaining === null) {

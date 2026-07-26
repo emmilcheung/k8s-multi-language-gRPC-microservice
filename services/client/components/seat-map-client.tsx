@@ -13,7 +13,7 @@
 // Security: userId is NEVER sent from this component — it is derived server-side
 // from the Kong-injected X-User-Id header.
 
-import { useState, useEffect, useTransition, useRef, useMemo } from "react";
+import { useState, useEffect, useTransition, useRef, useMemo, useCallback } from "react";
 import { useActionState } from "react";
 import { useQuery, useMutation } from "urql";
 import { Button } from "@/components/ui/button";
@@ -113,8 +113,6 @@ export function SeatMapClient({ ticketId, planId, plan, basePrice, priceTiers = 
   const [heldIds, setHeldIds] = useState<Set<string>>(new Set());
   // Hold expiry timestamp.
   const [holdExpiresAt, setHoldExpiresAt] = useState<string | null>(null);
-  // Live countdown seconds remaining (null = no active hold).
-  const [holdSecondsLeft, setHoldSecondsLeft] = useState<number | null>(null);
   const [holdJustExpired, setHoldJustExpired] = useState(false);
 
   // Section tab selection.
@@ -144,24 +142,6 @@ export function SeatMapClient({ ticketId, planId, plan, basePrice, priceTiers = 
     }, 5000);
     return () => clearInterval(timer);
   }, [reexecute]);
-
-  // ── hold countdown timer ──────────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!holdExpiresAt) {
-      setHoldSecondsLeft(null);
-      return;
-    }
-
-    const tick = () => {
-      const secs = Math.max(0, Math.round((new Date(holdExpiresAt).getTime() - Date.now()) / 1000));
-      setHoldSecondsLeft(secs);
-    };
-
-    tick();
-    const timer = setInterval(tick, 1000);
-    return () => clearInterval(timer);
-  }, [holdExpiresAt]);
 
   // ── seat selection helpers ────────────────────────────────────────────────
 
@@ -197,16 +177,24 @@ export function SeatMapClient({ ticketId, planId, plan, basePrice, priceTiers = 
 
   const prevSelectedRef = useRef<Set<string>>(new Set());
 
+  // Clear the hold locally the moment it lapses. HoldTimerRibbon fires the same
+  // handler, but it is only mounted while seats are selected — this timer is the
+  // fallback for every other state.
+  const handleHoldExpired = useCallback(() => {
+    setHoldJustExpired(true);
+    setSelectedIds(new Set());
+    setHeldIds(new Set());
+    setHoldExpiresAt(null);
+    prevSelectedRef.current = new Set();
+    reexecute({ requestPolicy: "network-only" });
+  }, [reexecute]);
+
   useEffect(() => {
-    if (holdExpiresAt && holdSecondsLeft === 0) {
-      setHoldJustExpired(true);
-      setSelectedIds(new Set());
-      setHeldIds(new Set());
-      setHoldExpiresAt(null);
-      prevSelectedRef.current = new Set();
-      reexecute({ requestPolicy: "network-only" });
-    }
-  }, [holdExpiresAt, holdSecondsLeft, reexecute]);
+    if (!holdExpiresAt) return;
+    const msLeft = new Date(holdExpiresAt).getTime() - Date.now();
+    const timer = setTimeout(handleHoldExpired, Math.max(0, msLeft));
+    return () => clearTimeout(timer);
+  }, [holdExpiresAt, handleHoldExpired]);
 
   useEffect(() => {
     const prev = prevSelectedRef.current;
@@ -377,15 +365,7 @@ export function SeatMapClient({ ticketId, planId, plan, basePrice, priceTiers = 
             <HoldTimerRibbon
               expiresAt={holdExpiresAt}
               tone="accent"
-              onExpire={() => {
-                // Trigger the existing hold-expiry handler
-                setHoldJustExpired(true);
-                setSelectedIds(new Set());
-                setHeldIds(new Set());
-                setHoldExpiresAt(null);
-                prevSelectedRef.current = new Set();
-                reexecute({ requestPolicy: "network-only" });
-              }}
+              onExpire={handleHoldExpired}
             />
           )}
 

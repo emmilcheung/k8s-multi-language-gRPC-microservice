@@ -105,11 +105,16 @@ export function createGraphQLClient(cookie?: string, timeoutMs = 5_000): Client 
         onError(error, operation) {
           // Serialize into the message string so it survives Next.js's dev
           // overlay (the overlay strips structured second-arg objects).
+          // urql widened `operation.query` to include PersistedDocument, which
+          // carries no `definitions` — fall back to "anonymous" for those.
+          const doc = operation.query;
           const opName =
-            (operation.query.definitions.find(
-              (d): d is import("graphql").OperationDefinitionNode =>
-                d.kind === "OperationDefinition",
-            )?.name?.value) ?? "anonymous";
+            ("definitions" in doc
+              ? doc.definitions.find(
+                  (d): d is import("graphql").OperationDefinitionNode =>
+                    d.kind === "OperationDefinition",
+                )?.name?.value
+              : undefined) ?? "anonymous";
           const payload = {
             operationName: opName,
             operationKind: operation.kind,
