@@ -242,7 +242,7 @@ function createService(params: {
     params.repo as unknown as PaymentsRepository,
     params.orderServiceClient as unknown as OrderServiceClient,
     params.stripe as unknown as Stripe,
-    params.paymentVaultProvider as unknown as PaymentVaultProvider,
+    params.paymentVaultProvider,
     params.config as unknown as ConfigService,
     params.db as unknown as DrizzleDB,
   );

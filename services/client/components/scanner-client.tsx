@@ -136,9 +136,14 @@ export function ScannerClient({ eventId, eventTitle, venueName }: ScannerClientP
     setCameraActive(false);
   }
 
+  // The gate label and device id live in sessionStorage, which is unavailable
+  // during SSR. They must therefore be adopted after mount rather than in a lazy
+  // useState initializer, or the server and client markup would disagree — so
+  // the synchronous setState here is deliberate.
   useEffect(() => {
     const storedGateLabel = window.sessionStorage.getItem("scanner.gateLabel") ?? "GATE";
     window.sessionStorage.setItem("scanner.gateLabel", storedGateLabel);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setGateLabel(storedGateLabel);
 
     const existingDeviceId = window.sessionStorage.getItem("scanner.deviceId");

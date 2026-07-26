@@ -14,7 +14,6 @@ import "@xyflow/react/dist/style.css";
 import React, {
   useCallback,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import {
@@ -176,10 +175,6 @@ export function SeatingPlanCanvas({
     [setNodes]
   );
 
-  // Keep track of whether there are unsaved changes.
-  const isDirtyRef = useRef(false);
-  isDirtyRef.current = true;
-
   // ── Save handler ───────────────────────────────────────────────────────────
 
   const handleSave = useCallback(async () => {
@@ -199,7 +194,6 @@ export function SeatingPlanCanvas({
     if (result.error) {
       setSaveError(result.error);
     } else {
-      isDirtyRef.current = false;
       setSavedAt(new Date());
     }
   }, [planId, nodes]);

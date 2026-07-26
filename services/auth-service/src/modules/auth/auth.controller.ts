@@ -87,8 +87,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const oldRefreshToken = req.cookies[this.refreshTokenCookieName()] as
-      | string
-      | undefined;
+      string | undefined;
     const currentSessionId =
       this.refreshTokenService.extractSessionId(oldRefreshToken);
     if (oldRefreshToken) {
@@ -100,8 +99,7 @@ export class AuthController {
     // expires. This is a defence-in-depth measure — the primary defence is the
     // short (15 min) token lifetime (S-04).
     const accessToken = req.cookies[this.accessTokenCookieName()] as
-      | string
-      | undefined;
+      string | undefined;
     if (accessToken) {
       await this.authService.blacklistAccessToken(accessToken);
     }
@@ -125,8 +123,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const oldRefreshToken = req.cookies[this.refreshTokenCookieName()] as
-      | string
-      | undefined;
+      string | undefined;
     if (!oldRefreshToken) {
       throw new UnauthorizedException({
         error: {
@@ -275,8 +272,7 @@ export class AuthController {
     const kongUserId = req.headers['x-user-id'] as string | undefined;
     const userIdSig = req.headers['x-user-id-sig'] as string | undefined;
     const token = req.cookies[this.accessTokenCookieName()] as
-      | string
-      | undefined;
+      string | undefined;
 
     // Fast path: no token and no Kong-injected header → not authenticated.
     if (!token && !kongUserId) {
@@ -421,8 +417,7 @@ export class AuthController {
     const kongUserId = req.headers['x-user-id'] as string | undefined;
     const userIdSig = req.headers['x-user-id-sig'] as string | undefined;
     const token = req.cookies[this.accessTokenCookieName()] as
-      | string
-      | undefined;
+      string | undefined;
 
     if (!token && !kongUserId) {
       throw new UnauthorizedException({
