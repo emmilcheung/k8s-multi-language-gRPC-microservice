@@ -121,7 +121,7 @@ describe("UserSettingsMutationResolver", () => {
     mockService.updateProfile.mockResolvedValue({ displayName: "Jane" });
     const ctx = { req: { headers: { "x-user-id": "u-1" } } };
     const out = await resolver.updateProfile(
-      { displayName: "Jane" } as any,
+      { displayName: "Jane" },
       ctx as any,
     );
     expect(mockService.updateProfile).toHaveBeenCalledWith("u-1", {
@@ -133,10 +133,7 @@ describe("UserSettingsMutationResolver", () => {
   it("updatePreferences delegates with caller id", async () => {
     mockService.updatePreferences.mockResolvedValue({ marketingOptIn: true });
     const ctx = { req: { headers: { "x-user-id": "u-2" } } };
-    await resolver.updatePreferences(
-      { marketingOptIn: true } as any,
-      ctx as any,
-    );
+    await resolver.updatePreferences({ marketingOptIn: true }, ctx as any);
     expect(mockService.updatePreferences).toHaveBeenCalledWith("u-2", {
       marketingOptIn: true,
     });
@@ -145,10 +142,7 @@ describe("UserSettingsMutationResolver", () => {
   it("updateBillingAddress delegates with caller id", async () => {
     mockService.updateBillingAddress.mockResolvedValue({ line1: "1 Main St" });
     const ctx = { req: { headers: { "x-user-id": "u-3" } } };
-    await resolver.updateBillingAddress(
-      { line1: "1 Main St" } as any,
-      ctx as any,
-    );
+    await resolver.updateBillingAddress({ line1: "1 Main St" }, ctx as any);
     expect(mockService.updateBillingAddress).toHaveBeenCalledWith("u-3", {
       line1: "1 Main St",
     });
