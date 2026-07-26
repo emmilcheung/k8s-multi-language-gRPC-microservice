@@ -9,7 +9,7 @@
   "pnpm": {
     "overrides": {
       "yaml": "2.8.3",
-      "protobufjs": "7.6.3",
+      "protobufjs": "7.6.5",
       "@protobufjs/utf8": "1.1.1",
       "qs": "6.15.2",
       "uuid": "14.0.0",
