@@ -25,7 +25,8 @@
     <!-- CVE-2026-9828, CVE-2026-10532: logback-core -->
     <logback.version>1.5.35</logback.version>
     <logstash-logback.version>8.0</logstash-logback.version>
-    <postgresql.version>42.7.11</postgresql.version>
+    <!-- CVE-2026-54291: pgjdbc -->
+    <postgresql.version>42.7.12</postgresql.version>
     <!-- Security patches -->
     <!-- CVE-2026-29145/34500/34487/34483/29146/24880/24734/32990/25854: Tomcat multiple CVEs -->
     <tomcat.version>11.0.22</tomcat.version>
