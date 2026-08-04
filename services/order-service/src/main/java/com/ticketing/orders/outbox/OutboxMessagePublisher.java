@@ -12,12 +12,12 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Transactional helper that publishes a single outbox message to Kafka and marks it
- * published in its own Spring-managed DB transaction (C-02 fix).
+ * Transactional helper that publishes a single outbox message to Kafka and marks it published.
  *
- * Extracted from OutboxRelay so that Spring's @Transactional proxy applies correctly —
- * self-invocation within the same bean bypasses the proxy and does not start a new
- * transaction.
+ * Called from {@link OutboxRelay#relay()}, which is itself @Transactional so the
+ * FOR UPDATE SKIP LOCKED claim survives the publish loop; REQUIRED propagation means this
+ * joins that batch transaction rather than opening one per message. Kept as a separate bean
+ * because self-invocation within OutboxRelay would bypass Spring's proxy entirely.
  *
  * Tracing: restores the saved W3C trace context before calling kafkaTemplate.send() so
  * that Spring Kafka observation (template.observation-enabled: true) injects it into
@@ -38,15 +38,16 @@ public class OutboxMessagePublisher {
     }
 
     /**
-     * Sends {@code msg} to Kafka and, if the broker acknowledges (acks=all), commits
-     * the mark-published update in its own transaction.
+     * Sends {@code msg} to Kafka and, if the broker acknowledges (acks=all), marks it
+     * published in the caller's transaction.
      *
      * <p>Failure modes:</p>
      * <ul>
-     *   <li>Kafka send fails → exception caught; DB transaction is never entered; row
-     *       stays unpublished and will be retried on the next poll.</li>
-     *   <li>Kafka succeeds but DB commit fails → the message was sent but the row is
-     *       not marked published; it will be re-sent on the next poll. Consumers must
+     *   <li>Kafka send fails → exception caught and logged; the row is never marked, so it
+     *       stays unpublished and is retried on the next poll. The rest of the batch
+     *       continues.</li>
+     *   <li>Kafka succeeds but the batch does not commit → the message was sent but the row
+     *       is not marked published; it will be re-sent on the next poll. Consumers must
      *       be idempotent (AGENTS.md §3.5).</li>
      * </ul>
      */

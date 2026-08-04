@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -56,48 +55,23 @@ func TestListUnpublished_TwoCallersSeeDisjointRows(t *testing.T) {
 	ctx := context.Background()
 	repo := NewCredentialRepo(pool)
 
-	// Ensure the outbox table exists with the minimum columns we need.
-	// In CI the schema is applied by migrations; in ad-hoc runs against an
-	// empty DB this guarantees the table is present.
-	_, err := pool.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS outbox (
-			id            TEXT PRIMARY KEY,
-			topic         TEXT NOT NULL,
-			payload       JSONB NOT NULL DEFAULT '{}',
-			trace_headers JSONB NOT NULL DEFAULT '{}',
-			partition_key TEXT NOT NULL DEFAULT '',
-			published     BOOLEAN NOT NULL DEFAULT false,
-			published_at  TIMESTAMPTZ,
-			created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-		)`)
-	require.NoError(t, err)
+	ensureOutboxTable(t, pool)
 
-	// Clean up any leftover rows from a previous run.
-	_, err = pool.Exec(ctx, `DELETE FROM outbox WHERE id LIKE 'skip-locked-test-%'`)
-	require.NoError(t, err)
+	// Rows are tagged by topic, not by id: outbox.id is UUID in the migrated
+	// schema (004_outbox.up.sql), so filtering on `id LIKE ...` fails with
+	// "operator does not exist: uuid ~~ unknown" against a real database.
+	const marker = "skip-locked-test.topic"
+	cleanup := func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM outbox WHERE topic = $1`, marker)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
 
 	// Seed three unpublished rows.
-	payload := json.RawMessage(`{}`)
-	traceHeaders := json.RawMessage(`{}`)
+	now := time.Now().UTC()
 	for i := 0; i < 3; i++ {
-		row := &repository.OutboxRow{
-			ID:           "skip-locked-test-" + string(rune('a'+i)),
-			Topic:        "test.topic",
-			Payload:      payload,
-			TraceHeaders: traceHeaders,
-			PartitionKey: "pk",
-		}
-		_, err := pool.Exec(ctx,
-			`INSERT INTO outbox (id, topic, payload, trace_headers, partition_key, published)
-			 VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, false)
-			 ON CONFLICT (id) DO NOTHING`,
-			row.ID, row.Topic, string(row.Payload), string(row.TraceHeaders), row.PartitionKey,
-		)
-		require.NoError(t, err)
+		seedOutboxRow(t, pool, marker, false, now)
 	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM outbox WHERE id LIKE 'skip-locked-test-%'`)
-	})
 
 	// Open two transactions and claim rows from each concurrently.
 	tx1, err := pool.Begin(ctx)
@@ -128,7 +102,116 @@ func TestListUnpublished_TwoCallersSeeDisjointRows(t *testing.T) {
 
 	// Together the two transactions must cover the three seeded rows with no
 	// gaps (tx2 may be empty if tx1 claimed all three, which is also correct).
-	totalClaimed := len(rows1) + len(rows2)
+	// Count only this test's rows — other rows may exist in a shared database.
+	totalClaimed := 0
+	for _, r := range append(append([]*repository.OutboxRow{}, rows1...), rows2...) {
+		if r.Topic == marker {
+			totalClaimed++
+		}
+	}
 	assert.Equal(t, 3, totalClaimed,
 		"expected both transactions to together claim all 3 seeded rows, got %d", totalClaimed)
+}
+
+// ensureOutboxTable creates the outbox table if the target database has no
+// migrations applied.  The column types mirror 004_outbox.up.sql + 008 exactly
+// (notably id UUID, not TEXT) so these tests behave identically against a
+// migrated database and an empty one.
+func ensureOutboxTable(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `
+		CREATE TABLE IF NOT EXISTS outbox (
+			id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+			topic         TEXT        NOT NULL,
+			payload       JSONB       NOT NULL,
+			trace_headers JSONB       NOT NULL DEFAULT '{}',
+			partition_key TEXT        NOT NULL,
+			published     BOOLEAN     NOT NULL DEFAULT false,
+			published_at  TIMESTAMPTZ,
+			created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+		)`)
+	require.NoError(t, err)
+}
+
+// seedOutboxRow inserts one row tagged with `topic` so a test can find and clean
+// up its own rows without depending on the id column's type.
+func seedOutboxRow(t *testing.T, pool *pgxpool.Pool, topic string, published bool, createdAt time.Time) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO outbox (topic, payload, trace_headers, partition_key, published, created_at)
+		 VALUES ($1, '{}'::jsonb, '{}'::jsonb, 'pk', $2, $3)`,
+		topic, published, createdAt)
+	require.NoError(t, err)
+}
+
+// TestDeletePublishedBefore_PurgesOnlyPublishedRowsPastCutoff exercises the real
+// DELETE ... WHERE id IN (SELECT ... LIMIT) statement against Postgres.  The
+// unit-level cleanup test uses an in-memory double, so this is the only place the
+// actual SQL — including the bounded sub-select — is proven to filter on both
+// `published` and `created_at`.  Deleting an unpublished row here would mean
+// losing an event permanently.
+func TestDeletePublishedBefore_PurgesOnlyPublishedRowsPastCutoff(t *testing.T) {
+	pool := requireTestPool(t)
+	ctx := context.Background()
+	repo := NewCredentialRepo(pool)
+	ensureOutboxTable(t, pool)
+
+	const (
+		oldPublished   = "purge-test.old-published"
+		oldUnpublished = "purge-test.old-unpublished"
+		newPublished   = "purge-test.new-published"
+	)
+	cleanup := func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM outbox WHERE topic LIKE 'purge-test.%'`)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	now := time.Now().UTC()
+	seedOutboxRow(t, pool, oldPublished, true, now.Add(-48*time.Hour))
+	seedOutboxRow(t, pool, oldUnpublished, false, now.Add(-48*time.Hour))
+	seedOutboxRow(t, pool, newPublished, true, now.Add(-time.Hour))
+
+	deleted, err := repo.DeletePublishedBefore(ctx, now.Add(-24*time.Hour), 500)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), deleted)
+
+	var remaining []string
+	rows, err := pool.Query(ctx,
+		`SELECT topic FROM outbox WHERE topic LIKE 'purge-test.%' ORDER BY topic`)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var topic string
+		require.NoError(t, rows.Scan(&topic))
+		remaining = append(remaining, topic)
+	}
+	require.NoError(t, rows.Err())
+
+	assert.Equal(t, []string{newPublished, oldUnpublished}, remaining,
+		"only published rows past the cutoff may be purged; an unpublished row deleted here is an event lost forever")
+}
+
+// TestDeletePublishedBefore_RespectsLimit proves the LIMIT in the sub-select is
+// applied, which is what keeps one purge statement's lock hold time bounded.
+func TestDeletePublishedBefore_RespectsLimit(t *testing.T) {
+	pool := requireTestPool(t)
+	ctx := context.Background()
+	repo := NewCredentialRepo(pool)
+	ensureOutboxTable(t, pool)
+
+	cleanup := func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM outbox WHERE topic = 'purge-limit.test'`)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	old := time.Now().UTC().Add(-48 * time.Hour)
+	for i := 0; i < 5; i++ {
+		seedOutboxRow(t, pool, "purge-limit.test", true, old)
+	}
+
+	deleted, err := repo.DeletePublishedBefore(ctx, time.Now().UTC().Add(-24*time.Hour), 2)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), deleted, "the statement must delete at most `limit` rows per call")
 }

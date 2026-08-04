@@ -9,6 +9,29 @@
 
 ---
 
+## Session: 2026-08-05 — fix(outbox): indexing, retention, claim isolation across all four outboxes ⏸ AWAITING MERGE APPROVAL
+
+**Branch:** `fix/outbox-polling-and-retention`
+
+### What was done
+
+Hardened the transactional outbox in ticket-service (Mongo), payment-service (Drizzle/PG), attendance-service (pgx/PG) and order-service (JPA/PG), so that relay cost tracks **backlog depth** rather than total table/collection size.
+
+- **ticket-service** — added the multikey index `idx_outbox_pending` on `outbox.nextAttemptAt` (the claim was a COLLSCAN of the whole `tickets` collection ~2×/s per replica). Relay now backs off exponentially on empty polls (500 ms → 5 s cap), resetting the moment work appears. New env-gated `explain()` test proves the planner selects the index.
+- **payment-service** — added `FOR UPDATE SKIP LOCKED` claim isolation (runs 2–6 replicas) and a 24 h/10 min retention purge in bounded batches.
+- **attendance-service** — added the same 24 h/10 min retention purge (`internal/service/outbox_cleanup.go`, wired in `cmd/server/main.go`), plus **migration 008** adding `outbox.published_at`, a column `MarkPublishedTx` had always written but no migration ever created. A partial publish failure now commits the rows already on the topic instead of rolling the batch back.
+- **order-service** — `findUnpublished` is now bounded (`Pageable`, default 50 via `OUTBOX_RELAY_BATCH_SIZE`) and claims with `FOR UPDATE SKIP LOCKED`; the relay is `@Transactional` so the claim survives the publish loop.
+
+### Standards / doc changes
+
+- **`services/ticket-service/AGENTS.md`** — the outbox section claimed the ticket + event write "requires a multi-document transaction". It does not: the event is an element of the embedded `outbox` array, so both are written by one single-document update (`$set` + `$push`), which is atomic in MongoDB and strictly stronger than a transaction. Corrected the doc; the code was already right.
+
+### Verification
+
+Local Postgres 16.4 and MongoDB 7.0.14 were run standalone (Docker is unavailable on this machine, so Testcontainers suites could not run). Migration 008 was applied twice against a real database to confirm it is additive and idempotent.
+
+---
+
 ## Session: 2026-06-24 — feat(search): metrics, opt-in OpenSearch Helm subchart, docs ✅ COMPLETE
 
 **Branch:** `feat/opensearch-ticket-search`

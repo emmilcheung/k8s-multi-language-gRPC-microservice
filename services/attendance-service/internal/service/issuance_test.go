@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ type credRepoDouble struct {
 	createConflictCred *repository.AdmissionCredential
 	listUnpublishedErr error
 	markPublishedErr   error
+	deletePublishedErr error
 }
 
 func newCredRepoDouble() *credRepoDouble {
@@ -107,6 +109,25 @@ func (r *credRepoDouble) MarkPublishedTx(_ context.Context, _ pgx.Tx, id string,
 	return r.MarkPublished(context.Background(), id, publishedAt)
 }
 
+// DeletePublishedBefore satisfies repository.OutboxRepository, mirroring the
+// bounded delete the Postgres implementation issues.
+func (r *credRepoDouble) DeletePublishedBefore(_ context.Context, before time.Time, limit int) (int64, error) {
+	if r.deletePublishedErr != nil {
+		return 0, r.deletePublishedErr
+	}
+	var deleted int64
+	for id, row := range r.outboxByID {
+		if deleted >= int64(limit) {
+			break
+		}
+		if row.Published && row.CreatedAt.Before(before) {
+			delete(r.outboxByID, id)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
 func (r *credRepoDouble) FindByID(_ context.Context, _ string) (*repository.AdmissionCredential, error) {
 	return nil, repository.ErrNotFound
 }
@@ -175,6 +196,9 @@ func (r *credRepoDouble) UpdateCredentialBuyer(_ context.Context, _, _ string) e
 type pubDouble struct {
 	published []publishedMsg
 	err       error
+	// failFromNth makes Publish start failing at the Nth call (1-based), so a
+	// partial-batch failure can be exercised. Zero means "use err for all calls".
+	failFromNth int
 }
 
 type publishedMsg struct {
@@ -185,6 +209,9 @@ type publishedMsg struct {
 
 func (p *pubDouble) Publish(topic string, key, value []byte) error {
 	p.published = append(p.published, publishedMsg{topic: topic, key: key, value: value})
+	if p.failFromNth > 0 && len(p.published) < p.failFromNth {
+		return nil
+	}
 	return p.err
 }
 
@@ -215,6 +242,20 @@ func (noopTx) Prepare(_ context.Context, _, _ string) (*pgxpgconn.StatementDescr
 	return nil, nil
 }
 func (noopTx) Conn() *pgx.Conn { return nil }
+
+// recordingTx records whether the relay committed the batch, which is the only
+// externally visible difference between "commit the rows already published" and
+// "roll the whole batch back" when the repository double ignores the tx.
+type recordingTx struct {
+	noopTx
+	committed bool
+}
+
+func (t *recordingTx) Commit(_ context.Context) error { t.committed = true; return nil }
+
+type recordingTxBeginner struct{ tx *recordingTx }
+
+func (b *recordingTxBeginner) Begin(_ context.Context) (pgx.Tx, error) { return b.tx, nil }
 
 func newTestIssuanceService(t *testing.T, repo *credRepoDouble) *IssuanceService {
 	t.Helper()
@@ -484,6 +525,52 @@ func TestOutboxRelay_RunOnce_PublishFailure_LeavesRowUnpublished(t *testing.T) {
 	require.Error(t, err)
 	assert.False(t, repo.outboxByID["fd9b4127-74b7-4977-904c-0cb654ff0c0a"].Published)
 	assert.Nil(t, repo.byIssuanceKey["order-relay-fail:unit:0"].IssuanceEventPublishedAt)
+}
+
+// A publish failure part-way through a batch must not throw away the rows that
+// already reached the broker. Rolling their marks back would re-send every one
+// of them on the next tick, so a single flaky publish at position N costs N-1
+// duplicate deliveries. The claim is untouched either way — it is the same
+// transaction, still held with FOR UPDATE SKIP LOCKED.
+func TestOutboxRelay_RunOnce_PartialPublishFailure_CommitsRowsAlreadyOnTheTopic(t *testing.T) {
+	now := time.Now().UTC()
+	repo := newCredRepoDouble()
+	for i, id := range []string{
+		"5c1f6d8e-7a1c-4a5d-9a5e-2f0e5f0f9a11",
+		"0a2b4c6d-8e0f-4a1b-9c3d-5e7f9a1b3c5d",
+	} {
+		key := fmt.Sprintf("order-relay-partial:unit:%d", i)
+		repo.byIssuanceKey[key] = &repository.AdmissionCredential{
+			ID:           id,
+			IssuanceKey:  key,
+			TicketID:     "ticket-relay-partial",
+			OrderID:      "order-relay-partial",
+			EventID:      "ticket-relay-partial",
+			TokenVersion: 1,
+			TokenID:      "b1a4d1a0-6c58-4a7f-9c2e-7d3f5a9b1c60",
+			Status:       repository.CredentialStatusIssued,
+			IssuedAt:     now,
+		}
+		repo.outboxByID[id] = mustOutboxRow(t, repo.byIssuanceKey[key])
+	}
+	pub := &pubDouble{failFromNth: 2, err: errors.New("broker unavailable")}
+	tx := &recordingTx{}
+	relay := NewOutboxRelay(&recordingTxBeginner{tx: tx}, repo, pub, zap.NewNop())
+
+	err := relay.RunOnce(context.Background(), 10)
+
+	require.Error(t, err, "the caller must still learn that publishing is failing")
+	assert.Len(t, pub.published, 2, "the batch must stop at the failing row rather than push on")
+	assert.True(t, tx.committed,
+		"rows already on the topic must be committed as published; rolling back re-sends them next tick")
+
+	var marked int
+	for _, row := range repo.outboxByID {
+		if row.Published {
+			marked++
+		}
+	}
+	assert.Equal(t, 1, marked, "exactly the row that was published should be marked; the failing row retries")
 }
 
 func TestOutboxRelay_RunOnce_MarkPublishedFailure_RetriesSamePayloadAndID(t *testing.T) {
