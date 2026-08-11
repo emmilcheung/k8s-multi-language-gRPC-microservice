@@ -90,15 +90,15 @@ const (
 )
 
 type AdmissionTransfer struct {
-	ID             string
-	CredentialID   string
-	SenderUserID   string
+	ID              string
+	CredentialID    string
+	SenderUserID    string
 	RecipientUserID *string
-	RecipientEmail string
-	State          TransferState
-	CreatedAt      time.Time
-	AcceptedAt     *time.Time
-	RecalledAt     *time.Time
+	RecipientEmail  string
+	State           TransferState
+	CreatedAt       time.Time
+	AcceptedAt      *time.Time
+	RecalledAt      *time.Time
 }
 
 // OutboxRow is a durable Kafka message waiting to be relayed.

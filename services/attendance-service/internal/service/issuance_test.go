@@ -225,9 +225,9 @@ func (noopTxBeginner) Begin(_ context.Context) (pgx.Tx, error) { return noopTx{}
 // noopTx is a pgx.Tx stub where every method is a no-op.
 type noopTx struct{}
 
-func (noopTx) Begin(_ context.Context) (pgx.Tx, error)           { return noopTx{}, nil }
-func (noopTx) Commit(_ context.Context) error                     { return nil }
-func (noopTx) Rollback(_ context.Context) error                   { return nil }
+func (noopTx) Begin(_ context.Context) (pgx.Tx, error) { return noopTx{}, nil }
+func (noopTx) Commit(_ context.Context) error          { return nil }
+func (noopTx) Rollback(_ context.Context) error        { return nil }
 func (noopTx) Exec(_ context.Context, _ string, _ ...any) (pgxpgconn.CommandTag, error) {
 	return pgxpgconn.CommandTag{}, nil
 }

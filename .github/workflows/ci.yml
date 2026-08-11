@@ -1042,11 +1042,11 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      # No golangci-lint step yet, unlike every other Go service here. This service
-      # has never been linted and currently reports 7 pre-existing findings
-      # (4 errcheck, 3 unused). Three of them require deleting dead code, which is
-      # not something adding a CI job should do silently — clear them, then add the
-      # standard golangci-lint-action step to close this gap.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+          working-directory: services/attendance-service
 
       - name: Unit + repository integration tests
         run: go test -v -count=1 -run "^Test" ./internal/...

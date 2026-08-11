@@ -154,16 +154,6 @@ func newConsumer(t *testing.T, h OrderEventHandler, p dlqPublisher) *OrderConsum
 	return c
 }
 
-// runLoop drives c.loop with a context that is cancelled after all messages
-// have been read (detected by waiting until committed+skipped == messages).
-func runLoopUntilDrained(consumer *OrderConsumer, reader *fakeReader, timeout time.Duration) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	// Run loop; it will exit when ctx is cancelled (after the timeout or when
-	// we manually cancel).
-	consumer.loop(ctx, reader)
-}
-
 // ---------------------------------------------------------------------------
 // Issue 1a: no commit when DLQ publish fails
 // ---------------------------------------------------------------------------

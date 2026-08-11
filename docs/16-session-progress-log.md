@@ -35,10 +35,13 @@ Local Postgres 16.4 and MongoDB 7.0.14 were run standalone (Docker is unavailabl
 - **`fix(order)`** — order-service publish-failure semantics contradicted the other three services: `publishOne` swallowed a failed send and the relay continued, letting a later event for the same `partitionKey` overtake an earlier one still being retried. It now stops at the failing row and commits the progress made, matching payment-service and attendance-service. Also bounded `kafkaTemplate.send(...).get()` via `OUTBOX_RELAY_PUBLISH_TIMEOUT_MS` (default 10 s) — once `relay()` became `@Transactional` an unbounded wait pinned the whole claimed batch for `delivery.timeout.ms`, not just one row.
 - **`ci`** — attendance-service had **no CI job at all** and `TEST_DATABASE_URL` was set nowhere in the workflow, so every Postgres-backed test in the service skipped itself while the suite reported `ok`. Added the job (postgres:16-alpine service container) and wired the service into the changes filter, the `ci` gate and `e2e`'s needs. `requireTestPool` now applies `internal/migrations` rather than each test creating its own approximation of the schema — that second source of truth is what allowed the `id LIKE`-against-UUID bug to be written.
 
+- **`fix(attendance)`** — cleared the lint and formatting debt that adding CI exposed, so attendance-service now runs the same `golangci-lint` step as every other Go service. 10 errcheck findings (9 × unchecked `os.Unsetenv` in `config_test.go`, 1 × `resp.Body.Close` in `user_lookup.go`) and 3 unused symbols (`runLoopUntilDrained`, `stubCredentialRepoWithList` and its method — all dead, no callers). 7 files were also not `gofmt`-clean; the diff was pure field alignment.
+
+  Note for future runs: `golangci-lint` caps duplicate findings at 3 by default (`max-same-issues`), so its headline count understates the work. Use `--max-same-issues=0 --max-issues-per-linter=0` to see the true set.
+
 ### Known gaps (not addressed)
 
 - No Testcontainers suite has run anywhere — Docker is unavailable on this machine. `services/*/test/...`, `mvn verify -Pfailsafe` and `pnpm test:integration` will execute for the first time in CI.
-- attendance-service has 7 pre-existing golangci-lint findings (4 errcheck, 3 unused); its CI job therefore omits the lint step that every other Go service runs. Three findings require deleting dead code.
 - Migration 008 has been applied only to a local throwaway database. Deploying attendance-service requires it (hard stop #3).
 
 ---
