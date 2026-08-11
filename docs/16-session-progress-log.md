@@ -30,6 +30,17 @@ Hardened the transactional outbox in ticket-service (Mongo), payment-service (Dr
 
 Local Postgres 16.4 and MongoDB 7.0.14 were run standalone (Docker is unavailable on this machine, so Testcontainers suites could not run). Migration 008 was applied twice against a real database to confirm it is additive and idempotent.
 
+### Follow-ups completed 2026-08-11 (same branch)
+
+- **`fix(order)`** — order-service publish-failure semantics contradicted the other three services: `publishOne` swallowed a failed send and the relay continued, letting a later event for the same `partitionKey` overtake an earlier one still being retried. It now stops at the failing row and commits the progress made, matching payment-service and attendance-service. Also bounded `kafkaTemplate.send(...).get()` via `OUTBOX_RELAY_PUBLISH_TIMEOUT_MS` (default 10 s) — once `relay()` became `@Transactional` an unbounded wait pinned the whole claimed batch for `delivery.timeout.ms`, not just one row.
+- **`ci`** — attendance-service had **no CI job at all** and `TEST_DATABASE_URL` was set nowhere in the workflow, so every Postgres-backed test in the service skipped itself while the suite reported `ok`. Added the job (postgres:16-alpine service container) and wired the service into the changes filter, the `ci` gate and `e2e`'s needs. `requireTestPool` now applies `internal/migrations` rather than each test creating its own approximation of the schema — that second source of truth is what allowed the `id LIKE`-against-UUID bug to be written.
+
+### Known gaps (not addressed)
+
+- No Testcontainers suite has run anywhere — Docker is unavailable on this machine. `services/*/test/...`, `mvn verify -Pfailsafe` and `pnpm test:integration` will execute for the first time in CI.
+- attendance-service has 7 pre-existing golangci-lint findings (4 errcheck, 3 unused); its CI job therefore omits the lint step that every other Go service runs. Three findings require deleting dead code.
+- Migration 008 has been applied only to a local throwaway database. Deploying attendance-service requires it (hard stop #3).
+
 ---
 
 ## Session: 2026-06-24 — feat(search): metrics, opt-in OpenSearch Helm subchart, docs ✅ COMPLETE
