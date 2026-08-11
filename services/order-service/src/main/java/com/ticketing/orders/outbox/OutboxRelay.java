@@ -28,11 +28,18 @@ import java.util.List;
  * correctness problem than the batch commit this reintroduces. Batch scope is bounded by the
  * page size.
  *
- * Failure handling is unchanged where it matters: {@link OutboxMessagePublisher#publishOne}
- * still swallows a failed Kafka send, so one unreachable partition does not stop the rest of
- * the page, and the unmarked row is retried next poll. A DB failure while marking, by
- * contrast, now marks the batch rollback-only, so the whole page is re-published — bounded by
- * the page size, and consumers must be idempotent regardless (AGENTS.md §3.5).
+ * On a failed send the batch stops at the failing row and commits the rows already published;
+ * the failing row and everything after it stay unpublished and are retried next poll. Stopping
+ * rather than skipping is what preserves per-entity ordering: skipping would let a later event
+ * for the same partition key reach Kafka ahead of an earlier one that is still failing, which
+ * defeats the point of keying by orderId at all (AGENTS.md §3.4). The cost is head-of-line
+ * blocking if a row can never be published (e.g. a payload over max.message.bytes); that shows
+ * up as a repeating publish-failure log rather than as silent reordering. This matches
+ * payment-service and attendance-service, which make the same trade-off.
+ *
+ * A DB failure while marking, by contrast, marks the batch rollback-only, so the whole page is
+ * re-published — bounded by the page size, and consumers must be idempotent regardless
+ * (AGENTS.md §3.5).
  *
  * The partition key stored in the outbox is used as the Kafka message key so that
  * messages for the same entity (e.g. same orderId) land on the same partition,
@@ -63,8 +70,15 @@ public class OutboxRelay {
             return;
         }
 
+        int published = 0;
         for (OutboxMessage msg : pending) {
-            publisher.publishOne(msg);
+            if (!publisher.publishOne(msg)) {
+                log.warn("Outbox relay stopped at message id={} topic={}; committing {} row(s) already "
+                                + "published and retrying from this row next poll",
+                        msg.getId(), msg.getTopic(), published);
+                break;
+            }
+            published++;
         }
     }
 }

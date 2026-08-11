@@ -58,12 +58,37 @@ class OutboxRelayTest {
         OutboxMessage first = new OutboxMessage("orders.order.created", "{}", "order-1");
         OutboxMessage second = new OutboxMessage("orders.order.cancelled", "{}", "order-2");
         when(outboxRepository.findUnpublished(any(Pageable.class))).thenReturn(List.of(first, second));
+        when(publisher.publishOne(any(OutboxMessage.class))).thenReturn(true);
 
         relayWithBatchSize(50).relay();
 
         verify(publisher).publishOne(first);
         verify(publisher).publishOne(second);
         verify(publisher, times(2)).publishOne(any(OutboxMessage.class));
+    }
+
+    /**
+     * Ordering guarantee, not just error handling. The outbox keys every record by orderId so
+     * that events for one order stay in order on their partition (AGENTS.md §3.4). If the relay
+     * skipped a failing row and carried on, a later event for that same order would reach Kafka
+     * ahead of the earlier one still being retried — an order could be observed cancelled before
+     * it was created. Stopping the batch is what makes the partition key mean anything.
+     */
+    @Test
+    void relay_shouldStopAtFailingMessage_soLaterEventsForTheSameKeyCannotOvertakeIt() {
+        OutboxMessage otherOrder = new OutboxMessage("orders.order.created", "{}", "order-1");
+        OutboxMessage failing = new OutboxMessage("orders.order.created", "{}", "order-2");
+        OutboxMessage sameKeyLater = new OutboxMessage("orders.order.cancelled", "{}", "order-2");
+        when(outboxRepository.findUnpublished(any(Pageable.class)))
+                .thenReturn(List.of(otherOrder, failing, sameKeyLater));
+        when(publisher.publishOne(otherOrder)).thenReturn(true);
+        when(publisher.publishOne(failing)).thenReturn(false);
+
+        relayWithBatchSize(50).relay();
+
+        verify(publisher).publishOne(otherOrder);
+        verify(publisher).publishOne(failing);
+        verify(publisher, never()).publishOne(sameKeyLater);
     }
 
     @Test

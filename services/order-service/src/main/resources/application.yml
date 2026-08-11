@@ -134,6 +134,12 @@ outbox:
     # rows one FOR UPDATE SKIP LOCKED claim holds while the batch publishes. Matches
     # payment-service's relay batch size.
     batch-size: ${OUTBOX_RELAY_BATCH_SIZE:50}
+    # How long to wait for the broker to acknowledge one record before giving up on it.
+    # Must stay well under delivery.timeout.ms (~120 000 ms): the relay holds a FOR UPDATE
+    # SKIP LOCKED claim on the whole batch while publishing, so an unbounded wait would pin
+    # every claimed row for the producer's full delivery timeout. The batch stops on the
+    # first failure, so this also bounds the claim's total lifetime.
+    publish-timeout-ms: ${OUTBOX_RELAY_PUBLISH_TIMEOUT_MS:10000}
 
 # ── Resilience4j — circuit breaker on gRPC client (R-01) ─────────────────────
 resilience4j:
