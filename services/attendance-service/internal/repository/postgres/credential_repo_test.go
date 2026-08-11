@@ -7,11 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/acme/attendance-service/internal/migrations"
 	"github.com/acme/attendance-service/internal/repository"
 	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestIsUniqueViolation(t *testing.T) {
@@ -24,6 +26,13 @@ func TestIsUniqueViolation(t *testing.T) {
 // environment variable and skips the test if the variable is unset or the
 // pool cannot connect.  Tests that call this function are integration tests
 // and require a running Postgres instance.
+//
+// The migrations are applied (idempotently) rather than letting each test
+// CREATE TABLE its own approximation of the schema.  A hand-written copy
+// silently drifts from internal/migrations — that is exactly how these tests
+// came to filter outbox rows with `id LIKE`, which cannot work against the
+// UUID column 004_outbox.up.sql actually creates.  Running the real
+// migrations makes drift impossible to write.
 func requireTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -41,6 +50,12 @@ func requireTestPool(t *testing.T) *pgxpool.Pool {
 		t.Skipf("cannot ping test postgres: %v", err)
 	}
 	t.Cleanup(pool.Close)
+
+	// Fail rather than skip: an unmigratable test database is a real problem,
+	// and skipping is what let these tests be silently absent from CI.
+	require.NoError(t, migrations.Run(dsn, zap.NewNop()),
+		"could not apply migrations to TEST_DATABASE_URL")
+
 	return pool
 }
 
@@ -54,8 +69,6 @@ func TestListUnpublished_TwoCallersSeeDisjointRows(t *testing.T) {
 	pool := requireTestPool(t)
 	ctx := context.Background()
 	repo := NewCredentialRepo(pool)
-
-	ensureOutboxTable(t, pool)
 
 	// Rows are tagged by topic, not by id: outbox.id is UUID in the migrated
 	// schema (004_outbox.up.sql), so filtering on `id LIKE ...` fails with
@@ -113,26 +126,6 @@ func TestListUnpublished_TwoCallersSeeDisjointRows(t *testing.T) {
 		"expected both transactions to together claim all 3 seeded rows, got %d", totalClaimed)
 }
 
-// ensureOutboxTable creates the outbox table if the target database has no
-// migrations applied.  The column types mirror 004_outbox.up.sql + 008 exactly
-// (notably id UUID, not TEXT) so these tests behave identically against a
-// migrated database and an empty one.
-func ensureOutboxTable(t *testing.T, pool *pgxpool.Pool) {
-	t.Helper()
-	_, err := pool.Exec(context.Background(), `
-		CREATE TABLE IF NOT EXISTS outbox (
-			id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-			topic         TEXT        NOT NULL,
-			payload       JSONB       NOT NULL,
-			trace_headers JSONB       NOT NULL DEFAULT '{}',
-			partition_key TEXT        NOT NULL,
-			published     BOOLEAN     NOT NULL DEFAULT false,
-			published_at  TIMESTAMPTZ,
-			created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-		)`)
-	require.NoError(t, err)
-}
-
 // seedOutboxRow inserts one row tagged with `topic` so a test can find and clean
 // up its own rows without depending on the id column's type.
 func seedOutboxRow(t *testing.T, pool *pgxpool.Pool, topic string, published bool, createdAt time.Time) {
@@ -154,7 +147,6 @@ func TestDeletePublishedBefore_PurgesOnlyPublishedRowsPastCutoff(t *testing.T) {
 	pool := requireTestPool(t)
 	ctx := context.Background()
 	repo := NewCredentialRepo(pool)
-	ensureOutboxTable(t, pool)
 
 	const (
 		oldPublished   = "purge-test.old-published"
@@ -198,7 +190,6 @@ func TestDeletePublishedBefore_RespectsLimit(t *testing.T) {
 	pool := requireTestPool(t)
 	ctx := context.Background()
 	repo := NewCredentialRepo(pool)
-	ensureOutboxTable(t, pool)
 
 	cleanup := func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM outbox WHERE topic = 'purge-limit.test'`)
