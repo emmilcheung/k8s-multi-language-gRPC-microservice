@@ -549,6 +549,26 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection) error {
 			Keys:    bson.D{{Key: "seatingPlanId", Value: 1}},
 			Options: options.Index().SetName("idx_seatingPlanId").SetSparse(true),
 		},
+		// Multikey index backing ClaimPendingOutboxEvents. Without it every claim
+		// is a COLLSCAN of the whole tickets collection, ~2×/sec per relay replica
+		// even when there is nothing to publish.
+		//
+		// Deliberately NOT a partial index. A partialFilterExpression would keep
+		// drained documents out of the index, but MongoDB only uses a partial
+		// index when it can prove the query is a subset of the partial filter,
+		// and it cannot prove that through an $elemMatch: measured on MongoDB
+		// 7.0.14, both {"outbox.0": {$exists: true}} and
+		// {"outbox.nextAttemptAt": {$exists: true}} fell back to a COLLSCAN
+		// (19 996 docs examined for 1 match). This plain multikey index is
+		// selected and examines 1 key / 1 doc for the same query.
+		//
+		// Drained documents still get a null key here, so index *size* tracks
+		// collection size — but $lte on a date is type-bracketed, so the scan
+		// never visits those null keys and claim *cost* tracks backlog depth.
+		{
+			Keys:    bson.D{{Key: "outbox.nextAttemptAt", Value: 1}},
+			Options: options.Index().SetName("idx_outbox_pending"),
+		},
 	})
 	return err
 }

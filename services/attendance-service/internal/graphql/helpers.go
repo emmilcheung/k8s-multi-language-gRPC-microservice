@@ -6,12 +6,12 @@ import (
 
 func mapCredentialToGQL(c *repository.AdmissionCredential, transfer *repository.AdmissionTransfer) *AdmissionPass {
 	ap := &AdmissionPass{
-		ID:       c.ID,
-		TicketID: c.TicketID,
-		OrderID:  c.OrderID,
-		EventID:  c.EventID,
-		Status:   CredentialStatus(c.Status),
-		IssuedAt: c.IssuedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ID:            c.ID,
+		TicketID:      c.TicketID,
+		OrderID:       c.OrderID,
+		EventID:       c.EventID,
+		Status:        CredentialStatus(c.Status),
+		IssuedAt:      c.IssuedAt.Format("2006-01-02T15:04:05Z07:00"),
 		TransferState: TransferStateNone,
 	}
 	if c.UsedAt != nil {

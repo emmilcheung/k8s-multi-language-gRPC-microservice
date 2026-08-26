@@ -48,6 +48,7 @@ jobs:
     name: Detect changed paths
     runs-on: ubuntu-24.04
     outputs:
+      attendance: ${{ steps.filter.outputs.attendance }}
       auth:       ${{ steps.filter.outputs.auth }}
       client:     ${{ steps.filter.outputs.client }}
       expiration: ${{ steps.filter.outputs.expiration }}
@@ -69,6 +70,10 @@ jobs:
         id: filter
         with:
           filters: |
+            attendance:
+              - 'services/attendance-service/**'
+              - 'proto/**'
+              - '.github/workflows/ci.yml'
             auth:
               - 'services/auth-service/**'
               - '.github/workflows/ci.yml'
@@ -988,6 +993,105 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
+  # ── attendance-service (Go / CGO / Testcontainers — PostgreSQL) ─────────────
+  attendance:
+    name: attendance-service
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.attendance == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: services/attendance-service
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/attendance-service
+      CGO_ENABLED: "1"
+    # Postgres for the repository integration tests under ./internal/... . Those
+    # tests skip themselves when TEST_DATABASE_URL is unset, and the variable was
+    # set nowhere in this workflow — so the FOR UPDATE SKIP LOCKED claim test and
+    # the outbox retention tests had never once executed in CI. requireTestPool
+    # applies internal/migrations to this database, so they run against the real
+    # schema rather than a hand-written approximation of it.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: attendance_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install librdkafka build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc libc6-dev librdkafka-dev
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: services/attendance-service/go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+          working-directory: services/attendance-service
+
+      - name: Unit + repository integration tests
+        run: go test -v -count=1 -run "^Test" ./internal/...
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/attendance_test?sslmode=disable
+
+      - name: Integration tests (Testcontainers — PostgreSQL)
+        run: go test -v -count=1 -timeout 5m ./test/...
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "false"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/attendance-service/Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/attendance-service.tar
+
+      - name: Load image for scanning
+        run: docker load --input /tmp/attendance-service.tar
+        working-directory: .
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-results.sarif
+
   # ── e2e (Playwright, runs after all service jobs pass on pull_request) ────────
   # Runs sequentially after every service CI job in this workflow. Only fires on
   # pull_request events (not on direct pushes to main). This means:
@@ -1005,7 +1109,7 @@ jobs:
     name: Playwright E2E (full stack)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    needs: [changes, auth, client, expiration, kong, order, payment, proto, ticket, user, venue]
+    needs: [changes, attendance, auth, client, expiration, kong, order, payment, proto, ticket, user, venue]
     env:
       E2E_INFRA_SERVICES: postgres-auth postgres-orders postgres-payments postgres-attendance mongodb redis kafka schema-registry
       E2E_APP_SERVICES: auth-service ticket-service venue-service order-service payment-service expiration-service user-service attendance-service
@@ -1511,7 +1615,7 @@ jobs:
     name: CI
     runs-on: ubuntu-24.04
     if: always()
-    needs: [changes, auth, client, expiration, graphql, helm-validate, queue, kong, order, payment, proto, ticket, user, venue, e2e]
+    needs: [changes, attendance, auth, client, expiration, graphql, helm-validate, queue, kong, order, payment, proto, ticket, user, venue, e2e]
     steps:
       - name: Check all jobs passed (or skip if only markdown changed)
         run: |

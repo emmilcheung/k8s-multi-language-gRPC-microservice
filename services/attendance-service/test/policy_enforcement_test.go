@@ -134,4 +134,3 @@ func (s *fixedPolicyBlockScanSvc) CheckInByBuyer(
 ) (*service.ScanOutcome, error) {
 	return &service.ScanOutcome{Result: service.ScanResultRevoked}, service.ErrPolicyBlock
 }
-

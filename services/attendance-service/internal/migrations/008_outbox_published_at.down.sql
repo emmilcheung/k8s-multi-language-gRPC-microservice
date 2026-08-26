@@ -1,0 +1,1 @@
+ALTER TABLE outbox DROP COLUMN IF EXISTS published_at;

@@ -90,15 +90,15 @@ const (
 )
 
 type AdmissionTransfer struct {
-	ID             string
-	CredentialID   string
-	SenderUserID   string
+	ID              string
+	CredentialID    string
+	SenderUserID    string
 	RecipientUserID *string
-	RecipientEmail string
-	State          TransferState
-	CreatedAt      time.Time
-	AcceptedAt     *time.Time
-	RecalledAt     *time.Time
+	RecipientEmail  string
+	State           TransferState
+	CreatedAt       time.Time
+	AcceptedAt      *time.Time
+	RecalledAt      *time.Time
 }
 
 // OutboxRow is a durable Kafka message waiting to be relayed.
@@ -194,6 +194,10 @@ type OutboxRepository interface {
 	// MarkPublishedTx marks a single outbox row as published inside an existing
 	// transaction.  The caller owns the commit/rollback lifecycle.
 	MarkPublishedTx(ctx context.Context, tx pgx.Tx, id string, publishedAt time.Time) error
+	// DeletePublishedBefore removes up to limit published outbox rows created
+	// before the given cutoff, returning how many were deleted.  Bounded so a
+	// purge cycle cannot hold locks over an arbitrarily large backlog.
+	DeletePublishedBefore(ctx context.Context, before time.Time, limit int) (int64, error)
 }
 
 // PolicyRepository manages event attendance policies.
