@@ -61,6 +61,7 @@ jobs:
       user:       ${{ steps.filter.outputs.user }}
       venue:      ${{ steps.filter.outputs.venue }}
       queue:      ${{ steps.filter.outputs.queue }}
+      mcp:        ${{ steps.filter.outputs.mcp }}
       skip-ci:    ${{ steps.set-skip-ci.outputs.skip-ci }}
     steps:
       - uses: actions/checkout@v4
@@ -118,9 +119,13 @@ jobs:
               - 'services/queue-service/**'
               - 'infra/queue-system/**'
               - '.github/workflows/ci.yml'
+            mcp:
+              - 'packages/ticketing-mcp-server/**'
+              - '.github/workflows/ci.yml'
             # skip-ci: true if ONLY markdown/docs files changed (no code/config changes)
             ci-required:
               - 'services/**'
+              - 'packages/**'
               - 'proto/**'
               - 'infra/**'
               - '.github/workflows/ci.yml'
@@ -205,6 +210,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -301,6 +309,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -378,6 +389,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -552,6 +566,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -619,6 +636,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -697,6 +717,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -772,12 +795,46 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
+
+  # ── ticketing-mcp-server (TypeScript / pnpm / Vitest) ──────────────────────
+  # No image is built for this package — it ships to npm, so there is no Trivy
+  # image scan step here.
+  mcp:
+    name: ticketing-mcp-server
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.mcp == 'true'
+    defaults:
+      run:
+        working-directory: packages/ticketing-mcp-server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile --silent
+
+      - name: Build
+        run: pnpm build
+
+      - name: Unit tests
+        run: pnpm test
 
   # ── proto (buf lint + breaking change detection) ────────────────────────────
   proto:
@@ -820,10 +877,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Render kong.yml (build.sh local)
-        run: bash scripts/build.sh local kong.yml
+        # Dependabot-triggered runs (and fork PRs) get no Actions secrets. This
+        # step only needs a syntactically valid RSA public key for `kong config
+        # parse` to succeed, so generate a throwaway one rather than fail.
+        run: |
+          if [[ -z "${KONG_RSA_PUBLIC_KEY:-}" ]]; then
+            openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$RUNNER_TEMP/kong-ci.key" 2>/dev/null
+            KONG_RSA_PUBLIC_KEY="$(openssl rsa -in "$RUNNER_TEMP/kong-ci.key" -pubout 2>/dev/null)"
+            export KONG_RSA_PUBLIC_KEY
+          fi
+          export KONG_SIGNING_KEY="${KONG_SIGNING_KEY:-ci_kong_signing_key_32_bytes_minimum}"
+          bash scripts/build.sh local kong.yml
         env:
-          # KONG_RSA_PUBLIC_KEY must be set in repo secrets.
-          # The job is skipped on forks where the secret is unavailable.
           KONG_RSA_PUBLIC_KEY: ${{ secrets.KONG_RSA_PUBLIC_KEY }}
           KONG_SIGNING_KEY: ${{ secrets.X_USER_ID_SIGNING_KEY }}
 
@@ -904,6 +969,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -981,6 +1049,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Without this the action rebuilds the SARIF report at ALL severities and
+          # exit-code follows it, so a single LOW/MEDIUM finding fails the gate.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
@@ -998,9 +1069,9 @@ jobs:
   # introduce a regression, so E2E can still proceed.
   #
   # NOTE: GitHub Actions secrets are unavailable on pull_request events from
-  # forks. E2E will fail on fork PRs (missing RSA_PRIVATE_KEY etc.). This is
-  # an acceptable trade-off for a private/internal repo; revisit if opening to
-  # external contributors (use pull_request_target + explicit fork handling).
+  # forks and on Dependabot-triggered runs (Dependabot has its own secret
+  # scope). The "Write root .env" step below therefore mints throwaway
+  # credentials when the secrets are absent, so E2E is self-sufficient.
   e2e:
     name: Playwright E2E (full stack)
     runs-on: ubuntu-24.04
@@ -1029,6 +1100,18 @@ jobs:
       # PEM strings; printf '%b' expands \n → real newlines for Docker Compose.
       - name: Write root .env
         run: |
+          # Dependabot-triggered runs (and fork PRs) get no Actions secrets.
+          # Everything below is a throwaway consumed only by the ephemeral
+          # compose stack, so mint a matching RSA pair on the fly instead of
+          # failing the job. Generating both halves together also guarantees
+          # they agree — the two stored secrets can silently drift apart.
+          if [[ -z "${RSA_PRIVATE_KEY:-}" || -z "${KONG_RSA_PUBLIC_KEY:-}" ]]; then
+            openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$RUNNER_TEMP/e2e-ci.key" 2>/dev/null
+            RSA_PRIVATE_KEY="$(cat "$RUNNER_TEMP/e2e-ci.key")"
+            KONG_RSA_PUBLIC_KEY="$(openssl rsa -in "$RUNNER_TEMP/e2e-ci.key" -pubout 2>/dev/null)"
+          fi
+          STRIPE_SECRET_KEY="${STRIPE_SECRET_KEY:-sk_test_mock}"
+          X_USER_ID_SIGNING_KEY="${X_USER_ID_SIGNING_KEY:-ci_x_user_id_signing_key_32_bytes_min}"
           {
             printf 'RSA_PRIVATE_KEY="%b"\n' "$RSA_PRIVATE_KEY"
             printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY"
@@ -1511,7 +1594,7 @@ jobs:
     name: CI
     runs-on: ubuntu-24.04
     if: always()
-    needs: [changes, auth, client, expiration, graphql, helm-validate, queue, kong, order, payment, proto, ticket, user, venue, e2e]
+    needs: [changes, auth, client, expiration, graphql, helm-validate, queue, kong, mcp, order, payment, proto, ticket, user, venue, e2e]
     steps:
       - name: Check all jobs passed (or skip if only markdown changed)
         run: |
