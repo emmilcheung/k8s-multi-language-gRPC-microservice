@@ -18,7 +18,9 @@ RUN mvn dependency:go-offline -q
 # Download OpenTelemetry Java agent — zero-code auto-instrumentation (O-01).
 # Pinned to v2.26.1. curl -fL follows GitHub's CDN redirect and fails loudly
 # on non-2xx responses, unlike Docker ADD which silently writes empty files.
-ARG OTEL_AGENT_VERSION=2.26.1
+# CVE-2026-54704: JDBC auto-instrumentation could leak double-quoted passwords
+# from SQL CONNECT statements into trace spans prior to 2.28.0.
+ARG OTEL_AGENT_VERSION=2.28.0
 RUN curl -fL -o /build/otel-agent.jar \
     "https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v${OTEL_AGENT_VERSION}/opentelemetry-javaagent.jar"
 
