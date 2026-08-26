@@ -119,9 +119,9 @@ describe('GlobalExceptionFilter', () => {
         thrown = e;
       }
       expect((thrown as Error).message).toBe('Already exists');
-      expect((thrown as { extensions: Record<string, unknown> }).extensions.code).toBe(
-        'EMAIL_IN_USE',
-      );
+      expect(
+        (thrown as { extensions: Record<string, unknown> }).extensions.code,
+      ).toBe('EMAIL_IN_USE');
     });
 
     it('should map non-HttpException to a generic GraphQLError without leaking internals', () => {
@@ -134,9 +134,9 @@ describe('GlobalExceptionFilter', () => {
         thrown = e;
       }
       expect((thrown as Error).message).toBe('An unexpected error occurred');
-      expect((thrown as { extensions: Record<string, unknown> }).extensions.code).toBe(
-        'INTERNAL_ERROR',
-      );
+      expect(
+        (thrown as { extensions: Record<string, unknown> }).extensions.code,
+      ).toBe('INTERNAL_ERROR');
     });
 
     it('should return 500 for programmer errors (non-HttpException)', () => {

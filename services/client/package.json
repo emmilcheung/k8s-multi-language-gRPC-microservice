@@ -7,6 +7,8 @@
     "overrides": {
       "path-to-regexp": "8.4.2",
       "picomatch": "2.3.2",
+      "sharp": "0.35.0",
+      "body-parser": "2.3.0",
       "qs": "6.15.2",
       "vite": "8.0.5",
       "fast-uri": "3.1.2",
@@ -46,7 +48,7 @@
     "@urql/exchange-retry": "^2.0.0",
     "graphql": "^16.13.2",
     "lucide-react": "^0.577.0",
-    "next": "16.2.6",
+    "next": "16.2.11",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",

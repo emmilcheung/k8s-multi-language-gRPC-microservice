@@ -33,7 +33,6 @@ function requireUserId(ctx: GqlContext): string {
   return userId;
 }
 
-
 @Resolver('User')
 export class AuthResolver {
   constructor(private readonly usersRepository: UsersRepository) {}
