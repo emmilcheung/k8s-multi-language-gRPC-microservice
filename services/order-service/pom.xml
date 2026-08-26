@@ -7,7 +7,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>4.0.6</version>
+    <version>4.0.8</version>
     <relativePath/>
   </parent>
 
@@ -25,14 +25,15 @@
     <!-- CVE-2026-9828, CVE-2026-10532: logback-core -->
     <logback.version>1.5.35</logback.version>
     <logstash-logback.version>8.0</logstash-logback.version>
-    <postgresql.version>42.7.11</postgresql.version>
+    <!-- CVE-2026-54291: postgresql JDBC driver -->
+    <postgresql.version>42.7.13</postgresql.version>
     <!-- Security patches -->
     <!-- CVE-2026-29145/34500/34487/34483/29146/24880/24734/32990/25854: Tomcat multiple CVEs -->
     <tomcat.version>11.0.22</tomcat.version>
     <!-- CVE-2026-45292: OpenTelemetry baggage propagators unbounded memory allocation -->
     <opentelemetry.version>1.62.0</opentelemetry.version>
-    <!-- CVE-2026-22737/22735/22745/22741: spring-webmvc info disclosure + SSE corruption -->
-    <spring-framework.version>7.0.7</spring-framework.version>
+    <!-- CVE-2026-22737/22735/22745/22741, CVE-2026-41853/41846/41844/41843/41841/41845/41842/41852/41851/41850/41848: spring-framework multiple CVEs -->
+    <spring-framework.version>7.0.9</spring-framework.version>
     <!-- CVE-2026-41731/41726: spring-kafka deserialization + listener CVEs -->
     <spring-kafka.version>4.0.6</spring-kafka.version>
   </properties>
@@ -40,16 +41,16 @@
   <dependencyManagement>
     <dependencies>
       <!-- CVE-2026-29062, GHSA-2m67-wjpj-xhg9, GHSA-72hv-8253-57qq: jackson-core 3.x DoS -->
-      <!-- CVE-2026-54512..54518: jackson-databind 3.x, fixed in 3.1.4 -->
+      <!-- CVE-2026-54512..54518, CVE-2026-59889: jackson-databind 3.x, fixed in 3.1.5 -->
       <dependency>
         <groupId>tools.jackson.core</groupId>
         <artifactId>jackson-core</artifactId>
-        <version>3.1.4</version>
+        <version>3.1.6</version>
       </dependency>
       <dependency>
         <groupId>tools.jackson.core</groupId>
         <artifactId>jackson-databind</artifactId>
-        <version>3.1.4</version>
+        <version>3.1.6</version>
       </dependency>
       <dependency>
         <groupId>tools.jackson.core</groupId>
@@ -86,10 +87,11 @@
         <artifactId>lz4-java</artifactId>
         <version>1.8.1</version>
       </dependency>
+      <!-- CVE-2026-59949: at.yawk.lz4:lz4-java -->
       <dependency>
         <groupId>at.yawk.lz4</groupId>
         <artifactId>lz4-java</artifactId>
-        <version>1.10.1</version>
+        <version>1.11.2</version>
       </dependency>
       <!-- CVE-2026-35554: kafka-clients DoS vulnerability -->
       <dependency>
