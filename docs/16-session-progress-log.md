@@ -9,6 +9,47 @@
 
 ---
 
+## Session: 2026-09-16 — fix(scale): helm subchart toggles + outbox SKIP LOCKED claim ⏳ INTEGRATED, NOT MERGED
+
+**Branch:** `feat/scalability-m1` (integration) ← `fix/sr-01-helm-conditions`, `fix/sr-06-order-outbox-claim`
+
+First wave of a scalability remediation effort, run orchestrated: workers implemented, the manager verified every claim independently. Tracked against a local (untracked) review register as items SR-01 and SR-06.
+
+### What was done
+
+- **Helm subchart toggles** — `condition:` added to all eight Bitnami backing subcharts in `infra/helm/Chart.yaml` (postgres-auth/orders/payments/venue/attendance/users, mongodb, redis), with matching `enabled: true` defaults in `values.yaml`. This is the portability contract: overlays disable in-cluster backing stores by toggle rather than by deleting dependencies, which is the precondition for pointing prod at managed databases.
+- **order-service outbox claim** — `OutboxRepository.findUnpublished()` replaced with a native `SELECT ... ORDER BY created_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED` (JPQL cannot express `SKIP LOCKED`). `OutboxRelay.relay()` is now `@Transactional`, with batch size from `OUTBOX_RELAY_BATCH_SIZE` (default 100). Previously every replica read every unpublished row with no limit and no lock — N× duplicate publishes, and an unbounded heap load after a Kafka outage.
+- **New test** — `OutboxRelayConcurrencyTest` runs two genuinely overlapping transactions (the second `PROPAGATION_REQUIRES_NEW` while the first is still uncommitted) against real PostgreSQL via Testcontainers, and asserts the two claims are disjoint. `@DataJpaTest` is not on this project's classpath, so the JPA slice is wired by hand via `@ImportAutoConfiguration` rather than adding a Maven dependency.
+
+### Verification
+
+- All three Helm overlays render at exit 0 with zero stderr: local 187343 B / 8 StatefulSets, staging and prod 213207 B / 7 StatefulSets each. Local is byte-identical to the pre-change baseline; staging/prod differ only in Bitnami's per-render random `postgres-password`.
+- order-service: **57 tests, 0 failures, 0 errors, 0 skipped**, read directly from `target/surefire-reports/*.txt` — a piped `mvn | tail` reports tail's exit status, not Maven's. `mvn checkstyle:check` exit 0.
+- Red→green reproduced independently of the worker: the committed test, run against pre-change `main` with its claim pointed back at the old `findUnpublished()`, fails on the disjointness assertion; on the branch it passes.
+- `git diff --name-only main..feat/scalability-m1` is exactly the 7 intended files.
+
+### Known tradeoff (affects future outbox work)
+
+Mark-published now commits **per batch**, not per message. Failure containment regressed — one failing row can poison the shared persistence context for the rest of the batch — and the claim transaction holds row locks across up to 100 blocking Kafka sends. Consumers must be idempotent (AGENTS.md §3.5).
+
+**Decided: accept, and copy this pattern to other relays rather than "fixing" it.** Per-message commit is structurally incompatible with holding a `FOR UPDATE SKIP LOCKED` claim open — an inner `REQUIRES_NEW` transaction updating a row the outer transaction has locked blocks on the outer, while the outer synchronously waits for that inner call to return. Postgres cannot detect this (it sees only the inner session waiting on the outer's lock), so it stalls to `lock_timeout` rather than aborting. Per-message commit therefore means abandoning `SKIP LOCKED` for claim-by-`UPDATE`, costing a migration plus a lease column and a stuck-claim reaper — speculative complexity (Rule 2) with no measured need. Revisit on evidence: an observed duplicate-publish rate or a long-transaction alert. Batch size is env-tunable in the meantime.
+
+### Not done
+
+- Outbox cleanup `DELETE` batching — part of the same register item, split to its own ticket.
+- A third task (venue-service lock ordering) was **stopped and reverted, not shipped**: the suspected deadlock did not reproduce in 90+ runs across three configurations, and all three `FOR UPDATE` sites use a single-statement `WHERE id = ANY($1)`, which locks in scan order rather than caller-supplied order, making lock-order inversion structurally impossible. Shipping a test that passes both before and after would have been a false green. **Since closed as deferred** — a defensive `ORDER BY s.id` would be a change no test can fail on (Rule 9), and in Postgres an `ORDER BY` above a `FOR UPDATE` does not reliably dictate lock acquisition order anyway. Reopen only if a real SQLSTATE 40P01 is observed on a venue seat path.
+- **Not merged to `main`** (CLAUDE.md core rule 6). `main` is unmoved at `f565089`.
+
+### Integration audit
+
+Audited before proceeding. The diff is clean, and one real gap was found and closed: the Helm work had only been verified on the `enabled: true` path — that everything still rendered unchanged — while the actual point of the ticket, that `enabled: false` *removes* a subchart, was never exercised. Now tested: prod rendered with `postgres-venue`, `postgres-attendance` and `redis` off gives exit 0, zero stderr, 213207→172261 bytes, StatefulSets 7→4, and zero occurrences of all three release names. A suspected second gap (that the `kafka` dependency carried no `condition:`) was **wrong** — it does, as do `cp-kafka`, `opensearch` and `observability`; only `kong` and the first-party service subcharts lack toggles, which is out of scope here.
+
+### Follow-up found while verifying
+
+The prod render emits Secret `ticketing-postgres-users` with a literal password that is **regenerated on every render**, so a real `helm upgrade` would rotate the password out from under the running database and the StatefulSet would fail to authenticate. `infra/helm/templates/` contains no `kind: Secret`, so every other `existingSecret` reference is provisioned out-of-band — `postgres-users` is the one block that never got the same treatment. Now tracked as its own P0 register item. It stays open rather than being fixed inline: the remedy depends on where the credential should come from (out-of-band `existingSecret` like the other five, or External Secrets/SSM), which is an infrastructure choice, not a mechanical edit.
+
+---
+
 ## Session: 2026-06-24 — feat(search): metrics, opt-in OpenSearch Helm subchart, docs ✅ COMPLETE
 
 **Branch:** `feat/opensearch-ticket-search`
