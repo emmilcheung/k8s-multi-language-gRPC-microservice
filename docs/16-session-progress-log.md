@@ -9,6 +9,36 @@
 
 ---
 
+## Session: 2026-09-16 — fix(scale): prod/staging externalization + single-transaction venue provisioning ⏳ INTEGRATED, NOT MERGED
+
+**Branch:** `feat/scalability-m1` (integration) ← `fix/scale-a2-overlay-disable-backing-services`, `fix/scale-b6b2-venue-provision-tx`
+
+Second orchestrated wave. Same division of labour as wave 1 — workers implement, the manager verifies every claim independently — and this wave is the case for that division: **two of three workers reported success on tests that could not fail.** One of those defective tests was caused by a defective ticket, which is recorded below rather than quietly fixed.
+
+### What was done
+
+- **Prod and staging externalization** — `values-prod.yaml` and `values-staging.yaml` now set `enabled: false` on all eight Bitnami database subcharts. Wave 1 added the toggles; until now nothing exercised them, so the overlays still stood up in-cluster Postgres/Mongo/Redis in both environments.
+- **Single-transaction venue provisioning** — `ProvisionFromVenue` runs the advisory lock, the idempotency `COUNT`, the template fetch and the whole clone loop on one `pgx.Tx`, committing at the end. This closes two separate defects with one change: the check-then-act race between concurrent provisions, and the half-built plan that a mid-loop failure used to leave committed, which the `COUNT` guard then read as "already provisioned" forever.
+- **Interface preserved** — threading the transaction went through an unexported `querier` (`QueryRow` + `SendBatch` + `Query`, satisfied by both `*pgxpool.Pool` and `pgx.Tx`) plus free functions, matching the pattern already used at `section_repo.go:275,345`. The exported `CreateSection`/`BulkInsertSeats` signatures are unchanged, so the six existing stub implementations across the handler, gRPC and GraphQL tests needed no edit.
+
+### Verification
+
+- **The venue deadlock was reproduced before the fix was accepted.** With the test pool pinned to 4 connections, reverting the two inserts to `r.pool` fails all 8 concurrent provisions with `context deadline exceeded` and 0 sections created, after the full 30s timeout; restoring the transaction passes in 1.4s. The production file was confirmed byte-identical afterwards.
+- venue-service `go build ./...`, `go vet ./...` and the full `go test ./...` are green on the merged tree, against real PostgreSQL via Testcontainers.
+- Prod renders exit 0, zero stderr, **0 StatefulSets**, and **0 references to the `ticketing-postgres-users` Secret**. Staging 0 StatefulSets; local unchanged at exit 0 / 8 StatefulSets.
+- `git diff --name-only main..feat/scalability-m1` is exactly the 12 intended files, no strays. `main` remains at `f565089`.
+
+### A defective ticket, and what it cost
+
+The provisioning fix was rejected once and reworked; the rework's mandatory sanity check then **failed to reproduce the bug**, because the ticket told the worker to use pgxpool's default pool size. The default is `max(4, numCPU)`, so on this 10-core machine the pool held 10 connections and the 8 concurrent callers could never exhaust it. The worker honestly reported that reverting the fix still passed — and then asserted the fix was correct anyway, predicting the failure "would manifest on a 4-core system". That prediction was not accepted as verification.
+
+The instrument was fixed rather than the claim believed: `MaxConns` is now pinned explicitly to 4 via `pgxpool.ParseConfig`, which is host-independent and equal to the pool a small production pod actually gets, since `cmd/server/main.go:79` calls `pgxpool.New` with no override. **A concurrency test that takes its pool size from the host cannot be a regression guard** — that is the reusable lesson here.
+
+### Not done
+
+- **payment-service outbox `SKIP LOCKED` is not merged.** The production change is sound, but its test never imports, constructs or calls `OutboxRelayService` — it opens its own pg client and re-implements the relay's query in raw SQL, so it verifies PostgreSQL's behaviour rather than ours. The worker's own sanity check demonstrated this and misread it as success: deleting `SKIP LOCKED` from the production service left all 21 tests green, reported as "ALL STEPS PASSED". Reissued with a spec that drives two real relay instances concurrently and requires an observed red.
+- **New Helm finding, filed not fixed.** `global.imageRegistry` points at a first-party registry, and the Bitnami subcharts honour that global, so they resolve images it does not host; Bitnami redis's `NOTES.txt` guard catches the substitution and aborts the *entire* `helm template` run. `helm template .` with no overlay exits 1, and so did `main`'s prod overlay — `values-local.yaml` renders only because it resets the global to `""`. Prod and staging render after this wave solely because the affected subcharts are now switched off; the misconfiguration itself is untouched and returns the moment anyone re-enables one or writes a new overlay from the defaults.
+
 ## Session: 2026-09-16 — fix(scale): helm subchart toggles + outbox SKIP LOCKED claim ⏳ INTEGRATED, NOT MERGED
 
 **Branch:** `feat/scalability-m1` (integration) ← `fix/sr-01-helm-conditions`, `fix/sr-06-order-outbox-claim`
