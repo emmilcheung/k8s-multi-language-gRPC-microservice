@@ -12,6 +12,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// querier is satisfied by both *pgxpool.Pool and pgx.Tx, so the section and seat
+// insert helpers can run standalone or inside a caller's transaction.
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
 // SectionRepo implements repository.SectionRepository using pgxpool.
 type SectionRepo struct {
 	pool *pgxpool.Pool
@@ -24,17 +32,25 @@ func NewSectionRepo(pool *pgxpool.Pool) *SectionRepo {
 
 // CreateSection inserts a new section. On return, s.ID, s.CreatedAt, s.UpdatedAt are populated.
 func (r *SectionRepo) CreateSection(ctx context.Context, s *repository.Section) error {
+	return createSection(ctx, r.pool, s)
+}
+
+func createSection(ctx context.Context, db querier, s *repository.Section) error {
 	const q = `
 		INSERT INTO sections (plan_id, name, type, row_count, column_count, price_tier_id)
 		VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::uuid)
 		RETURNING id, created_at, updated_at`
-	return r.pool.QueryRow(ctx, q, s.PlanID, s.Name, s.Type, s.RowCount, s.ColumnCount, s.PriceTierID).
+	return db.QueryRow(ctx, q, s.PlanID, s.Name, s.Type, s.RowCount, s.ColumnCount, s.PriceTierID).
 		Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
 }
 
 // BulkInsertSeats auto-generates seat rows for a newly created section using a
 // pgx batch to avoid N round-trips. priceTierID is optional; pass "" for NULL.
 func (r *SectionRepo) BulkInsertSeats(ctx context.Context, sectionID, planID, sectionType, priceTierID string, rowCount, columnCount int) error {
+	return bulkInsertSeats(ctx, r.pool, sectionID, planID, sectionType, priceTierID, rowCount, columnCount)
+}
+
+func bulkInsertSeats(ctx context.Context, db querier, sectionID, planID, sectionType, priceTierID string, rowCount, columnCount int) error {
 	const q = `
 		INSERT INTO seats (section_id, plan_id, seat_label, row_label, column_number, price_tier_id, attributes)
 		VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::uuid, $7)`
@@ -63,7 +79,7 @@ func (r *SectionRepo) BulkInsertSeats(ctx context.Context, sectionID, planID, se
 		return nil
 	}
 
-	br := r.pool.SendBatch(ctx, batch)
+	br := db.SendBatch(ctx, batch)
 	defer br.Close() //nolint:errcheck
 
 	for i := 0; i < batch.Len(); i++ {
@@ -78,9 +94,26 @@ func (r *SectionRepo) BulkInsertSeats(ctx context.Context, sectionID, planID, se
 // generates seat rows for each.  Idempotent: returns (0, nil) if the plan already
 // has sections.  Returns the count of sections provisioned.
 func (r *SectionRepo) ProvisionFromVenue(ctx context.Context, planID, venueID string) (int, error) {
+	// One transaction for the whole clone. pg_advisory_xact_lock serialises concurrent
+	// callers for the same plan (the COUNT guard below is otherwise a check-then-act
+	// race, SR-35), and committing only at the end makes the clone atomic so a mid-loop
+	// failure cannot leave a half-built plan that the COUNT guard then treats as
+	// complete forever (SR-39). Doing the inserts on this same tx — rather than on the
+	// pool — keeps each caller to ONE pooled connection, which is what stops the pool
+	// from deadlocking under concurrent provisioning.
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, planID); err != nil {
+		return 0, err
+	}
+
 	// Check idempotency: if plan already has sections, do nothing.
 	var existing int
-	if err := r.pool.QueryRow(ctx,
+	if err := tx.QueryRow(ctx,
 		`SELECT COUNT(*) FROM sections WHERE plan_id = $1`, planID,
 	).Scan(&existing); err != nil {
 		return 0, err
@@ -96,7 +129,7 @@ func (r *SectionRepo) ProvisionFromVenue(ctx context.Context, planID, venueID st
 		WHERE  venue_id = $1
 		ORDER  BY display_order, created_at`
 
-	rows, err := r.pool.Query(ctx, vsQ, venueID)
+	rows, err := tx.Query(ctx, vsQ, venueID)
 	if err != nil {
 		return 0, err
 	}
@@ -134,14 +167,17 @@ func (r *SectionRepo) ProvisionFromVenue(ctx context.Context, planID, venueID st
 			RowCount:    ts.rowCount,
 			ColumnCount: ts.colCount,
 		}
-		if err := r.CreateSection(ctx, s); err != nil {
+		if err := createSection(ctx, tx, s); err != nil {
 			return 0, fmt.Errorf("provision section %q: %w", ts.name, err)
 		}
-		if err := r.BulkInsertSeats(ctx, s.ID, planID, ts.sectionType, "", ts.rowCount, ts.colCount); err != nil {
+		if err := bulkInsertSeats(ctx, tx, s.ID, planID, ts.sectionType, "", ts.rowCount, ts.colCount); err != nil {
 			return 0, fmt.Errorf("provision seats for section %q: %w", ts.name, err)
 		}
 	}
 
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
 	return len(templates), nil
 }
 
