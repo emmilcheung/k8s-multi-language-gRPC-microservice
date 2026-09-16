@@ -88,6 +88,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Poll outbox every second. Publishes up to RELAY_BATCH_SIZE unpublished rows per tick.
+   * Rows are claimed with FOR UPDATE SKIP LOCKED inside a transaction so concurrent
+   * relay replicas claim disjoint rows and do not double-publish.
    * Each row is published and marked individually — partial batch success is safe
    * because each row is idempotent (CloudEvents id is a UUID).
    */
@@ -95,63 +97,64 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   async relay() {
     if (!this.kafkaAvailable || !this.producer) return;
 
-    let rows: (typeof outbox.$inferSelect)[];
     try {
-      rows = await this.db
-        .select()
-        .from(outbox)
-        .where(eq(outbox.published, false))
-        .orderBy(asc(outbox.createdAt))
-        .limit(RELAY_BATCH_SIZE);
+      await this.db.transaction(async (tx) => {
+        const rows = await tx
+          .select()
+          .from(outbox)
+          .where(eq(outbox.published, false))
+          .orderBy(asc(outbox.createdAt))
+          .limit(RELAY_BATCH_SIZE)
+          .for('update', { skipLocked: true });
+
+        for (const row of rows) {
+          try {
+            await withKafkaProducerSpan(
+              `kafka publish ${row.topic}`,
+              row.traceHeaders,
+              async (headers) => {
+                await this.producer!.send({
+                  topic: row.topic,
+                  messages: [
+                    {
+                      key: row.partitionKey,
+                      value: JSON.stringify(row.payload),
+                      headers,
+                    },
+                  ],
+                });
+              },
+            );
+
+            await tx.update(outbox).set({ published: true }).where(eq(outbox.id, row.id));
+
+            this.logger.info(
+              { outboxId: row.id, topic: row.topic, partitionKey: row.partitionKey },
+              'Outbox row published to Kafka',
+            );
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.auditError('payment.outbox.publish_failed', {
+              outboxId: row.id,
+              topic: row.topic,
+              partitionKey: row.partitionKey,
+              cloudEventType:
+                typeof row.payload === 'object' && row.payload !== null && 'type' in row.payload
+                  ? (row.payload.type as string)
+                  : undefined,
+              ...this.errorAuditDetails(err),
+            });
+            this.logger.error(
+              { outboxId: row.id, topic: row.topic, err: msg },
+              'Outbox relay: failed to publish row — will retry on next tick',
+            );
+            // Leave published = false — relay will retry on next 1-second tick
+          }
+        }
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error({ err: msg }, 'Outbox relay: failed to query unpublished rows');
-      return;
-    }
-
-    for (const row of rows) {
-      try {
-        await withKafkaProducerSpan(
-          `kafka publish ${row.topic}`,
-          row.traceHeaders,
-          async (headers) => {
-            await this.producer!.send({
-              topic: row.topic,
-              messages: [
-                {
-                  key: row.partitionKey,
-                  value: JSON.stringify(row.payload),
-                  headers,
-                },
-              ],
-            });
-          },
-        );
-
-        await this.db.update(outbox).set({ published: true }).where(eq(outbox.id, row.id));
-
-        this.logger.info(
-          { outboxId: row.id, topic: row.topic, partitionKey: row.partitionKey },
-          'Outbox row published to Kafka',
-        );
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.auditError('payment.outbox.publish_failed', {
-          outboxId: row.id,
-          topic: row.topic,
-          partitionKey: row.partitionKey,
-          cloudEventType:
-            typeof row.payload === 'object' && row.payload !== null && 'type' in row.payload
-              ? (row.payload.type as string)
-              : undefined,
-          ...this.errorAuditDetails(err),
-        });
-        this.logger.error(
-          { outboxId: row.id, topic: row.topic, err: msg },
-          'Outbox relay: failed to publish row — will retry on next tick',
-        );
-        // Leave published = false — relay will retry on next 1-second tick
-      }
+      this.logger.error({ err: msg }, 'Outbox relay: claim transaction failed');
     }
   }
 
