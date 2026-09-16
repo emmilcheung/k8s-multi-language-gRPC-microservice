@@ -7,6 +7,7 @@ import { type DrizzleDB } from '../../database/database.module';
 type LoggerMock = Pick<PinoLogger, 'info' | 'warn' | 'error'>;
 type ConfigMock = Pick<ConfigService, 'getOrThrow'>;
 type DbMock = {
+  transaction: ReturnType<typeof vi.fn>;
   select: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
 };
@@ -30,16 +31,21 @@ function makeDb(rows: Array<Record<string, unknown>>) {
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockResolvedValue(rows),
+    limit: vi.fn().mockReturnThis(),
+    for: vi.fn().mockResolvedValue(rows),
   };
   const updateChain = {
     set: vi.fn().mockReturnThis(),
     where: vi.fn().mockResolvedValue(undefined),
   };
-
-  return {
+  const tx = {
     select: vi.fn().mockReturnValue(selectChain),
     update: vi.fn().mockReturnValue(updateChain),
+  };
+  return {
+    transaction: vi.fn().mockImplementation(async (cb: (t: unknown) => Promise<void>) => cb(tx)),
+    select: tx.select,
+    update: tx.update,
   };
 }
 
@@ -98,5 +104,40 @@ describe('OutboxRelayService.relay', () => {
       }),
       'Payment audit event',
     );
+  });
+
+  it('should claim rows with FOR UPDATE SKIP LOCKED so replicas do not double-publish', async () => {
+    const selectChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      for: vi.fn().mockResolvedValue([]),
+    };
+    const updateChain = {
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue(undefined),
+    };
+    const tx = {
+      select: vi.fn().mockReturnValue(selectChain),
+      update: vi.fn().mockReturnValue(updateChain),
+    };
+    const db = {
+      transaction: vi.fn().mockImplementation(async (cb: (t: unknown) => Promise<void>) => cb(tx)),
+      select: tx.select,
+      update: tx.update,
+    };
+
+    const service = createRelayService({ logger, config: makeConfig(), db });
+    const relayState = service as unknown as Record<string, unknown>;
+    relayState['kafkaAvailable'] = true;
+    relayState['producer'] = {
+      send: vi.fn(),
+    };
+
+    await service.relay();
+
+    expect(db.transaction).toHaveBeenCalled();
+    expect(selectChain.for).toHaveBeenCalledWith('update', { skipLocked: true });
   });
 });
