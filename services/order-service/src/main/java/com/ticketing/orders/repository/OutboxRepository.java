@@ -4,6 +4,7 @@ import com.ticketing.orders.entity.OutboxMessage;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.OffsetDateTime;
@@ -13,8 +14,10 @@ import java.util.UUID;
 @Repository
 public interface OutboxRepository extends JpaRepository<OutboxMessage, UUID> {
 
-    @Query("SELECT o FROM OutboxMessage o WHERE o.published = false ORDER BY o.createdAt ASC")
-    List<OutboxMessage> findUnpublished();
+    @Query(value = "SELECT * FROM outbox WHERE published = false "
+                 + "ORDER BY created_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED",
+           nativeQuery = true)
+    List<OutboxMessage> findUnpublishedForUpdate(@Param("limit") int limit);
 
     /**
      * Deletes published outbox rows older than the given timestamp.

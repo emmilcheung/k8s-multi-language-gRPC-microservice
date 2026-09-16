@@ -130,6 +130,9 @@ outbox:
     # while reducing DB queries and OTel spans ~10× vs the previous 500 ms fixed delay.
     # Override via OUTBOX_RELAY_POLL_INTERVAL_MS env var for lower-latency environments.
     poll-interval-ms: ${OUTBOX_RELAY_POLL_INTERVAL_MS:5000}
+    # Max rows claimed per relay run via SELECT ... FOR UPDATE SKIP LOCKED (SR-06).
+    # Override via OUTBOX_RELAY_BATCH_SIZE env var.
+    batch-size: ${OUTBOX_RELAY_BATCH_SIZE:100}
 
 # ── Resilience4j — circuit breaker on gRPC client (R-01) ─────────────────────
 resilience4j:
