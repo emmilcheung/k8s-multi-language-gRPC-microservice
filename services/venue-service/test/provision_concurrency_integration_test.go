@@ -156,12 +156,21 @@ func TestProvisionFromVenue_DoesNotExhaustPoolUnderConcurrency(t *testing.T) {
 
 	require.NoError(t, migrations.Run(connStr, zap.NewNop()))
 
-	// Use plain pgxpool.New(ctx, connStr) to get the DEFAULT pool size.
-	// The default is max(4, numCPU). On this system with 4 CPUs, that's 4.
-	// If the old buggy implementation held one connection per advisory lock
-	// while inserting through the pool, all 4 connections would be consumed
-	// by the lock transactions, and the inserts would deadlock.
-	pool, err := pgxpool.New(ctx, connStr)
+	// Pin MaxConns to 4 rather than taking pgxpool's default of max(4, numCPU).
+	// The default makes this test depend on the host CPU count: on a 10-core
+	// machine the pool holds 10 connections, 8 concurrent callers never exhaust
+	// it, and the test passes even with the deadlock present. 4 is also the
+	// production floor — cmd/server/main.go calls pgxpool.New with no MaxConns
+	// override, so a 2-core pod runs with exactly this pool size.
+	//
+	// With 4 connections and 8 callers: if ProvisionFromVenue holds the advisory
+	// lock on one connection while inserting through the pool, every caller needs
+	// TWO connections. Four callers take all four for their lock transactions and
+	// then block forever waiting for an insert connection that no one can release.
+	poolCfg, err := pgxpool.ParseConfig(connStr)
+	require.NoError(t, err)
+	poolCfg.MaxConns = 4
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	require.NoError(t, err)
 	defer pool.Close()
 
