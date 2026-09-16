@@ -1,21 +1,26 @@
 /**
  * Integration test for outbox relay concurrency behavior.
  *
- * Verifies that multiple concurrent relay instances use FOR UPDATE SKIP LOCKED
- * to claim disjoint sets of unpublished rows, preventing double-publishing.
+ * Verifies that OutboxRelayService drives two concurrent relay instances against
+ * a real database and uses FOR UPDATE SKIP LOCKED to claim disjoint sets of
+ * unpublished rows, preventing double-publishing.
  *
- * Spins up a real PostgreSQL container, applies migrations, then exercises
- * the concurrent claim pattern with two overlapping transactions.
+ * The test constructs the service directly (not via NestJS), injects stub
+ * dependencies, and exercises the relay() method concurrently with controlled
+ * producer gates to verify that SKIP LOCKED prevents duplicate publishes.
  */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Pool } from 'pg';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, asc } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as schema from '../src/database/schema';
+import { OutboxRelayService } from '../src/modules/payments/outbox-relay.service';
+import type { PinoLogger } from 'nestjs-pino';
+import type { ConfigService } from '@nestjs/config';
 
 const { outbox } = schema;
 
@@ -35,7 +40,7 @@ beforeAll(async () => {
   // Initialize pool with enough connections for concurrent transactions
   pool = new Pool({
     connectionString: databaseUrl,
-    max: 5, // Allow at least 5 connections for overlapping transactions
+    max: 5,
   });
 
   // Initialize drizzle client for schema access
@@ -71,8 +76,8 @@ afterAll(async () => {
 });
 
 describe('Outbox relay concurrency', () => {
-  it('should claim rows with FOR UPDATE SKIP LOCKED so replicas do not double-publish', async () => {
-    // Insert 3 unpublished rows using raw SQL
+  it('should drive the real relay service and prevent double-publish with SKIP LOCKED', async () => {
+    // Insert 3 unpublished outbox rows
     const now = new Date().toISOString();
     const client = await pool.connect();
     try {
@@ -119,124 +124,141 @@ describe('Outbox relay concurrency', () => {
       client.release();
     }
 
-    // Transaction A: claim 2 rows with FOR UPDATE SKIP LOCKED and hold the transaction open
-    let transactionARows: Array<{
-      id: string;
-      topic: string;
-      partitionKey: string;
-      payload: unknown;
-      traceHeaders: unknown;
-      published: boolean;
-      createdAt: Date;
-    }> = [];
-    let releaseTransactionA: () => Promise<void> = () => Promise.resolve();
+    // Build stub logger (no-op functions)
+    const stubLogger = {
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      debug: () => {},
+    } as unknown as PinoLogger;
 
-    const transactionAPromise = new Promise<void>((resolve, reject) => {
-      pool.connect((err, clientA, done) => {
-        if (err) {
-          reject(err);
-          return;
-        }
+    // Build stub config (returns undefined for all gets)
+    const stubConfig = {
+      get: () => undefined,
+    } as unknown as ConfigService;
 
-        if (!clientA) {
-          reject(new Error('Failed to get database client'));
-          return;
-        }
+    // Track messages sent by each relay
+    const relayAMessages: Array<{ key: string; value: string }> = [];
+    const relayBMessages: Array<{ key: string; value: string }> = [];
 
-        // eslint-disable-next-line @typescript-eslint/no-floating-promises
-        (async () => {
-          try {
-            await clientA.query('BEGIN ISOLATION LEVEL READ COMMITTED');
-
-            const result = await clientA.query(
-              `SELECT id, topic, partition_key, payload, trace_headers, published, created_at
-               FROM outbox
-               WHERE published = false
-               ORDER BY created_at ASC
-               LIMIT 2
-               FOR UPDATE SKIP LOCKED`,
-            );
-
-            transactionARows = result.rows.map((row) => ({
-              id: row.id as string,
-              topic: row.topic as string,
-              partitionKey: row.partition_key as string,
-              payload: row.payload,
-              traceHeaders: row.trace_headers,
-              published: row.published as boolean,
-              createdAt: row.created_at as Date,
-            }));
-
-            // Signal that A has claimed rows
-            resolve();
-
-            // Hold the transaction open until releaseTransactionA is called
-            await new Promise<void>((resolveHold) => {
-              releaseTransactionA = async () => {
-                await clientA.query('COMMIT');
-                resolveHold();
-              };
-            });
-          } catch (error) {
-            done(error as Error);
-            reject(error instanceof Error ? error : new Error(String(error)));
-          } finally {
-            done();
-          }
-        })();
-      });
+    // Gate: relayA's first producer.send() will block until relayB finishes
+    let resolveGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      resolveGate = resolve;
     });
 
-    // Wait for transaction A to claim rows
-    await transactionAPromise;
+    let relayAHasEnteredSend = false;
 
-    // Transaction B: while A holds its lock, try to claim with the same query
-    const transactionBRows = await db
-      .select()
-      .from(outbox)
+    // Fake producer for relay A: blocks on first send
+    const fakeProducerA = {
+      send: async (args: any) => {
+        relayAMessages.push({
+          key: args.messages[0].key as string,
+          value: args.messages[0].value as string,
+        });
 
-      .where(eq(outbox.published, false))
+        if (!relayAHasEnteredSend) {
+          relayAHasEnteredSend = true;
+          // Signal that we've entered send, then wait for gate
+          await gate;
+        }
+      },
+    };
 
-      .orderBy(asc(outbox.createdAt))
-      .limit(2)
-      .for('update', { skipLocked: true });
+    // Fake producer for relay B: returns immediately
+    const fakeProducerB = {
+      // eslint-disable-next-line @typescript-eslint/require-await
+      send: async (args: any) => {
+        relayBMessages.push({
+          key: args.messages[0].key as string,
+          value: args.messages[0].value as string,
+        });
+      },
+    };
 
-    // Release transaction A
-    await releaseTransactionA();
+    // Construct relay service instances
+    const relayA = new OutboxRelayService(stubLogger, stubConfig, db);
+    const relayB = new OutboxRelayService(stubLogger, stubConfig, db);
 
-    // Verify that A and B claimed disjoint sets
-    const transactionAIds = new Set(transactionARows.map((r) => r.id));
-    const transactionBIds = new Set(transactionBRows.map((r) => r.id));
+    // Set kafkaAvailable and producer via bracket access for both relays
+    (relayA as any).kafkaAvailable = true;
+    (relayA as any).producer = fakeProducerA;
+    (relayB as any).kafkaAvailable = true;
+    (relayB as any).producer = fakeProducerB;
 
-    // Find overlap
-    const overlap = Array.from(transactionAIds).filter((id) => transactionBIds.has(id));
+    // Start relay A without awaiting
+    const relayAPromise = relayA.relay();
+
+    // Wait for relay A to enter its first producer.send()
+    let attempts = 0;
+    while (!relayAHasEnteredSend && attempts < 100) {
+      await new Promise((r) => setTimeout(r, 10));
+      attempts++;
+    }
+
+    expect(relayAHasEnteredSend, 'relay A should have entered producer.send').toBe(true);
+
+    // While relay A is blocked in producer.send, relay B runs to completion
+    await relayB.relay();
+
+    // Verify relay B got no rows (all were locked by relay A)
+    expect(
+      relayBMessages.length,
+      'relay B should have claimed 0 rows because all were locked by relay A',
+    ).toBe(0);
+
+    // Release relay A's gate
+    resolveGate();
+
+    // Await relay A to complete
+    await relayAPromise;
+
+    // Combine messages from both relays
+    const allMessages = [...relayAMessages, ...relayBMessages];
+
+    // Assertion 1: Total message count should be 3 (each row published once)
+    expect(
+      allMessages.length,
+      'total send calls should be exactly 3 (each row published once)',
+    ).toBe(3);
+
+    // Assertion 2: Relay A should have published all 3 rows
+    expect(relayAMessages.length, 'relay A should have published all 3 unpublished rows').toBe(3);
+
+    // Assertion 3: Query database to verify which rows are marked published
+    const publishedRows = await db.select().from(outbox).where(eq(outbox.published, true));
+    const publishedRowIds = new Set(publishedRows.map((r) => r.id));
+
+    // Assertion 4: Should have exactly 3 published rows (no duplicates)
+    expect(
+      publishedRows.length,
+      'all 3 outbox rows should be marked as published after relay completes',
+    ).toBe(3);
 
     expect(
-      overlap,
-      'row claimed by both transactions — SKIP LOCKED not working, replicas will double-publish',
-    ).toHaveLength(0);
-    expect(
-      transactionARows,
-      'transaction A should have claimed 2 rows without SKIP LOCKED stopping it',
-    ).toHaveLength(2);
-    expect(
-      transactionBRows.length,
-      'transaction B should have claimed at most 1 row because A holds 2; SKIP LOCKED should skip locked rows',
-    ).toBeLessThanOrEqual(1);
+      publishedRowIds.size,
+      'should have exactly 3 unique published row IDs (no duplicates)',
+    ).toBe(3);
 
-    // All claimed rows should come from the 3 we inserted
-    const allClaimedIds = new Set([...transactionAIds, ...transactionBIds]);
-    const insertedIds = new Set([
+    // Assertion 5: Verify all 3 original IDs were published
+    const expectedIds = new Set([
       '11111111-1111-4111-8111-111111111111',
       '22222222-2222-4222-8222-222222222222',
       '33333333-3333-4333-8333-333333333333',
     ]);
 
-    for (const claimedId of allClaimedIds) {
+    for (const publishedId of publishedRowIds) {
       expect(
-        insertedIds.has(claimedId),
-        `claimed row ${claimedId} was not in the inserted set`,
+        expectedIds.has(publishedId),
+        `published row id ${publishedId} should be one of the original 3 inserted rows`,
       ).toBe(true);
     }
+
+    // Assertion 6: Verify no unpublished rows remain
+    const unpublishedRows = await db.select().from(outbox).where(eq(outbox.published, false));
+    expect(
+      unpublishedRows.length,
+      'all outbox rows should be published, none should remain unpublished',
+    ).toBe(0);
   });
 });
