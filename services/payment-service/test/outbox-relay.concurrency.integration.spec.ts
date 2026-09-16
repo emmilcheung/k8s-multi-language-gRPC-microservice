@@ -7,7 +7,7 @@
  * Spins up a real PostgreSQL container, applies migrations, then exercises
  * the concurrent claim pattern with two overlapping transactions.
  */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Pool } from 'pg';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -50,11 +50,16 @@ beforeAll(async () => {
     path.join(__dirname, '../migrations/002_add_outbox.sql'),
     'utf-8',
   );
+  const migration3Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/003_add_outbox_trace_headers.sql'),
+    'utf-8',
+  );
 
   const client = await pool.connect();
   try {
     await client.query(migration1Sql);
     await client.query(migration2Sql);
+    await client.query(migration3Sql);
   } finally {
     client.release();
   }
@@ -72,13 +77,13 @@ describe('Outbox relay concurrency', () => {
     const client = await pool.connect();
     try {
       await client.query(
-        `INSERT INTO outbox (id, topic, partition_key, payload, trace_headers, published, created_at, updated_at)
+        `INSERT INTO outbox (id, topic, partition_key, payload, trace_headers, published, created_at)
          VALUES
-           ($1, $2, $3, $4, $5, $6, $7, $8),
-           ($9, $10, $11, $12, $13, $14, $15, $16),
-           ($17, $18, $19, $20, $21, $22, $23, $24)`,
+           ($1, $2, $3, $4, $5, $6, $7),
+           ($8, $9, $10, $11, $12, $13, $14),
+           ($15, $16, $17, $18, $19, $20, $21)`,
         [
-          'outbox-concurrent-1',
+          '11111111-1111-4111-8111-111111111111',
           'payments.payment.captured',
           'order-1',
           JSON.stringify({
@@ -88,8 +93,7 @@ describe('Outbox relay concurrency', () => {
           '{}',
           false,
           now,
-          now,
-          'outbox-concurrent-2',
+          '22222222-2222-4222-8222-222222222222',
           'payments.payment.captured',
           'order-2',
           JSON.stringify({
@@ -99,8 +103,7 @@ describe('Outbox relay concurrency', () => {
           '{}',
           false,
           now,
-          now,
-          'outbox-concurrent-3',
+          '33333333-3333-4333-8333-333333333333',
           'payments.payment.captured',
           'order-3',
           JSON.stringify({
@@ -109,7 +112,6 @@ describe('Outbox relay concurrency', () => {
           }),
           '{}',
           false,
-          now,
           now,
         ],
       );
@@ -126,7 +128,6 @@ describe('Outbox relay concurrency', () => {
       traceHeaders: unknown;
       published: boolean;
       createdAt: Date;
-      updatedAt: Date;
     }> = [];
     let releaseTransactionA: () => Promise<void> = () => Promise.resolve();
 
@@ -148,7 +149,7 @@ describe('Outbox relay concurrency', () => {
             await clientA.query('BEGIN ISOLATION LEVEL READ COMMITTED');
 
             const result = await clientA.query(
-              `SELECT id, topic, partition_key, payload, trace_headers, published, created_at, updated_at
+              `SELECT id, topic, partition_key, payload, trace_headers, published, created_at
                FROM outbox
                WHERE published = false
                ORDER BY created_at ASC
@@ -164,7 +165,6 @@ describe('Outbox relay concurrency', () => {
               traceHeaders: row.trace_headers,
               published: row.published as boolean,
               createdAt: row.created_at as Date,
-              updatedAt: row.updated_at as Date,
             }));
 
             // Signal that A has claimed rows
@@ -196,7 +196,7 @@ describe('Outbox relay concurrency', () => {
       .from(outbox)
 
       .where(eq(outbox.published, false))
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+
       .orderBy(asc(outbox.createdAt))
       .limit(2)
       .for('update', { skipLocked: true });
@@ -227,13 +227,16 @@ describe('Outbox relay concurrency', () => {
     // All claimed rows should come from the 3 we inserted
     const allClaimedIds = new Set([...transactionAIds, ...transactionBIds]);
     const insertedIds = new Set([
-      'outbox-concurrent-1',
-      'outbox-concurrent-2',
-      'outbox-concurrent-3',
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222',
+      '33333333-3333-4333-8333-333333333333',
     ]);
 
     for (const claimedId of allClaimedIds) {
-      expect(insertedIds.has(claimedId), `claimed row ${claimedId} was not in the inserted set`).toBe(true);
+      expect(
+        insertedIds.has(claimedId),
+        `claimed row ${claimedId} was not in the inserted set`,
+      ).toBe(true);
     }
   });
 });
