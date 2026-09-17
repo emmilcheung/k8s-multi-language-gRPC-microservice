@@ -9,6 +9,53 @@
 
 ---
 
+## Session: 2026-09-17 — fix(order): outbox cleanup batching + M1 branch audit ⏳ AUDITED, NOT MERGED
+
+**Branch:** `feat/scalability-m1` (integration) ← `fix/scale-b8-outbox-cleanup-batching`
+
+Fourth and final orchestrated wave for M1, plus the overall review and audit the owner asked for before anything reaches `main`.
+
+### What was done
+
+- **Outbox cleanup batching (SR-06, second half).** `OutboxCleanupJob.purgePublished()` issued one unbounded `DELETE` inside one transaction. Over a backlog — the state left by any Kafka outage — that holds row locks and pins the vacuum horizon for the whole run, and on timeout it makes *no* progress, so the next run retries the same doomed statement forever. It now deletes `outbox.cleanup.batch-size` rows (default 500) per iteration, up to `outbox.cleanup.max-batches` (default 100) per invocation, leaving the remainder to the next schedule.
+- **`@Transactional` moved off the job and onto the repository method.** This is the whole point of the change: on `OutboxRepository.deletePublishedBatch` each batch commits on its own, so a failure part-way keeps the progress already made. On the job it would wrap every batch in one outer transaction and roll all of them back — the exact behaviour being removed.
+- **`V6__add_outbox_published_index.sql`.** The cleanup `DELETE` had no usable index. `V1`'s `idx_outbox_unpublished` is partial on `WHERE published = false`, which is the *relay's* filter. Without the mirror-image index on `(created_at) WHERE published = true`, batching would have turned one sequential scan into one scan per batch — strictly worse than the unbounded delete it replaces. Plain `CREATE INDEX`, not `CONCURRENTLY`, because Flyway wraps each migration in a transaction and `CONCURRENTLY` cannot run inside one.
+- **A false RED recipe corrected.** `OutboxRelayConcurrencyTest.java:106` told a reviewer to swap the claim call to `findUnpublished()` to reproduce the red — but the same SR-06 change deleted that method. Repointed at the `LIMIT … FOR UPDATE SKIP LOCKED` clause that actually has to be removed. Comment only.
+
+### Verification
+
+- Full `mvn test` on the merged tree: **61 tests, 0 failures, 0 errors, 0 skipped, EXIT=0**, with the exit code captured directly rather than through a pipe.
+- **Both reds reproduced here, not taken on report.** Dropping the `LIMIT` from `deletePublishedBatch` fails `deletePublishedBatchRespectsItsLimit` (`expected: 100 but was: 250`) *and* `eachBatchCommitsSoAFailurePartWayKeepsItsProgress` (`expected: 50L but was: 0L`) — the worker had reported only the first. Adding `@Transactional` back to `purgePublished()` fails `cleanupJobMustNotBeTransactional` (`expected: null but was: @Transactional(...)`). Both files restored and confirmed byte-identical to `53f84a4`.
+- Branch audit: 24 changed files, all traceable to a register item; no secret values; no dependency manifest, migration outside `V6`, client, supergraph, port, NetworkPolicy or securityContext change; every code change merged `--no-ff` from its own `fix/scale-*` branch.
+- **A2 backward compatibility verified rather than assumed.** Disabling the in-cluster Postgres/Mongo/Redis subcharts in staging and prod breaks no service because no chart template references those values — services read connection strings from a Kubernetes Secret via `envFrom.secretRef`.
+
+### A sanity check that could not fail — this time the manager's
+
+The ticket specified: "restore `@Transactional` on `purgePublished()` → test C must fail." It cannot. The test constructs the job with `new`, and a hand-constructed object has no Spring AOP proxy, so `@Transactional` on it is completely inert. Confirmed by running it: with the annotation restored, the behavioural test still passes.
+
+This was caught before the worker committed, and fixed by adding `cleanupJobMustNotBeTransactional` — a reflection guard that asserts the annotation is absent and carries the reason in its failure message. It is the property that matters, because in production the job *is* a Spring bean and the annotation *would* take effect there.
+
+That makes four defects of the same shape across this milestone — a check written so that it cannot fail — three from workers and two now from the manager's own tickets. The pattern is specific enough to name: **whenever a fix is verified by reverting it, the revert must be executed, not predicted, and the revert must be shown to produce a failure the test is actually capable of reporting.**
+
+### A bug chased and cleared
+
+`OutboxMessagePublisher.publishOne` carries `@Transactional` with `REQUIRED` propagation and, since SR-06, joins the relay's claim transaction. If a Kafka failure escaped it, the transaction proxy would call `setRollbackOnly()` and the relay's commit would throw `UnexpectedRollbackException`, discarding every mark-published in the batch and re-sending all of them on the next tick — a duplicate storm from a single bad row. It does not happen: the `catch` sits inside the method body, so nothing propagates through the proxy. Recorded because the failure mode is non-obvious and the next person to touch that method needs to know why the `catch` cannot be moved out.
+
+### A conflict between the plan and the register
+
+Plan item `B3` asks for advisory-lock leader election on "venue sweeper **and order cleanup**"; SR-15's register row names only the venue sweeper and the ticket reconciler. Order-service's `OutboxCleanupJob` does run on every pod every 10 minutes, so the plan is not wrong to mention it.
+
+**Dropped deliberately rather than deferred**, because the two designs are mutually exclusive. A per-batch advisory lock does not serialize the job — another pod simply interleaves batches, and each batch is independently correct. A job-wide lock requires one transaction spanning every batch, which is precisely what this change exists to eliminate. Concurrent cleanup pods produce brief lock waits and `deleted = 0`, not incorrectness, on a table bounded by the 24-hour retention the job itself enforces.
+
+### Not done
+
+- **`main` is untouched at `f565089`, and stays that way pending owner approval.** No auto-merge (CLAUDE.md core rule 6).
+- M1's exit criterion is not code and cannot be met from here: "every service at 3 replicas in staging for 24h with no duplicate events and no stuck reservations" needs a staging deploy, which is an owner action.
+- SR-01 remains half-complete by design: the Helm half landed, the Terraform half (RDS for venue/user/attendance, managed Mongo) is untouched, and `terraform apply` is an owner action under `docs/15-agent-hard-stops.md`.
+- Every register item stays `in-progress` rather than `done`; the done-count moves only after merge to `main`.
+
+---
+
 ## Session: 2026-09-17 — fix(scale): sweeper leader election, expiration replicas, outbox claim contract ⏳ INTEGRATED, NOT MERGED
 
 **Branch:** `feat/scalability-m1` (integration) ← `fix/scale-b5-expiration-replicas`, `fix/scale-b3a-venue-sweeper-leader`
