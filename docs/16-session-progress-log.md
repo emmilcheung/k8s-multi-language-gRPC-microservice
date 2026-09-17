@@ -36,7 +36,7 @@ So the assertion was right, the production code was right, and the test still co
 
 ### Not done
 
-- SR-15's second half — leader election for the ticket-service quota reconciler — is dispatched but not landed.
+- Nothing else from M1's dispatched work is outstanding. SR-15 is now complete on the branch: the ticket-service quota reconciler takes a Redis `SET NX` lease at `ticket-service:reconciler:leader` with TTL = the 5-minute interval, so one replica per tick paginates Mongo and rewrites Redis instead of all of them. It is deliberately not released on success, because releasing it would let the next replica's offset ticker start a second redundant pass inside the same interval; a failed pass does release it. Verified by deleting the election guard and watching both assertions fail, then re-running the full `go test ./...` — including the 201-second testcontainers package the worker stopped short of.
 - The order-service outbox cleanup `DELETE` batching split out of SR-06 is still open.
 - Nothing has merged to `main`. The overall review and audit of `feat/scalability-m1` is still pending.
 
