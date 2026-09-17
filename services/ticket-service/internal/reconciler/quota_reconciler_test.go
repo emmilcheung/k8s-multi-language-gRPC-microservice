@@ -3,6 +3,7 @@ package reconciler_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/acme/ticket-service/internal/cache"
 	"github.com/acme/ticket-service/internal/reconciler"
@@ -107,7 +108,7 @@ func (c *countingSeedQuotaManager) Seed(ctx context.Context, ticketID string, av
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-func newTestRedisQuotaManager(t *testing.T) (*cache.RedisQuotaManager, func()) {
+func newTestRedisQuotaManager(t *testing.T) (*cache.RedisQuotaManager, *redis.Client, func()) {
 	t.Helper()
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
@@ -117,7 +118,7 @@ func newTestRedisQuotaManager(t *testing.T) (*cache.RedisQuotaManager, func()) {
 		_ = client.Close()
 		mr.Close()
 	}
-	return qm, cleanup
+	return qm, client, cleanup
 }
 
 func newTestLogger(t *testing.T) *zap.Logger {
@@ -142,7 +143,7 @@ func gaTicket(id string, quota, reserved, sold int) *repository.Ticket {
 // TestReconciler_Run_ShouldReseedMissingKey verifies that when the Redis key
 // for a GA ticket is absent the reconciler seeds it with the correct value.
 func TestReconciler_Run_ShouldReseedMissingKey(t *testing.T) {
-	qm, cleanup := newTestRedisQuotaManager(t)
+	qm, rdb, cleanup := newTestRedisQuotaManager(t)
 	defer cleanup()
 
 	// quota=5, reserved=1, sold=1 → expected available=3
@@ -150,7 +151,7 @@ func TestReconciler_Run_ShouldReseedMissingKey(t *testing.T) {
 	sweeper := &stubSweeper{}
 	log := newTestLogger(t)
 
-	r := reconciler.New(repo, sweeper, qm, 0, log)
+	r := reconciler.New(repo, sweeper, qm, rdb, 0, log)
 	require.NoError(t, r.Run(context.Background()))
 
 	avail, err := qm.Available(context.Background(), "t1")
@@ -161,7 +162,7 @@ func TestReconciler_Run_ShouldReseedMissingKey(t *testing.T) {
 // TestReconciler_Run_ShouldForceCorrectDrift verifies that when the Redis key
 // exists but has a wrong value the reconciler force-corrects it.
 func TestReconciler_Run_ShouldForceCorrectDrift(t *testing.T) {
-	qm, cleanup := newTestRedisQuotaManager(t)
+	qm, rdb, cleanup := newTestRedisQuotaManager(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -174,7 +175,7 @@ func TestReconciler_Run_ShouldForceCorrectDrift(t *testing.T) {
 	sweeper := &stubSweeper{}
 	log := newTestLogger(t)
 
-	r := reconciler.New(repo, sweeper, qm, 0, log)
+	r := reconciler.New(repo, sweeper, qm, rdb, 0, log)
 	require.NoError(t, r.Run(ctx))
 
 	avail, err := qm.Available(ctx, "t2")
@@ -186,7 +187,7 @@ func TestReconciler_Run_ShouldForceCorrectDrift(t *testing.T) {
 // non-empty SeatingPlanID are ignored by the reconciler (venue-service manages
 // those).
 func TestReconciler_Run_ShouldSkipSeatedTickets(t *testing.T) {
-	qm, cleanup := newTestRedisQuotaManager(t)
+	qm, rdb, cleanup := newTestRedisQuotaManager(t)
 	defer cleanup()
 
 	seatedTicket := &repository.Ticket{
@@ -200,7 +201,7 @@ func TestReconciler_Run_ShouldSkipSeatedTickets(t *testing.T) {
 	sweeper := &stubSweeper{}
 	log := newTestLogger(t)
 
-	r := reconciler.New(repo, sweeper, qm, 0, log)
+	r := reconciler.New(repo, sweeper, qm, rdb, 0, log)
 	require.NoError(t, r.Run(context.Background()))
 
 	// The Redis key must NOT have been created for the seated ticket.
@@ -213,7 +214,7 @@ func TestReconciler_Run_ShouldSkipSeatedTickets(t *testing.T) {
 // value already matches MongoDB truth the reconciler does not call Seed with
 // force=true.
 func TestReconciler_Run_ShouldNotOverwriteCorrectKey(t *testing.T) {
-	baseQM, cleanup := newTestRedisQuotaManager(t)
+	baseQM, rdb, cleanup := newTestRedisQuotaManager(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -228,7 +229,7 @@ func TestReconciler_Run_ShouldNotOverwriteCorrectKey(t *testing.T) {
 	sweeper := &stubSweeper{}
 	log := newTestLogger(t)
 
-	r := reconciler.New(repo, sweeper, counting, 0, log)
+	r := reconciler.New(repo, sweeper, counting, rdb, 0, log)
 	require.NoError(t, r.Run(ctx))
 
 	avail, err := baseQM.Available(ctx, "t3")
@@ -240,15 +241,45 @@ func TestReconciler_Run_ShouldNotOverwriteCorrectKey(t *testing.T) {
 // TestReconciler_Run_ShouldCallSweeper verifies that the sweeper interface is
 // invoked during each Run() pass.
 func TestReconciler_Run_ShouldCallSweeper(t *testing.T) {
-	qm, cleanup := newTestRedisQuotaManager(t)
+	qm, rdb, cleanup := newTestRedisQuotaManager(t)
 	defer cleanup()
 
 	repo := &stubTicketRepo{tickets: []*repository.Ticket{}}
 	sweeper := &stubSweeper{returnN: 2}
 	log := newTestLogger(t)
 
-	r := reconciler.New(repo, sweeper, qm, 0, log)
+	r := reconciler.New(repo, sweeper, qm, rdb, 0, log)
 	require.NoError(t, r.Run(context.Background()))
 
 	assert.Equal(t, 1, sweeper.callCount, "sweeper must be called exactly once per Run")
+}
+
+// TestReconciler_RunIfLeader_ShouldSkipWhenAnotherReplicaHoldsTheLock verifies
+// that a replica which loses the leader election does no reconciliation work at
+// all. Without leader election every replica runs a full pass every tick, which
+// is N times the Mongo pagination and N times the Redis writes.
+func TestReconciler_RunIfLeader_ShouldSkipWhenAnotherReplicaHoldsTheLock(t *testing.T) {
+	qm, rdb, cleanup := newTestRedisQuotaManager(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	repo := &stubTicketRepo{tickets: []*repository.Ticket{gaTicket("t1", 5, 1, 1)}}
+	sweeper := &stubSweeper{}
+	log := newTestLogger(t)
+
+	r := reconciler.New(repo, sweeper, qm, rdb, time.Minute, log)
+
+	// Simulate another replica already holding the lock.
+	require.NoError(t, rdb.Set(ctx, "ticket-service:reconciler:leader", "some-other-replica-token", time.Minute).Err())
+
+	// Call the method under test.
+	require.NoError(t, r.RunIfLeader(ctx), "losing the leader election is not an error")
+
+	// Assert the pass did NOT run.
+	assert.Equal(t, 0, sweeper.callCount, "a non-leader replica must not sweep expired reservations")
+
+	// The Redis availability key for t1 must still be absent.
+	_, err := qm.Available(ctx, "t1")
+	assert.ErrorIs(t, err, cache.ErrKeyNotInitialised, "a non-leader replica must not reseed Redis keys")
 }
