@@ -47,6 +47,12 @@ Plan item `B3` asks for advisory-lock leader election on "venue sweeper **and or
 
 **Dropped deliberately rather than deferred**, because the two designs are mutually exclusive. A per-batch advisory lock does not serialize the job — another pod simply interleaves batches, and each batch is independently correct. A job-wide lock requires one transaction spanning every batch, which is precisely what this change exists to eliminate. Concurrent cleanup pods produce brief lock waits and `deleted = 0`, not incorrectness, on a table bounded by the 24-hour retention the job itself enforces.
 
+### Branch cleanup — the rejected SR-35 attempt was deleted
+
+`fix/scale-b6b-venue-provision-advisory-lock` (`5dc169f4`) was `B6b`'s rejected first attempt: it held `pg_advisory_xact_lock` on a dedicated transaction while still inserting through `r.pool`, so every caller needed two pooled connections and four concurrent provisions exhausted the pool unconditionally, with no lock contention required.
+
+It never merged, so none of its code was ever on this branch and SR-35's status rests solely on `fix/scale-b6b2-venue-provision-tx`. But it was ambiguous at a glance — **two branches carrying `SR-35` in their subject and touching the same two files**, with nothing in either name marking one as superseded, and it was the only unmerged branch of the eight. Deleted on owner instruction, which supersedes the earlier standing "keep the small branch for record" for this branch only. It was never pushed, so `docs/scalability-review.md` now carries its full SHA and the reason it failed as the only remaining record. Seven `fix/scale-*` branches remain, all merged.
+
 ### Not done
 
 - **`main` is untouched at `f565089`, and stays that way pending owner approval.** No auto-merge (CLAUDE.md core rule 6).
