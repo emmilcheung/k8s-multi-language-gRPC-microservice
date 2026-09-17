@@ -113,6 +113,7 @@ func TestHoldSweeper_LeaderElection(t *testing.T) {
 	// ── Step 1: Simulate another pod being the leader ───────────────────────────
 	leaderConn, err := pool.Acquire(ctx)
 	require.NoError(t, err, "failed to acquire separate connection for leader simulation")
+	defer leaderConn.Release()
 
 	_, err = leaderConn.Exec(ctx, `SELECT pg_advisory_lock(hashtext($1))`, "venue-hold-sweeper")
 	require.NoError(t, err, "failed to acquire leader lock from separate connection")
@@ -132,7 +133,6 @@ func TestHoldSweeper_LeaderElection(t *testing.T) {
 	// ── Step 4: Release the outside lock ─────────────────────────────────────────
 	_, err = leaderConn.Exec(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, "venue-hold-sweeper")
 	require.NoError(t, err)
-	leaderConn.Release()
 
 	// ── Step 5: Call SweepExpiredHolds again; now we should be leader and sweep ──
 	swept, err = sectionRepo.SweepExpiredHolds(ctx)
