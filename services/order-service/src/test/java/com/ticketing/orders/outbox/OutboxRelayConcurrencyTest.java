@@ -104,9 +104,10 @@ class OutboxRelayConcurrencyTest {
         outboxRepository.save(new OutboxMessage("test.topic", "{}", "pk-2"));
         outboxRepository.save(new OutboxMessage("test.topic", "{}", "pk-3"));
 
-        // RED run calls the current, unlocked findUnpublished(); GREEN run swaps this
-        // single line to findUnpublishedForUpdate(10). Assertions below are not touched
-        // between the two runs.
+        // To reproduce the RED, drop "LIMIT :limit FOR UPDATE SKIP LOCKED" from
+        // OutboxRepository.findUnpublishedForUpdate — both transactions then see all
+        // 3 rows and the doesNotContain assertion below fails. Assertions are not
+        // touched between the two runs.
         Supplier<List<OutboxMessage>> claim = () -> outboxRepository.findUnpublishedForUpdate(10);
 
         List<UUID> firstClaimIds = new ArrayList<>();
