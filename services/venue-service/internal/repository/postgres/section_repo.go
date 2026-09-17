@@ -437,8 +437,27 @@ func (r *SectionRepo) SellSeats(ctx context.Context, seatIDs []string) error {
 
 // SweepExpiredHolds releases all HELD seats whose held_until timestamp has
 // already passed. Called periodically by the hold sweeper goroutine.
+// Only one pod sweeps per tick: it takes pg_try_advisory_xact_lock and returns
+// (0, nil) without sweeping when another pod already holds it.
 // Returns the number of seats released.
 func (r *SectionRepo) SweepExpiredHolds(ctx context.Context) (int64, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	// Attempt to become leader for this sweep cycle.
+	var gotLock bool
+	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtext($1))`, "venue-hold-sweeper").Scan(&gotLock); err != nil {
+		return 0, err
+	}
+	if !gotLock {
+		// Another pod is sweeping this tick.
+		return 0, nil
+	}
+
+	// We are the leader; run the sweep.
 	const q = `
 		UPDATE seats
 		SET status     = 'AVAILABLE',
@@ -448,10 +467,15 @@ func (r *SectionRepo) SweepExpiredHolds(ctx context.Context) (int64, error) {
 		    updated_at = now()
 		WHERE status = 'HELD'
 		  AND held_until < now()`
-	tag, err := r.pool.Exec(ctx, q)
+	tag, err := tx.Exec(ctx, q)
 	if err != nil {
 		return 0, err
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+
 	return tag.RowsAffected(), nil
 }
 
