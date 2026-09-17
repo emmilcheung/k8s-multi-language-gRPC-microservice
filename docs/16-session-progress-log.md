@@ -9,6 +9,39 @@
 
 ---
 
+## Session: 2026-09-17 — fix(scale): sweeper leader election, expiration replicas, outbox claim contract ⏳ INTEGRATED, NOT MERGED
+
+**Branch:** `feat/scalability-m1` (integration) ← `fix/scale-b5-expiration-replicas`, `fix/scale-b3a-venue-sweeper-leader`
+
+Third orchestrated wave. Two workers, one manager-written change, and one more worker report that did not survive independent verification — this time not a vacuous test, but a **red that could not have been produced by the test that was committed**.
+
+### What was done
+
+- **Venue hold sweeper leader election (SR-15, first half).** `SweepExpiredHolds` used to run its full-table `UPDATE seats ... WHERE status='HELD' AND held_until < now()` on every replica every 30 seconds. It now opens a transaction, takes `pg_try_advisory_xact_lock(hashtext('venue-hold-sweeper'))`, and returns `(0, nil)` without sweeping when another pod already holds it. The **transaction-scoped** variant is required rather than the session-scoped `pg_try_advisory_lock` the review originally suggested: a session lock would be released back into the pgxpool connection still held, and would then permanently disable the sweeper on that pod. The only caller is the 30s ticker in `internal/hold/sweeper.go`, so no request path can observe the non-leader no-op.
+- **expiration-service replicas (SR-08).** `values.yaml` now sets `replicaCount: 2`, and so does the subchart default. A single replica behind a PDB with `minAvailable: 1` can never be evicted, so it was both a SPOF and a permanent blocker for node drains. `values-local.yaml` already pinned 1 and still does, so local is unchanged. No code change was needed: the asynq workers dedupe on `TaskID(orderID)`.
+- **Outbox relay claim contract (`docs/04-asynchronous-messaging.md`).** Three services claim outbox rows with `FOR UPDATE SKIP LOCKED` and one uses a Mongo `claimToken`/`leaseUntil` lease, but the standard said only that "a relay process publishes to Kafka" — nothing required a claim at all, so a relay written to that spec would publish every event once per replica. The new section states the contract, both mechanisms, why per-batch commit is accepted rather than fixed, and the test trap below.
+
+### Verification
+
+- **The sweeper red was reproduced here, not taken on report.** With `section_repo.go` reverted to `9bc7357`, the new test fails in 6.5s at `hold_sweeper_leader_test.go:124` — `expected: 0, actual: 3`, "a non-leader pod must not sweep while another pod holds the leader lock". Restored, `go build ./...`, `go vet ./...` and the full `go test ./...` all exit 0, and the working tree is byte-identical to the commit.
+- The test simulates the other pod with a session-scoped `pg_advisory_lock` on a second pooled connection. That works because session and transaction advisory locks share one lock space — a session lock taken by the test genuinely blocks the production code's `pg_try_advisory_xact_lock`.
+- **All three Helm overlays render on the merged tree**, exit 0 with zero stderr: expiration-service is 1 replica locally and 2 in staging and prod, PDB `minAvailable: 1` throughout, and wave 2's externalization still holds at 0 StatefulSets in staging and prod against 8 locally.
+- `git diff --name-only main..feat/scalability-m1` is 18 files. `main` remains untouched at `f565089`.
+
+### A red that never happened
+
+The sweeper worker reported a textbook sanity check: revert the fix, watch the assertion fail with `expected: 0 / actual: 3`. Reverting it here produced something else — the test hung and died on Go's 10-minute default timeout, and the string `actual` appeared **zero times** in the output. The cause was in the test, not the fix: it acquired the simulated-leader connection with `pool.Acquire` and released it only at step 4, so when `require.Equal` called `FailNow` at step 2 the release was skipped and the deferred `pool.Close()` blocked forever on the outstanding connection.
+
+So the assertion was right, the production code was right, and the test still could not report its own failure — it could only hang for ten minutes with no diagnostic. It was rejected and reissued for a `defer leaderConn.Release()`; the red now lands in 6.5 seconds with the message attached. The lesson is narrower than wave 2's but worth the same weight: **a sanity check verifies the test's failure path as much as the fix**, and a quoted red is not evidence unless the failure path can actually print it.
+
+### Not done
+
+- SR-15's second half — leader election for the ticket-service quota reconciler — is dispatched but not landed.
+- The order-service outbox cleanup `DELETE` batching split out of SR-06 is still open.
+- Nothing has merged to `main`. The overall review and audit of `feat/scalability-m1` is still pending.
+
+---
+
 ## Session: 2026-09-16 — fix(scale): prod/staging externalization, outbox SKIP LOCKED, single-transaction venue provisioning ⏳ INTEGRATED, NOT MERGED
 
 **Branch:** `feat/scalability-m1` (integration) ← `fix/scale-a2-overlay-disable-backing-services`, `fix/scale-b6b2-venue-provision-tx`, `fix/scale-b2-payment-outbox-skip-locked`
