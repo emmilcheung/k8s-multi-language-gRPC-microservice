@@ -726,3 +726,37 @@ upgrade` in the Dockerfile. It clears only when Microsoft publishes a refreshed 
 3. Accept a red queue-service until the upstream base image refreshes.
 
 No change was made to the Trivy severity configuration.
+
+### Addendum — Go 1.26 toolchain upgrade (commit `de8a22f`, local, UNPUSHED)
+
+Owner directed "the 5 red one first". Narrowing the Trivy gate was not signed off,
+so the remediation took the real-fix path: upgrade the toolchain.
+
+`golang:1.25-bookworm@sha256:3b4a1151…` → `golang:1.26-bookworm@sha256:a688600c…` (1.26.8)
+in 4 Dockerfiles, `go-version: "1.25"` → `"1.26"` in 4 `ci.yml` entries, plus the module
+bumps that required it: `x/crypto` 0.56.0, `otel/*` 1.45.0, and
+`gorilla/websocket` 1.5.3 (attendance only). These cannot be split — the module bumps
+raise each `go.mod` directive to 1.26.0, which the 1.25 builder rejects.
+
+| Service | build | vet | unit tests | image build | Trivy (all sev, fixable) |
+|---|---|---|---|---|---|
+| ticket-service | ✅ | ✅ | ✅ 10 pkgs | ✅ | ✅ 0 findings |
+| venue-service | ✅ | ✅ | ✅ 6 pkgs | ✅ | ✅ 0 findings |
+| expiration-service | ✅ | ✅ | ✅ 4 pkgs | ✅ | ✅ 0 findings |
+| attendance-service | ✅ | ✅ | ✅ 6 pkgs | ✅ | ✅ 0 findings |
+
+**Correction to the previous entry.** It stated `gorilla/websocket` was test-only and did
+not move the gate. That was wrong — it was reverted alongside `x/mod`, but the image scan
+shows it *is* linked into attendance-service's binary. `x/mod`, `docker/docker` and
+`moby/go-archive` remain correctly classified as test-only.
+
+**queue-service — confirmed unfixable in-repo.** Freshly pulled
+`aspnet:10.0-noble-chiseled` still ships `libc6 2.39-0ubuntu8.8`; CVE-2026-80489 needs
+`8.9`. The `10.0-resolute-chiseled` variant (Ubuntu 25.10) carries the **same** CVE at
+`2.43-2ubuntu2.3 → 2.4`, so switching distro does not help, and chiseled images have no
+package manager to patch with. This clears only when Microsoft rebuilds. Remaining
+options are owner calls: wait for the upstream rebuild, or sign off on the gate change.
+
+Still not done: `de8a22f` is committed locally but **unpushed** — the push was blocked
+because the commit modifies `.github/workflows/ci.yml`. CI has not yet run against it,
+so the four green results above are local evidence only.
