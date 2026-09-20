@@ -646,3 +646,83 @@ Completed a full lint and type-check pass across all six services, discovering a
 - **Commits**: 1
 - **Files Changed**: 9 (+115 / -17 lines)
 - **Breaking Changes**: None
+
+---
+
+## 2026-09-21 — PR #122 CI remediation: Trivy gate sweep
+
+**Branch**: `fix/outbox-polling-and-retention` (PR #122) — head `f4a04e84`
+
+### Root cause of the repo-wide red
+
+`aquasecurity/trivy-action` with `format: sarif` leaves `limit-severities-for-sarif`
+at its default (`false`). The `severity: HIGH,CRITICAL` input therefore only shapes
+the report — the scan itself covers **all** severities, and `exit-code: "1"` fires on
+**any** fixable finding, including LOW and MEDIUM. Every per-service gate in
+`.github/workflows/ci.yml` is affected. With `ignore-unfixed: true`, every blocking
+finding has a published upstream fix.
+
+### Changes landed
+
+| Commit | Change | Effect |
+|---|---|---|
+| `663b51f` (merged via `42231e8b`) | CVE sweep: 18 HIGH/CRITICAL version bumps | order-service → green |
+| `fad48e7` | Add required `fullUrl` to the queue-gate integration test | client `Build image` → green |
+| `f4a04e8` | `qs` override → 6.16.0 (auth, user, payment, client) | those 3 node services → green |
+
+`43a4b585` had added the required `fullUrl` field to `GateInput` without updating the
+integration test. `pnpm lint` and `pnpm test` stayed green, but `pnpm build` inside the
+client Dockerfile type-checks, so CI's `Build image` step failed.
+
+### Verification Matrix
+
+| Service | Command | Result |
+|---|---|---|
+| client | `tsc --noEmit` / `pnpm build` / `pnpm test` | ✅ 0 errors / rc=0 / 207 passed, 2 skipped |
+| auth-service | `pnpm test` | ✅ 99 passed |
+| user-service | `pnpm test` | ✅ 43 passed |
+| payment-service | `pnpm test` | ✅ 95 passed |
+| order-service | `mvn test` (online) | ✅ 63 passed |
+
+### CI result — run `35538462381`
+
+✅ auth-service, client, payment-service, user-service, order-service, kong-gateway,
+proto, GraphQL schema check, Helm validation
+❌ ticket-service, venue-service, expiration-service, attendance-service, queue-service
+
+### Remaining blockers — OWNER DECISION REQUIRED
+
+Both are outside the remit of a dependency sweep.
+
+**1. Four Go services — blocked on a repo-wide Go 1.25 → 1.26 toolchain upgrade.**
+Image scans of `ticket-service` and `attendance-service` show an identical residual set
+(the other two confirmed by module parity — same `x/crypto v0.55.0`, same `otel/sdk v1.44.0`):
+
+- MEDIUM `golang.org/x/crypto` 0.55.0 → 0.56.0 (CVE-2026-78662)
+- LOW ×3 `go.opentelemetry.io/otel/*` 1.43/1.44 → 1.45.0 (CVE-2026-81870)
+
+Both fixes declare `go 1.26.0` upstream (verified in the published `.mod` files), which
+raises each service's `go` directive to 1.26 and breaks the digest-pinned
+`golang:1.25-bookworm@sha256:3b4a11…` builder with
+`go.mod requires go >= 1.26.0 (running go 1.25.14; GOTOOLCHAIN=local)`.
+Upgrading means 4 Dockerfile digests + 4 `go-version: "1.25"` entries in `ci.yml`.
+
+*Not* blockers: `x/mod`, `docker/docker` and `moby/go-archive` appear in a `trivy fs`
+scan of `go.mod` but are test-only and never reach the scanned binary — confirmed by
+image scan. Bumping them does not move the gate.
+
+**2. queue-service — 6 MEDIUM in `libc6` 2.39-0ubuntu8.8 → 2.39-0ubuntu8.9.**
+Base image is `mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled`. Chiseled images
+carry no package manager and no shell, so this **cannot** be patched with `apt-get
+upgrade` in the Dockerfile. It clears only when Microsoft publishes a refreshed tag.
+
+### Options for the owner
+
+1. Upgrade the toolchain to Go 1.26 repo-wide (unblocks the 4 Go services; queue-service still red).
+2. Set `limit-severities-for-sarif: true` so the gate enforces the `HIGH,CRITICAL`
+   it already declares. This matches the workflow's evident intent, but it **narrows the
+   gate** and is explicitly owner-sign-off territory. PR #109 separately proposes changes
+   to this gate and should be decided alongside.
+3. Accept a red queue-service until the upstream base image refreshes.
+
+No change was made to the Trivy severity configuration.
