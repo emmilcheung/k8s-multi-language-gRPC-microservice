@@ -760,3 +760,26 @@ options are owner calls: wait for the upstream rebuild, or sign off on the gate 
 Still not done: `de8a22f` is committed locally but **unpushed** — the push was blocked
 because the commit modifies `.github/workflows/ci.yml`. CI has not yet run against it,
 so the four green results above are local evidence only.
+
+### CI result — run `35541697068` (`de8a22f4`, pushed 2026-09-21)
+
+The Go 1.26 upgrade is confirmed by CI, matching local verification exactly.
+
+**15 of 16 jobs green**, including **Playwright E2E (full stack)** — which had been
+skipped on every prior run because upstream jobs failed, so this is its first green
+on this branch.
+
+✅ ticket-service, venue-service, expiration-service, attendance-service (all four
+previously red on Trivy), auth, user, payment, client, order, kong-gateway, proto,
+GraphQL schema check, Helm validation, Detect changed paths, Playwright E2E
+❌ queue-service — failing step verified as `Scan image with Trivy`, exit 1,
+`[ubuntu] os_version="24.04" pkg_num=8`, consistent with the local scan's single
+fixable finding (`libc6` CVE-2026-80489).
+
+Unrelated observation, not gating: the queue-service **test** project warns NU1903 on
+`SSH.NET` 2025.1.0 (two HIGH advisories, GHSA-mggc-4xg6-vcxf and GHSA-q939-rpr3-3284).
+Test-only, so it never reaches the scanned image, but worth a follow-up. Tests pass 62/62.
+
+**PR #122 is now blocked on exactly one thing**, and it is not a code change: the
+queue-service gate failure has no in-repo fix. Owner decides between waiting for the
+Microsoft base-image rebuild and signing off on the Trivy gate configuration.
