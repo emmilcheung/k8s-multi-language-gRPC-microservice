@@ -336,7 +336,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache-dependency-path: services/expiration-service/go.sum
 
       - name: go vet
@@ -858,7 +858,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache-dependency-path: services/ticket-service/go.sum
 
       - name: go vet
@@ -939,7 +939,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache-dependency-path: services/venue-service/go.sum
 
       - name: go vet
@@ -1036,7 +1036,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache-dependency-path: services/attendance-service/go.sum
 
       - name: go vet
