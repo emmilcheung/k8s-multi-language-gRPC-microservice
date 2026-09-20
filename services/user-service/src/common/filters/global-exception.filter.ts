@@ -88,8 +88,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         const errField = rec["error"];
         if (typeof errField === "object" && errField !== null) {
           const err = errField as Record<string, unknown>;
-          if (typeof err["message"] === "string") message = err["message"] as string;
-          if (typeof err["code"] === "string") code = err["code"] as string;
+          if (typeof err["message"] === "string") message = err["message"];
+          if (typeof err["code"] === "string") code = err["code"];
         } else if ("message" in rec) {
           const raw = rec["message"];
           message = Array.isArray(raw) ? raw.join("; ") : String(raw);
@@ -100,7 +100,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       // Intentionally not setting extensions.http.status — standard GraphQL
       // returns HTTP 200 with errors in the body; the resolver-level status is
       // surfaced via extensions.statusCode for clients that want it.
-      return new GraphQLError(message, { extensions: { code, statusCode: status } });
+      return new GraphQLError(message, {
+        extensions: { code, statusCode: status },
+      });
     }
     this.logger.error(
       { err: exception },
