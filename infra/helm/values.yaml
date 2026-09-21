@@ -335,6 +335,14 @@ postgres-users:
 # ── mongodb (Bitnami MongoDB) ─────────────────────────────────────────────────
 mongodb:
   enabled: true
+  # Standalone mongod over a ReadWriteOnce volume. The chart default of
+  # RollingUpdate deadlocks on any pod-template change: the new pod cannot take
+  # the lock the old one still holds and dies with
+  # "DBPathInUse: Unable to lock the lock file", while the old pod is never
+  # retired because the new one never goes Ready. Recreate stops the old pod
+  # first. Safe here because a single mongod cannot be highly available anyway.
+  updateStrategy:
+    type: Recreate
   auth:
     enabled: true
     database: tickets_db

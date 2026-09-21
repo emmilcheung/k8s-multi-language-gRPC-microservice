@@ -274,7 +274,7 @@ secrets: _check-secrets _namespace
 			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092"; \
 		\
 		_apply attendance-service-secrets \
-			--from-literal=DATABASE_URL="postgresql://attendance_user:attendance-local-secret@ticketing-postgres-attendance:5432/attendance_db" \
+			--from-literal=DATABASE_URL="postgresql://attendance_user:attendance-local-secret@ticketing-postgres-attendance:5432/attendance_db?sslmode=disable" \
 			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092" \
 			--from-literal=QR_SIGNING_KEY="$$QR_SIGNING_KEY" \
 			--from-literal=TICKET_SERVICE_URL="ticketing-ticket-service.ticketing.svc.cluster.local:50051" \
@@ -282,7 +282,8 @@ secrets: _check-secrets _namespace
 		\
 		_apply user-service-secrets \
 			--from-literal=DATABASE_URL="postgresql://users_user:users-local-secret@ticketing-postgres-users:5432/users_db" \
-			--from-literal=DB_POOL_MAX="20"; \
+			--from-literal=DB_POOL_MAX="20" \
+			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
 	'
 	@echo "All secrets created."
 
