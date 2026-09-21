@@ -292,7 +292,15 @@ secrets: _check-secrets _namespace
 # ─────────────────────────────────────────────────────────────────────────────
 kong-config: _check-secrets
 	@echo "Rendering Kong config for minikube..."
+# KONG_SIGNING_KEY is what build.sh bakes into jwt-sub.lua as the HMAC key for
+# the X-User-Id-Sig header. It defaults to empty, and an empty key makes Kong
+# emit no signature at all, so every subgraph rejects the request with
+# INVALID_SIGNATURE ("Invalid user ID signature") — surfacing to the client only
+# as the masked "Subgraph errors redacted". It must be the same value the
+# services get as X_USER_ID_SIGNING_KEY. setup.sh already passed it; this target
+# did not.
 	@KONG_RSA_PUBLIC_KEY='$(call _secret,KONG_RSA_PUBLIC_KEY)' \
+		KONG_SIGNING_KEY='$(call _secret,X_USER_ID_SIGNING_KEY)' \
 		bash $(GATEWAY_DIR)/scripts/build.sh minikube $(KONG_YML)
 	@echo "Kong config written to $(KONG_YML)"
 
