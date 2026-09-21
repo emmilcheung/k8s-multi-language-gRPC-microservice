@@ -48,11 +48,20 @@ func (r *OutboxRelay) Run(ctx context.Context, interval time.Duration, batchSize
 }
 
 func (r *OutboxRelay) RunOnce(ctx context.Context, batchSize int) error {
-	// At-least-once semantics: rows are claimed inside a transaction with
-	// FOR UPDATE SKIP LOCKED (via ListUnpublishedTx). If Publish succeeds for
-	// rows 1..N-1 but fails for row N, the deferred Rollback unmarks all prior
-	// MarkPublishedTx calls, so rows 1..N-1 will be re-published on the next
-	// RunOnce call. Downstream consumers MUST be idempotent on credential_id.
+	// At-least-once semantics. Rows are claimed inside a transaction with
+	// FOR UPDATE SKIP LOCKED (via ListUnpublishedTx); the claim is held for the
+	// whole batch, which is what keeps concurrent replicas disjoint.
+	//
+	// A publish failure at row N stops the batch but does NOT discard the batch:
+	// rows 1..N-1 are already on the topic, so their marks are committed. Rolling
+	// them back would re-send every one of them next tick — a guaranteed burst of
+	// duplicates on every partial failure, growing with batch position. Row N is
+	// left unmarked because we cannot tell whether it reached the broker, so it
+	// is retried. Downstream consumers MUST still be idempotent on credential_id.
+	//
+	// Stopping rather than skipping row N preserves per-entity ordering: skipping
+	// would let a later event for the same partition key reach Kafka ahead of an
+	// earlier one still being retried.
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("relay: begin tx: %w", err)
@@ -63,15 +72,24 @@ func (r *OutboxRelay) RunOnce(ctx context.Context, batchSize int) error {
 	if err != nil {
 		return fmt.Errorf("relay: list unpublished outbox rows: %w", err)
 	}
+
+	var publishErr error
 	for _, row := range rows {
 		if err := r.pub.Publish(row.Topic, []byte(row.PartitionKey), row.Payload); err != nil {
-			r.log.Warn("relay: publish failed; releasing claim",
+			r.log.Warn("relay: publish failed; committing progress and retrying this row next tick",
 				zap.String("id", row.ID), zap.Error(err))
-			return fmt.Errorf("relay: publish outbox row %s: %w", row.ID, err)
+			publishErr = fmt.Errorf("relay: publish outbox row %s: %w", row.ID, err)
+			break
 		}
 		if err := r.repo.MarkPublishedTx(ctx, tx, row.ID, time.Now().UTC()); err != nil {
+			// Unlike a publish failure this aborts the transaction, so there is
+			// no progress left to commit — every row in the batch is re-published.
 			return fmt.Errorf("relay: mark outbox row %s published: %w", row.ID, err)
 		}
 	}
-	return tx.Commit(ctx)
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("relay: commit outbox batch: %w", err)
+	}
+	return publishErr
 }

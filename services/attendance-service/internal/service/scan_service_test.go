@@ -42,7 +42,9 @@ func (d *scanCredRepoDouble) FindByIssuanceKey(_ context.Context, _ string) (*re
 func (d *scanCredRepoDouble) CreateWithOutbox(_ context.Context, _ *repository.AdmissionCredential, _ *repository.OutboxRow) error {
 	return nil
 }
-func (d *scanCredRepoDouble) Create(_ context.Context, _ *repository.AdmissionCredential) error { return nil }
+func (d *scanCredRepoDouble) Create(_ context.Context, _ *repository.AdmissionCredential) error {
+	return nil
+}
 func (d *scanCredRepoDouble) ConsumeIssued(
 	_ context.Context,
 	_ string,
@@ -68,7 +70,9 @@ func (d *scanCredRepoDouble) ConsumeIssued(
 func (d *scanCredRepoDouble) UpdateStatus(_ context.Context, _ string, _ repository.CredentialStatus) error {
 	return nil
 }
-func (d *scanCredRepoDouble) MarkEventPublished(_ context.Context, _ string, _ time.Time) error { return nil }
+func (d *scanCredRepoDouble) MarkEventPublished(_ context.Context, _ string, _ time.Time) error {
+	return nil
+}
 func (d *scanCredRepoDouble) ListCheckedInByEventID(_ context.Context, _ string, _ int) ([]*repository.AdmissionCredential, error) {
 	return []*repository.AdmissionCredential{}, nil
 }

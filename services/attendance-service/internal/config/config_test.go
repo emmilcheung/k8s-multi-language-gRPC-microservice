@@ -21,7 +21,7 @@ func validEnv(t *testing.T) {
 
 func TestLoad_MissingDatabaseURL(t *testing.T) {
 	validEnv(t)
-	os.Unsetenv("DATABASE_URL")
+	_ = os.Unsetenv("DATABASE_URL")
 	_, err := config.Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "DATABASE_URL is required")
@@ -29,7 +29,7 @@ func TestLoad_MissingDatabaseURL(t *testing.T) {
 
 func TestLoad_MissingKafkaBrokers(t *testing.T) {
 	validEnv(t)
-	os.Unsetenv("KAFKA_BROKERS")
+	_ = os.Unsetenv("KAFKA_BROKERS")
 	_, err := config.Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "KAFKA_BROKERS is required")
@@ -37,7 +37,7 @@ func TestLoad_MissingKafkaBrokers(t *testing.T) {
 
 func TestLoad_MissingQRSigningKey(t *testing.T) {
 	validEnv(t)
-	os.Unsetenv("QR_SIGNING_KEY")
+	_ = os.Unsetenv("QR_SIGNING_KEY")
 	_, err := config.Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "QR_SIGNING_KEY is required")
@@ -54,7 +54,7 @@ func TestLoad_QRSigningKeyTooShort(t *testing.T) {
 func TestLoad_UserIDSigningKeyRequiredInProduction(t *testing.T) {
 	validEnv(t)
 	t.Setenv("APP_ENV", "production")
-	os.Unsetenv("X_USER_ID_SIGNING_KEY")
+	_ = os.Unsetenv("X_USER_ID_SIGNING_KEY")
 	_, err := config.Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "X_USER_ID_SIGNING_KEY must be at least 32 characters in production")
@@ -72,7 +72,7 @@ func TestLoad_UserIDSigningKeyTooShortInProduction(t *testing.T) {
 func TestLoad_UserIDSigningKeyOptionalOutsideProduction(t *testing.T) {
 	validEnv(t)
 	t.Setenv("APP_ENV", "development")
-	os.Unsetenv("X_USER_ID_SIGNING_KEY")
+	_ = os.Unsetenv("X_USER_ID_SIGNING_KEY")
 	cfg, err := config.Load()
 	require.NoError(t, err)
 	assert.Empty(t, cfg.UserIDSigningKey)
@@ -144,10 +144,10 @@ func TestLoad_Success(t *testing.T) {
 
 func TestLoad_MultipleErrors(t *testing.T) {
 	// Clear all env
-	os.Unsetenv("DATABASE_URL")
-	os.Unsetenv("KAFKA_BROKERS")
-	os.Unsetenv("QR_SIGNING_KEY")
-	os.Unsetenv("TICKET_SERVICE_URL")
+	_ = os.Unsetenv("DATABASE_URL")
+	_ = os.Unsetenv("KAFKA_BROKERS")
+	_ = os.Unsetenv("QR_SIGNING_KEY")
+	_ = os.Unsetenv("TICKET_SERVICE_URL")
 	t.Setenv("HTTP_PORT", "3007")
 
 	_, err := config.Load()

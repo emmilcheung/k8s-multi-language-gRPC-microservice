@@ -9,6 +9,43 @@
 
 ---
 
+## Session: 2026-08-05 — fix(outbox): indexing, retention, claim isolation across all four outboxes ⏸ AWAITING MERGE APPROVAL
+
+**Branch:** `fix/outbox-polling-and-retention`
+
+### What was done
+
+Hardened the transactional outbox in ticket-service (Mongo), payment-service (Drizzle/PG), attendance-service (pgx/PG) and order-service (JPA/PG), so that relay cost tracks **backlog depth** rather than total table/collection size.
+
+- **ticket-service** — added the multikey index `idx_outbox_pending` on `outbox.nextAttemptAt` (the claim was a COLLSCAN of the whole `tickets` collection ~2×/s per replica). Relay now backs off exponentially on empty polls (500 ms → 5 s cap), resetting the moment work appears. New env-gated `explain()` test proves the planner selects the index.
+- **payment-service** — added `FOR UPDATE SKIP LOCKED` claim isolation (runs 2–6 replicas) and a 24 h/10 min retention purge in bounded batches.
+- **attendance-service** — added the same 24 h/10 min retention purge (`internal/service/outbox_cleanup.go`, wired in `cmd/server/main.go`), plus **migration 008** adding `outbox.published_at`, a column `MarkPublishedTx` had always written but no migration ever created. A partial publish failure now commits the rows already on the topic instead of rolling the batch back.
+- **order-service** — `findUnpublished` is now bounded (`Pageable`, default 50 via `OUTBOX_RELAY_BATCH_SIZE`) and claims with `FOR UPDATE SKIP LOCKED`; the relay is `@Transactional` so the claim survives the publish loop.
+
+### Standards / doc changes
+
+- **`services/ticket-service/AGENTS.md`** — the outbox section claimed the ticket + event write "requires a multi-document transaction". It does not: the event is an element of the embedded `outbox` array, so both are written by one single-document update (`$set` + `$push`), which is atomic in MongoDB and strictly stronger than a transaction. Corrected the doc; the code was already right.
+
+### Verification
+
+Local Postgres 16.4 and MongoDB 7.0.14 were run standalone (Docker is unavailable on this machine, so Testcontainers suites could not run). Migration 008 was applied twice against a real database to confirm it is additive and idempotent.
+
+### Follow-ups completed 2026-08-11 (same branch)
+
+- **`fix(order)`** — order-service publish-failure semantics contradicted the other three services: `publishOne` swallowed a failed send and the relay continued, letting a later event for the same `partitionKey` overtake an earlier one still being retried. It now stops at the failing row and commits the progress made, matching payment-service and attendance-service. Also bounded `kafkaTemplate.send(...).get()` via `OUTBOX_RELAY_PUBLISH_TIMEOUT_MS` (default 10 s) — once `relay()` became `@Transactional` an unbounded wait pinned the whole claimed batch for `delivery.timeout.ms`, not just one row.
+- **`ci`** — attendance-service had **no CI job at all** and `TEST_DATABASE_URL` was set nowhere in the workflow, so every Postgres-backed test in the service skipped itself while the suite reported `ok`. Added the job (postgres:16-alpine service container) and wired the service into the changes filter, the `ci` gate and `e2e`'s needs. `requireTestPool` now applies `internal/migrations` rather than each test creating its own approximation of the schema — that second source of truth is what allowed the `id LIKE`-against-UUID bug to be written.
+
+- **`fix(attendance)`** — cleared the lint and formatting debt that adding CI exposed, so attendance-service now runs the same `golangci-lint` step as every other Go service. 10 errcheck findings (9 × unchecked `os.Unsetenv` in `config_test.go`, 1 × `resp.Body.Close` in `user_lookup.go`) and 3 unused symbols (`runLoopUntilDrained`, `stubCredentialRepoWithList` and its method — all dead, no callers). 7 files were also not `gofmt`-clean; the diff was pure field alignment.
+
+  Note for future runs: `golangci-lint` caps duplicate findings at 3 by default (`max-same-issues`), so its headline count understates the work. Use `--max-same-issues=0 --max-issues-per-linter=0` to see the true set.
+
+### Known gaps (not addressed)
+
+- No Testcontainers suite has run anywhere — Docker is unavailable on this machine. `services/*/test/...`, `mvn verify -Pfailsafe` and `pnpm test:integration` will execute for the first time in CI.
+- Migration 008 has been applied only to a local throwaway database. Deploying attendance-service requires it (hard stop #3).
+
+---
+
 ## Session: 2026-06-24 — feat(search): metrics, opt-in OpenSearch Helm subchart, docs ✅ COMPLETE
 
 **Branch:** `feat/opensearch-ticket-search`

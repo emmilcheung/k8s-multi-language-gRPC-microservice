@@ -127,6 +127,7 @@ func main() {
 	// WS2 keeps a single process-local outbox relay per deployment; row claiming
 	// across multiple instances is intentionally out of scope for this pass.
 	outboxRelay := service.NewOutboxRelay(pool, credRepo, producer, log)
+	outboxCleanup := service.NewOutboxCleanup(credRepo, log)
 
 	// Kafka consumer
 	consumer, err := appkafka.NewOrderConsumer(
@@ -141,6 +142,7 @@ func main() {
 	defer consumerCancel()
 	go consumer.Start(consumerCtx)
 	go outboxRelay.Run(consumerCtx, 2*time.Second, 100)
+	go outboxCleanup.Run(consumerCtx, service.OutboxCleanupInterval, service.OutboxRetention)
 
 	// Echo setup
 	e := echo.New()

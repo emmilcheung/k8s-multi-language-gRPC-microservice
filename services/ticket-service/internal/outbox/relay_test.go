@@ -231,6 +231,108 @@ func TestBackoffDelay_ShouldCapAtMaximum(t *testing.T) {
 	assert.Equal(t, 30*time.Second, backoffDelay(10))
 }
 
+// An idle relay must not keep querying at the base poll interval: the claim
+// query runs against the whole tickets collection, so a relay with nothing to
+// publish would otherwise cost two queries per second per replica forever.
+func TestNextIdleInterval_ShouldBackOffExponentially_WhenPollsAreEmpty(t *testing.T) {
+	tests := []struct {
+		name    string
+		current time.Duration
+		want    time.Duration
+	}{
+		{name: "doubles the base interval", current: defaultPollInterval, want: time.Second},
+		{name: "keeps doubling below the cap", current: time.Second, want: 2 * time.Second},
+		{name: "clamps at the cap", current: 4 * time.Second, want: maxIdlePollInterval},
+		{name: "stays at the cap", current: maxIdlePollInterval, want: maxIdlePollInterval},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, nextIdleInterval(tc.current))
+		})
+	}
+}
+
+// Backing off must not cost publish latency: as soon as a poll returns work the
+// relay has to be back at the base interval, otherwise an event arriving after a
+// quiet period would wait up to maxIdlePollInterval to be published.
+func TestRelayStart_ShouldResetBackoff_WhenPollReturnsWork(t *testing.T) {
+	repo := &recordingRelayRepo{
+		// Two empty polls (backoff grows), then one poll with work, then empty again.
+		results: [][]repository.ClaimedOutboxEvent{
+			{},
+			{},
+			{{TicketID: "tk_1", Event: repository.TicketOutboxEvent{
+				ID: "evt_1", Type: repository.OutboxEventTypeTicketCreated, ClaimToken: "tok",
+			}}},
+			{},
+		},
+	}
+	relay := NewRelay(repo, &stubRelayProducer{}, zap.NewNop())
+	// Large enough that timer jitter is small relative to the interval, so the
+	// doubling below is measurable rather than a coin flip.
+	relay.pollInterval = 20 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	repo.stopAfter = len(repo.results)
+	repo.cancel = cancel
+
+	done := make(chan struct{})
+	go func() { relay.Start(ctx); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("relay did not stop")
+	}
+
+	require.Len(t, repo.gaps, len(repo.results)-1)
+	// gap[0]: after the 1st empty poll  -> base interval (~20ms)
+	// gap[1]: after the 2nd empty poll  -> doubled     (~40ms)
+	// gap[2]: after the poll with work  -> no wait at all (immediate continue)
+	assert.Greater(t, repo.gaps[1], repo.gaps[0]*3/2,
+		"an idle relay must back off: gap after the 2nd empty poll should be ~2x the base interval")
+	assert.Less(t, repo.gaps[2], repo.gaps[0]/2,
+		"a poll that returns work must not wait, so publish latency is unaffected by backoff")
+}
+
+// recordingRelayRepo records the wall-clock gap between successive claim calls
+// and cancels the relay context once the scripted results are exhausted.
+type recordingRelayRepo struct {
+	results   [][]repository.ClaimedOutboxEvent
+	calls     int
+	last      time.Time
+	gaps      []time.Duration
+	stopAfter int
+	cancel    context.CancelFunc
+}
+
+func (s *recordingRelayRepo) ClaimPendingOutboxEvents(_ context.Context, _ time.Duration, _ int) ([]repository.ClaimedOutboxEvent, error) {
+	now := time.Now()
+	if !s.last.IsZero() {
+		s.gaps = append(s.gaps, now.Sub(s.last))
+	}
+	s.last = now
+
+	if s.calls >= len(s.results) {
+		s.cancel()
+		return nil, nil
+	}
+	out := s.results[s.calls]
+	s.calls++
+	if s.calls >= s.stopAfter {
+		defer s.cancel()
+	}
+	return out, nil
+}
+
+func (s *recordingRelayRepo) AcknowledgeOutboxEvent(_ context.Context, _, _, _ string) error {
+	return nil
+}
+
+func (s *recordingRelayRepo) RequeueOutboxEvent(_ context.Context, _, _, _, _ string, _ int, _ time.Time) error {
+	return nil
+}
+
 func TestRelay_TicketEventData_CarriesCategoryAndCreatedAt(t *testing.T) {
 	created := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	payload := repository.TicketOutboxPayload{

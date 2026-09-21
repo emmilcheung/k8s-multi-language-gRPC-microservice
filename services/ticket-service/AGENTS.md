@@ -95,7 +95,7 @@ test/                   ← integration tests (Testcontainers)
 
 - Topic produced to: `tickets.ticket.created`, `tickets.ticket.updated`.
 - Partition key = `ticketId` (preserves per-ticket ordering).
-- Use **transactional outbox pattern**: write the outbox record inside the same DB transaction as the business update; a relay goroutine reads and publishes.
+- Use the **transactional outbox pattern**, in its document-model form: the outbox event is an element of the `outbox` array embedded in the ticket document, so the business update and the event are written by one single-document update (`$set` + `$push`). Single-document writes are atomic in MongoDB, so this needs **no multi-document transaction** — it is strictly stronger than one. A relay goroutine then claims events with a lease token, publishes, and `$pull`s them on acknowledgement.
 - Producer config: `acks=all`, `enable.idempotence=true`.
 - Event envelope must follow CloudEvents v1.0 (see [§04](../../docs/04-asynchronous-messaging.md)).
 - On producer failure: log at `ERROR` with the failing message payload (no PII), then surface a `500` to the caller — **never silently discard**.

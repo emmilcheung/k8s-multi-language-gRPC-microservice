@@ -73,7 +73,7 @@ func (l *httpUserIdentityLookup) LookupUserIDByEmail(
 	if err != nil {
 		return "", fmt.Errorf("user lookup request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	switch resp.StatusCode {
 	case http.StatusOK:

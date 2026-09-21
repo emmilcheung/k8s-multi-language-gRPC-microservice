@@ -29,7 +29,7 @@
     <postgresql.version>42.7.13</postgresql.version>
     <!-- Security patches -->
     <!-- CVE-2026-29145/34500/34487/34483/29146/24880/24734/32990/25854: Tomcat multiple CVEs -->
-    <tomcat.version>11.0.22</tomcat.version>
+    <tomcat.version>11.0.25</tomcat.version>
     <!-- CVE-2026-45292: OpenTelemetry baggage propagators unbounded memory allocation -->
     <opentelemetry.version>1.62.0</opentelemetry.version>
     <!-- CVE-2026-22737/22735/22745/22741, CVE-2026-41853/41846/41844/41843/41841/41845/41842/41852/41851/41850/41848: spring-framework multiple CVEs -->

@@ -43,12 +43,12 @@ type CloudEvent struct {
 
 // OrderCompletedData carries the relevant fields from orders.order.completed.
 type OrderCompletedData struct {
-	OrderID       string   `json:"orderId"`
-	UserID        string   `json:"userId"`
-	TicketID      string   `json:"ticketId"`
-	ReservationID string   `json:"reservationId"`
-	Quantity      int      `json:"quantity"`
-	Version       int      `json:"version"`
+	OrderID       string `json:"orderId"`
+	UserID        string `json:"userId"`
+	TicketID      string `json:"ticketId"`
+	ReservationID string `json:"reservationId"`
+	Quantity      int    `json:"quantity"`
+	Version       int    `json:"version"`
 	// SeatIDs is non-empty for seated orders; one credential is issued per seat.
 	// For GA orders SeatIDs is empty and one credential is issued per Quantity unit.
 	SeatIDs []string `json:"seatIds"`

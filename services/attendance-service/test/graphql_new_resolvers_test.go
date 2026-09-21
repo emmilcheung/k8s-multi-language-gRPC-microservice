@@ -465,16 +465,6 @@ func TestGraphQL_WrapWithUserIDSignatureValidation_EmptyKeyAllowsAll(t *testing.
 
 func strPtr(s string) *string { return &s }
 
-// stubCredentialRepoWithList returns a fixed list from ListCheckedInByEventID.
-type stubCredentialRepoWithList struct {
-	stubCredentialRepo
-	creds []*repository.AdmissionCredential
-}
-
-func (s *stubCredentialRepoWithList) ListCheckedInByEventID(_ context.Context, _ string, _ int) ([]*repository.AdmissionCredential, error) {
-	return s.creds, nil
-}
-
 // stubPolicyRepoWithUpsert records upserted policy and returns a preset one on find.
 type stubPolicyRepoWithUpsert struct {
 	policy   *repository.AttendancePolicy
