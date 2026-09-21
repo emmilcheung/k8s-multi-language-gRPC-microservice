@@ -28,7 +28,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=builder --chown=app:app /app/.next/standalone ./
 COPY --from=builder --chown=app:app /app/.next/static ./.next/static
 COPY --from=builder --chown=app:app /app/public ./public
-USER app
+# Numeric UID: k8s runAsNonRoot cannot verify a non-numeric USER and refuses
+# to start the container ("image has non-numeric user (app)"). 100:101 is the
+# uid:gid that adduser -S assigned to app in this image.
+USER 100:101
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"

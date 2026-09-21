@@ -40,7 +40,10 @@ COPY --from=builder /build/otel-agent.jar /app/otel-agent.jar
 
 COPY --from=builder /build/target/order-service-*.jar app.jar
 
-USER app
+# Numeric UID: k8s runAsNonRoot cannot verify a non-numeric USER and refuses
+# to start the container ("image has non-numeric user (app)"). 100:101 is the
+# uid:gid that adduser -S assigned to app in this image.
+USER 100:101
 
 EXPOSE 8080
 

@@ -29,7 +29,10 @@ COPY --from=builder --chown=app:app /app/dist ./dist
 COPY --from=builder --chown=app:app /app/package.json ./package.json
 COPY --from=builder --chown=app:app /app/migrations ./migrations
 
-USER app
+# Numeric UID: k8s runAsNonRoot cannot verify a non-numeric USER and refuses
+# to start the container ("image has non-numeric user (app)"). 100:101 is the
+# uid:gid that adduser -S assigned to app in this image.
+USER 100:101
 
 EXPOSE 3004
 
