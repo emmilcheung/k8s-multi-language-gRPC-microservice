@@ -1,0 +1,47 @@
+# Time-boxed Trivy exceptions for queue-service ONLY.
+#
+# This file suppresses specific CVEs. It does NOT change the severity gate —
+# every other finding, at every severity, still fails the build for this service
+# and for every other service.
+#
+# Why these are here:
+#   All six are the same defect class in glibc, present in the base image
+#   mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled, which ships
+#   libc6 2.39-0ubuntu8.8. Every one is fixed only by 2.39-0ubuntu8.9.
+#
+#   There is no in-repo remediation:
+#     - Chiseled images contain no package manager and no shell, so the
+#       Dockerfile cannot apt-get upgrade the package.
+#     - The alternative 10.0-resolute-chiseled variant (Ubuntu 25.10) carries
+#       the SAME unfixed CVEs at libc6 2.43-2ubuntu2.3, so changing distro
+#       does not help.
+#     - Dropping to a non-chiseled base to gain apt would enlarge the attack
+#       surface to remove six MEDIUMs, which is a net loss.
+#
+#   These clear when Microsoft republishes the base image with the patched
+#   glibc. The expiry below forces a re-evaluation rather than letting this
+#   silently become permanent: once the date passes, Trivy stops honouring
+#   these entries and the build fails again.
+#
+# Owner action on expiry: re-scan the base image. If Microsoft has rebuilt,
+# delete this file. If not, extend the date deliberately and say why.
+
+vulnerabilities:
+  - id: CVE-2026-6368
+    statement: glibc in base image aspnet:10.0-noble-chiseled; fixed only in libc6 2.39-0ubuntu8.9, not yet published by Microsoft.
+    expired_at: 2026-12-21
+  - id: CVE-2026-6791
+    statement: glibc in base image aspnet:10.0-noble-chiseled; fixed only in libc6 2.39-0ubuntu8.9, not yet published by Microsoft.
+    expired_at: 2026-12-21
+  - id: CVE-2026-19499
+    statement: glibc in base image aspnet:10.0-noble-chiseled; fixed only in libc6 2.39-0ubuntu8.9, not yet published by Microsoft.
+    expired_at: 2026-12-21
+  - id: CVE-2026-19542
+    statement: glibc in base image aspnet:10.0-noble-chiseled; fixed only in libc6 2.39-0ubuntu8.9, not yet published by Microsoft.
+    expired_at: 2026-12-21
+  - id: CVE-2026-77117
+    statement: glibc in base image aspnet:10.0-noble-chiseled; fixed only in libc6 2.39-0ubuntu8.9, not yet published by Microsoft.
+    expired_at: 2026-12-21
+  - id: CVE-2026-80489
+    statement: glibc in base image aspnet:10.0-noble-chiseled; fixed only in libc6 2.39-0ubuntu8.9, not yet published by Microsoft.
+    expired_at: 2026-12-21

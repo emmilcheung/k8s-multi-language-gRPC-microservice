@@ -16,6 +16,9 @@ const (
 	defaultBatchSize     = 20
 	baseRetryDelay       = 500 * time.Millisecond
 	maxRetryDelay        = 30 * time.Second
+	// maxIdlePollInterval caps the exponential backoff applied to empty polls.
+	// An idle relay settles at one query every 5s instead of two per second.
+	maxIdlePollInterval = 5 * time.Second
 )
 
 type relayRepository interface {
@@ -52,9 +55,16 @@ func NewRelay(repo relayRepository, producer relayProducer, log *zap.Logger) *Re
 }
 
 // Start runs the relay until ctx is cancelled.
+//
+// A poll that returns work is followed immediately by another poll. A poll that
+// returns nothing backs off exponentially from pollInterval up to
+// maxIdlePollInterval, resetting to pollInterval as soon as work appears again.
+// This keeps publish latency at the base interval while an idle relay stops
+// hammering the collection.
 func (r *Relay) Start(ctx context.Context) {
-	ticker := time.NewTicker(r.pollInterval)
-	defer ticker.Stop()
+	idleInterval := r.pollInterval
+	timer := time.NewTimer(idleInterval)
+	defer timer.Stop()
 
 	r.log.Info("ticket outbox relay started")
 	defer r.log.Info("ticket outbox relay stopped")
@@ -65,15 +75,34 @@ func (r *Relay) Start(ctx context.Context) {
 			r.log.Error("ticket outbox batch failed", zap.Error(err))
 		}
 		if processed > 0 {
+			idleInterval = r.pollInterval
 			continue
 		}
+
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(idleInterval)
 
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
+
+		idleInterval = nextIdleInterval(idleInterval)
 	}
+}
+
+// nextIdleInterval doubles the empty-poll backoff, capped at maxIdlePollInterval.
+func nextIdleInterval(current time.Duration) time.Duration {
+	if next := current * 2; next < maxIdlePollInterval {
+		return next
+	}
+	return maxIdlePollInterval
 }
 
 func (r *Relay) processBatch(ctx context.Context) (int, error) {

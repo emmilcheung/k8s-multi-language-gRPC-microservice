@@ -13,6 +13,7 @@ import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.transaction.autoconfigure.TransactionAutoConfiguration;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -104,11 +105,12 @@ class OutboxRelayConcurrencyTest {
         outboxRepository.save(new OutboxMessage("test.topic", "{}", "pk-2"));
         outboxRepository.save(new OutboxMessage("test.topic", "{}", "pk-3"));
 
-        // To reproduce the RED, drop "LIMIT :limit FOR UPDATE SKIP LOCKED" from
-        // OutboxRepository.findUnpublishedForUpdate — both transactions then see all
-        // 3 rows and the doesNotContain assertion below fails. Assertions are not
-        // touched between the two runs.
-        Supplier<List<OutboxMessage>> claim = () -> outboxRepository.findUnpublishedForUpdate(10);
+        // To reproduce the RED, drop the @Lock(PESSIMISTIC_WRITE) / @QueryHints
+        // lock.timeout = -2 pair from OutboxRepository.findUnpublished — that pair is
+        // what Hibernate renders as FOR UPDATE SKIP LOCKED. Without it both
+        // transactions see all 3 rows and the doesNotContain assertion below fails.
+        // Assertions are not touched between the two runs.
+        Supplier<List<OutboxMessage>> claim = () -> outboxRepository.findUnpublished(Pageable.ofSize(10));
 
         List<UUID> firstClaimIds = new ArrayList<>();
         List<UUID> secondClaimIds = new ArrayList<>();

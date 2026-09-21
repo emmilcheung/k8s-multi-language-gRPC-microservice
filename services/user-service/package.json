@@ -12,12 +12,12 @@
       "protobufjs": "7.6.5",
       "@protobufjs/utf8": "1.1.1",
       "body-parser": "2.3.0",
-      "qs": "6.15.2",
+      "qs": "6.16.0",
       "uuid": "14.0.0",
       "fast-uri": "3.1.2",
       "undici": "6.24.0",
       "ws": "8.21.0",
-      "multer": "2.2.0",
+      "multer": "2.3.0",
       "@grpc/grpc-js": "1.14.4"
     }
   },

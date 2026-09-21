@@ -598,6 +598,32 @@ func (r *CredentialRepo) MarkPublished(ctx context.Context, id string, published
 	return nil
 }
 
+// DeletePublishedBefore removes up to limit published outbox rows created before
+// the cutoff.  Published rows are no longer needed for at-least-once delivery;
+// without this the outbox table grows for the life of the deployment.
+//
+// The delete is bounded by an id sub-select rather than issued as one unbounded
+// DELETE: a single statement over a large backlog would hold row locks for the
+// whole scan and hand autovacuum one huge dead-tuple burst.
+func (r *CredentialRepo) DeletePublishedBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	const q = `
+		DELETE FROM outbox
+		WHERE id IN (
+			SELECT id FROM outbox
+			WHERE published = true AND created_at < $1
+			ORDER BY created_at ASC
+			LIMIT $2
+		)`
+	ct, err := r.db.Exec(ctx, q, before, limit)
+	if err != nil {
+		return 0, fmt.Errorf("credential_repo: delete published outbox rows: %w", err)
+	}
+	return ct.RowsAffected(), nil
+}
+
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
