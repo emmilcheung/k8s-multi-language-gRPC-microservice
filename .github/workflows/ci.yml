@@ -557,6 +557,11 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Suppresses six unfixable glibc CVEs carried by the chiseled base
+          # image. Scoped to this job only; the severity gate is unchanged
+          # here and everywhere else. Entries expire 2026-12-21 — see the
+          # rationale in the file itself.
+          trivyignores: services/queue-service/.trivyignore.yaml
 
       - name: Upload Trivy SARIF report
         if: always() && hashFiles('trivy-results.sarif') != ''
