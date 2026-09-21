@@ -228,6 +228,11 @@ apollo-router:
   # via HPA minReplicas, at 200m/256Mi each. Keep apollo-router settings here.
   networkPolicy:
     enabled: false
+  # No GraphOS license locally. Apollo Router v2 exits with "license violation"
+  # rather than degrading if operation limits are configured unlicensed, so the
+  # pod CrashLoopBackOffs. Off here only; the chart default stays on.
+  operationLimits:
+    enabled: false
   resources:
     requests:
       cpu: 100m

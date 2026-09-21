@@ -88,5 +88,18 @@ topologySpreadConstraints:
 networkPolicy:
   enabled: true
 
+# Operation limits are GraphOS-licensed features. Apollo Router v2 does not
+# degrade gracefully: if any of these keys is present in router.yaml without a
+# valid APOLLO_KEY/APOLLO_GRAPH_REF it logs "license violation" and exits, so
+# the pod CrashLoopBackOffs. Keep this enabled wherever a GraphOS license is
+# available — it is a real protection against deep/wide hostile queries — and
+# disable it only in unlicensed environments such as local minikube.
+operationLimits:
+  enabled: true
+  maxDepth: 15
+  maxHeight: 200
+  maxAliases: 30
+  maxRootFields: 20
+
 telemetry:
   otlpEndpoint: "http://otel-collector:4317"
