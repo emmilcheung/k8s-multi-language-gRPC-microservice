@@ -221,6 +221,13 @@ apollo-router:
   replicaCount: 1
   autoscaling:
     enabled: false
+  # NetworkPolicy off locally, same rationale as the other charts (minikube CNI
+  # may not enforce policies). This key previously lived in a SECOND
+  # `apollo-router:` block further down the file; YAML last-wins silently threw
+  # away this whole block, so local ran the chart defaults instead — 2 replicas
+  # via HPA minReplicas, at 200m/256Mi each. Keep apollo-router settings here.
+  networkPolicy:
+    enabled: false
   resources:
     requests:
       cpu: 100m
@@ -455,10 +462,6 @@ cp-kafka:
     enabled: true
     nodePort: 30093        # unused for LoadBalancer but kept for schema completeness
     advertisedHost: "127.0.0.1"  # minikube tunnel exposes LoadBalancer on localhost
-
-apollo-router:
-  networkPolicy:
-    enabled: false
 
 kong:
   # Prefer A records over SRV to avoid CoreDNS NXDOMAIN on ClusterIP services.
