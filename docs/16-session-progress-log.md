@@ -817,3 +817,34 @@ being decorative.
 
 **On expiry**: re-scan the base image. If Microsoft has rebuilt, delete the file. If not,
 extend the date deliberately and record why.
+
+---
+
+## 2026-09-21 — PR #122 CI fully green
+
+Run **35565629002** on `fef8ae29` (`fix/outbox-polling-and-retention`) concluded
+**success**. All 18 jobs green: the 15 service jobs, `proto`, `GraphQL schema check`,
+`Helm rendered-manifest validation`, and `Playwright E2E (full stack)`.
+
+Starting point this session was 6 green / 10 red. The sequence that closed it:
+
+1. Root cause — `trivy-action` with `format: sarif` scans **all** severities
+   (`limit-severities-for-sarif` defaults to `false`), so `exit-code: "1"` fired on
+   fixable LOW/MEDIUM findings. `severity: HIGH,CRITICAL` only shapes the report.
+2. CVE sweep across the Node/Go services; `qs` override to 6.16.0; `fullUrl` added to
+   the client queue-gate integration test.
+3. Go 1.25 → 1.26 toolchain upgrade — four digest-pinned builder images plus four
+   `go-version` entries in `ci.yml`, moved in one commit with `x/crypto` 0.56.0,
+   `otel` 1.45.0 and `gorilla/websocket` 1.5.3, because those modules raise `go.mod`
+   to `1.26.0` and cannot be split from the toolchain bump.
+4. queue-service — six unfixable glibc CVEs in the chiseled base, closed by an
+   owner-approved, job-scoped, time-boxed ignore (see the entry above).
+
+The Trivy severity gate was not narrowed at any point, for any service.
+
+**Owner decisions still open**: merge approval for #122 (no auto-merge to main);
+whether to split the Go 1.26 platform commit `de8a22f` out of an outbox PR;
+review of migration 008 (attendance outbox schema, so far only exercised against a
+throwaway local DB); the redundant `chore/cve-sweep-2026-09` branch, whose contents
+now live in #122; and the non-gating `SSH.NET` 2025.1.0 HIGH advisories in
+queue-service's **test** project.
