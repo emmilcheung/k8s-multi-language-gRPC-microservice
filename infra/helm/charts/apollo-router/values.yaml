@@ -19,6 +19,11 @@ image:
 service:
   port: 4001
 
+# Port of the router's separate health listener (health_check.listen in
+# files/router.yaml). Probes must target this, not the GraphQL port.
+healthCheck:
+  port: 8088
+
 resources:
   requests:
     cpu: 200m
@@ -42,7 +47,7 @@ podDisruptionBudget:
 livenessProbe:
   httpGet:
     path: /health
-    port: http
+    port: health
   initialDelaySeconds: 5
   periodSeconds: 10
   timeoutSeconds: 5
@@ -51,7 +56,7 @@ livenessProbe:
 readinessProbe:
   httpGet:
     path: /health
-    port: http
+    port: health
   initialDelaySeconds: 5
   periodSeconds: 10
   timeoutSeconds: 5
@@ -60,7 +65,7 @@ readinessProbe:
 startupProbe:
   httpGet:
     path: /health
-    port: http
+    port: health
   failureThreshold: 12
   periodSeconds: 5
   timeoutSeconds: 5

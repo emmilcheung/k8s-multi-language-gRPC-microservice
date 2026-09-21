@@ -3,6 +3,14 @@ supergraph:
   path: /graphql
   introspection: false
 
+# The router serves its health endpoint on a separate listener, defaulting to
+# 127.0.0.1:8088 — unreachable from kubelet, so every probe failed and the
+# startupProbe killed the pod after 12 x 5s even though the router was serving
+# GraphQL correctly. Bind it to the pod IP and expose it as the `health` port.
+health_check:
+  listen: 0.0.0.0:8088
+  enabled: true
+
 headers:
   all:
     request:
