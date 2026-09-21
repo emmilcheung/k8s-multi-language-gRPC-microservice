@@ -19,6 +19,14 @@ spec:
       {{- include "apollo-router.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        # The router reads router.yaml and supergraph.graphql from the ConfigMap
+        # at startup only. Without this, `helm upgrade` with a new supergraph (or
+        # any router config change) updates the ConfigMap and leaves the running
+        # pods serving the old schema forever, with nothing in the diff or the
+        # rollout status to say so. Hashing the ConfigMap into the pod template
+        # makes any config change roll the Deployment.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
       labels:
         {{- include "apollo-router.selectorLabels" . | nindent 8 }}
     spec:
