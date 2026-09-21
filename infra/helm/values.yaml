@@ -364,18 +364,39 @@ postgres-users:
 # ── mongodb (Bitnami MongoDB) ─────────────────────────────────────────────────
 mongodb:
   enabled: true
-  # Standalone mongod over a ReadWriteOnce volume. The chart default of
-  # RollingUpdate deadlocks on any pod-template change: the new pod cannot take
-  # the lock the old one still holds and dies with
-  # "DBPathInUse: Unable to lock the lock file", while the old pod is never
-  # retired because the new one never goes Ready. Recreate stops the old pod
-  # first. Safe here because a single mongod cannot be highly available anyway.
-  updateStrategy:
-    type: Recreate
+  # A replica set, not a standalone mongod — with one member locally. Write
+  # concern `majority`, transactions and change streams all require a replica
+  # set; a standalone mongod rejects them outright, so the single-member set is
+  # what lets ticket-service use the same write semantics locally that a real
+  # deployment uses. One member is a legitimate replica set: it elects itself,
+  # `majority` is 1, and the oplog exists. It buys correctness of semantics, not
+  # availability — do not read it as HA.
+  architecture: replicaset
+  replicaCount: 1
+  arbiter:
+    # Off. The chart enables an arbiter by default, which with one data node
+    # gives two voting members — an even number, so no majority survives losing
+    # either — and an arbiter cannot hold data, so `majority` writes would
+    # depend on a member that can never acknowledge them.
+    enabled: false
+  # `updateStrategy.type: Recreate` was here and is gone deliberately. It
+  # existed because a standalone mongod on a ReadWriteOnce volume deadlocks
+  # under RollingUpdate: the new pod cannot take a lock the old one still holds,
+  # dies with "DBPathInUse: Unable to lock the lock file", and the old pod is
+  # never retired because the new one never goes Ready. Replica-set mode renders
+  # a StatefulSet instead of a Deployment, and `Recreate` is not a valid
+  # StatefulSet update strategy — the API server rejects the object. The
+  # deadlock it worked around goes with it: a StatefulSet with the default
+  # OnDelete/RollingUpdate terminates pod-0 before starting its replacement, so
+  # the volume is never contended.
   auth:
     enabled: true
     database: tickets_db
     username: mongo_user
+    # In replicaset mode the chart also needs a `mongodb-replica-set-key` in
+    # this Secret — members authenticate to each other with it, and the chart
+    # will not generate one when an existingSecret is named. values-local.yaml
+    # clears existingSecret, so locally the chart mints the key itself.
     existingSecret: mongodb-secret
     existingSecretPasswordKey: password
     rootPasswordKey: root-password

@@ -240,7 +240,15 @@ secrets: _check-secrets _namespace
 			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
 		\
 		_apply ticket-service-secrets \
-			--from-literal=MONGO_URI="mongodb://mongo_user:mongo-local-secret@ticketing-mongodb:27017/tickets?authSource=admin" \
+			# Replica-set mode renders only a headless Service, so there is no
+			# `ticketing-mongodb` ClusterIP to dial any more; the seed has to be
+			# the pod's own FQDN, and it must be spelled exactly as the chart
+			# advertises it (MONGODB_ADVERTISED_HOSTNAME) or the driver discovers
+			# a host it cannot reach and every operation fails server selection.
+			# `replicaSet=rs0` is what makes the driver use the set rather than a
+			# direct connection, which is the prerequisite for write concern
+			# `majority`, transactions and change streams.
+			--from-literal=MONGO_URI="mongodb://mongo_user:mongo-local-secret@ticketing-mongodb-0.ticketing-mongodb-headless.ticketing.svc.cluster.local:27017/tickets?authSource=admin&replicaSet=rs0" \
 			--from-literal=MONGO_DB="tickets" \
 			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092" \
 			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \

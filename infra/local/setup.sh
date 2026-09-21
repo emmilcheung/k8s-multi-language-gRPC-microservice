@@ -188,7 +188,11 @@ PG_PAYMENTS_HOST="ticketing-postgres-payments"
 PG_VENUE_HOST="ticketing-postgres-venue"
 PG_ATTENDANCE_HOST="ticketing-postgres-attendance"
 PG_USERS_HOST="ticketing-postgres-users"
-MONGO_HOST="ticketing-mongodb"
+# Replica-set mode (mongodb.architecture=replicaset) renders only a headless
+# Service, so there is no `ticketing-mongodb` ClusterIP left to dial. Use the
+# pod FQDN, spelled exactly as the chart advertises it, or the driver will
+# discover a host it cannot reach.
+MONGO_HOST="ticketing-mongodb-0.ticketing-mongodb-headless.ticketing.svc.cluster.local"
 REDIS_HOST="ticketing-redis-master"
 KAFKA_HOST="ticketing-cp-kafka.ticketing.svc.cluster.local"   # in-cluster cp-kafka broker
 
@@ -222,7 +226,7 @@ apply_secret auth-service-secrets \
 
 # ticket-service-secrets
 apply_secret ticket-service-secrets \
-  --from-literal=MONGO_URI="mongodb://mongo_user:mongo-local-secret@${MONGO_HOST}:27017/tickets?authSource=admin" \
+  --from-literal=MONGO_URI="mongodb://mongo_user:mongo-local-secret@${MONGO_HOST}:27017/tickets?authSource=admin&replicaSet=rs0" \
   --from-literal=MONGO_DB="tickets" \
   --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092" \
   --from-literal=X_USER_ID_SIGNING_KEY="${X_USER_ID_SIGNING_KEY}"
