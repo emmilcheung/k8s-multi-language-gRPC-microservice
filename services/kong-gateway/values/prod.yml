@@ -1,28 +1,72 @@
 # Kong gateway — EKS production environment overrides
 # ──────────────────────────────────────────────────────
-# Namespace: ticketing-prod
 # Helm release: ticketing
 # Rate limiting uses Redis (shared across Kong nodes).
 # Tighter rate limits and longer SSR timeouts for real traffic.
 
-HOST_AUTH: ticketing-auth-service.ticketing-prod.svc.cluster.local:3000
-HOST_TICKETS: ticketing-ticket-service.ticketing-prod.svc.cluster.local:3001
-HOST_ORDERS: ticketing-order-service.ticketing-prod.svc.cluster.local:8082
-HOST_PAYMENTS: ticketing-payment-service.ticketing-prod.svc.cluster.local:3002
-HOST_CLIENT: ticketing-client.ticketing-prod.svc.cluster.local:4000
-HOST_VENUE: ticketing-venue-service.ticketing-prod.svc.cluster.local:3003
-HOST_APOLLO_ROUTER: ticketing-apollo-router.ticketing-prod.svc.cluster.local:4001
+# The namespace is declared once and expanded into every HOST_* below by
+# build.sh. It used to be copy-pasted into each entry, and that is how this file
+# drifted: two entries (HOST_USERS, HOST_ATTENDANCE) were simply never added, so
+# they fell back to the docker-compose defaults in _defaults.yml
+# (`user-service:3004`, `attendance-service:3007`) — names that do not resolve in
+# Kubernetes, making every /api/users and /api/attendance route a 502.
+#
+# UNVERIFIED: docs/scalability-review.md records the prod release as living in
+# namespace `ticketing`, while the (currently commented-out) deploy job in
+# .github/workflows/ci.yml targets `ticketing-prod`. The CI file is the more
+# specific artifact, so it wins here. No prod deploy has ever run, so neither
+# source is authoritative. Confirm before the first real deploy — it is one line.
+NAMESPACE: ticketing-prod
+
+HOST_AUTH: ticketing-auth-service.{{NAMESPACE}}.svc.cluster.local:3000
+HOST_TICKETS: ticketing-ticket-service.{{NAMESPACE}}.svc.cluster.local:3001
+HOST_ORDERS: ticketing-order-service.{{NAMESPACE}}.svc.cluster.local:8082
+HOST_PAYMENTS: ticketing-payment-service.{{NAMESPACE}}.svc.cluster.local:3002
+HOST_USERS: ticketing-user-service.{{NAMESPACE}}.svc.cluster.local:3004
+HOST_ATTENDANCE: ticketing-attendance-service.{{NAMESPACE}}.svc.cluster.local:3007
+HOST_CLIENT: ticketing-client.{{NAMESPACE}}.svc.cluster.local:4000
+HOST_VENUE: ticketing-venue-service.{{NAMESPACE}}.svc.cluster.local:3003
+HOST_APOLLO_ROUTER: ticketing-apollo-router.{{NAMESPACE}}.svc.cluster.local:4001
 
 READ_TIMEOUT_MS: 30000
 WRITE_TIMEOUT_MS: 30000
 CLIENT_READ_TIMEOUT_MS: 60000
 CLIENT_WRITE_TIMEOUT_MS: 60000
 
-RATE_LIMIT_ANONYMOUS_PER_MINUTE: 60
+# ── Rate limiting ──────────────────────────────────────────────────────────────
+# The anonymous limit is per source IP. At 60/min it throttled a single active
+# browser: the Next.js catch-all route means page navigations and /_next/* assets
+# all count, so one person browsing can spend tens of requests a minute, and a
+# corporate or carrier-NAT egress IP fronts hundreds of people sharing one bucket.
+# 600/min tolerates roughly twenty concurrent anonymous users behind one address
+# while still capping a single source at 10 rps. It is a deliberate loosening of
+# a production control and the one judgment call in this change — flagged for
+# review. Volumetric defence belongs at CloudFront/WAF, not here; Kong's limiter
+# is for per-client fairness. docs/18-slos-and-load-testing.md says not to weaken
+# the production limit *for testing*, which this is not.
+RATE_LIMIT_ANONYMOUS_PER_MINUTE: 600
 RATE_LIMIT_POLICY: redis
 RATE_LIMIT_AUTHENTICATED_PER_MINUTE: 600
 RATE_LIMIT_AUTH_ENDPOINTS_PER_MINUTE: 10
-RATE_LIMIT_REDIS_HOST: ticketing-redis-master.ticketing-prod.svc.cluster.local
+
+# Deliberately blank. This used to name the in-cluster Bitnami Redis
+# (ticketing-redis-master.<ns>.svc.cluster.local), which prod does not deploy —
+# `redis.enabled: false` in infra/helm/values-prod.yaml — so the rate limiter was
+# pointed at a Service that does not exist. The real endpoint is ElastiCache,
+# whose DNS name carries a Terraform-generated hash and so cannot be committed.
+# build.sh takes it from KONG_RATE_LIMIT_REDIS_HOST at render time and refuses to
+# render at all if the policy is `redis` and no host resolves.
+RATE_LIMIT_REDIS_HOST: ""
 RATE_LIMIT_REDIS_PORT: 6379
+# infra/terraform/modules/elasticache sets transit_encryption_enabled = true, so
+# a plaintext connection is refused. With fault_tolerant the failure is silent:
+# the limiter degrades to no limiting at all rather than erroring.
+RATE_LIMIT_REDIS_SSL: "true"
+# Verification is off because Kong's trusted-certificate store is not configured
+# in the chart (no lua_ssl_trusted_certificate), so verify would fail closed on
+# every request. The connection stays inside the VPC on a private subnet whose
+# security group only admits the cluster CIDR. Follow-up: ship the Amazon root CA
+# to the Kong pod and turn this on.
+RATE_LIMIT_REDIS_SSL_VERIFY: "false"
 
 CORS_ALLOWED_ORIGINS: "https://ticketing.example.com"

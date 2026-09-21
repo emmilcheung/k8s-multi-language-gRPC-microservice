@@ -49,6 +49,11 @@ consumers:
           policy: {{RATE_LIMIT_POLICY}}
           redis_host: {{RATE_LIMIT_REDIS_HOST}}
           redis_port: {{RATE_LIMIT_REDIS_PORT}}
+          # ElastiCache is created with transit_encryption_enabled = true, so a
+          # plaintext connection is refused. Combined with fault_tolerant the
+          # failure is silent: the limiter stops limiting instead of erroring.
+          redis_ssl: {{RATE_LIMIT_REDIS_SSL}}
+          redis_ssl_verify: {{RATE_LIMIT_REDIS_SSL_VERIFY}}
           fault_tolerant: true
           hide_client_headers: false
 
@@ -93,7 +98,16 @@ services:
               policy: {{RATE_LIMIT_POLICY}}
               redis_host: {{RATE_LIMIT_REDIS_HOST}}
               redis_port: {{RATE_LIMIT_REDIS_PORT}}
-              fault_tolerant: true
+              redis_ssl: {{RATE_LIMIT_REDIS_SSL}}
+              redis_ssl_verify: {{RATE_LIMIT_REDIS_SSL_VERIFY}}
+              # Fail closed on the auth endpoints only. Kong defaults
+              # fault_tolerant to true, which means a Redis outage silently
+              # disables the limiter — acceptable for browse traffic, not for
+              # login/signup, where the limiter is the brute-force control. If
+              # Redis is unreachable these routes return 500 rather than becoming
+              # an unmetered credential-stuffing target. Every other route keeps
+              # the default and stays available.
+              fault_tolerant: false
               hide_client_headers: false
 
       # OAuth: consent query — JWT required (cookie); auth-service verifies the
@@ -177,7 +191,16 @@ services:
               policy: {{RATE_LIMIT_POLICY}}
               redis_host: {{RATE_LIMIT_REDIS_HOST}}
               redis_port: {{RATE_LIMIT_REDIS_PORT}}
-              fault_tolerant: true
+              redis_ssl: {{RATE_LIMIT_REDIS_SSL}}
+              redis_ssl_verify: {{RATE_LIMIT_REDIS_SSL_VERIFY}}
+              # Fail closed on the auth endpoints only. Kong defaults
+              # fault_tolerant to true, which means a Redis outage silently
+              # disables the limiter — acceptable for browse traffic, not for
+              # login/signup, where the limiter is the brute-force control. If
+              # Redis is unreachable these routes return 500 rather than becoming
+              # an unmetered credential-stuffing target. Every other route keeps
+              # the default and stays available.
+              fault_tolerant: false
               hide_client_headers: false
 
       # Protected: currentuser — validates JWT, injects X-User-Id from sub
@@ -802,6 +825,17 @@ services:
             config:
               minute: {{RATE_LIMIT_ATTENDANCE_SCAN_PER_MINUTE}}
               policy: {{RATE_LIMIT_POLICY}}
+              # redis_host/redis_port are not optional decoration. Kong's
+              # rate-limiting schema makes redis.host conditionally required when
+              # policy is `redis`, so omitting them here made `kong config parse`
+              # reject the whole declarative file in staging and prod — Kong
+              # refuses to load it and the gateway never starts. It went unnoticed
+              # because CI only renders and validates the `local` environment,
+              # where the policy is `local` and the condition never fires.
+              redis_host: {{RATE_LIMIT_REDIS_HOST}}
+              redis_port: {{RATE_LIMIT_REDIS_PORT}}
+              redis_ssl: {{RATE_LIMIT_REDIS_SSL}}
+              redis_ssl_verify: {{RATE_LIMIT_REDIS_SSL_VERIFY}}
 
       - name: attendance-api
         paths:
@@ -904,6 +938,12 @@ services:
             config:
               minute: {{RATE_LIMIT_AUTHENTICATED_PER_MINUTE}}
               policy: {{RATE_LIMIT_POLICY}}
+              # Required whenever the policy is `redis` — see the attendance-scan
+              # route above for what omitting them costs.
+              redis_host: {{RATE_LIMIT_REDIS_HOST}}
+              redis_port: {{RATE_LIMIT_REDIS_PORT}}
+              redis_ssl: {{RATE_LIMIT_REDIS_SSL}}
+              redis_ssl_verify: {{RATE_LIMIT_REDIS_SSL_VERIFY}}
 
   # ── client (Next.js SSR) — catch-all, must be last ────────────────────────────
   # Kong matches routes by longest-prefix first; all /api/* routes above always
@@ -989,6 +1029,8 @@ plugins:
       policy: {{RATE_LIMIT_POLICY}}
       redis_host: {{RATE_LIMIT_REDIS_HOST}}
       redis_port: {{RATE_LIMIT_REDIS_PORT}}
+      redis_ssl: {{RATE_LIMIT_REDIS_SSL}}
+      redis_ssl_verify: {{RATE_LIMIT_REDIS_SSL_VERIFY}}
       fault_tolerant: true
       hide_client_headers: false
 

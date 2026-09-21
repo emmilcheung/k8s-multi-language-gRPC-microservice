@@ -1,15 +1,23 @@
 # Kong gateway — EKS dev environment overrides
 # ──────────────────────────────────────────────
-# Namespace: ticketing-dev
 # Helm release: ticketing
 
-HOST_AUTH: ticketing-auth-service.ticketing-dev.svc.cluster.local:3000
-HOST_TICKETS: ticketing-ticket-service.ticketing-dev.svc.cluster.local:3001
-HOST_ORDERS: ticketing-order-service.ticketing-dev.svc.cluster.local:8082
-HOST_PAYMENTS: ticketing-payment-service.ticketing-dev.svc.cluster.local:3002
-HOST_CLIENT: ticketing-client.ticketing-dev.svc.cluster.local:4000
-HOST_VENUE: ticketing-venue-service.ticketing-dev.svc.cluster.local:3003
-HOST_APOLLO_ROUTER: ticketing-apollo-router.ticketing-dev.svc.cluster.local:4001
+# Declared once and expanded into every HOST_* below by build.sh, so a namespace
+# change is one line rather than nine. HOST_USERS and HOST_ATTENDANCE were
+# missing here and in staging/prod: a missing key silently falls back to the
+# docker-compose default in _defaults.yml (`user-service:3004`), a name that does
+# not resolve in Kubernetes, so /api/users and /api/attendance returned 502.
+NAMESPACE: ticketing-dev
+
+HOST_AUTH: ticketing-auth-service.{{NAMESPACE}}.svc.cluster.local:3000
+HOST_TICKETS: ticketing-ticket-service.{{NAMESPACE}}.svc.cluster.local:3001
+HOST_ORDERS: ticketing-order-service.{{NAMESPACE}}.svc.cluster.local:8082
+HOST_PAYMENTS: ticketing-payment-service.{{NAMESPACE}}.svc.cluster.local:3002
+HOST_USERS: ticketing-user-service.{{NAMESPACE}}.svc.cluster.local:3004
+HOST_ATTENDANCE: ticketing-attendance-service.{{NAMESPACE}}.svc.cluster.local:3007
+HOST_CLIENT: ticketing-client.{{NAMESPACE}}.svc.cluster.local:4000
+HOST_VENUE: ticketing-venue-service.{{NAMESPACE}}.svc.cluster.local:3003
+HOST_APOLLO_ROUTER: ticketing-apollo-router.{{NAMESPACE}}.svc.cluster.local:4001
 
 RATE_LIMIT_ANONYMOUS_PER_MINUTE: 300
 RATE_LIMIT_POLICY: local

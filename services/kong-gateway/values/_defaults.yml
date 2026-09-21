@@ -54,6 +54,12 @@ RATE_LIMIT_AUTH_ENDPOINTS_PER_MINUTE: 60
 RATE_LIMIT_ATTENDANCE_SCAN_PER_MINUTE: 60
 RATE_LIMIT_REDIS_HOST: "127.0.0.1"
 RATE_LIMIT_REDIS_PORT: 6379
+# TLS to Redis. Off by default because every environment on the `local` policy
+# ignores these anyway, and the local/dev Redis is plaintext. The managed
+# ElastiCache replication groups have transit_encryption_enabled = true, so
+# staging and prod turn this on — see values/prod.yml for why verify stays off.
+RATE_LIMIT_REDIS_SSL: "false"
+RATE_LIMIT_REDIS_SSL_VERIFY: "false"
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS: "*"

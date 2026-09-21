@@ -53,6 +53,8 @@ infra/terraform/environments/**/*.tfvars
 
 # Kong gateway — rendered output (build artifact, never commit)
 services/kong-gateway/kong.yml
+# Per-environment renders produced by the CI validation loop (kong.prod.yml, ...).
+services/kong-gateway/kong.*.yml
 
 # Docker
 docker-compose.override.yml.local

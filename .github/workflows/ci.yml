@@ -829,16 +829,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Render kong.yml (build.sh local)
-        run: bash scripts/build.sh local kong.yml
+      # Every environment, not just `local`. Validating only `local` is how a
+      # config that Kong outright refuses to load reached staging and prod: the
+      # rate-limiting schema makes redis.host conditionally required when policy
+      # is `redis`, two route plugins omitted it, and `local` uses the `local`
+      # policy so the condition never fired. A render that Kong rejects means the
+      # gateway never starts — this loop is the only thing that catches it before
+      # a deploy does.
+      - name: Render and validate kong.yml for every environment
+        run: |
+          set -euo pipefail
+          for env in local minikube dev staging prod; do
+            echo "::group::${env}"
+            bash scripts/build.sh "${env}" "kong.${env}.yml"
+            bash scripts/validate.sh "kong.${env}.yml"
+            echo "::endgroup::"
+          done
         env:
           # KONG_RSA_PUBLIC_KEY must be set in repo secrets.
           # The job is skipped on forks where the secret is unavailable.
           KONG_RSA_PUBLIC_KEY: ${{ secrets.KONG_RSA_PUBLIC_KEY }}
           KONG_SIGNING_KEY: ${{ secrets.X_USER_ID_SIGNING_KEY }}
-
-      - name: Validate kong.yml (kong config parse via Docker)
-        run: bash scripts/validate.sh kong.yml
+          # staging and prod use the `redis` policy and leave the endpoint blank
+          # in their values file (ElastiCache mints it with a Terraform-generated
+          # hash). build.sh refuses to render without it, so CI supplies a syntactic
+          # stand-in — this job only parses the config, it never connects.
+          KONG_RATE_LIMIT_REDIS_HOST: redis.ci.invalid
 
   # ── ticket-service (Go 1.25 / Echo v4 / confluent-kafka-go CGO) ────────────
   ticket:
