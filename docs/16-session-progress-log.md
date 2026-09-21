@@ -9,6 +9,68 @@
 
 ---
 
+## Session: 2026-09-21 — ci(m1): PR #139 opened, CI diagnosed and green ⏳ AWAITING MERGE APPROVAL
+
+**Branch:** `feat/scalability-m1` → PR #139 (38 commits, 0 behind `main`)
+
+M1 opened as a PR after the owner's testability scenario was checked and upheld:
+replica count is deployment configuration, and the correctness it affects is still
+pinned by CI because Postgres row locks and advisory locks are *session*-scoped, not
+process-scoped — a second pooled connection is indistinguishable from a second pod to
+the database. `OutboxRelayConcurrencyTest` opens two genuinely overlapping
+transactions; `hold_sweeper_leader_test.go` takes `pg_advisory_lock` on a separate
+pooled connection. Both were read, not taken on the strength of their names.
+
+### CI: red, then green — diagnosed, not dismissed
+
+Run `35575341302` first failed on `ticket-service` → *Integration tests
+(Testcontainers — MongoDB + Kafka)* with `panic: test timed out after 5m0s`. That is
+a timeout, not an assertion. Re-running the failed job passed, with every other job
+green — including *Helm rendered-manifest validation*, which closes the
+`kubeconform -strict` gap previously logged as locally unverified (no binary on this
+machine). It has now run in CI and passed.
+
+The branch is excluded as a cause by the import graph rather than by assertion: M1's
+entire `ticket-service` diff is `cmd/server/main.go` (2 lines) plus
+`internal/reconciler/quota_reconciler{,_test}.go`; `services/ticket-service/test/`
+references neither `reconciler` nor `cmd`, so that package is byte-identical to
+`main`'s. The reconciler change runs in the *Unit tests* step, which passed even on
+the failing attempt.
+
+Durations, same commit and same tree: **301s (capped, failed)** → **207s (passed)**,
+against **168s** on `main`. A 94s swing across identical trees is the runner. The
+goroutine dump put the hang in `tcmongo.Run` → `initiateReplicaSet` →
+`WaitUntilReady` — container startup — and the log carried rdkafka
+`Coordinator load in progress: retrying` noise consistent with a contended runner.
+
+### Known fragility — NOT fixed, out of M1's scope
+
+`services/ticket-service/test/` has 90 test functions, **23 of which each start their
+own `mongo:7` replica-set container** via `newRepoForReservationTests`. Go's
+`-timeout` is cumulative per *package*, so all 23 startups are charged to one 300s
+budget — which is also why the panic named
+`TestFinalizeReservation_ShouldBeIdempotent_WhenAlreadySold (2s)`: it only held the
+baton when the alarm fired. At 207s there is ~31% headroom, so any PR can go red here
+without touching ticket-service. Remedy is a suite-scoped container or a raised
+package timeout. Deliberately not added to this PR.
+
+### Finding carried into the PR body, not treated as a blocker
+
+**SR-08 buys failover but not throughput until SR-02 lands.** expiration-service is a
+Kafka consumer-group member, so a second replica is safe by construction — but SR-02
+is still `open`, nothing provisions topics, and the broker default is
+`num.partitions=1`, so the second consumer is assigned no partitions and idles.
+Secondary: `OutboxCleanupJob` has no leader election and fires on every replica;
+batched deletes are idempotent so this is safe, but replicas contend on row locks.
+
+**Owner decisions still open**: merge approval for PR #139 (no auto-merge to main);
+the staging soak — every service at 3 replicas for 24h — which is M1's real exit
+criterion and an owner action; SR-02 topic provisioning; triage of the ticket-service
+integration-suite timeout budget; and the prod-render Secret `ticketing-postgres-users`,
+whose literal password is regenerated on every render, so a real `helm upgrade` would
+rotate the credential out from under the running database.
+
+
 ## Session: 2026-09-21 — merge(main): integrate PR #122 into feat/scalability-m1 ⏳ NOT MERGED TO MAIN
 
 **Branch:** `feat/scalability-m1` ← `origin/main` (merge `f1d79e6`)
