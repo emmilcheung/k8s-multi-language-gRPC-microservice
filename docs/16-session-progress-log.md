@@ -9,6 +9,82 @@
 
 ---
 
+## Session: 2026-09-22 — fix(kong,helm): M2 — Kafka topic provisioning + an unloadable gateway config ⏳ NOT DEPLOY-VERIFIED
+
+**Branch:** `feat/scalability-m2` (cut from `fix/local-cluster-bringup`, which is still unmerged and holds the chart fixes this depends on) · commits `dac1dec`, `f1c2f97`
+
+Two workstream items landed. Both are render-verified only — the owner asked for
+deploy and smoke verification to be batched into one later run, so nothing here has
+met a live cluster, a live broker or a live Redis. Said plainly because it matters:
+the previous session found twelve deploy-blocking defects that `helm template` and
+`helm lint` could not see.
+
+**Kafka topics are now declared, not assumed.** All 20 topics live in
+`infra/helm/files/topics.yaml` and are created by a Helm hook Job. The hook is
+`post-install,post-upgrade` rather than `pre-*` because locally the broker ships
+inside the same release: a `pre-install` hook would block forever waiting for a
+StatefulSet Helm has not created yet, gating the very install that would satisfy it.
+In prod the broker is MSK and always reachable, so one annotation serves both.
+Partition counts are sized to the largest consuming group at that service's HPA
+`maxReplicas`, and the Job reports drift rather than correcting it — raising a
+partition count rehashes keys and breaks per-key ordering, and lowering one is not
+possible at all. Topics were derived by reading call sites, not by grepping strings:
+eight candidates turned out to be OpenTelemetry span names and structured-log fields,
+and stayed out of the declaration.
+
+**The Kong staging and prod configs do not load.** `kong config parse` exits 1 on
+both. Kong's rate-limiting schema makes `redis.host` conditionally required when the
+policy is `redis`; two route plugins omitted it, and Kong refuses to load a
+declarative config it cannot validate, so the gateway would not have started at all.
+This had been recorded as a degraded rate limit counting per node. It is not — the
+difference is between an N-times-too-loose limit and no gateway — and it is
+reclassified P0.
+
+It survived because the CI job rendered and validated only the `local` environment,
+where the policy is `local` and the condition never fires. The job now loops all five
+environments. That guard, not the config change, is the durable part.
+
+Carried along in the same fix, all previously invisible for the same reason:
+`HOST_USERS` and `HOST_ATTENDANCE` were absent from dev/staging/prod (and
+`HOST_ATTENDANCE` from minikube), each silently falling back to a docker-compose bare
+hostname that does not resolve in Kubernetes, making `/api/users` and
+`/api/attendance` 502s; the rate limiter pointed at an in-cluster Redis that staging
+and prod do not deploy, and now takes the ElastiCache endpoint from
+`KONG_RATE_LIMIT_REDIS_HOST` at render time with `build.sh` refusing to render
+without it; `redis_ssl` is on, because the ElastiCache module enables transit
+encryption and a plaintext connection fails silently into no limiting at all; and the
+namespace is declared once per values file instead of copy-pasted into nine entries,
+which is how two of them went missing unnoticed.
+
+**Two things the owner should weigh in on.** The anonymous per-IP rate limit was
+raised from 60/min to 600/min: at 60 a single active browser was throttled, since the
+Next.js catch-all route means page navigations and `/_next/*` assets all count, and a
+carrier-NAT address puts hundreds of people in one bucket. It is still a deliberate
+loosening of a production control. Separately, `fault_tolerant: false` now applies to
+the two auth endpoints only, so a Redis outage cannot quietly switch off the
+brute-force control, while every other route keeps failing open and stays available.
+
+**Caught by verification, worth recording:** the first pass at that change left
+duplicate `fault_tolerant` keys in the same YAML block. Last-wins would have kept
+`true`, and `kong config parse` accepts duplicate keys without complaint, so it would
+have shipped looking right and doing nothing.
+
+**Verified:** all five Kong environments render and parse against both
+`kong:3.7-ubuntu` and the `kong:3.9` the chart actually runs, staging and prod moving
+exit 1 → exit 0; all three Helm overlays template and lint, with staging and prod
+byte-identical to baseline. **Not verified:** anything requiring a running cluster.
+
+**Owner decisions still open:** the 60 → 600 anonymous limit; the prod namespace,
+where the only two sources disagree and no cloud deploy has ever run to settle it;
+merge approval for `fix/local-cluster-bringup` (11 commits, unpushed, no PR) and
+later this branch; and the Apollo Router GraphOS licence versus dropping operation
+limits. **Still outstanding from the previous session:** the leaked
+`X_USER_ID_SIGNING_KEY` is unrotated — the rotation was denied by the sandbox — and
+the grouped smoke run now needs a full local rebuild first, since minikube and the
+build cache were torn down.
+
+---
+
 ## Session: 2026-09-21 — ci(m1): PR #139 opened, CI diagnosed and green ⏳ AWAITING MERGE APPROVAL
 
 **Branch:** `feat/scalability-m1` → PR #139 (38 commits, 0 behind `main`)
