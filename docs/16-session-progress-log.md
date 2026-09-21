@@ -783,3 +783,37 @@ Test-only, so it never reaches the scanned image, but worth a follow-up. Tests p
 **PR #122 is now blocked on exactly one thing**, and it is not a code change: the
 queue-service gate failure has no in-repo fix. Owner decides between waiting for the
 Microsoft base-image rebuild and signing off on the Trivy gate configuration.
+
+### queue-service — time-boxed CVE suppression (commit `fef8ae2`)
+
+Owner signed off explicitly after being shown that no in-repo remediation exists.
+
+The image carries six MEDIUM glibc CVEs — CVE-2026-6368, -6791, -19499, -19542,
+-77117, -80489 — all in `libc6 2.39-0ubuntu8.8`, all fixed only by `2.39-0ubuntu8.9`.
+
+Why nothing else was possible:
+- `aspnet:10.0-noble-chiseled` is chiseled: no package manager, no shell, so the
+  Dockerfile cannot upgrade the package.
+- `10.0-resolute-chiseled` (Ubuntu 25.10) carries the **same** unfixed CVEs at
+  `libc6 2.43-2ubuntu2.3` — switching distro is not a fix.
+- Dropping to a non-chiseled base to gain `apt` would enlarge the attack surface to
+  remove six MEDIUMs: a net loss.
+
+**This is a suppression, not a fix.** The CVEs remain in the running image. It is the
+narrowest available form: scoped to the queue-service job via `trivyignores`, listing
+six specific CVE IDs rather than a severity class, expiring **2026-12-21**. The severity
+gate is unchanged here and in every other service.
+
+Verified locally, all three states:
+
+| condition | exit code |
+|---|---|
+| no ignore file | 1 (six findings) |
+| ignore file, expiry in future | 0 |
+| ignore file, expiry moved to past | 1 |
+
+The third case matters: it proves the time-box genuinely re-arms the gate rather than
+being decorative.
+
+**On expiry**: re-scan the base image. If Microsoft has rebuilt, delete the file. If not,
+extend the date deliberately and record why.
