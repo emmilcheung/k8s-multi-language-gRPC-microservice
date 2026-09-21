@@ -9,6 +9,55 @@
 
 ---
 
+## Session: 2026-09-21 — merge(main): integrate PR #122 into feat/scalability-m1 ⏳ NOT MERGED TO MAIN
+
+**Branch:** `feat/scalability-m1` ← `origin/main` (merge `f1d79e6`)
+
+PR #122 merged to `main` (`ded09a8`), so M1 was brought up to date. #122 and M1 had
+independently implemented the same outbox claim fix, which produced seven conflicts.
+
+### How the conflicts were resolved
+
+All six code conflicts went to `main`'s side, because #122's version is a superset, not
+an alternative. Both branches hold the `FOR UPDATE SKIP LOCKED` claim inside a
+transaction, so both are correct on isolation — but #122 additionally **stops the batch
+at a failing row** instead of skipping it (skipping let a later event for the same
+partition key overtake an earlier one still being retried, defeating the point of keying
+by `orderId` at all, AGENTS.md §3.4) and **bounds the broker wait**
+(`OUTBOX_RELAY_PUBLISH_TIMEOUT_MS`, default 10 s), which matters precisely because the
+claim now spans a whole batch rather than one row. Taking `main` wholesale closed both
+defects in M1's code without patching either.
+
+M1's unique half was re-applied on top: order-service cleanup batching
+(`deletePublishedBatch`, `@Transactional` per batch so each commits on its own,
+`OutboxCleanupJob`, `outbox.cleanup.*`) and `V6__add_outbox_published_index.sql`. V6 was
+free on `main`, so the append-only migration rule is not violated.
+
+`OutboxRelayConcurrencyTest` was rewritten rather than deleted: it now proves SKIP LOCKED
+against `@Lock(PESSIMISTIC_WRITE)` + `QueryHint lock.timeout = -2` instead of against a
+native query. It passes — which is the first actual test evidence that the annotation
+form emits `for update skip locked`, a property #122 asserted in javadoc only.
+
+### Verification
+
+- order-service `mvn -o test` — **68/68, 0 skipped**, including both Testcontainers suites.
+- payment-service — **95 unit + 21 integration, 0 skipped**; `pnpm test` alone does NOT
+  run the concurrency spec (it lives in `test/`, covered by `test:integration`), so it
+  was run explicitly.
+- ticket-service, venue-service — `go build`, `go vet`, `go test ./...` clean on top of
+  `main`'s Go 1.26 toolchain.
+- Helm — all 13 service charts render; prod and staging render with **0 StatefulSets**
+  vs local's 8, re-confirming SR-01 after the merge.
+
+### Not done
+
+- **`kubeconform -strict` did not run** — not installed on this machine. Only the render
+  half of that CI step was reproduced locally; the schema validation runs first in CI.
+- Nothing is pushed and no PR is open for `feat/scalability-m1`. M1's exit criterion
+  (3 replicas in staging for 24 h) is a deploy, which is an owner action.
+
+---
+
 ## Session: 2026-09-17 — fix(order): outbox cleanup batching + M1 branch audit ⏳ AUDITED, NOT MERGED
 
 **Branch:** `feat/scalability-m1` (integration) ← `fix/scale-b8-outbox-cleanup-batching`
