@@ -47,3 +47,32 @@ kafka:
 
 cp-kafka:
   enabled: false
+
+# ── Managed datastores ────────────────────────────────────────────────────────
+# Staging and prod use managed Postgres / Redis / MongoDB. The in-cluster
+# subcharts are for local development only and must stay off here; services read
+# their connection strings from Kubernetes Secrets via secretRef, not from these
+# values.
+postgres-auth:
+  enabled: false
+
+postgres-orders:
+  enabled: false
+
+postgres-payments:
+  enabled: false
+
+postgres-users:
+  enabled: false
+
+postgres-venue:
+  enabled: false
+
+postgres-attendance:
+  enabled: false
+
+mongodb:
+  enabled: false
+
+redis:
+  enabled: false

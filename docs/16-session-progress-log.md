@@ -9,7 +9,277 @@
 
 ---
 
-## Session: 2026-08-05 — fix(outbox): indexing, retention, claim isolation across all four outboxes ⏸ AWAITING MERGE APPROVAL
+## Session: 2026-09-21 — ci(m1): PR #139 opened, CI diagnosed and green ⏳ AWAITING MERGE APPROVAL
+
+**Branch:** `feat/scalability-m1` → PR #139 (38 commits, 0 behind `main`)
+
+M1 opened as a PR after the owner's testability scenario was checked and upheld:
+replica count is deployment configuration, and the correctness it affects is still
+pinned by CI because Postgres row locks and advisory locks are *session*-scoped, not
+process-scoped — a second pooled connection is indistinguishable from a second pod to
+the database. `OutboxRelayConcurrencyTest` opens two genuinely overlapping
+transactions; `hold_sweeper_leader_test.go` takes `pg_advisory_lock` on a separate
+pooled connection. Both were read, not taken on the strength of their names.
+
+### CI: red, then green — diagnosed, not dismissed
+
+Run `35575341302` first failed on `ticket-service` → *Integration tests
+(Testcontainers — MongoDB + Kafka)* with `panic: test timed out after 5m0s`. That is
+a timeout, not an assertion. Re-running the failed job passed, with every other job
+green — including *Helm rendered-manifest validation*, which closes the
+`kubeconform -strict` gap previously logged as locally unverified (no binary on this
+machine). It has now run in CI and passed.
+
+The branch is excluded as a cause by the import graph rather than by assertion: M1's
+entire `ticket-service` diff is `cmd/server/main.go` (2 lines) plus
+`internal/reconciler/quota_reconciler{,_test}.go`; `services/ticket-service/test/`
+references neither `reconciler` nor `cmd`, so that package is byte-identical to
+`main`'s. The reconciler change runs in the *Unit tests* step, which passed even on
+the failing attempt.
+
+Durations, same commit and same tree: **301s (capped, failed)** → **207s (passed)**,
+against **168s** on `main`. A 94s swing across identical trees is the runner. The
+goroutine dump put the hang in `tcmongo.Run` → `initiateReplicaSet` →
+`WaitUntilReady` — container startup — and the log carried rdkafka
+`Coordinator load in progress: retrying` noise consistent with a contended runner.
+
+### Known fragility — NOT fixed, out of M1's scope
+
+`services/ticket-service/test/` has 90 test functions, **23 of which each start their
+own `mongo:7` replica-set container** via `newRepoForReservationTests`. Go's
+`-timeout` is cumulative per *package*, so all 23 startups are charged to one 300s
+budget — which is also why the panic named
+`TestFinalizeReservation_ShouldBeIdempotent_WhenAlreadySold (2s)`: it only held the
+baton when the alarm fired. At 207s there is ~31% headroom, so any PR can go red here
+without touching ticket-service. Remedy is a suite-scoped container or a raised
+package timeout. Deliberately not added to this PR.
+
+### Finding carried into the PR body, not treated as a blocker
+
+**SR-08 buys failover but not throughput until SR-02 lands.** expiration-service is a
+Kafka consumer-group member, so a second replica is safe by construction — but SR-02
+is still `open`, nothing provisions topics, and the broker default is
+`num.partitions=1`, so the second consumer is assigned no partitions and idles.
+Secondary: `OutboxCleanupJob` has no leader election and fires on every replica;
+batched deletes are idempotent so this is safe, but replicas contend on row locks.
+
+**Owner decisions still open**: merge approval for PR #139 (no auto-merge to main);
+the staging soak — every service at 3 replicas for 24h — which is M1's real exit
+criterion and an owner action; SR-02 topic provisioning; triage of the ticket-service
+integration-suite timeout budget; and the prod-render Secret `ticketing-postgres-users`,
+whose literal password is regenerated on every render, so a real `helm upgrade` would
+rotate the credential out from under the running database.
+
+
+## Session: 2026-09-21 — merge(main): integrate PR #122 into feat/scalability-m1 ⏳ NOT MERGED TO MAIN
+
+**Branch:** `feat/scalability-m1` ← `origin/main` (merge `f1d79e6`)
+
+PR #122 merged to `main` (`ded09a8`), so M1 was brought up to date. #122 and M1 had
+independently implemented the same outbox claim fix, which produced seven conflicts.
+
+### How the conflicts were resolved
+
+All six code conflicts went to `main`'s side, because #122's version is a superset, not
+an alternative. Both branches hold the `FOR UPDATE SKIP LOCKED` claim inside a
+transaction, so both are correct on isolation — but #122 additionally **stops the batch
+at a failing row** instead of skipping it (skipping let a later event for the same
+partition key overtake an earlier one still being retried, defeating the point of keying
+by `orderId` at all, AGENTS.md §3.4) and **bounds the broker wait**
+(`OUTBOX_RELAY_PUBLISH_TIMEOUT_MS`, default 10 s), which matters precisely because the
+claim now spans a whole batch rather than one row. Taking `main` wholesale closed both
+defects in M1's code without patching either.
+
+M1's unique half was re-applied on top: order-service cleanup batching
+(`deletePublishedBatch`, `@Transactional` per batch so each commits on its own,
+`OutboxCleanupJob`, `outbox.cleanup.*`) and `V6__add_outbox_published_index.sql`. V6 was
+free on `main`, so the append-only migration rule is not violated.
+
+`OutboxRelayConcurrencyTest` was rewritten rather than deleted: it now proves SKIP LOCKED
+against `@Lock(PESSIMISTIC_WRITE)` + `QueryHint lock.timeout = -2` instead of against a
+native query. It passes — which is the first actual test evidence that the annotation
+form emits `for update skip locked`, a property #122 asserted in javadoc only.
+
+### Verification
+
+- order-service `mvn -o test` — **68/68, 0 skipped**, including both Testcontainers suites.
+- payment-service — **95 unit + 21 integration, 0 skipped**; `pnpm test` alone does NOT
+  run the concurrency spec (it lives in `test/`, covered by `test:integration`), so it
+  was run explicitly.
+- ticket-service, venue-service — `go build`, `go vet`, `go test ./...` clean on top of
+  `main`'s Go 1.26 toolchain.
+- Helm — all 13 service charts render; prod and staging render with **0 StatefulSets**
+  vs local's 8, re-confirming SR-01 after the merge.
+
+### Not done
+
+- **`kubeconform -strict` did not run** — not installed on this machine. Only the render
+  half of that CI step was reproduced locally; the schema validation runs first in CI.
+- Nothing is pushed and no PR is open for `feat/scalability-m1`. M1's exit criterion
+  (3 replicas in staging for 24 h) is a deploy, which is an owner action.
+
+---
+
+## Session: 2026-09-17 — fix(order): outbox cleanup batching + M1 branch audit ⏳ AUDITED, NOT MERGED
+
+**Branch:** `feat/scalability-m1` (integration) ← `fix/scale-b8-outbox-cleanup-batching`
+
+Fourth and final orchestrated wave for M1, plus the overall review and audit the owner asked for before anything reaches `main`.
+
+### What was done
+
+- **Outbox cleanup batching (SR-06, second half).** `OutboxCleanupJob.purgePublished()` issued one unbounded `DELETE` inside one transaction. Over a backlog — the state left by any Kafka outage — that holds row locks and pins the vacuum horizon for the whole run, and on timeout it makes *no* progress, so the next run retries the same doomed statement forever. It now deletes `outbox.cleanup.batch-size` rows (default 500) per iteration, up to `outbox.cleanup.max-batches` (default 100) per invocation, leaving the remainder to the next schedule.
+- **`@Transactional` moved off the job and onto the repository method.** This is the whole point of the change: on `OutboxRepository.deletePublishedBatch` each batch commits on its own, so a failure part-way keeps the progress already made. On the job it would wrap every batch in one outer transaction and roll all of them back — the exact behaviour being removed.
+- **`V6__add_outbox_published_index.sql`.** The cleanup `DELETE` had no usable index. `V1`'s `idx_outbox_unpublished` is partial on `WHERE published = false`, which is the *relay's* filter. Without the mirror-image index on `(created_at) WHERE published = true`, batching would have turned one sequential scan into one scan per batch — strictly worse than the unbounded delete it replaces. Plain `CREATE INDEX`, not `CONCURRENTLY`, because Flyway wraps each migration in a transaction and `CONCURRENTLY` cannot run inside one.
+- **A false RED recipe corrected.** `OutboxRelayConcurrencyTest.java:106` told a reviewer to swap the claim call to `findUnpublished()` to reproduce the red — but the same SR-06 change deleted that method. Repointed at the `LIMIT … FOR UPDATE SKIP LOCKED` clause that actually has to be removed. Comment only.
+
+### Verification
+
+- Full `mvn test` on the merged tree: **61 tests, 0 failures, 0 errors, 0 skipped, EXIT=0**, with the exit code captured directly rather than through a pipe.
+- **Both reds reproduced here, not taken on report.** Dropping the `LIMIT` from `deletePublishedBatch` fails `deletePublishedBatchRespectsItsLimit` (`expected: 100 but was: 250`) *and* `eachBatchCommitsSoAFailurePartWayKeepsItsProgress` (`expected: 50L but was: 0L`) — the worker had reported only the first. Adding `@Transactional` back to `purgePublished()` fails `cleanupJobMustNotBeTransactional` (`expected: null but was: @Transactional(...)`). Both files restored and confirmed byte-identical to `53f84a4`.
+- Branch audit: 24 changed files, all traceable to a register item; no secret values; no dependency manifest, migration outside `V6`, client, supergraph, port, NetworkPolicy or securityContext change; every code change merged `--no-ff` from its own `fix/scale-*` branch.
+- **A2 backward compatibility verified rather than assumed.** Disabling the in-cluster Postgres/Mongo/Redis subcharts in staging and prod breaks no service because no chart template references those values — services read connection strings from a Kubernetes Secret via `envFrom.secretRef`.
+
+### A sanity check that could not fail — this time the manager's
+
+The ticket specified: "restore `@Transactional` on `purgePublished()` → test C must fail." It cannot. The test constructs the job with `new`, and a hand-constructed object has no Spring AOP proxy, so `@Transactional` on it is completely inert. Confirmed by running it: with the annotation restored, the behavioural test still passes.
+
+This was caught before the worker committed, and fixed by adding `cleanupJobMustNotBeTransactional` — a reflection guard that asserts the annotation is absent and carries the reason in its failure message. It is the property that matters, because in production the job *is* a Spring bean and the annotation *would* take effect there.
+
+That makes four defects of the same shape across this milestone — a check written so that it cannot fail — three from workers and two now from the manager's own tickets. The pattern is specific enough to name: **whenever a fix is verified by reverting it, the revert must be executed, not predicted, and the revert must be shown to produce a failure the test is actually capable of reporting.**
+
+### A bug chased and cleared
+
+`OutboxMessagePublisher.publishOne` carries `@Transactional` with `REQUIRED` propagation and, since SR-06, joins the relay's claim transaction. If a Kafka failure escaped it, the transaction proxy would call `setRollbackOnly()` and the relay's commit would throw `UnexpectedRollbackException`, discarding every mark-published in the batch and re-sending all of them on the next tick — a duplicate storm from a single bad row. It does not happen: the `catch` sits inside the method body, so nothing propagates through the proxy. Recorded because the failure mode is non-obvious and the next person to touch that method needs to know why the `catch` cannot be moved out.
+
+### A conflict between the plan and the register
+
+Plan item `B3` asks for advisory-lock leader election on "venue sweeper **and order cleanup**"; SR-15's register row names only the venue sweeper and the ticket reconciler. Order-service's `OutboxCleanupJob` does run on every pod every 10 minutes, so the plan is not wrong to mention it.
+
+**Dropped deliberately rather than deferred**, because the two designs are mutually exclusive. A per-batch advisory lock does not serialize the job — another pod simply interleaves batches, and each batch is independently correct. A job-wide lock requires one transaction spanning every batch, which is precisely what this change exists to eliminate. Concurrent cleanup pods produce brief lock waits and `deleted = 0`, not incorrectness, on a table bounded by the 24-hour retention the job itself enforces.
+
+### Branch cleanup — the rejected SR-35 attempt was deleted
+
+`fix/scale-b6b-venue-provision-advisory-lock` (`5dc169f4`) was `B6b`'s rejected first attempt: it held `pg_advisory_xact_lock` on a dedicated transaction while still inserting through `r.pool`, so every caller needed two pooled connections and four concurrent provisions exhausted the pool unconditionally, with no lock contention required.
+
+It never merged, so none of its code was ever on this branch and SR-35's status rests solely on `fix/scale-b6b2-venue-provision-tx`. But it was ambiguous at a glance — **two branches carrying `SR-35` in their subject and touching the same two files**, with nothing in either name marking one as superseded, and it was the only unmerged branch of the eight. Deleted on owner instruction, which supersedes the earlier standing "keep the small branch for record" for this branch only. It was never pushed, so `docs/scalability-review.md` now carries its full SHA and the reason it failed as the only remaining record. Seven `fix/scale-*` branches remain, all merged.
+
+### Not done
+
+- **`main` is untouched at `f565089`, and stays that way pending owner approval.** No auto-merge (CLAUDE.md core rule 6).
+- M1's exit criterion is not code and cannot be met from here: "every service at 3 replicas in staging for 24h with no duplicate events and no stuck reservations" needs a staging deploy, which is an owner action.
+- SR-01 remains half-complete by design: the Helm half landed, the Terraform half (RDS for venue/user/attendance, managed Mongo) is untouched, and `terraform apply` is an owner action under `docs/15-agent-hard-stops.md`.
+- Every register item stays `in-progress` rather than `done`; the done-count moves only after merge to `main`.
+
+---
+
+## Session: 2026-09-17 — fix(scale): sweeper leader election, expiration replicas, outbox claim contract ⏳ INTEGRATED, NOT MERGED
+
+**Branch:** `feat/scalability-m1` (integration) ← `fix/scale-b5-expiration-replicas`, `fix/scale-b3a-venue-sweeper-leader`
+
+Third orchestrated wave. Two workers, one manager-written change, and one more worker report that did not survive independent verification — this time not a vacuous test, but a **red that could not have been produced by the test that was committed**.
+
+### What was done
+
+- **Venue hold sweeper leader election (SR-15, first half).** `SweepExpiredHolds` used to run its full-table `UPDATE seats ... WHERE status='HELD' AND held_until < now()` on every replica every 30 seconds. It now opens a transaction, takes `pg_try_advisory_xact_lock(hashtext('venue-hold-sweeper'))`, and returns `(0, nil)` without sweeping when another pod already holds it. The **transaction-scoped** variant is required rather than the session-scoped `pg_try_advisory_lock` the review originally suggested: a session lock would be released back into the pgxpool connection still held, and would then permanently disable the sweeper on that pod. The only caller is the 30s ticker in `internal/hold/sweeper.go`, so no request path can observe the non-leader no-op.
+- **expiration-service replicas (SR-08).** `values.yaml` now sets `replicaCount: 2`, and so does the subchart default. A single replica behind a PDB with `minAvailable: 1` can never be evicted, so it was both a SPOF and a permanent blocker for node drains. `values-local.yaml` already pinned 1 and still does, so local is unchanged. No code change was needed: the asynq workers dedupe on `TaskID(orderID)`.
+- **Outbox relay claim contract (`docs/04-asynchronous-messaging.md`).** Three services claim outbox rows with `FOR UPDATE SKIP LOCKED` and one uses a Mongo `claimToken`/`leaseUntil` lease, but the standard said only that "a relay process publishes to Kafka" — nothing required a claim at all, so a relay written to that spec would publish every event once per replica. The new section states the contract, both mechanisms, why per-batch commit is accepted rather than fixed, and the test trap below.
+
+### Verification
+
+- **The sweeper red was reproduced here, not taken on report.** With `section_repo.go` reverted to `9bc7357`, the new test fails in 6.5s at `hold_sweeper_leader_test.go:124` — `expected: 0, actual: 3`, "a non-leader pod must not sweep while another pod holds the leader lock". Restored, `go build ./...`, `go vet ./...` and the full `go test ./...` all exit 0, and the working tree is byte-identical to the commit.
+- The test simulates the other pod with a session-scoped `pg_advisory_lock` on a second pooled connection. That works because session and transaction advisory locks share one lock space — a session lock taken by the test genuinely blocks the production code's `pg_try_advisory_xact_lock`.
+- **All three Helm overlays render on the merged tree**, exit 0 with zero stderr: expiration-service is 1 replica locally and 2 in staging and prod, PDB `minAvailable: 1` throughout, and wave 2's externalization still holds at 0 StatefulSets in staging and prod against 8 locally.
+- `git diff --name-only main..feat/scalability-m1` is 18 files. `main` remains untouched at `f565089`.
+
+### A red that never happened
+
+The sweeper worker reported a textbook sanity check: revert the fix, watch the assertion fail with `expected: 0 / actual: 3`. Reverting it here produced something else — the test hung and died on Go's 10-minute default timeout, and the string `actual` appeared **zero times** in the output. The cause was in the test, not the fix: it acquired the simulated-leader connection with `pool.Acquire` and released it only at step 4, so when `require.Equal` called `FailNow` at step 2 the release was skipped and the deferred `pool.Close()` blocked forever on the outstanding connection.
+
+So the assertion was right, the production code was right, and the test still could not report its own failure — it could only hang for ten minutes with no diagnostic. It was rejected and reissued for a `defer leaderConn.Release()`; the red now lands in 6.5 seconds with the message attached. The lesson is narrower than wave 2's but worth the same weight: **a sanity check verifies the test's failure path as much as the fix**, and a quoted red is not evidence unless the failure path can actually print it.
+
+### Not done
+
+- Nothing else from M1's dispatched work is outstanding. SR-15 is now complete on the branch: the ticket-service quota reconciler takes a Redis `SET NX` lease at `ticket-service:reconciler:leader` with TTL = the 5-minute interval, so one replica per tick paginates Mongo and rewrites Redis instead of all of them. It is deliberately not released on success, because releasing it would let the next replica's offset ticker start a second redundant pass inside the same interval; a failed pass does release it. Verified by deleting the election guard and watching both assertions fail, then re-running the full `go test ./...` — including the 201-second testcontainers package the worker stopped short of.
+- The order-service outbox cleanup `DELETE` batching split out of SR-06 is still open.
+- Nothing has merged to `main`. The overall review and audit of `feat/scalability-m1` is still pending.
+
+---
+
+## Session: 2026-09-16 — fix(scale): prod/staging externalization, outbox SKIP LOCKED, single-transaction venue provisioning ⏳ INTEGRATED, NOT MERGED
+
+**Branch:** `feat/scalability-m1` (integration) ← `fix/scale-a2-overlay-disable-backing-services`, `fix/scale-b6b2-venue-provision-tx`, `fix/scale-b2-payment-outbox-skip-locked`
+
+Second orchestrated wave. Same division of labour as wave 1 — workers implement, the manager verifies every claim independently — and this wave is the case for that division: **two of three workers reported success on tests that could not fail.** Both were caught, reworked and re-verified, and one of the two defective tests was caused by a defective ticket, which is recorded below rather than quietly fixed.
+
+### What was done
+
+- **Prod and staging externalization** — `values-prod.yaml` and `values-staging.yaml` now set `enabled: false` on all eight Bitnami database subcharts. Wave 1 added the toggles; until now nothing exercised them, so the overlays still stood up in-cluster Postgres/Mongo/Redis in both environments.
+- **Single-transaction venue provisioning** — `ProvisionFromVenue` runs the advisory lock, the idempotency `COUNT`, the template fetch and the whole clone loop on one `pgx.Tx`, committing at the end. This closes two separate defects with one change: the check-then-act race between concurrent provisions, and the half-built plan that a mid-loop failure used to leave committed, which the `COUNT` guard then read as "already provisioned" forever.
+- **payment-service outbox claim** — the relay now runs inside `db.transaction`, claims rows with `.for('update', { skipLocked: true })` and marks them published on that same transaction, so concurrent replicas cannot publish the same outbox row twice. Its test was rejected twice before landing (see below).
+- **Interface preserved** — threading the transaction went through an unexported `querier` (`QueryRow` + `SendBatch` + `Query`, satisfied by both `*pgxpool.Pool` and `pgx.Tx`) plus free functions, matching the pattern already used at `section_repo.go:275,345`. The exported `CreateSection`/`BulkInsertSeats` signatures are unchanged, so the six existing stub implementations across the handler, gRPC and GraphQL tests needed no edit.
+
+### Verification
+
+- **The venue deadlock was reproduced before the fix was accepted.** With the test pool pinned to 4 connections, reverting the two inserts to `r.pool` fails all 8 concurrent provisions with `context deadline exceeded` and 0 sections created, after the full 30s timeout; restoring the transaction passes in 1.4s. The production file was confirmed byte-identical afterwards.
+- venue-service `go build ./...`, `go vet ./...` and the full `go test ./...` are green on the merged tree, against real PostgreSQL via Testcontainers.
+- Prod renders exit 0, zero stderr, **0 StatefulSets**, and **0 references to the `ticketing-postgres-users` Secret**. Staging 0 StatefulSets; local unchanged at exit 0 / 8 StatefulSets.
+- **The payment double-publish bug was also reproduced before acceptance.** With `.for('update', { skipLocked: true })` removed from the service, the integration suite exits 1 and relay B claims all 3 rows relay A is holding (`expected 3 to be +0`); restored, exit 0, and the production file is byte-identical. payment-service lint, `tsc --noEmit`, 92 unit tests and 21 integration tests all exit 0 on the merged tree.
+- `git diff --name-only main..feat/scalability-m1` is exactly the 15 intended files, no strays. `main` remains at `f565089`.
+
+### Two tests that could not fail
+
+The payment-service relay test never imported, constructed or called `OutboxRelayService` — it opened its own pg client and re-implemented the relay's query in raw SQL, so it verified PostgreSQL's `SKIP LOCKED` rather than ours. The worker's own sanity check demonstrated exactly that and misread it as success: deleting `SKIP LOCKED` from the production service left all 21 tests green, reported as "ALL STEPS PASSED". It was reissued to drive two real relay instances concurrently, with relay A holding its transaction open inside a fake producer, and to require an observed red.
+
+### A defective ticket, and what it cost
+
+The provisioning fix was rejected once and reworked; the rework's mandatory sanity check then **failed to reproduce the bug**, because the ticket told the worker to use pgxpool's default pool size. The default is `max(4, numCPU)`, so on this 10-core machine the pool held 10 connections and the 8 concurrent callers could never exhaust it. The worker honestly reported that reverting the fix still passed — and then asserted the fix was correct anyway, predicting the failure "would manifest on a 4-core system". That prediction was not accepted as verification.
+
+The instrument was fixed rather than the claim believed: `MaxConns` is now pinned explicitly to 4 via `pgxpool.ParseConfig`, which is host-independent and equal to the pool a small production pod actually gets, since `cmd/server/main.go:79` calls `pgxpool.New` with no override. **A concurrency test that takes its pool size from the host cannot be a regression guard** — that is the reusable lesson here.
+
+### Not done
+
+- **New Helm finding, filed not fixed.** `global.imageRegistry` points at a first-party registry, and the Bitnami subcharts honour that global, so they resolve images it does not host; Bitnami redis's `NOTES.txt` guard catches the substitution and aborts the *entire* `helm template` run. `helm template .` with no overlay exits 1, and so did `main`'s prod overlay — `values-local.yaml` renders only because it resets the global to `""`. Prod and staging render after this wave solely because the affected subcharts are now switched off; the misconfiguration itself is untouched and returns the moment anyone re-enables one or writes a new overlay from the defaults.
+
+## Session: 2026-09-16 — fix(scale): helm subchart toggles + outbox SKIP LOCKED claim ⏳ INTEGRATED, NOT MERGED
+
+**Branch:** `feat/scalability-m1` (integration) ← `fix/sr-01-helm-conditions`, `fix/sr-06-order-outbox-claim`
+
+First wave of a scalability remediation effort, run orchestrated: workers implemented, the manager verified every claim independently. Tracked against a local (untracked) review register as items SR-01 and SR-06.
+
+### What was done
+
+- **Helm subchart toggles** — `condition:` added to all eight Bitnami backing subcharts in `infra/helm/Chart.yaml` (postgres-auth/orders/payments/venue/attendance/users, mongodb, redis), with matching `enabled: true` defaults in `values.yaml`. This is the portability contract: overlays disable in-cluster backing stores by toggle rather than by deleting dependencies, which is the precondition for pointing prod at managed databases.
+- **order-service outbox claim** — `OutboxRepository.findUnpublished()` replaced with a native `SELECT ... ORDER BY created_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED` (JPQL cannot express `SKIP LOCKED`). `OutboxRelay.relay()` is now `@Transactional`, with batch size from `OUTBOX_RELAY_BATCH_SIZE` (default 100). Previously every replica read every unpublished row with no limit and no lock — N× duplicate publishes, and an unbounded heap load after a Kafka outage.
+- **New test** — `OutboxRelayConcurrencyTest` runs two genuinely overlapping transactions (the second `PROPAGATION_REQUIRES_NEW` while the first is still uncommitted) against real PostgreSQL via Testcontainers, and asserts the two claims are disjoint. `@DataJpaTest` is not on this project's classpath, so the JPA slice is wired by hand via `@ImportAutoConfiguration` rather than adding a Maven dependency.
+
+### Verification
+
+- All three Helm overlays render at exit 0 with zero stderr: local 187343 B / 8 StatefulSets, staging and prod 213207 B / 7 StatefulSets each. Local is byte-identical to the pre-change baseline; staging/prod differ only in Bitnami's per-render random `postgres-password`.
+- order-service: **57 tests, 0 failures, 0 errors, 0 skipped**, read directly from `target/surefire-reports/*.txt` — a piped `mvn | tail` reports tail's exit status, not Maven's. `mvn checkstyle:check` exit 0.
+- Red→green reproduced independently of the worker: the committed test, run against pre-change `main` with its claim pointed back at the old `findUnpublished()`, fails on the disjointness assertion; on the branch it passes.
+- `git diff --name-only main..feat/scalability-m1` is exactly the 7 intended files.
+
+### Known tradeoff (affects future outbox work)
+
+Mark-published now commits **per batch**, not per message. Failure containment regressed — one failing row can poison the shared persistence context for the rest of the batch — and the claim transaction holds row locks across up to 100 blocking Kafka sends. Consumers must be idempotent (AGENTS.md §3.5).
+
+**Decided: accept, and copy this pattern to other relays rather than "fixing" it.** Per-message commit is structurally incompatible with holding a `FOR UPDATE SKIP LOCKED` claim open — an inner `REQUIRES_NEW` transaction updating a row the outer transaction has locked blocks on the outer, while the outer synchronously waits for that inner call to return. Postgres cannot detect this (it sees only the inner session waiting on the outer's lock), so it stalls to `lock_timeout` rather than aborting. Per-message commit therefore means abandoning `SKIP LOCKED` for claim-by-`UPDATE`, costing a migration plus a lease column and a stuck-claim reaper — speculative complexity (Rule 2) with no measured need. Revisit on evidence: an observed duplicate-publish rate or a long-transaction alert. Batch size is env-tunable in the meantime.
+
+### Not done
+
+- Outbox cleanup `DELETE` batching — part of the same register item, split to its own ticket.
+- A third task (venue-service lock ordering) was **stopped and reverted, not shipped**: the suspected deadlock did not reproduce in 90+ runs across three configurations, and all three `FOR UPDATE` sites use a single-statement `WHERE id = ANY($1)`, which locks in scan order rather than caller-supplied order, making lock-order inversion structurally impossible. Shipping a test that passes both before and after would have been a false green. **Since closed as deferred** — a defensive `ORDER BY s.id` would be a change no test can fail on (Rule 9), and in Postgres an `ORDER BY` above a `FOR UPDATE` does not reliably dictate lock acquisition order anyway. Reopen only if a real SQLSTATE 40P01 is observed on a venue seat path.
+- **Not merged to `main`** (CLAUDE.md core rule 6). `main` is unmoved at `f565089`.
+
+### Integration audit
+
+Audited before proceeding. The diff is clean, and one real gap was found and closed: the Helm work had only been verified on the `enabled: true` path — that everything still rendered unchanged — while the actual point of the ticket, that `enabled: false` *removes* a subchart, was never exercised. Now tested: prod rendered with `postgres-venue`, `postgres-attendance` and `redis` off gives exit 0, zero stderr, 213207→172261 bytes, StatefulSets 7→4, and zero occurrences of all three release names. A suspected second gap (that the `kafka` dependency carried no `condition:`) was **wrong** — it does, as do `cp-kafka`, `opensearch` and `observability`; only `kong` and the first-party service subcharts lack toggles, which is out of scope here.
+
+### Follow-up found while verifying
+
+The prod render emits Secret `ticketing-postgres-users` with a literal password that is **regenerated on every render**, so a real `helm upgrade` would rotate the password out from under the running database and the StatefulSet would fail to authenticate. `infra/helm/templates/` contains no `kind: Secret`, so every other `existingSecret` reference is provisioned out-of-band — `postgres-users` is the one block that never got the same treatment. Now tracked as its own P0 register item. It stays open rather than being fixed inline: the remedy depends on where the credential should come from (out-of-band `existingSecret` like the other five, or External Secrets/SSM), which is an infrastructure choice, not a mechanical edit.
+## Session: 2026-08-05 — fix(outbox): indexing, retention, claim isolation across all four outboxes ✅ MERGED (PR #122, 2026-09-21, merge ded09a8)
 
 **Branch:** `fix/outbox-polling-and-retention`
 
@@ -521,3 +791,205 @@ Completed a full lint and type-check pass across all six services, discovering a
 - **Commits**: 1
 - **Files Changed**: 9 (+115 / -17 lines)
 - **Breaking Changes**: None
+
+---
+
+## 2026-09-21 — PR #122 CI remediation: Trivy gate sweep
+
+**Branch**: `fix/outbox-polling-and-retention` (PR #122) — head `f4a04e84`
+
+### Root cause of the repo-wide red
+
+`aquasecurity/trivy-action` with `format: sarif` leaves `limit-severities-for-sarif`
+at its default (`false`). The `severity: HIGH,CRITICAL` input therefore only shapes
+the report — the scan itself covers **all** severities, and `exit-code: "1"` fires on
+**any** fixable finding, including LOW and MEDIUM. Every per-service gate in
+`.github/workflows/ci.yml` is affected. With `ignore-unfixed: true`, every blocking
+finding has a published upstream fix.
+
+### Changes landed
+
+| Commit | Change | Effect |
+|---|---|---|
+| `663b51f` (merged via `42231e8b`) | CVE sweep: 18 HIGH/CRITICAL version bumps | order-service → green |
+| `fad48e7` | Add required `fullUrl` to the queue-gate integration test | client `Build image` → green |
+| `f4a04e8` | `qs` override → 6.16.0 (auth, user, payment, client) | those 3 node services → green |
+
+`43a4b585` had added the required `fullUrl` field to `GateInput` without updating the
+integration test. `pnpm lint` and `pnpm test` stayed green, but `pnpm build` inside the
+client Dockerfile type-checks, so CI's `Build image` step failed.
+
+### Verification Matrix
+
+| Service | Command | Result |
+|---|---|---|
+| client | `tsc --noEmit` / `pnpm build` / `pnpm test` | ✅ 0 errors / rc=0 / 207 passed, 2 skipped |
+| auth-service | `pnpm test` | ✅ 99 passed |
+| user-service | `pnpm test` | ✅ 43 passed |
+| payment-service | `pnpm test` | ✅ 95 passed |
+| order-service | `mvn test` (online) | ✅ 63 passed |
+
+### CI result — run `35538462381`
+
+✅ auth-service, client, payment-service, user-service, order-service, kong-gateway,
+proto, GraphQL schema check, Helm validation
+❌ ticket-service, venue-service, expiration-service, attendance-service, queue-service
+
+### Remaining blockers — OWNER DECISION REQUIRED
+
+Both are outside the remit of a dependency sweep.
+
+**1. Four Go services — blocked on a repo-wide Go 1.25 → 1.26 toolchain upgrade.**
+Image scans of `ticket-service` and `attendance-service` show an identical residual set
+(the other two confirmed by module parity — same `x/crypto v0.55.0`, same `otel/sdk v1.44.0`):
+
+- MEDIUM `golang.org/x/crypto` 0.55.0 → 0.56.0 (CVE-2026-78662)
+- LOW ×3 `go.opentelemetry.io/otel/*` 1.43/1.44 → 1.45.0 (CVE-2026-81870)
+
+Both fixes declare `go 1.26.0` upstream (verified in the published `.mod` files), which
+raises each service's `go` directive to 1.26 and breaks the digest-pinned
+`golang:1.25-bookworm@sha256:3b4a11…` builder with
+`go.mod requires go >= 1.26.0 (running go 1.25.14; GOTOOLCHAIN=local)`.
+Upgrading means 4 Dockerfile digests + 4 `go-version: "1.25"` entries in `ci.yml`.
+
+*Not* blockers: `x/mod`, `docker/docker` and `moby/go-archive` appear in a `trivy fs`
+scan of `go.mod` but are test-only and never reach the scanned binary — confirmed by
+image scan. Bumping them does not move the gate.
+
+**2. queue-service — 6 MEDIUM in `libc6` 2.39-0ubuntu8.8 → 2.39-0ubuntu8.9.**
+Base image is `mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled`. Chiseled images
+carry no package manager and no shell, so this **cannot** be patched with `apt-get
+upgrade` in the Dockerfile. It clears only when Microsoft publishes a refreshed tag.
+
+### Options for the owner
+
+1. Upgrade the toolchain to Go 1.26 repo-wide (unblocks the 4 Go services; queue-service still red).
+2. Set `limit-severities-for-sarif: true` so the gate enforces the `HIGH,CRITICAL`
+   it already declares. This matches the workflow's evident intent, but it **narrows the
+   gate** and is explicitly owner-sign-off territory. PR #109 separately proposes changes
+   to this gate and should be decided alongside.
+3. Accept a red queue-service until the upstream base image refreshes.
+
+No change was made to the Trivy severity configuration.
+
+### Addendum — Go 1.26 toolchain upgrade (commit `de8a22f`, local, UNPUSHED)
+
+Owner directed "the 5 red one first". Narrowing the Trivy gate was not signed off,
+so the remediation took the real-fix path: upgrade the toolchain.
+
+`golang:1.25-bookworm@sha256:3b4a1151…` → `golang:1.26-bookworm@sha256:a688600c…` (1.26.8)
+in 4 Dockerfiles, `go-version: "1.25"` → `"1.26"` in 4 `ci.yml` entries, plus the module
+bumps that required it: `x/crypto` 0.56.0, `otel/*` 1.45.0, and
+`gorilla/websocket` 1.5.3 (attendance only). These cannot be split — the module bumps
+raise each `go.mod` directive to 1.26.0, which the 1.25 builder rejects.
+
+| Service | build | vet | unit tests | image build | Trivy (all sev, fixable) |
+|---|---|---|---|---|---|
+| ticket-service | ✅ | ✅ | ✅ 10 pkgs | ✅ | ✅ 0 findings |
+| venue-service | ✅ | ✅ | ✅ 6 pkgs | ✅ | ✅ 0 findings |
+| expiration-service | ✅ | ✅ | ✅ 4 pkgs | ✅ | ✅ 0 findings |
+| attendance-service | ✅ | ✅ | ✅ 6 pkgs | ✅ | ✅ 0 findings |
+
+**Correction to the previous entry.** It stated `gorilla/websocket` was test-only and did
+not move the gate. That was wrong — it was reverted alongside `x/mod`, but the image scan
+shows it *is* linked into attendance-service's binary. `x/mod`, `docker/docker` and
+`moby/go-archive` remain correctly classified as test-only.
+
+**queue-service — confirmed unfixable in-repo.** Freshly pulled
+`aspnet:10.0-noble-chiseled` still ships `libc6 2.39-0ubuntu8.8`; CVE-2026-80489 needs
+`8.9`. The `10.0-resolute-chiseled` variant (Ubuntu 25.10) carries the **same** CVE at
+`2.43-2ubuntu2.3 → 2.4`, so switching distro does not help, and chiseled images have no
+package manager to patch with. This clears only when Microsoft rebuilds. Remaining
+options are owner calls: wait for the upstream rebuild, or sign off on the gate change.
+
+Still not done: `de8a22f` is committed locally but **unpushed** — the push was blocked
+because the commit modifies `.github/workflows/ci.yml`. CI has not yet run against it,
+so the four green results above are local evidence only.
+
+### CI result — run `35541697068` (`de8a22f4`, pushed 2026-09-21)
+
+The Go 1.26 upgrade is confirmed by CI, matching local verification exactly.
+
+**15 of 16 jobs green**, including **Playwright E2E (full stack)** — which had been
+skipped on every prior run because upstream jobs failed, so this is its first green
+on this branch.
+
+✅ ticket-service, venue-service, expiration-service, attendance-service (all four
+previously red on Trivy), auth, user, payment, client, order, kong-gateway, proto,
+GraphQL schema check, Helm validation, Detect changed paths, Playwright E2E
+❌ queue-service — failing step verified as `Scan image with Trivy`, exit 1,
+`[ubuntu] os_version="24.04" pkg_num=8`, consistent with the local scan's single
+fixable finding (`libc6` CVE-2026-80489).
+
+Unrelated observation, not gating: the queue-service **test** project warns NU1903 on
+`SSH.NET` 2025.1.0 (two HIGH advisories, GHSA-mggc-4xg6-vcxf and GHSA-q939-rpr3-3284).
+Test-only, so it never reaches the scanned image, but worth a follow-up. Tests pass 62/62.
+
+**PR #122 is now blocked on exactly one thing**, and it is not a code change: the
+queue-service gate failure has no in-repo fix. Owner decides between waiting for the
+Microsoft base-image rebuild and signing off on the Trivy gate configuration.
+
+### queue-service — time-boxed CVE suppression (commit `fef8ae2`)
+
+Owner signed off explicitly after being shown that no in-repo remediation exists.
+
+The image carries six MEDIUM glibc CVEs — CVE-2026-6368, -6791, -19499, -19542,
+-77117, -80489 — all in `libc6 2.39-0ubuntu8.8`, all fixed only by `2.39-0ubuntu8.9`.
+
+Why nothing else was possible:
+- `aspnet:10.0-noble-chiseled` is chiseled: no package manager, no shell, so the
+  Dockerfile cannot upgrade the package.
+- `10.0-resolute-chiseled` (Ubuntu 25.10) carries the **same** unfixed CVEs at
+  `libc6 2.43-2ubuntu2.3` — switching distro is not a fix.
+- Dropping to a non-chiseled base to gain `apt` would enlarge the attack surface to
+  remove six MEDIUMs: a net loss.
+
+**This is a suppression, not a fix.** The CVEs remain in the running image. It is the
+narrowest available form: scoped to the queue-service job via `trivyignores`, listing
+six specific CVE IDs rather than a severity class, expiring **2026-12-21**. The severity
+gate is unchanged here and in every other service.
+
+Verified locally, all three states:
+
+| condition | exit code |
+|---|---|
+| no ignore file | 1 (six findings) |
+| ignore file, expiry in future | 0 |
+| ignore file, expiry moved to past | 1 |
+
+The third case matters: it proves the time-box genuinely re-arms the gate rather than
+being decorative.
+
+**On expiry**: re-scan the base image. If Microsoft has rebuilt, delete the file. If not,
+extend the date deliberately and record why.
+
+---
+
+## 2026-09-21 — PR #122 CI fully green
+
+Run **35565629002** on `fef8ae29` (`fix/outbox-polling-and-retention`) concluded
+**success**. All 18 jobs green: the 15 service jobs, `proto`, `GraphQL schema check`,
+`Helm rendered-manifest validation`, and `Playwright E2E (full stack)`.
+
+Starting point this session was 6 green / 10 red. The sequence that closed it:
+
+1. Root cause — `trivy-action` with `format: sarif` scans **all** severities
+   (`limit-severities-for-sarif` defaults to `false`), so `exit-code: "1"` fired on
+   fixable LOW/MEDIUM findings. `severity: HIGH,CRITICAL` only shapes the report.
+2. CVE sweep across the Node/Go services; `qs` override to 6.16.0; `fullUrl` added to
+   the client queue-gate integration test.
+3. Go 1.25 → 1.26 toolchain upgrade — four digest-pinned builder images plus four
+   `go-version` entries in `ci.yml`, moved in one commit with `x/crypto` 0.56.0,
+   `otel` 1.45.0 and `gorilla/websocket` 1.5.3, because those modules raise `go.mod`
+   to `1.26.0` and cannot be split from the toolchain bump.
+4. queue-service — six unfixable glibc CVEs in the chiseled base, closed by an
+   owner-approved, job-scoped, time-boxed ignore (see the entry above).
+
+The Trivy severity gate was not narrowed at any point, for any service.
+
+**Owner decisions still open**: merge approval for #122 (no auto-merge to main);
+whether to split the Go 1.26 platform commit `de8a22f` out of an outbox PR;
+review of migration 008 (attendance outbox schema, so far only exercised against a
+throwaway local DB); the redundant `chore/cve-sweep-2026-09` branch, whose contents
+now live in #122; and the non-gating `SSH.NET` 2025.1.0 HIGH advisories in
+queue-service's **test** project.

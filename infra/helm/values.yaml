@@ -119,7 +119,8 @@ payment-service:
 
 # ── expiration-service ────────────────────────────────────────────────────────
 expiration-service:
-  replicaCount: 1
+  # 2+ replicas: asynq workers dedupe on TaskID(orderID), and a single replica with PDB minAvailable=1 can never be evicted (SR-08). Local pins 1 in values-local.yaml.
+  replicaCount: 2
   image:
     repository: expiration-service
     tag: "SET_BY_CI"  # overridden to git SHA at deploy time; never use latest in any env (I-04)
@@ -229,6 +230,7 @@ attendance-service:
 
 # ── postgres-auth (Bitnami PostgreSQL) ────────────────────────────────────────
 postgres-auth:
+  enabled: true
   auth:
     database: auth_db
     username: auth_user
@@ -248,6 +250,7 @@ postgres-auth:
 
 # ── postgres-orders (Bitnami PostgreSQL) ──────────────────────────────────────
 postgres-orders:
+  enabled: true
   auth:
     database: orders_db
     username: orders_user
@@ -267,6 +270,7 @@ postgres-orders:
 
 # ── postgres-payments (Bitnami PostgreSQL) ────────────────────────────────────
 postgres-payments:
+  enabled: true
   auth:
     database: payments_db
     username: payments_user
@@ -286,6 +290,7 @@ postgres-payments:
 
 # ── postgres-venue (Bitnami PostgreSQL) ───────────────────────────────────────
 postgres-venue:
+  enabled: true
   auth:
     database: venue_db
     username: venue_user
@@ -305,6 +310,7 @@ postgres-venue:
 
 # ── postgres-attendance (Bitnami PostgreSQL) ──────────────────────────────────
 postgres-attendance:
+  enabled: true
   auth:
     database: attendance_db
     username: attendance_user
@@ -322,8 +328,13 @@ postgres-attendance:
   metrics:
     enabled: true
 
+# ── postgres-users (Bitnami PostgreSQL) ───────────────────────────────────────
+postgres-users:
+  enabled: true
+
 # ── mongodb (Bitnami MongoDB) ─────────────────────────────────────────────────
 mongodb:
+  enabled: true
   auth:
     enabled: true
     database: tickets_db
@@ -343,6 +354,7 @@ mongodb:
 
 # ── redis (Bitnami Redis) ─────────────────────────────────────────────────────
 redis:
+  enabled: true
   auth:
     enabled: false
   architecture: standalone

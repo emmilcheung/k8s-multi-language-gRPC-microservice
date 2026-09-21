@@ -10,12 +10,15 @@ package reconciler
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/acme/ticket-service/internal/cache"
 	"github.com/acme/ticket-service/internal/repository"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -25,7 +28,17 @@ const (
 
 	// pageSize is the number of tickets fetched per FindAll page.
 	pageSize = 50
+
+	// leaderLockKey is the Redis key every ticket-service replica contends for
+	// before running a reconciliation pass.
+	leaderLockKey = "ticket-service:reconciler:leader"
 )
+
+// releaseLeaderScript deletes the leader lock only if it still holds our token,
+// so a pod whose lock already expired cannot delete its successor's lock. Same
+// compare-and-delete pattern as cache/swr_cache.go's releaseLockScript.
+var releaseLeaderScript = redis.NewScript(
+	`if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end`)
 
 // ReservationExpirer is implemented by any type that can sweep stale RESERVED
 // reservations. MongoTicketRepository satisfies this interface via its
@@ -39,6 +52,7 @@ type Reconciler struct {
 	repo     repository.TicketRepository
 	sweeper  ReservationExpirer
 	quota    cache.QuotaManager
+	redis    *redis.Client
 	interval time.Duration
 	log      *zap.Logger
 }
@@ -49,6 +63,7 @@ func New(
 	repo repository.TicketRepository,
 	sweeper ReservationExpirer,
 	quota cache.QuotaManager,
+	redisClient *redis.Client,
 	interval time.Duration,
 	log *zap.Logger,
 ) *Reconciler {
@@ -59,6 +74,7 @@ func New(
 		repo:     repo,
 		sweeper:  sweeper,
 		quota:    quota,
+		redis:    redisClient,
 		interval: interval,
 		log:      log,
 	}
@@ -78,12 +94,50 @@ func (r *Reconciler) Start(ctx context.Context) {
 			r.log.Info("quota reconciler stopped")
 			return
 		case <-ticker.C:
-			if err := r.Run(ctx); err != nil {
+			if err := r.runIfLeader(ctx); err != nil {
 				r.log.Error("quota reconciler run failed", zap.Error(err))
 			}
 		}
 	}
 }
+
+// runIfLeader runs one reconciliation pass, but only on the replica that wins
+// the Redis leader lock for this tick.
+//
+// The lock TTL equals the reconciliation interval and the lock is deliberately
+// NOT released after a successful pass. Releasing it would let the next
+// replica's ticker -- which fires at a different offset -- immediately start a
+// second, redundant pass inside the same interval, which is the duplicated work
+// this lock exists to prevent. On a failed pass the lock IS released, so another
+// replica retries at its next tick rather than waiting out the TTL. If the
+// leader crashes mid-pass the TTL expires and another replica takes over.
+func (r *Reconciler) runIfLeader(ctx context.Context) error {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Errorf("reconciler: generate leader token: %w", err)
+	}
+	token := hex.EncodeToString(buf)
+
+	acquired, err := r.redis.SetNX(ctx, leaderLockKey, token, r.interval).Result()
+	if err != nil {
+		return fmt.Errorf("reconciler: acquire leader lock: %w", err)
+	}
+	if !acquired {
+		r.log.Debug("reconciler: another replica holds the leader lock this tick")
+		return nil
+	}
+
+	if runErr := r.Run(ctx); runErr != nil {
+		if relErr := releaseLeaderScript.Run(ctx, r.redis, []string{leaderLockKey}, token).Err(); relErr != nil {
+			r.log.Warn("reconciler: release leader lock after failed pass", zap.Error(relErr))
+		}
+		return runErr
+	}
+	return nil
+}
+
+// RunIfLeader is the exported entry point for tests; Start uses runIfLeader.
+func (r *Reconciler) RunIfLeader(ctx context.Context) error { return r.runIfLeader(ctx) }
 
 // Run executes one full reconciliation pass. It is exported so tests can call
 // it directly without the ticker overhead.

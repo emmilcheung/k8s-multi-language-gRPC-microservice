@@ -123,7 +123,7 @@ func main() {
 		// Start quota reconciliation worker — corrects Redis drift vs MongoDB.
 		reconcilerCtx, reconcilerCancel := context.WithCancel(context.Background())
 		defer reconcilerCancel()
-		rec := reconciler.New(mongoRepo, mongoRepo, quotaManager, reconciler.DefaultInterval, log)
+		rec := reconciler.New(mongoRepo, mongoRepo, quotaManager, redisClient, reconciler.DefaultInterval, log)
 		go rec.Start(reconcilerCtx)
 	} else {
 		ticketRepo = repository.NewCachingTicketRepository(mongoRepo, cache.NewNoopCache(), log)

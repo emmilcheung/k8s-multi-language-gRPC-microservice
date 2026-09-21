@@ -8,7 +8,9 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.QueryHints;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.persistence.QueryHint;
 import java.time.OffsetDateTime;
@@ -43,10 +45,25 @@ public interface OutboxRepository extends JpaRepository<OutboxMessage, UUID> {
     List<OutboxMessage> findUnpublished(Pageable pageable);
 
     /**
-     * Deletes published outbox rows older than the given timestamp.
-     * Called by {@link com.ticketing.orders.outbox.OutboxCleanupJob} on a schedule.
+     * Deletes at most {@code batchSize} published outbox rows older than the given
+     * timestamp, oldest first. Called in a loop by
+     * {@link com.ticketing.orders.outbox.OutboxCleanupJob}.
+     *
+     * <p>{@code @Transactional} sits on this repository method and NOT on the calling
+     * job, so each batch commits on its own. That is the point of the change: a single
+     * unbounded DELETE over a backlog holds row locks and pins the vacuum horizon for
+     * the whole run, and on timeout makes no progress at all, so the next run retries
+     * the same doomed statement.
+     *
+     * <p>Backed by the partial index {@code idx_outbox_published_created ON
+     * outbox(created_at) WHERE published = true} (V6). V1's partial index covers only
+     * {@code published = false}, which is the relay's claim query, not this one.
      */
     @Modifying
-    @Query("DELETE FROM OutboxMessage o WHERE o.published = true AND o.createdAt < :before")
-    int deletePublishedBefore(OffsetDateTime before);
+    @Transactional
+    @Query(value = "DELETE FROM outbox WHERE id IN ("
+                 + "SELECT id FROM outbox WHERE published = true AND created_at < :before "
+                 + "ORDER BY created_at ASC LIMIT :batchSize)",
+           nativeQuery = true)
+    int deletePublishedBatch(@Param("before") OffsetDateTime before, @Param("batchSize") int batchSize);
 }
