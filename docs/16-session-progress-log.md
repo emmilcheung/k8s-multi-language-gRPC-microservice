@@ -9,11 +9,12 @@
 
 ---
 
-## Session: 2026-09-22 — fix(kong,helm): M2 — Kafka topic provisioning + an unloadable gateway config ⏳ NOT DEPLOY-VERIFIED
+## Session: 2026-09-22 — feat(kong,helm): M2 agent half — topics, an unloadable gateway, a meshed broker port, external secrets, a Mongo replica set ⏳ NOT DEPLOY-VERIFIED
 
-**Branch:** `feat/scalability-m2` (cut from `fix/local-cluster-bringup`, which is still unmerged and holds the chart fixes this depends on) · commits `dac1dec`, `f1c2f97`
+**Branch:** `feat/scalability-m2` (cut from `fix/local-cluster-bringup`, which is still unmerged and holds the chart fixes this depends on) · commits `dac1dec`, `f1c2f97`, `f321cd9`, `ceefb4a`, `4b95bc9`
 
-Two workstream items landed. Both are render-verified only — the owner asked for
+Five workstream items landed — D4, D3, D5, A5's chart half and A4's local half, the
+whole agent-executable set for M2. All are render-verified only — the owner asked for
 deploy and smoke verification to be batched into one later run, so nothing here has
 met a live cluster, a live broker or a live Redis. Said plainly because it matters:
 the previous session found twelve deploy-blocking defects that `helm template` and
@@ -74,7 +75,77 @@ have shipped looking right and doing nothing.
 exit 1 → exit 0; all three Helm overlays template and lint, with staging and prod
 byte-identical to baseline. **Not verified:** anything requiring a running cluster.
 
-**Owner decisions still open:** the 60 → 600 anonymous limit; the prod namespace,
+**Linkerd was meshing the wrong Kafka port.** `skipOutboundPorts` lived once in
+`values.yaml` at 9092 — the in-cluster cp-kafka PLAINTEXT listener — and staging and
+prod inherited it, although neither runs that broker. MSK listens on 9098 for
+SASL/IAM over TLS, so the proxy skipped a port nothing connects to while staying in
+the path of the real traffic. The value now lives per overlay, which is where a value
+that has to move with the broker belongs. The diff is four lines and proves something
+useful on its own: a `global:` block in an overlay deep-merges into the chart default
+rather than replacing it, so the sibling mesh settings survive.
+
+**But the client half of that item is blocked, and the block is not small.** MSK is
+provisioned IAM-only, and no service in the repo can speak IAM: all six default to
+`PLAINTEXT` and every SASL path they have validates only username-and-password
+mechanisms. `AWS_MSK_IAM` is a Java login module — librdkafka does not implement it,
+so the four Go services would need OAUTHBEARER plus an MSK IAM signer, and
+queue-service (.NET) has no first-party option at all. The realistic alternative is to
+enable SASL/SCRAM on MSK and keep every existing code path, which is a Terraform
+change plus six secrets and no application code. That is an owner decision about
+authentication posture, not a mechanical edit, so it was written up in full and left
+alone. Related and also left alone: the MSK security group opens 9094 for SASL/SCRAM
+that the cluster never enables — an open port with no auth mechanism behind it, and a
+security-group change is a reviewed change.
+
+**Secrets can now come from a store instead of a shell script.** Each of the eight
+service charts renders an `ExternalSecret` that populates the Secret it already names
+in `secretRef`, so no Deployment changed; `dataFrom.extract` copies every key of the
+remote secret rather than listing them, which is the right shape for an `envFrom`
+consumer and stops the template drifting as a service's env contract grows. It is off
+everywhere and must stay off: the operator install is cluster-wide and the IRSA role
+is Terraform, and enabling it before those exist replaces a working Secret with no
+Secret and puts every pod in `CreateContainerConfigError` — worse than the manual step
+it removes. The staging and prod overlays carry the store name and key prefix already
+filled in so the switch is one line later. Remote keys are namespace-scoped, so
+staging and prod cannot read each other's credentials. This does **not** close the
+regenerating prod Secret (SR-38): that one comes from a Bitnami subchart and still
+needs an owner call on where the credential originates.
+
+**Local MongoDB is a replica set now.** A single member, which is a legitimate replica
+set — it elects itself, `majority` is 1, the oplog exists — and it is what makes write
+concern `majority`, transactions and change streams available at all; a standalone
+mongod rejects all three. It buys correct semantics, not availability. Two things had
+to move with it and both would have been failures rather than warnings: the chart's
+default arbiter had to be disabled, because one data node plus an arbiter is two
+voting members with only one able to acknowledge a `majority` write; and the
+`updateStrategy: Recreate` added last session had to go, because replicaset mode
+renders a StatefulSet and `Recreate` is not a valid StatefulSet strategy — the API
+server rejects the object. The deadlock that setting worked around goes with it.
+`MONGO_URI` also had to be re-pointed: replicaset mode renders only a headless
+Service, so the seed is the pod FQDN spelled exactly as the chart advertises it, plus
+`replicaSet=rs0`.
+
+**Two new findings, and one of them first produced a wrong measurement of my own
+work.** CI renders every subchart standalone and never renders the umbrella chart with
+any overlay — `values-prod.yaml` appears nowhere in the workflow — so no deployable
+artifact is validated and an off-by-default feature can never be exercised. That is
+the same shape as the Kong finding above and was registered rather than fixed, because
+the step needs a dependency fetch over OCI and would redden CI on network flakes.
+Separately, the gitignored `*.tgz` archives sitting beside the chart directories
+shadow them: one `helm template` run resolved four of eight service charts from stale
+archives and four from the edited sources, so the first verification of the new
+ExternalSecrets reported four of eight and looked like a template bug. A bare
+`helm template` can measure stale templates and report success.
+
+**A process failure, recorded because the result would have been a false pass.** A
+stray `git stash` inside a verification loop stashed the tracked values-file edits
+mid-run, so three "renders clean" results were produced against the baseline rather
+than against the change. Caught by checking `git stash list`, restored with
+`git stash pop`, and every render re-run. Nothing was lost and no pre-restore result
+was kept.
+
+**Owner decisions still open:** the MSK client auth mechanism, described above and
+the one blocking a P0; the 60 → 600 anonymous limit; the prod namespace,
 where the only two sources disagree and no cloud deploy has ever run to settle it;
 merge approval for `fix/local-cluster-bringup` (11 commits, unpushed, no PR) and
 later this branch; and the Apollo Router GraphOS licence versus dropping operation
