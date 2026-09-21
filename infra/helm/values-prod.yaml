@@ -18,6 +18,18 @@ global:
     linkerd:
       skipOutboundPorts: "9098"
 
+  # External Secrets. Still `false`: the operator install and the IRSA role that
+  # lets it read Secrets Manager are both outside this chart, and flipping this
+  # before they exist replaces a working out-of-band Secret with no Secret at
+  # all. The store name and prefix are filled in here so that turning it on is a
+  # one-line change once the infrastructure half of A5 lands.
+  externalSecrets:
+    enabled: false
+    secretStore:
+      name: aws-secretsmanager
+      kind: ClusterSecretStore
+    remoteKeyPrefix: ticketing-prod
+
 apollo-router:
   networkPolicy:
     enabled: true

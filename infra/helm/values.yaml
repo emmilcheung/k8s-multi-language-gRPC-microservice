@@ -21,6 +21,30 @@ global:
       grpcServerPolicy:
         enabled: true
       identityDomain: cluster.local
+  # External Secrets Operator. When enabled, each service chart renders an
+  # ExternalSecret that populates the Secret named by its `secretRef` from the
+  # store below, replacing the out-of-band `kubectl create secret` step.
+  #
+  # Off by default, and it must stay off until two things exist that this chart
+  # deliberately does not create: the operator itself (a cluster-wide install)
+  # and an IRSA role letting it read Secrets Manager (Terraform). Rendering an
+  # ExternalSecret against a store that does not exist leaves the Secret absent
+  # and every pod stuck in CreateContainerConfigError, which is a worse failure
+  # than the manual step it replaces.
+  #
+  # A chart may override this for itself with `<chart>.externalSecrets.enabled`;
+  # a chart-level value wins over this one either way, including `false`.
+  externalSecrets:
+    enabled: false
+    # Name and kind of the SecretStore/ClusterSecretStore to read from.
+    secretStore:
+      name: ""
+      kind: ClusterSecretStore
+    # Remote secrets are looked up at `<prefix>/<chart name>`, e.g.
+    # ticketing-prod/auth-service. Defaults to the release namespace, which is
+    # what keeps staging and prod from reading each other's credentials.
+    remoteKeyPrefix: ""
+    refreshInterval: 1h
 
 # ── auth-service ──────────────────────────────────────────────────────────────
 auth-service:
