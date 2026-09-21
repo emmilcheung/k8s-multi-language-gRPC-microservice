@@ -31,6 +31,11 @@ KONG_YML      := $(GATEWAY_DIR)/kong.yml
 NAMESPACE     := ticketing
 HELM_RELEASE  := ticketing
 
+# Tag used for locally built service images. values-local.yaml ships the
+# placeholder `SET_BY_CI`, which nothing substitutes outside CI, so the local
+# deploy must pass the tag explicitly. Not `latest` — repo rule I-04.
+IMAGE_TAG     ?= local
+
 # Read a value from infra/local/secrets.env without sourcing the file
 _secret = $(shell grep -m1 "^$(1)=" "$(SECRETS_FILE)" 2>/dev/null | sed 's/^$(1)=//' | sed "s/^[\"']//" | sed "s/[\"']$$//")
 
@@ -113,11 +118,11 @@ build-order:
 	@echo "  Building order-service (context: repo root)..."
 	@docker build \
 		--file $(REPO_ROOT)/services/order-service/Dockerfile \
-		--tag order-service:latest \
+		--tag order-service:$(IMAGE_TAG) \
 		--quiet \
 		$(REPO_ROOT)
-	@minikube image load --overwrite order-service:latest
-	@echo "  Loaded order-service:latest"
+	@minikube image load --overwrite order-service:$(IMAGE_TAG)
+	@echo "  Loaded order-service:$(IMAGE_TAG)"
 
 # ticket-service uses the repo root as its Docker build context because its
 # go.mod has a replace directive pointing to ../../libs/grpc-stubs/go which
@@ -126,11 +131,11 @@ build-ticket:
 	@echo "  Building ticket-service (context: repo root)..."
 	@docker build \
 		--file $(REPO_ROOT)/services/ticket-service/Dockerfile \
-		--tag ticket-service:latest \
+		--tag ticket-service:$(IMAGE_TAG) \
 		--quiet \
 		$(REPO_ROOT)
-	@minikube image load --overwrite ticket-service:latest
-	@echo "  Loaded ticket-service:latest"
+	@minikube image load --overwrite ticket-service:$(IMAGE_TAG)
+	@echo "  Loaded ticket-service:$(IMAGE_TAG)"
 
 # attendance-service uses the repo root as its Docker build context because its
 # go.mod has a replace directive pointing to ../../libs/grpc-stubs/go.
@@ -138,11 +143,11 @@ build-attendance:
 	@echo "  Building attendance-service (context: repo root)..."
 	@docker build \
 		--file $(REPO_ROOT)/services/attendance-service/Dockerfile \
-		--tag attendance-service:latest \
+		--tag attendance-service:$(IMAGE_TAG) \
 		--quiet \
 		$(REPO_ROOT)
-	@minikube image load --overwrite attendance-service:latest
-	@echo "  Loaded attendance-service:latest"
+	@minikube image load --overwrite attendance-service:$(IMAGE_TAG)
+	@echo "  Loaded attendance-service:$(IMAGE_TAG)"
 
 # All other services use their own directory as the build context
 build-services:
@@ -150,22 +155,22 @@ build-services:
 		echo "  Building $$svc..."; \
 		docker build \
 			--file $(REPO_ROOT)/services/$$svc/Dockerfile \
-			--tag $$svc:latest \
+			--tag $$svc:$(IMAGE_TAG) \
 			--quiet \
 			$(REPO_ROOT)/services/$$svc; \
-		minikube image load --overwrite $$svc:latest; \
-		echo "  Loaded $$svc:latest"; \
+		minikube image load --overwrite $$svc:$(IMAGE_TAG); \
+		echo "  Loaded $$svc:$(IMAGE_TAG)"; \
 	done
 
 build-venue:
 	@echo "  Building venue-service (context: repo root)..."
 	@docker build \
 		--file $(REPO_ROOT)/services/venue-service/Dockerfile \
-		--tag venue-service:latest \
+		--tag venue-service:$(IMAGE_TAG) \
 		--quiet \
 		$(REPO_ROOT)
-	@minikube image load --overwrite venue-service:latest
-	@echo "  Loaded venue-service:latest"
+	@minikube image load --overwrite venue-service:$(IMAGE_TAG)
+	@echo "  Loaded venue-service:$(IMAGE_TAG)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 ## load-infra-images : Pull backing-service images and load them into minikube
@@ -303,6 +308,15 @@ helm-upgrade: _namespace
 		--values $(HELM_CHART)/values-local.yaml \
 		--set-file "kong.dblessConfig.config=$(KONG_YML)" \
 		--set "mongodb.auth.existingSecret=" \
+		--set "auth-service.image.tag=$(IMAGE_TAG)" \
+		--set "ticket-service.image.tag=$(IMAGE_TAG)" \
+		--set "order-service.image.tag=$(IMAGE_TAG)" \
+		--set "payment-service.image.tag=$(IMAGE_TAG)" \
+		--set "expiration-service.image.tag=$(IMAGE_TAG)" \
+		--set "client.image.tag=$(IMAGE_TAG)" \
+		--set "venue-service.image.tag=$(IMAGE_TAG)" \
+		--set "attendance-service.image.tag=$(IMAGE_TAG)" \
+		--set "user-service.image.tag=$(IMAGE_TAG)" \
 		--set "auth-service.secretRef=auth-service-secrets" \
 		--set "ticket-service.secretRef=ticket-service-secrets" \
 		--set "venue-service.secretRef=venue-service-secrets" \
