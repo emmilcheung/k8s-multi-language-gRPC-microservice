@@ -12,6 +12,11 @@ global:
     enabled: true
     provider: linkerd
     linkerd:
+      # The in-cluster cp-kafka PLAINTEXT listener. Every overlay whose Kafka is
+      # not that broker must override this — values-staging.yaml and
+      # values-prod.yaml set 9098 for MSK's SASL/IAM listener. A default that is
+      # only right locally is fine; a default silently inherited by a managed
+      # broker on a different port is not, which is what used to happen here.
       skipOutboundPorts: "9092"
       grpcServerPolicy:
         enabled: true

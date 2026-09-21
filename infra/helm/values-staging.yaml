@@ -2,6 +2,22 @@
 # Staging validates full NetworkPolicy coverage and external secure Kafka before
 # production rollout. Supply KAFKA_* SASL secrets per service.
 
+# ── Service mesh ──────────────────────────────────────────────────────────────
+# `skipOutboundPorts` tells the Linkerd proxy to leave a destination port alone.
+# The chart default is 9092, the in-cluster cp-kafka PLAINTEXT listener — correct
+# locally, meaningless here: staging runs on MSK, which the Terraform module
+# creates with `client_authentication { sasl { iam = true } }` and
+# `client_broker = "TLS"`. That combination listens on 9098, and the module's
+# own security group opens 9098 for it. Skipping 9092 therefore skipped a port
+# nothing connects to, while the proxy stayed in the path of the real Kafka
+# traffic on 9098 — a TLS connection the proxy has no business terminating.
+# This value has to move with the broker; that is why it now lives per overlay
+# instead of once in values.yaml.
+global:
+  serviceMesh:
+    linkerd:
+      skipOutboundPorts: "9098"
+
 apollo-router:
   networkPolicy:
     enabled: true
