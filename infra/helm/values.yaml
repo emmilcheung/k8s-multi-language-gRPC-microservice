@@ -381,6 +381,43 @@ redis:
 # Non-production default only. Staging and production must disable this chart
 # via values-staging.yaml / values-prod.yaml and use externally managed Kafka
 # with per-service SASL credentials in Secrets.
+# ── Kafka topics as code (SR-02 / plan D4) ───────────────────────────────────
+# The declaration itself lives in files/topics.yaml; only the per-environment
+# knobs are here. Defaults are single-broker shaped, matching this file's other
+# defaults (kafka.controller.replicaCount is 1); staging and prod raise them.
+kafkaTopics:
+  enabled: true
+  # Empty means "the cp-kafka Service in this release". Managed environments set
+  # the MSK bootstrap string here.
+  bootstrapServers: ""
+  replicationFactor: 1
+  # 1 disables the config entirely rather than writing min.insync.replicas=1,
+  # which is meaningless on a single broker and would have to be undone later.
+  minInsyncReplicas: 1
+  image:
+    # The same image the local cp-kafka subchart already runs, so minikube needs
+    # no extra pull. Reaching MSK over IAM needs an image carrying
+    # aws-msk-iam-auth on the classpath — override repository/tag there.
+    repository: confluentinc/cp-kafka
+    tag: "7.7.1"
+    pullPolicy: IfNotPresent
+  # Extra AdminClient properties, verbatim, for managed brokers. Empty locally
+  # (PLAINTEXT). No secret material belongs here — IAM credentials come from the
+  # ServiceAccount's projected token.
+  clientProperties: ""
+  # IRSA-annotated ServiceAccount for MSK IAM. Empty locally.
+  serviceAccountName: ""
+  waitForBrokerSeconds: 180
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 kafka:
   kraft:
     enabled: true

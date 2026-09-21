@@ -1,0 +1,139 @@
+# Kafka topics as code — SR-02 / plan D4.
+#
+# MSK runs with `auto.create.topics.enable=false` and `num.partitions=1`, and
+# order-service's KafkaAdmin is deliberately `autoCreate=false` so an unreachable
+# broker cannot block context refresh. The combination means that in any managed
+# environment a topic that nobody creates simply never exists: producers fail and
+# consumers idle. This file is the single declaration, applied by the
+# kafka-topics Job in templates/kafka-topics-job.yaml against cp-kafka locally
+# and MSK in prod.
+#
+# partitions: sized to the largest single consumer group that reads the topic, at
+#   that service's HPA maxReplicas, with headroom. A group can never run more
+#   useful consumers than the topic has partitions. Partition counts are
+#   deliberately identical in every environment — only replication factor varies
+#   (values.yaml: kafkaTopics.replicationFactor) — because changing partition
+#   count changes key-to-partition mapping and therefore per-key ordering, and a
+#   topology that only holds in one environment breaks the portability contract.
+#   Raising a count later is safe for throughput but rehashes keys; lowering it is
+#   not possible at all. Prefer headroom now.
+#
+# retentionMs: how long the log is kept. Order and payment events feed the outbox
+#   reconciliation path, so they hold a full week. DLQs hold twice that — a
+#   poisoned message is only useful if someone can still read it on Monday.
+#
+# cleanupPolicy: `delete` everywhere. No topic here is a changelog/compacted
+#   table; `attendance.qr.issued` is the closest candidate but is consumed as an
+#   event stream, not replayed as state.
+#
+# Adding a topic: add it here and to the producing service in the same PR. The
+# Job is idempotent, so re-running it after a merge is a no-op for existing
+# topics.
+
+topics:
+  # ── orders ────────────────────────────────────────────────────────────────
+  # Read by ticket-service (HPA max 6), expiration-service (3) and
+  # payment-service (6). The on-sale hot path.
+  - name: orders.order.created
+    partitions: 12
+    retentionMs: 604800000      # 7d
+    cleanupPolicy: delete
+  - name: orders.order.created.dlq
+    partitions: 3
+    retentionMs: 1209600000     # 14d
+    cleanupPolicy: delete
+
+  # Read by ticket-service (6) and attendance-service (4); attendance issues the
+  # QR credential off this event, so a backlog here is a customer-visible one.
+  - name: orders.order.completed
+    partitions: 12
+    retentionMs: 604800000
+    cleanupPolicy: delete
+  - name: orders.order.completed.dlq
+    partitions: 3
+    retentionMs: 1209600000
+    cleanupPolicy: delete
+
+  # Read by ticket-service (6) to release held inventory.
+  - name: orders.order.cancelled
+    partitions: 6
+    retentionMs: 604800000
+    cleanupPolicy: delete
+  - name: orders.order.cancelled.dlq
+    partitions: 3
+    retentionMs: 1209600000
+    cleanupPolicy: delete
+
+  # ── payments ──────────────────────────────────────────────────────────────
+  # All three are read by order-service, HPA max 8.
+  - name: payments.payment.initiated
+    partitions: 8
+    retentionMs: 604800000
+    cleanupPolicy: delete
+  - name: payments.payment.initiated.dlq
+    partitions: 3
+    retentionMs: 1209600000
+    cleanupPolicy: delete
+
+  - name: payments.payment.captured
+    partitions: 8
+    retentionMs: 604800000
+    cleanupPolicy: delete
+  - name: payments.payment.captured.dlq
+    partitions: 3
+    retentionMs: 1209600000
+    cleanupPolicy: delete
+
+  - name: payments.payment.failed
+    partitions: 8
+    retentionMs: 604800000
+    cleanupPolicy: delete
+  - name: payments.payment.failed.dlq
+    partitions: 3
+    retentionMs: 1209600000
+    cleanupPolicy: delete
+
+  # Produced by payment-service's outbox. No consumer group reads it yet, so it
+  # is sized low deliberately rather than speculatively.
+  - name: payments.refund.requested
+    partitions: 3
+    retentionMs: 604800000
+    cleanupPolicy: delete
+
+  # ── tickets ───────────────────────────────────────────────────────────────
+  # Both read by order-service (8) in a single listener.
+  - name: tickets.ticket.created
+    partitions: 6
+    retentionMs: 604800000
+    cleanupPolicy: delete
+  - name: tickets.ticket.created.dlq
+    partitions: 3
+    retentionMs: 1209600000
+    cleanupPolicy: delete
+
+  - name: tickets.ticket.updated
+    partitions: 6
+    retentionMs: 604800000
+    cleanupPolicy: delete
+  - name: tickets.ticket.updated.dlq
+    partitions: 3
+    retentionMs: 1209600000
+    cleanupPolicy: delete
+
+  # ── attendance ────────────────────────────────────────────────────────────
+  # Produced by attendance-service when a QR credential is issued.
+  - name: attendance.qr.issued
+    partitions: 4
+    retentionMs: 604800000
+    cleanupPolicy: delete
+
+  # ── expiration ────────────────────────────────────────────────────────────
+  # Read by order-service (8). expiration-service declares the matching DLQ.
+  - name: expiration.order.expiration_complete
+    partitions: 6
+    retentionMs: 604800000
+    cleanupPolicy: delete
+  - name: expiration.order.expiration_complete.dlq
+    partitions: 3
+    retentionMs: 1209600000
+    cleanupPolicy: delete
