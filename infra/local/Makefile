@@ -410,6 +410,20 @@ _check-secrets:
 		{ echo "ERROR: RSA_PRIVATE_KEY is still a placeholder in secrets.env"; exit 1; } || true
 	@grep -q "^KONG_RSA_PUBLIC_KEY=REPLACE_ME" $(SECRETS_FILE) 2>/dev/null && \
 		{ echo "ERROR: KONG_RSA_PUBLIC_KEY is still a placeholder in secrets.env"; exit 1; } || true
+# Every key the secrets target feeds to kubectl must be present AND non-empty.
+# A missing key used to expand to --from-literal=KEY="", so `make up` created an
+# empty secret and only failed ~5 minutes later as a CrashLoopBackOff
+# ("X_USER_ID_SIGNING_KEY must be at least 32 characters"). A secrets.env
+# written before a key was introduced upstream hits this silently. Values are
+# never echoed — only the key name.
+	@for k in RSA_PRIVATE_KEY KONG_RSA_PUBLIC_KEY STRIPE_SECRET_KEY X_USER_ID_SIGNING_KEY QR_SIGNING_KEY; do \
+		v=$$(grep -m1 "^$$k=" $(SECRETS_FILE) 2>/dev/null | sed "s/^$$k=//"); \
+		if [ -z "$$v" ]; then \
+			echo "ERROR: $$k is missing or empty in $(SECRETS_FILE)."; \
+			echo "       Compare against infra/local/secrets.env.example."; \
+			exit 1; \
+		fi; \
+	done
 
 _minikube-start:
 	@if minikube status --profile minikube 2>/dev/null | grep -q "Running"; then \
