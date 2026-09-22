@@ -20,7 +20,7 @@ const envSchema = z
       .default('development'),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
     DATABASE_URL: z.string(),
-    DB_POOL_MAX: z.coerce.number().int().positive().default(20),
+    DB_POOL_MAX: z.coerce.number().int().positive().default(12),
     RSA_PRIVATE_KEY: z.string(),
     JWT_EXPIRY: z.string().default('15m'),
     JWT_COOKIE_NAME: z.string().default('token'),

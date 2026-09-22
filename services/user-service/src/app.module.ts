@@ -15,7 +15,7 @@ const envSchema = z
       .default("development"),
     PORT: z.coerce.number().int().min(1).max(65535).default(3004),
     DATABASE_URL: z.string(),
-    DB_POOL_MAX: z.coerce.number().int().positive().default(20),
+    DB_POOL_MAX: z.coerce.number().int().positive().default(12),
     X_USER_ID_SIGNING_KEY: z.string().optional().default(""),
   })
   .superRefine((config, ctx) => {
