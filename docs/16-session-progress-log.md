@@ -9,6 +9,130 @@
 
 ---
 
+## Session: 2026-09-23 — feat(scalability): M3 opened — one Mongo client, a sane HPA signal, and a real connection budget ⏳ NOT DEPLOY-VERIFIED
+
+**Branch:** `feat/scalability-m3` (cut from `main` at `3e66626`) · commits `63f22c4`, `cebf3ae`, `3a54f91` · **no PR opened**
+
+Three of the M3 items that need neither a cloud apply nor an open owner decision.
+Everything here is verified by unit tests, an integration suite and chart renders.
+**Nothing has met a running cluster** — minikube and the images were torn down at the
+end of the previous session and were not rebuilt, so no claim below rests on a live
+Postgres, Mongo or broker.
+
+### C2 / SR-21 — one Mongo client, majority writes, a sized pool (`63f22c4`)
+
+ticket-service opened two `mongo.Client`s per pod. Each client carries its own pool,
+so the driver default of 100 meant 200 connections per pod from a service nobody had
+budgeted connections for. There is now one client per process, built by a new
+`repository.MongoClientOptions`, which also states the two things that were being
+inherited silently: `writeconcern.Majority()` and `readpref.Primary()`.
+
+`ApplyURI` runs before the explicit setters, so a `w=` in the connection string cannot
+quietly downgrade the write concern. That is the kind of thing that holds until
+someone edits a Secret, so there is a test asserting it directly
+(`TestMongoClientOptions_URICannotDowngradeWriteConcern`).
+
+- **Verified:** 4 new unit tests, ticket-service unit suite green, integration suite
+  green in **196.6s** against a real `mongo:7` replica-set container.
+
+### E6 / SR-09 (half) — drop the JVM memory trigger from the order-service HPA (`cebf3ae`)
+
+A JVM reserves heap up front and releases it lazily, so container RSS tracks
+high-water usage rather than current load. As an HPA signal it does the opposite of
+what is wanted: it blocks scale-in after any spike, and it rises under GC pressure —
+scaling out a service whose real problem is that it is collecting garbage. The metric
+is now behind `autoscaling.targetMemoryUtilizationPercentage`, commented out for
+order-service only; every other chart keeps its memory trigger.
+
+- **Verified:** the prod render shows `ticketing-order-service: ['cpu']` and every
+  other HPA still at `['cpu','memory']`.
+- **Still open:** SR-09 also covers metrics-server and Karpenter. Neither is done, so
+  **the HPAs in this repo still have no metrics source**. This commit fixes the signal,
+  not the plumbing.
+
+### C1 / SR-20 — state every pool explicitly, and budget them (`3a54f91`)
+
+No service chose its pool size; every one inherited a driver default. Those defaults
+also move on their own — pgx uses `max(4, GOMAXPROCS)`, so changing a CPU limit
+silently resizes the pool, and the Mongo driver's 100 is per *client*, not per process.
+
+Each service now reads `DB_POOL_MAX` and sets the pool explicitly: venue and
+attendance via `pgxpool.ParseConfig` → `MaxConns` → `NewWithConfig`, order via
+`spring.datasource.hikari.maximum-pool-size`. user-service's value lives in its
+Secret, so the chart documents the ceiling instead of setting it and `infra/local`
+was lowered 20 → 12.
+
+The sizes come from arithmetic, now written down in a new **Connection Budget**
+section in [`docs/05-data-conventions.md`](05-data-conventions.md). No chart sets
+`max_connections`, so PostgreSQL's default of 100 applies and the per-instance budget
+is 80 at the 80% rule. Two services were over it:
+
+| Service | Was | Now | maxReplicas | Peak | Budget |
+|---|---|---|---|---|---|
+| auth-service | 40 | **12** | 6 | 72 | 80 |
+| payment-service | 20 | **12** | 6 | 72 | 80 |
+| order-service | 10 | **8** | 8 | 64 | 80 |
+| venue-service | 10 | 10 | 6 | 60 | 80 |
+| attendance-service | 10 | 10 | 4 | 40 | 80 |
+| user-service | 20 | **12** | 6 | 72 | 80 |
+
+auth was provisioned for 240 connections against a 100-connection server. The failure
+mode is worth naming: the pods that fall over are the ones that just scaled up to
+handle the load.
+
+**A correction to that section, made before commit.** The first draft said MongoDB
+"has no fixed analogue of `max_connections`". It does — `net.maxIncomingConnections`,
+default 65536, further capped at 80% of the soft `RLIMIT_NOFILE`. Neither binds here;
+memory does. The Bitnami mongodb chart is `enabled: false` in both staging and prod,
+so it only ever runs locally at `replicaCount: 1` under a **512Mi** limit, where ~1MB
+per connection on top of WiredTiger's 256MB cache floor means ~300 connections would
+OOMKill the pod well before any connection cap refused them. The `50 × 6 = 300` figure
+is sized for the **managed** cluster behind staging/prod and is **provisional** until
+that tier is chosen — the 80% rule needs a tier allowing ≥ 375.
+
+### Umbrella render was nondeterministic — found and fixed
+
+Rendering the same overlay twice produced different `DB_POOL_MAX` values. Cause:
+stale first-party `*.tgz` packages sitting beside their own source directories in
+`infra/helm/charts/`, produced by a `helm dependency update` earlier in this work and
+frozen at the pre-right-sizing numbers (auth 40, payment 20, order 10). Helm loads
+both the directory and the package and which one wins is not stable across runs.
+
+All 13 first-party packages were deleted — they are gitignored build artifacts. The
+five genuine third-party dependency packages (postgresql, mongodb, redis, kafka,
+kong) were kept. After that, all three overlays render the budgeted values on every
+run and `helm lint` is clean on each.
+
+This is worth remembering: any `helm template` result taken while those files existed
+was not trustworthy.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| ticket-service unit tests | pass |
+| ticket-service integration suite | pass — 196.6s, real `mongo:7` replica set |
+| venue-service `go build` / `vet` / `go test ./internal/...` | pass |
+| attendance-service `go build` / `vet` / `go test ./internal/...` | pass |
+| order-service `mvn compile` | pass |
+| `helm template` — local / staging / prod | render clean, values stable across runs |
+| `helm lint` — local / staging / prod | 0 failed |
+| Live cluster / E2E | **not run** |
+
+### Not done
+
+- **`infra/helm/Chart.lock` is left dirty on purpose** — a digest-and-timestamp
+  regeneration from that `helm dependency update`, unrelated to C1. It wants its own
+  commit rather than being swept into this one.
+- **No PR for `feat/scalability-m3`.**
+- Remaining M3 items untouched: C3 (PgBouncer), E1 (metrics-server), E2 (Karpenter,
+  cloud), E3 (topologySpreadConstraints), E4 (KEDA), E5 (SSE graceful scale-in).
+- Carried over and still open: the leaked `X_USER_ID_SIGNING_KEY` is **unrotated**;
+  the clean-install proof that Kafka topics come up at their declared partition counts;
+  the E2E suite against the k8s stack.
+
+---
+
 ## Session: 2026-09-22 — feat(kong,helm): M2 agent half — topics, an unloadable gateway, a meshed broker port, external secrets, a Mongo replica set ⏳ PARTLY DEPLOY-VERIFIED (E2E not run)
 
 **Branch:** `feat/scalability-m2` (cut from `fix/local-cluster-bringup`, which is still unmerged and holds the chart fixes this depends on) · commits `dac1dec`, `f1c2f97`, `f321cd9`, `ceefb4a`, `4b95bc9`, `4f54974`, `44a167d`
