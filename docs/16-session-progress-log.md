@@ -9,6 +9,79 @@
 
 ---
 
+## Session: 2026-09-23 — feat(scalability): M3 continued — zone spread, a metrics source, and SSE that survives a scale-in ⏳ NOT DEPLOY-VERIFIED
+
+**Branch:** `feat/scalability-m3` (unmerged, no PR). Continues the entry below; same branch, four more commits.
+
+### C1 follow-up — make the Node pool defaults match the budget (`c07d75c`)
+
+The charts set `DB_POOL_MAX`, and the three NestJS services do read it — so the budget took effect. But their own defaults contradicted it, which meant a missing or misspelled chart value would silently restore an over-budget pool instead of failing:
+
+| Service | zod default | pool factory | now |
+|---|---|---|---|
+| auth | 20 | `config.get('DB_POOL_MAX', 40)` — dead, and 40 × 6 = 240 vs a ceiling of 80 | `default(12)` + `getOrThrow` |
+| user | 20 | `config.get('DB_POOL_MAX', 20)` | `default(12)` + `getOrThrow` |
+| payment | 20 | `config.get('DB_POOL_MAX', 20)` | `default(12)` + `getOrThrow` |
+
+### E3 / SR-12 — spread pods across zones in staging and prod (`7d61bce`)
+
+The `topologySpreadConstraints` templates already existed in all ten charts. They had never been enabled in any overlay, so the feature was present and inert. Staging and prod now set `enabled: true` and `minReplicas: 3` per service; attendance-service uses `replicaCount: 3` instead, because its `autoscaling.enabled` is `false` and `minReplicas` is inert there; expiration-service gets spread only.
+
+**Written into both overlays, not just this log:** `whenUnsatisfiable: DoNotSchedule` is a real constraint, not a hint. If a zone has no room, HPA scale-out pods stay `Pending` rather than landing somewhere suboptimal. That is only safe once E1 gives the HPAs a metrics source and E2 gives the cluster a node autoscaler.
+
+### E1 / SR-09 — install metrics-server so the HPAs have a signal (`e2b6340`)
+
+Every workload chart ships an HPA. Nothing in the repo installed a metrics source. Every one of them would have reported `<unknown>/70%` and never scaled — in any environment, including the local one.
+
+- EKS: added as the managed `metrics-server` addon in `infra/terraform/modules/eks/main.tf`. No IRSA role, no Helm release.
+- Local: `minikube addons enable metrics-server` in both entrypoints — `infra/local/setup.sh` and `infra/local/Makefile`.
+
+`terraform validate` **could not run**: the configuration requires Terraform `>= 1.7.0` and the binary here is 1.5.4. `required_version` was deliberately *not* loosened to make the check pass. `terraform fmt -check` passed. Karpenter is still open, so SR-09 is not fully closed.
+
+### E5 / SR-27 — release SSE streams gracefully on scale-in (`663475b`)
+
+An SSE stream never completes. `e.Shutdown(ctx)` waits for in-flight requests to finish, so it had nothing that would ever finish: it blocked for its whole timeout and then cut every live seat-availability stream mid-frame. This happened on every scale-in, every rolling deploy and every node drain.
+
+**Server** (`internal/sse/broadcaster.go`, `internal/handler/sse_handler.go`, `cmd/server/main.go`):
+
+- `Drain()` / `Draining()` / `IsDraining()` — a closed-channel signal, idempotent (`sync.Once`), never blocking. Publishing still works after a drain: the handler stops reading, the broadcaster does not stop delivering.
+- The handler selects on `Draining()` and ends the stream after writing `retry: N`, jittered over 500–5000 ms. Ending the stream is what makes an SSE client reconnect; the `retry:` field is the only thing that stops all of them reconnecting at the same instant, onto fewer pods than before.
+- A client arriving mid-drain gets `503` + `Retry-After: 1`, not a stream that is about to close.
+- `main.go` drains before `e.Shutdown`, so the graceful shutdown has something that actually finishes to wait for.
+
+**Chart** (`infra/helm/charts/venue-service/`):
+
+- `lifecycle.preStopSleepSeconds: 5`. kubelet runs `preStop` and the endpoint removal concurrently and only sends SIGTERM once `preStop` returns, so the sleep keeps the pod serving until the removal has reached every kube-proxy and Kong. Charged against the existing 30 s `terminationGracePeriodSeconds`.
+- HPA `behavior.scaleDown`: a 600 s stabilization window and one pod per 120 s. The Kubernetes defaults would remove up to the whole fleet in one step after 300 s, and every removed pod's clients land on what is left.
+
+6 new tests (3 broadcaster, 3 handler) asserting the reconnect delay exists, is in range, and is actually spread across 25 clients. `go test -short ./...` green; `go test -race` green on both new packages.
+
+**SR-27 is only partial.** Still open: the versioned availability snapshot, the version cursor clients reconnect with, the resync-on-gap rule for the 64-message SSE buffer, and the N+1 read in `hold/manager.go:229-248`.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `go build ./...`, `go vet ./...` (venue-service) | pass |
+| `go test -short ./...` (venue-service) | pass |
+| `go test -race` (sse, handler) | pass |
+| `helm lint` — default, staging, prod | pass |
+| `helm template` — staging, prod | pass, values confirmed in the rendered output |
+| `helm template` — default overlay | **fails**, pre-existing Bitnami redis image-verification error; reproduced with the change stashed |
+| `kubeconform` | **not run** — not installed locally; CI runs it |
+| `terraform validate` | **not run** — local binary 1.5.4, config requires ≥ 1.7.0 |
+| Anything against a cluster | **not run** — there is no cluster |
+
+### Not done
+
+- **Nothing here is deploy-verified.** The preStop/endpoint-removal timing, the HPA `behavior` block, the zone spread and metrics-server have all been reasoned about and rendered, never observed.
+- **C3 (PgBouncer) deliberately deferred.** It needs `DATABASE_URL` split into discrete host/user/password across `setup.sh`, the `Makefile`, ExternalSecrets and Secrets Manager, plus a new 6×-aliased subchart and a PgBouncer auth decision (`auth_query` vs userlist under SCRAM) — none of it verifiable without a cluster. Note that plan decision #4 (one shared RDS instance) makes C3 a **prerequisite** for A3, not an optimisation: 380 fleet-wide connections need `max_connections` ≥ 475, which constrains the instance class.
+- **E2 (Karpenter)** cloud-only, open. **E4 (KEDA)** deferred by plan decision #3.
+- `infra/helm/Chart.lock` is still deliberately dirty and wants its own commit.
+- No PR opened; no merge to main.
+
+---
+
 ## Session: 2026-09-23 — feat(scalability): M3 opened — one Mongo client, a sane HPA signal, and a real connection budget ⏳ NOT DEPLOY-VERIFIED
 
 **Branch:** `feat/scalability-m3` (cut from `main` at `3e66626`) · commits `63f22c4`, `cebf3ae`, `3a54f91` · **no PR opened**
