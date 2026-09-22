@@ -57,9 +57,49 @@ each budget is checked against a single instance, not fleet-wide.
 | user-service | PostgreSQL | 12 | 6 | 72 | 80 | `DB_POOL_MAX` (Secret — see below) |
 | payment-service | PostgreSQL | 12 | 6 | 72 | 80 | `DB_POOL_MAX` (chart `env`) |
 | venue-service | PostgreSQL | 10 | 6 | 60 | 80 | `DB_POOL_MAX` (chart `env`) |
-| attendance-service | PostgreSQL | 10 | 4 | 40 | 80 | `DB_POOL_MAX` (chart `env`) |
+| attendance-service | PostgreSQL | 10 | 4* | 40 | 80 | `DB_POOL_MAX` (chart `env`) |
 | order-service | PostgreSQL | 8 | 8 | 64 | 80 | `DB_POOL_MAX` → `spring.datasource.hikari.maximum-pool-size` |
 | ticket-service | MongoDB | 50 | 6 | 300 | see below | `MONGO_MAX_POOL_SIZE` (chart `env`) |
+
+\* attendance-service ships `autoscaling.enabled: false`, so it has no HPA and its
+pod count is `replicaCount` (3 in staging/prod), not `maxReplicas`. The 4 is the
+ceiling that would apply the day autoscaling is turned on — budget against it
+anyway, because that is the change that would otherwise blow the number
+silently. The same is true of expiration-service.
+
+### The shared-instance budget
+
+Everything above sizes each service against **its own** PostgreSQL instance,
+which is what the in-cluster charts give you: six separate `postgres-*`
+subcharts, six separate ceilings.
+
+**The cloud target is not shaped that way.** The recorded budget decision is
+*one shared RDS instance with one database per service* — the logical boundaries
+(separate credentials, databases, pools and migration histories) are preserved,
+but `max_connections` is not. Every pool then competes for a single ceiling:
+
+| | Peak connections |
+|---|---|
+| auth 12 × 6 | 72 |
+| user 12 × 6 | 72 |
+| payment 12 × 6 | 72 |
+| venue 10 × 6 | 60 |
+| order 8 × 8 | 64 |
+| attendance 10 × 4 | 40 |
+| **Fleet total** | **380** |
+
+At the 80% rule that instance must be provisioned for **`max_connections` ≥ 475**.
+RDS derives the default from instance memory — roughly
+`DBInstanceClassMemory / 9531392` — so this is a sizing constraint on the
+instance class, not a parameter you can simply raise: a class with too little
+memory for 475 connections does not have the memory to serve them either.
+
+This is why PgBouncer in transaction mode is a **prerequisite** for provisioning
+that instance and not a later optimisation. Pooling collapses 380 client
+connections into a server-side pool an order of magnitude smaller, which is what
+makes a shared instance affordable at all. Until it is in place, treat 380
+against a single ceiling as the number to check — and re-check it here before
+any shared instance is created.
 
 MongoDB's analogue of `max_connections` is `net.maxIncomingConnections`. The
 Bitnami chart leaves `configuration` empty, so no `mongod.conf` is supplied and
