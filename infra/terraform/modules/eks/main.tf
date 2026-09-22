@@ -25,6 +25,13 @@ module "eks" {
     kube-proxy         = { most_recent = true }
     vpc-cni            = { most_recent = true }
     aws-ebs-csi-driver = { most_recent = true }
+
+    # E1 / SR-09. Every workload chart ships an HPA, and without metrics-server
+    # none of them has a metrics source: the HPA reports <unknown>/70% and never
+    # scales. This is not an enhancement — it is the component that makes the
+    # autoscaling already configured in this repo do anything at all. EKS ships
+    # it as a managed addon, so it needs no IRSA role and no Helm release.
+    metrics-server = { most_recent = true }
   }
 
   # Managed node group — general workloads

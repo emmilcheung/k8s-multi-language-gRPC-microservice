@@ -452,6 +452,8 @@ _minikube-start:
 		echo "Starting minikube (5 CPU, 7851 MB RAM)..."; \
 		minikube start --cpus=5 --memory=7851 --disk-size=50g --driver=docker; \
 	fi
+	@echo "Enabling metrics-server (E1/SR-09 — HPAs have no signal without it)..."
+	@minikube addons enable metrics-server
 
 _namespace:
 	@kubectl create namespace $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null
