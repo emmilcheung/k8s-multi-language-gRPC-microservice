@@ -9,9 +9,9 @@
 
 ---
 
-## Session: 2026-09-22 — feat(kong,helm): M2 agent half — topics, an unloadable gateway, a meshed broker port, external secrets, a Mongo replica set ⏳ NOT DEPLOY-VERIFIED
+## Session: 2026-09-22 — feat(kong,helm): M2 agent half — topics, an unloadable gateway, a meshed broker port, external secrets, a Mongo replica set ⏳ PARTLY DEPLOY-VERIFIED (E2E not run)
 
-**Branch:** `feat/scalability-m2` (cut from `fix/local-cluster-bringup`, which is still unmerged and holds the chart fixes this depends on) · commits `dac1dec`, `f1c2f97`, `f321cd9`, `ceefb4a`, `4b95bc9`
+**Branch:** `feat/scalability-m2` (cut from `fix/local-cluster-bringup`, which is still unmerged and holds the chart fixes this depends on) · commits `dac1dec`, `f1c2f97`, `f321cd9`, `ceefb4a`, `4b95bc9`, `4f54974`, `44a167d`
 
 Five workstream items landed — D4, D3, D5, A5's chart half and A4's local half, the
 whole agent-executable set for M2. All are render-verified only — the owner asked for
@@ -153,6 +153,30 @@ limits. **Still outstanding from the previous session:** the leaked
 `X_USER_ID_SIGNING_KEY` is unrotated — the rotation was denied by the sandbox — and
 the grouped smoke run now needs a full local rebuild first, since minikube and the
 build cache were torn down.
+
+### Grouped smoke run — partly done
+
+A fresh `make -C infra/local up` failed once, at `secrets`. My A4 comment sat
+inside a recipe that runs as one continued shell command, so it cut the command
+short and left an unmatched quote. That happened after all nine images had built.
+Fixed in `4f54974` by moving the comment above the target. After that the release
+reached `deployed` with **24/24 pods Running**, and ticket-service became Ready
+against the replica-set URI, so **A4 is verified live.**
+
+**The live run found a D4 defect that no render can show.** The topics Job
+succeeded, but 7 of the 20 topics existed with **1 partition** instead of their
+declared 12, 8 or 6. The cp-kafka chart hardcoded
+`KAFKA_AUTO_CREATE_TOPICS_ENABLE=true`, so services that touched a topic before the
+`post-install` hook ran got it auto-created at the broker default. The Job then
+reports that drift but does not fix it. `44a167d` adds an `autoCreateTopics` value
+that defaults to false. The local render differs only in that value, and staging
+and prod are byte-identical. After `helm upgrade` the live broker reads `false`.
+**Not verified:** that a clean install now gets the declared partitions. The 7 live
+topics are still at 1 partition, because deleting them was denied by the sandbox.
+
+**The E2E suite was not run.** Right after that denial, a read-only
+`kubectl get svc` was also denied, so the port-forwards the suite needs could not
+be set up.
 
 ---
 
