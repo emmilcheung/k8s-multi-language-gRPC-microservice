@@ -15,6 +15,13 @@ env:
   GRPC_PORT: "50051"
   LOG_LEVEL: info
   MONGO_DB: tickets
+  # Per-pod MongoDB pool. What the server sees is this number times the pod
+  # count, so read it against autoscaling.maxReplicas below: 50 x 6 = 300
+  # connections at full stretch, from this service alone. The service opens one
+  # client per process, so this is the whole per-pod footprint. Raising
+  # maxReplicas without revisiting this is how a replica set runs out of
+  # connections at exactly the moment it is scaling to cope with load.
+  MONGO_MAX_POOL_SIZE: "50"
 
 secretRef: ticket-service-secrets  # contains MONGO_URI, KAFKA_BROKERS, optional KAFKA_SECURITY_PROTOCOL/KAFKA_SASL_MECHANISM/KAFKA_SASL_USERNAME/KAFKA_SASL_PASSWORD/KAFKA_SSL_CA_LOCATION, X_USER_ID_SIGNING_KEY
 

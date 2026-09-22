@@ -325,6 +325,7 @@ type MongoTicketRepository struct {
 	reservations *mongo.Collection
 	quota        cache.QuotaManager // optional; nil means no Redis quota gate
 	log          *zap.Logger        // never nil; defaults to a no-op logger
+	ownsClient   bool               // true when this repository dialled the client and may disconnect it
 }
 
 // Option is a functional option for NewMongoTicketRepository.
@@ -347,18 +348,32 @@ func WithLogger(log *zap.Logger) Option {
 	}
 }
 
-// NewMongoTicketRepository creates a new repository, verifying connectivity at construction time.
+// NewMongoTicketRepository dials its own client and creates a repository that
+// owns it. Callers that already hold a client should use
+// NewMongoTicketRepositoryWithClient instead: a MongoDB client carries its own
+// connection pool, so one per repository multiplies the pool by the number of
+// repositories in the process.
 func NewMongoTicketRepository(ctx context.Context, uri, dbName string, opts ...Option) (*MongoTicketRepository, error) {
-	clientOpts := options.Client().ApplyURI(uri)
-	client, err := mongo.Connect(clientOpts)
+	client, err := NewMongoClient(ctx, uri, DefaultMongoMaxPoolSize)
 	if err != nil {
-		return nil, fmt.Errorf("mongo connect: %w", err)
+		return nil, err
 	}
 
-	if err := client.Ping(ctx, nil); err != nil {
-		return nil, fmt.Errorf("mongo ping: %w", err)
+	repo, err := newMongoTicketRepository(ctx, client, dbName, true, opts...)
+	if err != nil {
+		_ = client.Disconnect(ctx)
+		return nil, err
 	}
+	return repo, nil
+}
 
+// NewMongoTicketRepositoryWithClient creates a repository on a client the caller
+// owns. Close does not disconnect it, because the caller may still be using it.
+func NewMongoTicketRepositoryWithClient(ctx context.Context, client *mongo.Client, dbName string, opts ...Option) (*MongoTicketRepository, error) {
+	return newMongoTicketRepository(ctx, client, dbName, false, opts...)
+}
+
+func newMongoTicketRepository(ctx context.Context, client *mongo.Client, dbName string, ownsClient bool, opts ...Option) (*MongoTicketRepository, error) {
 	db := client.Database(dbName)
 	coll := db.Collection("tickets")
 	resvColl := db.Collection("ticket_reservations")
@@ -386,6 +401,7 @@ func NewMongoTicketRepository(ctx context.Context, uri, dbName string, opts ...O
 		collection:   coll,
 		reservations: resvColl,
 		log:          zap.NewNop(),
+		ownsClient:   ownsClient,
 	}
 	for _, o := range opts {
 		o(repo)
@@ -850,8 +866,13 @@ func (r *MongoTicketRepository) Ping(ctx context.Context) error {
 	return r.client.Ping(ctx, nil)
 }
 
-// Close disconnects the MongoDB client gracefully.
+// Close disconnects the MongoDB client gracefully, but only when this
+// repository dialled it. Disconnecting a client owned by the caller would tear
+// the pool out from under whatever else is sharing it.
 func (r *MongoTicketRepository) Close(ctx context.Context) error {
+	if !r.ownsClient {
+		return nil
+	}
 	return r.client.Disconnect(ctx)
 }
 
