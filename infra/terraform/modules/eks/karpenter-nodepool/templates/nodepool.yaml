@@ -1,0 +1,65 @@
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: default
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: default
+      # Karpenter chooses the instance type per batch of pending pods, so these
+      # are bounds rather than a choice. The point of leaving them wide is that
+      # a zone short of one family can still be satisfied from another — E3's
+      # DoNotSchedule spread depends on every zone being satisfiable.
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values:
+            {{- range .Values.capacityTypes }}
+            - {{ . | quote }}
+            {{- end }}
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values:
+            {{- range .Values.instanceCategories }}
+            - {{ . | quote }}
+            {{- end }}
+        - key: karpenter.k8s.aws/instance-generation
+          operator: Gt
+          values: ["3"]
+        # Nothing here fits on a nano or micro, and a node too small to hold a
+        # single pod is a node Karpenter buys and cannot use.
+        - key: karpenter.k8s.aws/instance-size
+          operator: NotIn
+          values: ["nano", "micro", "small"]
+      # Nodes are replaced on this schedule so AMI patches land.
+      expireAfter: {{ .Values.nodeExpiry | quote }}
+      # A hard cap on draining a node being removed: once it expires Karpenter
+      # deletes the remaining pods whether or not a PDB still blocks them. It
+      # has to clear the longest terminationGracePeriodSeconds in the fleet
+      # (30 s) with a wide margin, or consolidation kills pods mid-shutdown —
+      # which for venue-service means cutting live SSE streams, the thing E5
+      # exists to avoid.
+      terminationGracePeriod: 5m
+  disruption:
+    # WhenEmptyOrUnderutilized lets Karpenter repack the cluster, not just
+    # remove nodes that happen to be empty. Every workload chart ships a PDB,
+    # which is what keeps that from taking a service below its minimum.
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: {{ .Values.consolidateAfter | quote }}
+    budgets:
+      # At most one node is disrupted at a time. Consolidation is voluntary
+      # work — there is no reason for it to be concurrent, and concurrent
+      # disruption is how a PDB-respecting rollout still ends up with every
+      # replica of something moving at once.
+      - nodes: "1"
+  limits:
+    cpu: {{ .Values.cpuLimit }}
