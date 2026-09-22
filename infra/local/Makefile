@@ -293,7 +293,7 @@ secrets: _check-secrets _namespace
 		\
 		_apply user-service-secrets \
 			--from-literal=DATABASE_URL="postgresql://users_user:users-local-secret@ticketing-postgres-users:5432/users_db" \
-			--from-literal=DB_POOL_MAX="20" \
+			--from-literal=DB_POOL_MAX="12" \
 			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
 	'
 	@echo "All secrets created."

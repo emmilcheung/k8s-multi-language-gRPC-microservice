@@ -274,7 +274,7 @@ apply_secret attendance-service-secrets \
 # user-service-secrets
 apply_secret user-service-secrets \
   --from-literal=DATABASE_URL="postgresql://users_user:${PG_USERS_PASS}@${PG_USERS_HOST}:5432/users_db" \
-  --from-literal=DB_POOL_MAX="20"
+  --from-literal=DB_POOL_MAX="12"
 
 info "All secrets created."
 
