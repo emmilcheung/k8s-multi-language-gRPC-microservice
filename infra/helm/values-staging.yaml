@@ -2,6 +2,34 @@
 # Staging validates full NetworkPolicy coverage and external secure Kafka before
 # production rollout. Supply KAFKA_* SASL secrets per service.
 
+# ── Service mesh ──────────────────────────────────────────────────────────────
+# `skipOutboundPorts` tells the Linkerd proxy to leave a destination port alone.
+# The chart default is 9092, the in-cluster cp-kafka PLAINTEXT listener — correct
+# locally, meaningless here: staging runs on MSK, which the Terraform module
+# creates with `client_authentication { sasl { iam = true } }` and
+# `client_broker = "TLS"`. That combination listens on 9098, and the module's
+# own security group opens 9098 for it. Skipping 9092 therefore skipped a port
+# nothing connects to, while the proxy stayed in the path of the real Kafka
+# traffic on 9098 — a TLS connection the proxy has no business terminating.
+# This value has to move with the broker; that is why it now lives per overlay
+# instead of once in values.yaml.
+global:
+  serviceMesh:
+    linkerd:
+      skipOutboundPorts: "9098"
+
+  # External Secrets. Still `false`: the operator install and the IRSA role that
+  # lets it read Secrets Manager are both outside this chart, and flipping this
+  # before they exist replaces a working out-of-band Secret with no Secret at
+  # all. The store name and prefix are filled in here so that turning it on is a
+  # one-line change once the infrastructure half of A5 lands.
+  externalSecrets:
+    enabled: false
+    secretStore:
+      name: aws-secretsmanager
+      kind: ClusterSecretStore
+    remoteKeyPrefix: ticketing-staging
+
 apollo-router:
   networkPolicy:
     enabled: true
@@ -44,6 +72,32 @@ user-service:
 
 kafka:
   enabled: false
+
+# ── Kafka topics as code (SR-02 / plan D4) ───────────────────────────────────
+# MSK runs auto.create.topics.enable=false, so nothing creates these topics
+# unless this Job does. RF 3 across the three broker AZs with
+# min.insync.replicas=2 is the standard durable pairing: acks=all then survives
+# the loss of one broker without either losing writes or blocking them.
+#
+# bootstrapServers must be set to the MSK bootstrap string for this environment
+# (terraform output `msk_bootstrap_brokers_sasl_iam`) — it is intentionally left
+# empty so that a forgotten value fails loudly against a non-existent
+# <release>-cp-kafka Service rather than silently doing nothing.
+#
+# Reaching MSK over IAM also needs an image carrying aws-msk-iam-auth and an
+# IRSA-annotated ServiceAccount; both are part of A5/A7 and are not wired yet.
+kafkaTopics:
+  enabled: false
+  bootstrapServers: ""
+  replicationFactor: 3
+  minInsyncReplicas: 2
+  clientProperties: |
+    security.protocol=SASL_SSL
+    sasl.mechanism=AWS_MSK_IAM
+    sasl.jaas.config=software.amazon.msk.auth.iam.IAMLoginModule required;
+    sasl.client.callback.handler.class=software.amazon.msk.auth.iam.IAMClientCallbackHandler
+  # Held off until the IAM image and IRSA role exist (A5/A7). Turning this on
+  # before then gives a Job that cannot authenticate and a failed release.
 
 cp-kafka:
   enabled: false

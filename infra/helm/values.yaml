@@ -12,10 +12,39 @@ global:
     enabled: true
     provider: linkerd
     linkerd:
+      # The in-cluster cp-kafka PLAINTEXT listener. Every overlay whose Kafka is
+      # not that broker must override this — values-staging.yaml and
+      # values-prod.yaml set 9098 for MSK's SASL/IAM listener. A default that is
+      # only right locally is fine; a default silently inherited by a managed
+      # broker on a different port is not, which is what used to happen here.
       skipOutboundPorts: "9092"
       grpcServerPolicy:
         enabled: true
       identityDomain: cluster.local
+  # External Secrets Operator. When enabled, each service chart renders an
+  # ExternalSecret that populates the Secret named by its `secretRef` from the
+  # store below, replacing the out-of-band `kubectl create secret` step.
+  #
+  # Off by default, and it must stay off until two things exist that this chart
+  # deliberately does not create: the operator itself (a cluster-wide install)
+  # and an IRSA role letting it read Secrets Manager (Terraform). Rendering an
+  # ExternalSecret against a store that does not exist leaves the Secret absent
+  # and every pod stuck in CreateContainerConfigError, which is a worse failure
+  # than the manual step it replaces.
+  #
+  # A chart may override this for itself with `<chart>.externalSecrets.enabled`;
+  # a chart-level value wins over this one either way, including `false`.
+  externalSecrets:
+    enabled: false
+    # Name and kind of the SecretStore/ClusterSecretStore to read from.
+    secretStore:
+      name: ""
+      kind: ClusterSecretStore
+    # Remote secrets are looked up at `<prefix>/<chart name>`, e.g.
+    # ticketing-prod/auth-service. Defaults to the release namespace, which is
+    # what keeps staging and prod from reading each other's credentials.
+    remoteKeyPrefix: ""
+    refreshInterval: 1h
 
 # ── auth-service ──────────────────────────────────────────────────────────────
 auth-service:
@@ -335,18 +364,39 @@ postgres-users:
 # ── mongodb (Bitnami MongoDB) ─────────────────────────────────────────────────
 mongodb:
   enabled: true
-  # Standalone mongod over a ReadWriteOnce volume. The chart default of
-  # RollingUpdate deadlocks on any pod-template change: the new pod cannot take
-  # the lock the old one still holds and dies with
-  # "DBPathInUse: Unable to lock the lock file", while the old pod is never
-  # retired because the new one never goes Ready. Recreate stops the old pod
-  # first. Safe here because a single mongod cannot be highly available anyway.
-  updateStrategy:
-    type: Recreate
+  # A replica set, not a standalone mongod — with one member locally. Write
+  # concern `majority`, transactions and change streams all require a replica
+  # set; a standalone mongod rejects them outright, so the single-member set is
+  # what lets ticket-service use the same write semantics locally that a real
+  # deployment uses. One member is a legitimate replica set: it elects itself,
+  # `majority` is 1, and the oplog exists. It buys correctness of semantics, not
+  # availability — do not read it as HA.
+  architecture: replicaset
+  replicaCount: 1
+  arbiter:
+    # Off. The chart enables an arbiter by default, which with one data node
+    # gives two voting members — an even number, so no majority survives losing
+    # either — and an arbiter cannot hold data, so `majority` writes would
+    # depend on a member that can never acknowledge them.
+    enabled: false
+  # `updateStrategy.type: Recreate` was here and is gone deliberately. It
+  # existed because a standalone mongod on a ReadWriteOnce volume deadlocks
+  # under RollingUpdate: the new pod cannot take a lock the old one still holds,
+  # dies with "DBPathInUse: Unable to lock the lock file", and the old pod is
+  # never retired because the new one never goes Ready. Replica-set mode renders
+  # a StatefulSet instead of a Deployment, and `Recreate` is not a valid
+  # StatefulSet update strategy — the API server rejects the object. The
+  # deadlock it worked around goes with it: a StatefulSet with the default
+  # OnDelete/RollingUpdate terminates pod-0 before starting its replacement, so
+  # the volume is never contended.
   auth:
     enabled: true
     database: tickets_db
     username: mongo_user
+    # In replicaset mode the chart also needs a `mongodb-replica-set-key` in
+    # this Secret — members authenticate to each other with it, and the chart
+    # will not generate one when an existingSecret is named. values-local.yaml
+    # clears existingSecret, so locally the chart mints the key itself.
     existingSecret: mongodb-secret
     existingSecretPasswordKey: password
     rootPasswordKey: root-password
@@ -381,6 +431,43 @@ redis:
 # Non-production default only. Staging and production must disable this chart
 # via values-staging.yaml / values-prod.yaml and use externally managed Kafka
 # with per-service SASL credentials in Secrets.
+# ── Kafka topics as code (SR-02 / plan D4) ───────────────────────────────────
+# The declaration itself lives in files/topics.yaml; only the per-environment
+# knobs are here. Defaults are single-broker shaped, matching this file's other
+# defaults (kafka.controller.replicaCount is 1); staging and prod raise them.
+kafkaTopics:
+  enabled: true
+  # Empty means "the cp-kafka Service in this release". Managed environments set
+  # the MSK bootstrap string here.
+  bootstrapServers: ""
+  replicationFactor: 1
+  # 1 disables the config entirely rather than writing min.insync.replicas=1,
+  # which is meaningless on a single broker and would have to be undone later.
+  minInsyncReplicas: 1
+  image:
+    # The same image the local cp-kafka subchart already runs, so minikube needs
+    # no extra pull. Reaching MSK over IAM needs an image carrying
+    # aws-msk-iam-auth on the classpath — override repository/tag there.
+    repository: confluentinc/cp-kafka
+    tag: "7.7.1"
+    pullPolicy: IfNotPresent
+  # Extra AdminClient properties, verbatim, for managed brokers. Empty locally
+  # (PLAINTEXT). No secret material belongs here — IAM credentials come from the
+  # ServiceAccount's projected token.
+  clientProperties: ""
+  # IRSA-annotated ServiceAccount for MSK IAM. Empty locally.
+  serviceAccountName: ""
+  waitForBrokerSeconds: 180
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 kafka:
   kraft:
     enabled: true

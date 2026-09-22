@@ -1,0 +1,145 @@
+{{- if .Values.kafkaTopics.enabled }}
+{{- $topics := (.Files.Get "files/topics.yaml" | fromYaml).topics }}
+{{- if not $topics }}
+{{- fail "kafkaTopics.enabled is true but files/topics.yaml parsed to no topics" }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-kafka-topics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kafka-topics
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    # post-*, not pre-*. Locally the broker is part of this same release, so a
+    # pre-install hook would block forever waiting for a StatefulSet that Helm
+    # has not created yet — the hook gates the very install that would satisfy
+    # it. post-install runs once the broker is Ready. In prod the broker is MSK
+    # and always reachable, so post-* is correct there too, and one annotation
+    # serves both environments.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.kafkaTopics.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.kafkaTopics.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka-topics
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.kafkaTopics.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        # Numeric: kubelet cannot verify that a named user is non-root and will
+        # refuse to start the container. 1000 is `appuser` in the cp-kafka image.
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kafka-topics
+          image: "{{ .Values.kafkaTopics.image.repository }}:{{ .Values.kafkaTopics.image.tag }}"
+          imagePullPolicy: {{ .Values.kafkaTopics.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.kafkaTopics.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          env:
+            - name: BOOTSTRAP
+              # Defaults to the in-release cp-kafka Service. Managed environments
+              # set it explicitly to the MSK bootstrap string.
+              value: {{ .Values.kafkaTopics.bootstrapServers | default (printf "%s-cp-kafka:9092" .Release.Name) | quote }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+
+              {{- if .Values.kafkaTopics.clientProperties }}
+              # Auth for managed brokers (MSK IAM). Written to /tmp because the
+              # root filesystem is read-only. Contains no secret material — IAM
+              # credentials arrive via the ServiceAccount's projected token.
+              cat > /tmp/client.properties <<'PROPS'
+              {{- .Values.kafkaTopics.clientProperties | nindent 14 }}
+              PROPS
+              CMD_OPTS="--command-config /tmp/client.properties"
+              {{- else }}
+              CMD_OPTS=""
+              {{- end }}
+
+              # The broker may report Ready before it will serve an AdminClient
+              # request, and on a fresh install this Job races the very first
+              # leader election. Fail after the budget rather than hanging the
+              # release until Helm's --timeout.
+              deadline=$(( SECONDS + {{ .Values.kafkaTopics.waitForBrokerSeconds }} ))
+              until kafka-topics --bootstrap-server "$BOOTSTRAP" $CMD_OPTS --list >/dev/null 2>&1; do
+                if [ "$SECONDS" -ge "$deadline" ]; then
+                  echo "ERROR: broker $BOOTSTRAP did not answer within {{ .Values.kafkaTopics.waitForBrokerSeconds }}s" >&2
+                  exit 1
+                fi
+                echo "waiting for broker $BOOTSTRAP ..."
+                sleep 5
+              done
+
+              existing=$(kafka-topics --bootstrap-server "$BOOTSTRAP" $CMD_OPTS --list)
+              created=0; present=0; drifted=0
+
+              check_partitions() {
+                # Report drift; never alter. Raising the partition count rehashes
+                # every key and silently breaks per-key ordering for in-flight
+                # consumers, and lowering it is impossible. Whoever changed the
+                # declaration gets told, and decides.
+                local topic="$1" want="$2" have
+                have=$(kafka-topics --bootstrap-server "$BOOTSTRAP" $CMD_OPTS \
+                         --describe --topic "$topic" \
+                       | awk -v t="$topic" '$1=="Topic:" && $2==t {for(i=1;i<=NF;i++) if($i=="PartitionCount:") print $(i+1)}' \
+                       | head -1)
+                if [ -n "$have" ] && [ "$have" != "$want" ]; then
+                  echo "DRIFT: $topic has $have partitions, declaration says $want (not altered)" >&2
+                  drifted=$(( drifted + 1 ))
+                fi
+              }
+
+              {{- range $t := $topics }}
+              if echo "$existing" | grep -qxF {{ $t.name | quote }}; then
+                present=$(( present + 1 ))
+                check_partitions {{ $t.name | quote }} {{ $t.partitions }}
+              else
+                kafka-topics --bootstrap-server "$BOOTSTRAP" $CMD_OPTS \
+                  --create --if-not-exists \
+                  --topic {{ $t.name | quote }} \
+                  --partitions {{ $t.partitions }} \
+                  --replication-factor {{ $.Values.kafkaTopics.replicationFactor }} \
+                  {{- /* int64: fromYaml decodes these as float64, and a bare render emits
+                       scientific notation (retention.ms=6.048e+08) which the broker
+                       rejects as not a number. */}}
+                  --config retention.ms={{ $t.retentionMs | int64 }} \
+                  --config cleanup.policy={{ $t.cleanupPolicy }} \
+                  {{- if gt (int $.Values.kafkaTopics.minInsyncReplicas) 1 }}
+                  --config min.insync.replicas={{ $.Values.kafkaTopics.minInsyncReplicas }} \
+                  {{- end }}
+                  >/dev/null
+                echo "created {{ $t.name }} ({{ $t.partitions }}p)"
+                created=$(( created + 1 ))
+              fi
+              {{- end }}
+
+              echo "topics: $created created, $present already present, $drifted drifted"
+              # Drift is a warning, not a failure: it must not block a release
+              # that is otherwise fine. The line above is what an operator greps.
+              exit 0
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

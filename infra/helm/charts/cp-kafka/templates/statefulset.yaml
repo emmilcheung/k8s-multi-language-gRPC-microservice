@@ -67,8 +67,21 @@ spec:
               value: "1"
             - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
               value: "1"
+            # Off by default so the topic declaration in files/topics.yaml is the
+            # single authority on partition counts. With auto-create on, any service
+            # that touches a topic before the post-install hook Job runs gets it
+            # created at the broker default of num.partitions=1; the Job then finds
+            # the topic present and reports the drift without correcting it, because
+            # raising a partition count rehashes keys and lowering one is impossible.
+            # That race cost 7 of 20 topics their declared partitioning on a clean
+            # local install (orders.order.created 12 -> 1, both payment topics 8 -> 1,
+            # and so on) and is invisible to `helm template`.
+            # The cost of turning it off is a startup window: until the hook Job
+            # finishes, producers see UNKNOWN_TOPIC_OR_PARTITION and must retry.
+            # Every client here does (kafkajs and the Sarama/Confluent wrappers all
+            # refresh metadata and retry), so the window resolves itself.
             - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
-              value: "true"
+              value: {{ .Values.autoCreateTopics | default false | quote }}
             - name: KAFKA_LOG_RETENTION_HOURS
               value: "24"
             - name: KAFKA_LOG_SEGMENT_BYTES

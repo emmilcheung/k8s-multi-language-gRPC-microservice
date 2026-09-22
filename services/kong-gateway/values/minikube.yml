@@ -9,6 +9,10 @@ HOST_TICKETS: ticketing-ticket-service.ticketing.svc.cluster.local:3001
 HOST_ORDERS: ticketing-order-service.ticketing.svc.cluster.local:8082
 HOST_PAYMENTS: ticketing-payment-service.ticketing.svc.cluster.local:3002
 HOST_USERS: ticketing-user-service.ticketing.svc.cluster.local:3004
+# Was missing, so it fell back to the docker-compose default in _defaults.yml
+# (`attendance-service:3007`), a name with no Service behind it in minikube:
+# every /api/attendance route resolved to NXDOMAIN and returned 502.
+HOST_ATTENDANCE: ticketing-attendance-service.ticketing.svc.cluster.local:3007
 HOST_CLIENT: ticketing-client.ticketing.svc.cluster.local:4000
 HOST_VENUE: ticketing-venue-service.ticketing.svc.cluster.local:3003
 HOST_APOLLO_ROUTER: ticketing-apollo-router.ticketing.svc.cluster.local:4001

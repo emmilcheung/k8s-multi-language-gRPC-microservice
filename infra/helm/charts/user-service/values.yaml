@@ -16,6 +16,15 @@ env:
 #   DATABASE_URL, DB_POOL_MAX
 secretRef: user-service-secrets
 
+# External Secrets (off unless global.externalSecrets.enabled is true). Uncomment
+# to override the global switch for this chart alone — the key being present is
+# what makes it win, so `enabled: false` here pins the out-of-band Secret even in
+# an environment that has the operator.
+# externalSecrets:
+#   enabled: true
+#   remoteKey: ticketing-prod/user-service   # default is <namespace>/<chart name>
+
+
 resources:
   requests:
     cpu: 50m

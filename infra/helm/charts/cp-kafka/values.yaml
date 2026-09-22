@@ -9,6 +9,13 @@ image:
 clusterId: "MkU3OEVBNTcwNTJENDM2Qk"
 
 # Internal listener (cluster-internal traffic)
+# Let the broker create an undeclared topic on first use. Keep this false: the
+# post-install hook Job that applies files/topics.yaml is meant to be the only
+# thing that creates topics, and a service racing it wins with a 1-partition
+# topic the Job will report but not fix. Set true only for a throwaway broker
+# where partition counts do not matter.
+autoCreateTopics: false
+
 internalPort: 9092
 # Controller listener (KRaft consensus)
 controllerPort: 9094

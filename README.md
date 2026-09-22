@@ -573,7 +573,7 @@ make -C infra/local restart SVC=auth-service
 | PostgreSQL (orders) | `ticketing-postgres-orders:5432` |
 | PostgreSQL (payments) | `ticketing-postgres-payments:5432` |
 | PostgreSQL (venue) | `ticketing-postgres-venue:5432` |
-| MongoDB | `ticketing-mongodb:27017` |
+| MongoDB | `ticketing-mongodb-0.ticketing-mongodb-headless:27017` (single-member replica set `rs0`; no ClusterIP Service in replicaset mode) |
 | Redis | `ticketing-redis-master:6379` |
 | Kafka (internal) | `ticketing-cp-kafka:9092` |
 | Kong proxy | `localhost:8000` (via `minikube tunnel`) |
