@@ -29,6 +29,21 @@ const (
 	reconnectDelayMaxMS = 5000
 )
 
+// resyncFrame tells the client its seat map can no longer be trusted and it
+// must re-read GET /api/seating-plans/:planId/availability, whose response
+// carries the version to resume from.
+//
+// There is no event log to replay from, so a client that has missed anything —
+// because it reconnected onto a different pod, or because its buffer overflowed
+// — cannot be caught up with deltas. Saying so explicitly is the only honest
+// option; the alternative is a client that keeps applying changes to a seat map
+// that silently diverged, and shows seats as free that are not.
+const resyncFrame = "event: resync\ndata: {\"reason\":\"%s\"}\n\n"
+
+// lastEventIDHeader is the header a browser EventSource replays automatically
+// on reconnect, carrying the last `id:` it saw.
+const lastEventIDHeader = "Last-Event-ID"
+
 // SSEHandler handles GET /api/seating-plans/:planId/events (text/event-stream).
 type SSEHandler struct {
 	broadcaster SSEPublisher
@@ -93,6 +108,18 @@ func (h *SSEHandler) Stream(c echo.Context) error {
 		flusher.Flush()
 	}
 
+	// A cursor on the request means this is a reconnect, so the client held a
+	// seat map built from events this pod never saw and cannot resend.
+	if cursor := c.Request().Header.Get(lastEventIDHeader); cursor != "" {
+		h.log.Info("SSE client reconnected with a cursor; asking it to resync",
+			zap.String("planId", planID), zap.String("lastEventId", cursor))
+		if _, writeErr := w.Write(
+			[]byte(fmt.Sprintf(resyncFrame, "reconnect")),
+		); writeErr == nil {
+			flusher.Flush()
+		}
+	}
+
 	ctx := c.Request().Context()
 	for {
 		select {
@@ -117,6 +144,19 @@ func (h *SSEHandler) Stream(c echo.Context) error {
 		case msg, open := <-client.MsgChan:
 			if !open {
 				return nil
+			}
+			// Check before writing: the message in hand is the one after the
+			// gap, so the client must be told to resync before it applies it.
+			if client.Gapped() {
+				h.log.Warn("SSE client missed messages; asking it to resync",
+					zap.String("planId", planID))
+				if _, writeErr := w.Write(
+					[]byte(fmt.Sprintf(resyncFrame, "buffer-overflow")),
+				); writeErr != nil {
+					h.log.Warn("SSE write error",
+						zap.String("planId", planID), zap.Error(writeErr))
+					return nil
+				}
 			}
 			if _, writeErr := w.Write([]byte(msg)); writeErr != nil {
 				h.log.Warn("SSE write error",

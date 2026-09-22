@@ -13,6 +13,7 @@
 //	venue:{planId}:hold:{seatId}          STRING hold metadata JSON (TTL = holdTtlSec)
 //	venue:{planId}:user-holds:{userId}    SET   seatIds held by user (TTL = holdTtlSec)
 //	venue:{planId}:changes                PUBSUB channel for SSE notifications
+//	venue:{planId}:version                STRING monotonic change counter (SSE cursor)
 package hold
 
 import (
@@ -21,9 +22,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/acme/venue-service/internal/repository"
+	"github.com/acme/venue-service/internal/sse"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
@@ -56,10 +60,16 @@ type SeatEntry struct {
 }
 
 // AvailabilitySnapshot is the return type for GetAvailability.
+//
+// Version is the plan's change counter at the moment the snapshot was read. It
+// is the cursor an SSE client reconnects with: every change event carries the
+// version it produced, so a client that has just resynced can discard any delta
+// at or below the snapshot's version instead of applying it twice.
 type AvailabilitySnapshot struct {
 	PlanID   string               `json:"planId"`
 	SeatMap  map[string]SeatEntry `json:"seatMap"`
 	Counts   map[string]int       `json:"counts"`
+	Version  uint64               `json:"version"`
 	CachedAt time.Time            `json:"cachedAt"`
 }
 
@@ -89,6 +99,13 @@ type Manager struct {
 	// broadcaster is used for in-process SSE fan-out when Redis is unavailable.
 	// It may be nil.
 	broadcaster SeatEventPublisher
+
+	// localVersions is the change counter used when Redis is absent. With Redis
+	// the counter lives there, because the cursor only means anything if every
+	// pod derives it from the same place — a reconnecting client lands on a
+	// different pod than the one it left.
+	localVersionsMu sync.Mutex
+	localVersions   map[string]*atomic.Uint64
 }
 
 // NewManager creates a new hold Manager.
@@ -105,11 +122,12 @@ func NewManager(
 		holdTTL = 600 * time.Second // default 10 minutes
 	}
 	return &Manager{
-		redis:       redisClient,
-		sectionRepo: sectionRepo,
-		planRepo:    planRepo,
-		holdTTL:     holdTTL,
-		log:         log,
+		redis:         redisClient,
+		sectionRepo:   sectionRepo,
+		planRepo:      planRepo,
+		holdTTL:       holdTTL,
+		log:           log,
+		localVersions: make(map[string]*atomic.Uint64),
 	}
 }
 
@@ -131,6 +149,10 @@ func holdMetaKey(planID, seatID string) string {
 
 func userHoldsKey(planID, userID string) string {
 	return fmt.Sprintf("venue:{%s}:user-holds:%s", planID, userID)
+}
+
+func versionKey(planID string) string {
+	return fmt.Sprintf("venue:{%s}:version", planID)
 }
 
 func changesKey(planID string) string {
@@ -219,10 +241,15 @@ func (m *Manager) GetAvailability(ctx context.Context, planID string) (*Availabi
 		return nil, err
 	}
 
+	// Read the cursor before the seats, never after. A version taken afterwards
+	// could include a change that landed mid-walk and is therefore already
+	// missing from the map the client is about to trust; taken first, the worst
+	// case is the client re-applies a delta it already has, which is harmless.
 	snap := &AvailabilitySnapshot{
 		PlanID:   planID,
 		SeatMap:  make(map[string]SeatEntry),
 		Counts:   make(map[string]int),
+		Version:  m.currentVersion(ctx, planID),
 		CachedAt: time.Now().UTC(),
 	}
 
@@ -414,10 +441,63 @@ func (m *Manager) redisReleaseHold(ctx context.Context, planID, userID string, s
 	return nil
 }
 
+// localCounter returns the in-process counter for planID, creating it on first
+// use. Only reached when Redis is absent.
+func (m *Manager) localCounter(planID string) *atomic.Uint64 {
+	m.localVersionsMu.Lock()
+	defer m.localVersionsMu.Unlock()
+
+	c, ok := m.localVersions[planID]
+	if !ok {
+		c = &atomic.Uint64{}
+		m.localVersions[planID] = c
+	}
+	return c
+}
+
+// nextVersion allocates the version for a change about to be published.
+// Versions are per plan and strictly increasing; 0 means "no version", which is
+// what a caller sees if Redis refuses the INCR.
+func (m *Manager) nextVersion(ctx context.Context, planID string) uint64 {
+	if m.redis == nil {
+		return m.localCounter(planID).Add(1)
+	}
+
+	v, err := m.redis.Incr(ctx, versionKey(planID)).Result()
+	if err != nil {
+		// A change that cannot be numbered is still worth delivering — the
+		// client just cannot tell whether it already has it. Better a delta the
+		// client may re-apply than a seat change it never sees.
+		m.log.Warn("failed to allocate change version",
+			zap.Error(err), zap.String("planId", planID))
+		return 0
+	}
+	return uint64(v)
+}
+
+// currentVersion reads the plan's change counter without advancing it. An
+// unseen plan has no key yet, which reads as 0 — the correct starting cursor.
+func (m *Manager) currentVersion(ctx context.Context, planID string) uint64 {
+	if m.redis == nil {
+		return m.localCounter(planID).Load()
+	}
+
+	v, err := m.redis.Get(ctx, versionKey(planID)).Uint64()
+	if err != nil {
+		if !errors.Is(err, redis.Nil) {
+			m.log.Warn("failed to read change version",
+				zap.Error(err), zap.String("planId", planID))
+		}
+		return 0
+	}
+	return v
+}
+
 func (m *Manager) publishChange(ctx context.Context, planID, event string, seatIDs []string) {
 	payload, err := json.Marshal(map[string]interface{}{
 		"event":   event,
 		"seatIds": seatIDs,
+		"v":       m.nextVersion(ctx, planID),
 		"ts":      time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
@@ -434,7 +514,6 @@ func (m *Manager) publishChange(ctx context.Context, planID, event string, seatI
 
 	// No Redis — publish directly to the in-process broadcaster if attached.
 	if m.broadcaster != nil {
-		ssePayload := fmt.Sprintf("data: %s\n\n", string(payload))
-		m.broadcaster.Publish(planID, ssePayload)
+		m.broadcaster.Publish(planID, sse.FormatChange(payload))
 	}
 }

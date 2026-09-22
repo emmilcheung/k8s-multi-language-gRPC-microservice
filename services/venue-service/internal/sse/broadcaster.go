@@ -15,8 +15,10 @@ package sse
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -29,10 +31,39 @@ const HeartbeatInterval = 15 * time.Second
 // heartbeatPayload is sent as a comment-style SSE event to keep connections alive.
 const heartbeatPayload = ": heartbeat\n\n"
 
+// FormatChange wraps a seat-change JSON payload as an SSE frame, carrying the
+// change's version as the event id when the payload has one.
+//
+// The id matters: a browser EventSource remembers the last id it saw and
+// replays it as Last-Event-ID on reconnect, which is how the client tells a new
+// pod where it got to. Nothing here replays events — there is no log to replay
+// from — so the id is the cursor, not a seek token.
+func FormatChange(payload []byte) string {
+	var envelope struct {
+		V uint64 `json:"v"`
+	}
+	if err := json.Unmarshal(payload, &envelope); err == nil && envelope.V > 0 {
+		return fmt.Sprintf("id: %d\ndata: %s\n\n", envelope.V, payload)
+	}
+	return fmt.Sprintf("data: %s\n\n", payload)
+}
+
 // Client represents a single SSE subscriber for a seating plan.
 type Client struct {
 	PlanID  string
 	MsgChan chan string
+
+	// gapped records that a message was dropped because this client's buffer
+	// was full. The client's view of the plan is now wrong in a way it cannot
+	// detect on its own, so the handler must tell it to resync rather than let
+	// it keep applying deltas to stale state.
+	gapped atomic.Bool
+}
+
+// Gapped reports whether this client has missed a message, clearing the flag so
+// a single gap produces a single resync.
+func (c *Client) Gapped() bool {
+	return c.gapped.Swap(false)
 }
 
 // Broadcaster manages per-plan fan-out of seat state change events to SSE clients.
@@ -152,7 +183,11 @@ func (b *Broadcaster) Publish(planID, payload string) {
 		select {
 		case c.MsgChan <- payload:
 		default:
-			// Client channel is full — drop the message rather than block.
+			// Client channel is full — drop the message rather than block, and
+			// record the gap. Dropping silently is what made this dangerous:
+			// the client went on applying later deltas to a seat map that had
+			// already diverged.
+			c.gapped.Store(true)
 			b.log.Warn("SSE client channel full, dropping message",
 				zap.String("planId", planID))
 		}
@@ -232,9 +267,7 @@ func (b *Broadcaster) runRedisSub(ctx context.Context, planID string) {
 				return
 			}
 			// Forward the Redis message to in-process subscribers.
-			// Format as an SSE data frame.
-			ssePayload := fmt.Sprintf("data: %s\n\n", msg.Payload)
-			b.Publish(planID, ssePayload)
+			b.Publish(planID, FormatChange([]byte(msg.Payload)))
 		}
 	}
 }
