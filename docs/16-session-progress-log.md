@@ -11,7 +11,7 @@
 
 ## Session: 2026-09-23 — feat(scalability): M3 continued — zone spread, a metrics source, and SSE that survives a scale-in ⏳ NOT DEPLOY-VERIFIED
 
-**Branch:** `feat/scalability-m3` (unmerged, no PR). Continues the entry below; same branch, four more commits.
+**Branch:** `feat/scalability-m3` (unmerged, no PR). Continues the entry below; same branch, five more commits.
 
 ### C1 follow-up — make the Node pool defaults match the budget (`c07d75c`)
 
@@ -56,7 +56,21 @@ An SSE stream never completes. `e.Shutdown(ctx)` waits for in-flight requests to
 
 6 new tests (3 broadcaster, 3 handler) asserting the reconnect delay exists, is in range, and is actually spread across 25 clients. `go test -short ./...` green; `go test -race` green on both new packages.
 
-**SR-27 is only partial.** Still open: the versioned availability snapshot, the version cursor clients reconnect with, the resync-on-gap rule for the 64-message SSE buffer, and the N+1 read in `hold/manager.go:229-248`.
+### E5 / SR-27, second half — a version cursor and a resync rule (`d5521dd`)
+
+The drain half told a client *when* to reconnect. This tells it *what to do* when it gets there.
+
+Nothing replays SSE events — there is no event log — so a client that has missed anything cannot be caught up with deltas. Until now it was never told. It reconnected onto a different pod and carried on applying changes to a seat map with a hole in it, showing seats as free that were already held. The 64-message client buffer failed the same way, dropping silently.
+
+- **Every change is numbered.** `INCR venue:{planId}:version` — cluster-safe via the existing hash tag, and shared across pods, which is the whole point: a reconnecting client lands on a pod that never served it. Without Redis it falls back to a per-plan in-process counter, which is sound because that path is single-pod by construction. A failed `INCR` yields version 0 and the change is still delivered — a delta the client may re-apply beats a seat change it never sees.
+- **`AvailabilitySnapshot.Version` is read before the section walk, never after.** A version taken afterwards could include a change that landed mid-walk and is therefore already missing from the map the client is about to trust. Taken first, the worst case is a harmless re-apply.
+- **Change frames carry `id: <version>`.** A browser `EventSource` stores the last id it saw and replays it as `Last-Event-ID` on reconnect, so the cursor costs the client no code.
+- **`Last-Event-ID` present → `event: resync`.** The server cannot replay, so it says so. A client with no cursor does *not* get one, because it is about to read the snapshot anyway — telling it to resync would cost every new viewer of an on-sale page an extra availability read, which is the read this path exists to avoid.
+- **A dropped message sets a gap flag** on the client; the handler emits `event: resync` *before* writing the next delta, so the client discards the stale map instead of building on it.
+
+8 new tests: version monotonicity, per-plan independence, a 50-goroutine uniqueness check, frame formatting with and without a version, the buffer-overflow flag, and the three handler resync cases. The gap case injects the gap directly rather than racing the handler's reader, which is not reproducible — the recorder drains faster than a test can fill.
+
+**E5 is now complete.** Still open in SR-27: the per-section / per-seat N+1 read in `hold/manager.go:229-248`. Also worth knowing: `services/client` has **no SSE consumer at all** yet, so the client half of the cursor contract is unexercised by anything.
 
 ### Verification
 
@@ -64,7 +78,8 @@ An SSE stream never completes. `e.Shutdown(ctx)` waits for in-flight requests to
 |---|---|
 | `go build ./...`, `go vet ./...` (venue-service) | pass |
 | `go test -short ./...` (venue-service) | pass |
-| `go test -race` (sse, handler) | pass |
+| `go test -race -short ./internal/...` (venue-service) | pass |
+| `gofmt -l internal/ cmd/` (venue-service) | clean — note `test/graphql_resolver_test.go` is unformatted and was left alone, pre-existing |
 | `helm lint` — default, staging, prod | pass |
 | `helm template` — staging, prod | pass, values confirmed in the rendered output |
 | `helm template` — default overlay | **fails**, pre-existing Bitnami redis image-verification error; reproduced with the change stashed |
