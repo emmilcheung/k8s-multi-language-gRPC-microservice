@@ -64,9 +64,9 @@ jobs:
       queue:      ${{ steps.filter.outputs.queue }}
       skip-ci:    ${{ steps.set-skip-ci.outputs.skip-ci }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -157,13 +157,13 @@ jobs:
     env:
       IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/auth-service
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: pnpm
@@ -184,10 +184,10 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "false"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: services/auth-service
           file: services/auth-service/Dockerfile
@@ -202,7 +202,7 @@ jobs:
         working-directory: .
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
@@ -232,13 +232,13 @@ jobs:
     env:
       IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/client
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: pnpm
@@ -280,10 +280,10 @@ jobs:
       # Browser-backed validation runs in the Playwright E2E job below.
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: services/client
           file: services/client/Dockerfile
@@ -298,7 +298,7 @@ jobs:
         working-directory: .
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
@@ -329,12 +329,12 @@ jobs:
       IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/expiration-service
       CGO_ENABLED: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install librdkafka build dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc libc6-dev librdkafka-dev
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
           cache-dependency-path: services/expiration-service/go.sum
@@ -343,7 +343,7 @@ jobs:
         run: go vet ./...
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           working-directory: services/expiration-service
@@ -357,10 +357,10 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "false"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: services/expiration-service
           file: services/expiration-service/Dockerfile
@@ -375,7 +375,7 @@ jobs:
         working-directory: .
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
@@ -397,16 +397,16 @@ jobs:
     needs: changes
     if: needs.changes.outputs.graphql == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Cache Rover home
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.rover
           key: rover-${{ runner.os }}-v0.38.1-supergraph-v2.9.0
 
       - name: Install Rover CLI
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 5
           max_attempts: 3
@@ -421,7 +421,7 @@ jobs:
           rover --version
 
       - name: Compose supergraph
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 5
           max_attempts: 3
@@ -442,10 +442,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.helm == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: v3.16.4
 
@@ -502,9 +502,9 @@ jobs:
           --health-timeout 3s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
 
@@ -523,7 +523,7 @@ jobs:
           REDIS_TEST_CONNECTION: localhost:6379
 
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: v3.16.4
 
@@ -535,10 +535,10 @@ jobs:
           echo "OK: queue-system chart lints and renders"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build image (chiseled, non-root)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: services/queue-service/src/QueueService
           push: false
@@ -549,7 +549,7 @@ jobs:
         run: docker load --input /tmp/queue-service.tar
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
@@ -582,9 +582,9 @@ jobs:
     env:
       IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/order-service
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           java-version: "21"
           distribution: temurin
@@ -605,11 +605,11 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "false"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # Build context is repo root — Dockerfile is in the service subdirectory
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: services/order-service/Dockerfile
@@ -621,7 +621,7 @@ jobs:
         run: docker load --input /tmp/order-service.tar
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
@@ -651,13 +651,13 @@ jobs:
     env:
       IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/payment-service
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: pnpm
@@ -681,10 +681,10 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "false"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: services/payment-service
           file: services/payment-service/Dockerfile
@@ -699,7 +699,7 @@ jobs:
         working-directory: .
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
@@ -729,13 +729,13 @@ jobs:
     env:
       IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/user-service
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: pnpm
@@ -756,10 +756,10 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "false"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: services/user-service
           file: services/user-service/Dockerfile
@@ -774,7 +774,7 @@ jobs:
         working-directory: .
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
@@ -799,7 +799,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: buf lint
         uses: bufbuild/buf-action@v1
@@ -827,7 +827,7 @@ jobs:
       run:
         working-directory: services/kong-gateway
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Every environment, not just `local`. Validating only `local` is how a
       # config that Kong outright refuses to load reached staging and prod: the
@@ -872,12 +872,12 @@ jobs:
       IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/ticket-service
       CGO_ENABLED: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install librdkafka build dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc libc6-dev librdkafka-dev
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
           cache-dependency-path: services/ticket-service/go.sum
@@ -886,7 +886,7 @@ jobs:
         run: go vet ./...
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           working-directory: services/ticket-service
@@ -900,10 +900,10 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "false"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build image
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 15
           max_attempts: 3
@@ -922,7 +922,7 @@ jobs:
         working-directory: .
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
@@ -953,12 +953,12 @@ jobs:
       IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/venue-service
       CGO_ENABLED: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install librdkafka build dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc libc6-dev librdkafka-dev
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
           cache-dependency-path: services/venue-service/go.sum
@@ -967,7 +967,7 @@ jobs:
         run: go vet ./...
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           working-directory: services/venue-service
@@ -981,10 +981,10 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "false"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: services/venue-service/Dockerfile
@@ -999,7 +999,7 @@ jobs:
         working-directory: .
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
@@ -1050,12 +1050,12 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install librdkafka build dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc libc6-dev librdkafka-dev
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.26"
           cache-dependency-path: services/attendance-service/go.sum
@@ -1064,7 +1064,7 @@ jobs:
         run: go vet ./...
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           working-directory: services/attendance-service
@@ -1080,10 +1080,10 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "false"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: services/attendance-service/Dockerfile
@@ -1098,7 +1098,7 @@ jobs:
         working-directory: .
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif
@@ -1146,7 +1146,7 @@ jobs:
       !contains(needs.*.result, 'cancelled')
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Write the .env file consumed by docker-compose via env_file directives.
       # auth-service reads RSA_PRIVATE_KEY; payment-service reads STRIPE_SECRET_KEY.
@@ -1170,11 +1170,11 @@ jobs:
 
       # Install Node + pnpm + Playwright browsers BEFORE the long Docker waits
       # so the 167 MB Chrome download overlaps with image build time.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: pnpm
@@ -1185,7 +1185,7 @@ jobs:
         working-directory: services/client
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -1202,7 +1202,7 @@ jobs:
         working-directory: services/client
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build all service images
         run: docker compose build --parallel
@@ -1227,13 +1227,13 @@ jobs:
           done
 
       - name: Cache Rover home
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.rover
           key: rover-${{ runner.os }}-v0.38.1-supergraph-v2.9.0
 
       - name: Install Rover CLI
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 5
           max_attempts: 3
@@ -1243,7 +1243,7 @@ jobs:
             echo "$HOME/.rover/bin" >> "$GITHUB_PATH"
 
       - name: Compose Apollo Router supergraph
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 5
           max_attempts: 3
@@ -1305,7 +1305,7 @@ jobs:
           "
 
       - name: Cache Next.js build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: services/client/.next/cache
           key: nextjs-${{ runner.os }}-${{ hashFiles('services/client/pnpm-lock.yaml') }}-${{ hashFiles('services/client/app/**', 'services/client/components/**', 'services/client/lib/**') }}
@@ -1365,7 +1365,7 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: |
@@ -1394,7 +1394,7 @@ jobs:
 
       - name: Upload compose logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: compose-logs
           path: /tmp/compose-logs.txt
@@ -1402,7 +1402,7 @@ jobs:
 
       - name: Upload Next.js server logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nextjs-server-log
           path: /tmp/nextjs.log
@@ -1439,7 +1439,7 @@ jobs:
   #         echo "To enable deployments, set the AWS_DEPLOY_ROLE_ARN secret in repo Settings → Secrets."
   #         exit 0
 
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v7
   #       if: env.AWS_DEPLOY_ROLE_ARN != ''
 
   #     - name: Configure AWS credentials (OIDC)
@@ -1505,7 +1505,7 @@ jobs:
   #       if: env.AWS_DEPLOY_ROLE_ARN == ''
   #       run: echo "AWS_DEPLOY_ROLE_ARN not set — skipping deploy-staging." && exit 0
 
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v7
   #       if: env.AWS_DEPLOY_ROLE_ARN != ''
 
   #     - name: Configure AWS credentials (OIDC)
@@ -1573,7 +1573,7 @@ jobs:
   #       if: env.AWS_DEPLOY_ROLE_ARN == ''
   #       run: echo "AWS_DEPLOY_ROLE_ARN not set — skipping deploy-prod." && exit 0
 
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v7
   #       if: env.AWS_DEPLOY_ROLE_ARN != ''
 
   #     - name: Configure AWS credentials (OIDC)
