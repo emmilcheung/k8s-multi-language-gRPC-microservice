@@ -44,6 +44,20 @@ autoscaling:
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
+  # E5 / SR-27. Every scale-in ends the SSE streams the removed pod holds, and
+  # those clients reconnect onto the pods that are left. The k8s defaults would
+  # remove up to 100% of the fleet in one step after a 300 s window, which on a
+  # seat-availability stream is a visible outage rather than a resize. This
+  # doubles the window and takes one pod at a time so the reconnects arrive in
+  # batches the remaining pods can absorb. scaleUp is left at the k8s default —
+  # scaling out costs nobody their stream.
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
 
 podDisruptionBudget:
   enabled: true
@@ -77,6 +91,13 @@ startupProbe:
   timeoutSeconds: 5
 
 terminationGracePeriodSeconds: 30
+
+# E5 / SR-27. Seconds to keep serving after the pod is condemned, before the
+# process is signalled. Set to 0 to drop the hook entirely. See the comment on
+# the lifecycle block in templates/deployment.yaml for why this exists; it must
+# stay well under terminationGracePeriodSeconds above, which it shares.
+lifecycle:
+  preStopSleepSeconds: 5
 
 rollingUpdate:
   maxSurge: 1

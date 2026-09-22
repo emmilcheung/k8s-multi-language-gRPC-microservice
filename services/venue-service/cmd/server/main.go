@@ -308,6 +308,14 @@ func main() {
 		log.Error("server error — initiating shutdown")
 	}
 
+	// Release the SSE streams before asking the HTTP server to shut down.
+	// e.Shutdown waits for in-flight requests to finish, and an SSE stream never
+	// finishes on its own — without this it would block for the full timeout
+	// below and then cut every connection mid-frame. Draining first lets each
+	// stream end cleanly, with a jittered reconnect delay so the clients do not
+	// all return to the surviving pods at once.
+	sseBroadcaster.Drain()
+
 	grpcCancel()
 	consumerCancel()
 	sweeperCancel()

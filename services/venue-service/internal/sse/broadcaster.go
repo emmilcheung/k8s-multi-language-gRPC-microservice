@@ -46,6 +46,13 @@ type Broadcaster struct {
 	// redisSubs tracks active Redis pub/sub subscriptions keyed by planID.
 	redisSubsMu sync.Mutex
 	redisSubs   map[string]context.CancelFunc
+
+	// draining is closed by Drain to tell every connected stream to end so the
+	// client reconnects elsewhere. An SSE stream never completes on its own, so
+	// without this signal a graceful HTTP shutdown has nothing to wait for: it
+	// blocks for its whole timeout and then cuts every connection mid-frame.
+	draining  chan struct{}
+	drainOnce sync.Once
 }
 
 // NewBroadcaster creates a new Broadcaster. redisClient may be nil; in that
@@ -56,6 +63,38 @@ func NewBroadcaster(redisClient *redis.Client, log *zap.Logger) *Broadcaster {
 		redis:     redisClient,
 		log:       log,
 		redisSubs: make(map[string]context.CancelFunc),
+		draining:  make(chan struct{}),
+	}
+}
+
+// Drain marks the broadcaster as shutting down and signals every connected
+// stream to close. It is safe to call more than once and never blocks.
+//
+// Call it before shutting the HTTP server down. Nothing here waits for clients
+// to go away — it only releases them; the HTTP server's own graceful shutdown
+// is what waits.
+func (b *Broadcaster) Drain() {
+	b.drainOnce.Do(func() {
+		close(b.draining)
+	})
+}
+
+// Draining returns a channel closed when Drain is called. Handlers select on it
+// to end their stream.
+func (b *Broadcaster) Draining() <-chan struct{} {
+	return b.draining
+}
+
+// IsDraining reports whether Drain has been called. Handlers use it to refuse a
+// new stream during shutdown, so a client that arrives in the gap between
+// SIGTERM and the endpoint removal propagating is sent elsewhere immediately
+// rather than being handed a connection about to be closed.
+func (b *Broadcaster) IsDraining() bool {
+	select {
+	case <-b.draining:
+		return true
+	default:
+		return false
 	}
 }
 

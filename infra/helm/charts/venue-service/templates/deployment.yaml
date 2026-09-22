@@ -101,3 +101,19 @@ spec:
           startupProbe:
             {{- toYaml .Values.startupProbe | nindent 12 }}
           {{- end }}
+          {{- if .Values.lifecycle.preStopSleepSeconds }}
+          # E5 / SR-27. kubelet runs preStop and the endpoint removal
+          # concurrently, and only sends SIGTERM once preStop returns. Sleeping
+          # here keeps the pod serving while the removal reaches every
+          # kube-proxy and Kong, so no client is handed a stream on a pod that
+          # is already draining. The sleep is charged against
+          # terminationGracePeriodSeconds ({{ .Values.terminationGracePeriodSeconds }}s),
+          # leaving the rest for the SSE drain in cmd/server/main.go.
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - sleep {{ .Values.lifecycle.preStopSleepSeconds }}
+          {{- end }}
