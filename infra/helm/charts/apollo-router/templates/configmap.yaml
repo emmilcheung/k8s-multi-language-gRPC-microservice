@@ -8,5 +8,18 @@ metadata:
 data:
   router.yaml: |
     {{- .Files.Get "files/router.yaml" | nindent 4 }}
+    {{- if .Values.operationLimits.enabled }}
+    limits:
+      max_depth: {{ .Values.operationLimits.maxDepth }}
+      max_height: {{ .Values.operationLimits.maxHeight }}
+      max_aliases: {{ .Values.operationLimits.maxAliases }}
+      max_root_fields: {{ .Values.operationLimits.maxRootFields }}
+    {{- end }}
+    {{- if .Values.subgraphUrlOverrides.enabled }}
+    override_subgraph_url:
+      {{- range $subgraph, $url := .Values.subgraphUrlOverrides.subgraphs }}
+      {{ $subgraph }}: {{ tpl $url $ | quote }}
+      {{- end }}
+    {{- end }}
   supergraph.graphql: |
     {{- .Files.Get "files/supergraph.graphql" | nindent 4 }}

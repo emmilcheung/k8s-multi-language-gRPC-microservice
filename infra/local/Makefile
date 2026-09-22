@@ -31,6 +31,11 @@ KONG_YML      := $(GATEWAY_DIR)/kong.yml
 NAMESPACE     := ticketing
 HELM_RELEASE  := ticketing
 
+# Tag used for locally built service images. values-local.yaml ships the
+# placeholder `SET_BY_CI`, which nothing substitutes outside CI, so the local
+# deploy must pass the tag explicitly. Not `latest` — repo rule I-04.
+IMAGE_TAG     ?= local
+
 # Read a value from infra/local/secrets.env without sourcing the file
 _secret = $(shell grep -m1 "^$(1)=" "$(SECRETS_FILE)" 2>/dev/null | sed 's/^$(1)=//' | sed "s/^[\"']//" | sed "s/[\"']$$//")
 
@@ -113,11 +118,11 @@ build-order:
 	@echo "  Building order-service (context: repo root)..."
 	@docker build \
 		--file $(REPO_ROOT)/services/order-service/Dockerfile \
-		--tag order-service:latest \
+		--tag order-service:$(IMAGE_TAG) \
 		--quiet \
 		$(REPO_ROOT)
-	@minikube image load --overwrite order-service:latest
-	@echo "  Loaded order-service:latest"
+	@minikube image load --overwrite order-service:$(IMAGE_TAG)
+	@echo "  Loaded order-service:$(IMAGE_TAG)"
 
 # ticket-service uses the repo root as its Docker build context because its
 # go.mod has a replace directive pointing to ../../libs/grpc-stubs/go which
@@ -126,11 +131,11 @@ build-ticket:
 	@echo "  Building ticket-service (context: repo root)..."
 	@docker build \
 		--file $(REPO_ROOT)/services/ticket-service/Dockerfile \
-		--tag ticket-service:latest \
+		--tag ticket-service:$(IMAGE_TAG) \
 		--quiet \
 		$(REPO_ROOT)
-	@minikube image load --overwrite ticket-service:latest
-	@echo "  Loaded ticket-service:latest"
+	@minikube image load --overwrite ticket-service:$(IMAGE_TAG)
+	@echo "  Loaded ticket-service:$(IMAGE_TAG)"
 
 # attendance-service uses the repo root as its Docker build context because its
 # go.mod has a replace directive pointing to ../../libs/grpc-stubs/go.
@@ -138,11 +143,11 @@ build-attendance:
 	@echo "  Building attendance-service (context: repo root)..."
 	@docker build \
 		--file $(REPO_ROOT)/services/attendance-service/Dockerfile \
-		--tag attendance-service:latest \
+		--tag attendance-service:$(IMAGE_TAG) \
 		--quiet \
 		$(REPO_ROOT)
-	@minikube image load --overwrite attendance-service:latest
-	@echo "  Loaded attendance-service:latest"
+	@minikube image load --overwrite attendance-service:$(IMAGE_TAG)
+	@echo "  Loaded attendance-service:$(IMAGE_TAG)"
 
 # All other services use their own directory as the build context
 build-services:
@@ -150,22 +155,22 @@ build-services:
 		echo "  Building $$svc..."; \
 		docker build \
 			--file $(REPO_ROOT)/services/$$svc/Dockerfile \
-			--tag $$svc:latest \
+			--tag $$svc:$(IMAGE_TAG) \
 			--quiet \
 			$(REPO_ROOT)/services/$$svc; \
-		minikube image load --overwrite $$svc:latest; \
-		echo "  Loaded $$svc:latest"; \
+		minikube image load --overwrite $$svc:$(IMAGE_TAG); \
+		echo "  Loaded $$svc:$(IMAGE_TAG)"; \
 	done
 
 build-venue:
 	@echo "  Building venue-service (context: repo root)..."
 	@docker build \
 		--file $(REPO_ROOT)/services/venue-service/Dockerfile \
-		--tag venue-service:latest \
+		--tag venue-service:$(IMAGE_TAG) \
 		--quiet \
 		$(REPO_ROOT)
-	@minikube image load --overwrite venue-service:latest
-	@echo "  Loaded venue-service:latest"
+	@minikube image load --overwrite venue-service:$(IMAGE_TAG)
+	@echo "  Loaded venue-service:$(IMAGE_TAG)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 ## load-infra-images : Pull backing-service images and load them into minikube
@@ -269,7 +274,7 @@ secrets: _check-secrets _namespace
 			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092"; \
 		\
 		_apply attendance-service-secrets \
-			--from-literal=DATABASE_URL="postgresql://attendance_user:attendance-local-secret@ticketing-postgres-attendance:5432/attendance_db" \
+			--from-literal=DATABASE_URL="postgresql://attendance_user:attendance-local-secret@ticketing-postgres-attendance:5432/attendance_db?sslmode=disable" \
 			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092" \
 			--from-literal=QR_SIGNING_KEY="$$QR_SIGNING_KEY" \
 			--from-literal=TICKET_SERVICE_URL="ticketing-ticket-service.ticketing.svc.cluster.local:50051" \
@@ -277,7 +282,8 @@ secrets: _check-secrets _namespace
 		\
 		_apply user-service-secrets \
 			--from-literal=DATABASE_URL="postgresql://users_user:users-local-secret@ticketing-postgres-users:5432/users_db" \
-			--from-literal=DB_POOL_MAX="20"; \
+			--from-literal=DB_POOL_MAX="20" \
+			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
 	'
 	@echo "All secrets created."
 
@@ -286,7 +292,15 @@ secrets: _check-secrets _namespace
 # ─────────────────────────────────────────────────────────────────────────────
 kong-config: _check-secrets
 	@echo "Rendering Kong config for minikube..."
+# KONG_SIGNING_KEY is what build.sh bakes into jwt-sub.lua as the HMAC key for
+# the X-User-Id-Sig header. It defaults to empty, and an empty key makes Kong
+# emit no signature at all, so every subgraph rejects the request with
+# INVALID_SIGNATURE ("Invalid user ID signature") — surfacing to the client only
+# as the masked "Subgraph errors redacted". It must be the same value the
+# services get as X_USER_ID_SIGNING_KEY. setup.sh already passed it; this target
+# did not.
 	@KONG_RSA_PUBLIC_KEY='$(call _secret,KONG_RSA_PUBLIC_KEY)' \
+		KONG_SIGNING_KEY='$(call _secret,X_USER_ID_SIGNING_KEY)' \
 		bash $(GATEWAY_DIR)/scripts/build.sh minikube $(KONG_YML)
 	@echo "Kong config written to $(KONG_YML)"
 
@@ -303,6 +317,15 @@ helm-upgrade: _namespace
 		--values $(HELM_CHART)/values-local.yaml \
 		--set-file "kong.dblessConfig.config=$(KONG_YML)" \
 		--set "mongodb.auth.existingSecret=" \
+		--set "auth-service.image.tag=$(IMAGE_TAG)" \
+		--set "ticket-service.image.tag=$(IMAGE_TAG)" \
+		--set "order-service.image.tag=$(IMAGE_TAG)" \
+		--set "payment-service.image.tag=$(IMAGE_TAG)" \
+		--set "expiration-service.image.tag=$(IMAGE_TAG)" \
+		--set "client.image.tag=$(IMAGE_TAG)" \
+		--set "venue-service.image.tag=$(IMAGE_TAG)" \
+		--set "attendance-service.image.tag=$(IMAGE_TAG)" \
+		--set "user-service.image.tag=$(IMAGE_TAG)" \
 		--set "auth-service.secretRef=auth-service-secrets" \
 		--set "ticket-service.secretRef=ticket-service-secrets" \
 		--set "venue-service.secretRef=venue-service-secrets" \
@@ -396,6 +419,20 @@ _check-secrets:
 		{ echo "ERROR: RSA_PRIVATE_KEY is still a placeholder in secrets.env"; exit 1; } || true
 	@grep -q "^KONG_RSA_PUBLIC_KEY=REPLACE_ME" $(SECRETS_FILE) 2>/dev/null && \
 		{ echo "ERROR: KONG_RSA_PUBLIC_KEY is still a placeholder in secrets.env"; exit 1; } || true
+# Every key the secrets target feeds to kubectl must be present AND non-empty.
+# A missing key used to expand to --from-literal=KEY="", so `make up` created an
+# empty secret and only failed ~5 minutes later as a CrashLoopBackOff
+# ("X_USER_ID_SIGNING_KEY must be at least 32 characters"). A secrets.env
+# written before a key was introduced upstream hits this silently. Values are
+# never echoed — only the key name.
+	@for k in RSA_PRIVATE_KEY KONG_RSA_PUBLIC_KEY STRIPE_SECRET_KEY X_USER_ID_SIGNING_KEY QR_SIGNING_KEY; do \
+		v=$$(grep -m1 "^$$k=" $(SECRETS_FILE) 2>/dev/null | sed "s/^$$k=//"); \
+		if [ -z "$$v" ]; then \
+			echo "ERROR: $$k is missing or empty in $(SECRETS_FILE)."; \
+			echo "       Compare against infra/local/secrets.env.example."; \
+			exit 1; \
+		fi; \
+	done
 
 _minikube-start:
 	@if minikube status --profile minikube 2>/dev/null | grep -q "Running"; then \

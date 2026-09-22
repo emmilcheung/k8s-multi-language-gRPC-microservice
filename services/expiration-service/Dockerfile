@@ -25,7 +25,10 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 WORKDIR /app
 COPY --from=builder /expiration-service ./expiration-service
 
-USER app
+# Numeric UID: k8s runAsNonRoot cannot verify a non-numeric USER and refuses
+# to start the container ("image has non-numeric user (app)"). 999:999 is the
+# uid:gid that adduser assigned to app in this image.
+USER 999:999
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

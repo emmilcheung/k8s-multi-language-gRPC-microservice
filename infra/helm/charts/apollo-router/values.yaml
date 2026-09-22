@@ -19,6 +19,11 @@ image:
 service:
   port: 4001
 
+# Port of the router's separate health listener (health_check.listen in
+# files/router.yaml). Probes must target this, not the GraphQL port.
+healthCheck:
+  port: 8088
+
 resources:
   requests:
     cpu: 200m
@@ -42,7 +47,7 @@ podDisruptionBudget:
 livenessProbe:
   httpGet:
     path: /health
-    port: http
+    port: health
   initialDelaySeconds: 5
   periodSeconds: 10
   timeoutSeconds: 5
@@ -51,7 +56,7 @@ livenessProbe:
 readinessProbe:
   httpGet:
     path: /health
-    port: http
+    port: health
   initialDelaySeconds: 5
   periodSeconds: 10
   timeoutSeconds: 5
@@ -60,7 +65,7 @@ readinessProbe:
 startupProbe:
   httpGet:
     path: /health
-    port: http
+    port: health
   failureThreshold: 12
   periodSeconds: 5
   timeoutSeconds: 5
@@ -87,6 +92,39 @@ topologySpreadConstraints:
 
 networkPolicy:
   enabled: true
+
+# Operation limits are GraphOS-licensed features. Apollo Router v2 does not
+# degrade gracefully: if any of these keys is present in router.yaml without a
+# valid APOLLO_KEY/APOLLO_GRAPH_REF it logs "license violation" and exits, so
+# the pod CrashLoopBackOffs. Keep this enabled wherever a GraphOS license is
+# available — it is a real protection against deep/wide hostile queries — and
+# disable it only in unlicensed environments such as local minikube.
+operationLimits:
+  enabled: true
+  maxDepth: 15
+  maxHeight: 200
+  maxAliases: 30
+  maxRootFields: 20
+
+# The supergraph SDL in files/supergraph.graphql is produced by `rover compose`
+# against the docker-compose topology, so its join__graph routing URLs are bare
+# hostnames such as http://auth-service:3000/graphql. In Kubernetes the Services
+# carry the release prefix (ticketing-auth-service), so every subgraph fetch
+# failed with NXDOMAIN and the router masked it to the client as the unhelpful
+# "Subgraph errors redacted" — the whole federation was down while all 24 pods
+# reported Ready. Rather than hand-edit generated SDL (which the next compose
+# would overwrite), remap the URLs at runtime. Keys are subgraph names exactly as
+# they appear in join__Graph; values are Helm templates rendered with `tpl`.
+subgraphUrlOverrides:
+  enabled: true
+  subgraphs:
+    attendance: "http://{{ .Release.Name }}-attendance-service:3007/graphql"
+    auth: "http://{{ .Release.Name }}-auth-service:3000/graphql"
+    orders: "http://{{ .Release.Name }}-order-service:8082/graphql"
+    payments: "http://{{ .Release.Name }}-payment-service:3002/graphql"
+    tickets: "http://{{ .Release.Name }}-ticket-service:3001/graphql"
+    users: "http://{{ .Release.Name }}-user-service:3004/graphql"
+    venues: "http://{{ .Release.Name }}-venue-service:3003/graphql"
 
 telemetry:
   otlpEndpoint: "http://otel-collector:4317"

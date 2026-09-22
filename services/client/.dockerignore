@@ -1,0 +1,19 @@
+# Host node_modules must never enter the build context: the builder stage does
+# `COPY --from=deps /app/node_modules` and then `COPY . .`, so an un-ignored
+# host tree silently overwrites the correctly-installed one. A stale host copy
+# (next 16.2.11 against the pinned 16.3.3) paired 16.3.3's native swc binary
+# with 16.2.11's JS and broke `pnpm build` with
+# "Error: Missing field `turbopackMemoryEviction`".
+node_modules/
+.next/
+out/
+coverage/
+test-results/
+playwright-report/
+__tests__/
+.git
+.github
+*.log
+*.md
+eslint.config*
+playwright.config.ts
