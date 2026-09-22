@@ -11,7 +11,7 @@
 
 ## Session: 2026-09-23 — feat(scalability): M3 continued — zone spread, a metrics source, and SSE that survives a scale-in ⏳ NOT DEPLOY-VERIFIED
 
-**Branch:** `feat/scalability-m3` (unmerged, no PR). Continues the entry below; same branch, five more commits.
+**Branch:** `feat/scalability-m3` (unmerged, no PR). Continues the entry below; same branch, six more commits. M3 is now C1, C2, E1, E2, E3, E5, E6 done and C3, E4 open — but **M3's exit criterion is "HPA scales on real metrics; pool budget holds at HPA max with no connection refusals", which needs a cluster.** M3 cannot close here no matter what else lands.
 
 ### C1 follow-up — make the Node pool defaults match the budget (`c07d75c`)
 
@@ -72,6 +72,21 @@ Nothing replays SSE events — there is no event log — so a client that has mi
 
 **E5 is now complete.** Still open in SR-27: the per-section / per-seat N+1 read in `hold/manager.go:229-248`. Also worth knowing: `services/client` has **no SSE consumer at all** yet, so the client half of the cursor contract is unexercised by anything.
 
+### E2 / SR-09 — install Karpenter so the cluster can add nodes (`05b60e0`)
+
+The cluster carried `karpenter.sh/discovery` tags and no Karpenter. The only thing that could add capacity was the managed node group's `desired_size`, which nothing changes automatically — so an HPA wanting more pods than the nodes can hold left them Pending.
+
+This is a hard prerequisite for E3, not an optimisation. E3 made the charts spread with `whenUnsatisfiable: DoNotSchedule`, which means a pod with no room in its zone does *not* fall back to another zone: it waits for a node. Without a node autoscaler that wait never ends.
+
+- **`terraform-aws-modules/eks//modules/karpenter`** — v1 permissions, EKS Pod Identity rather than IRSA (no OIDC trust policy and no service-account annotation to keep in sync with the Helm values), node IAM role plus SSM, and the interruption SQS queue that carries spot reclaims and scheduled maintenance. The submodule creates its own EKS access entry by default, so the node role can join the cluster without a dependency cycle back through the cluster module.
+- **`helm_release` for the controller** — pinned version (repo rule I-04; a controller that silently upgrades itself can start terminating nodes differently after an unrelated apply) and pinned to the managed node group via `nodeSelector`. Karpenter must not run on nodes Karpenter manages. The managed node group stays for exactly this reason: a cluster whose only capacity comes from a controller running on that capacity cannot start.
+- **NodePool + EC2NodeClass as a small local chart**, not `kubernetes_manifest`. `kubernetes_manifest` reads a CRD's schema during *plan*, which cannot work on the apply that installs the CRDs. On-demand only (spot is a cost decision that wants a soak, not a default), c/m/r gen>3, nothing smaller than `medium`, a **200 vCPU ceiling** as the blast-radius limit against a runaway HPA, consolidation with a **one-node** disruption budget, **30-day expiry** so AMI patches land, and a **5m termination grace** that clears the fleet's longest `terminationGracePeriodSeconds` (30 s) with a wide margin — consolidation must not cut venue-service's SSE streams, which is the thing E5 exists to prevent.
+- **VPC: `karpenter.sh/discovery` on the private subnets.** Without it the EC2NodeClass discovers no subnets and provisions nothing, which presents exactly like a full cluster — Pending pods and no error anywhere.
+
+**A verification finding worth keeping:** `terraform init -backend=false` inside `infra/terraform/modules/eks` works, and `terraform validate` passes there, even though the *environments* declare `required_version >= 1.7.0` and the local binary is 1.5.4. Module directories carry no `required_version`, so they can be validated standalone. That is how this change got a real syntax-and-schema check — including that every argument passed to the Karpenter submodule and every output read from it actually exists. (The 797 MB `.terraform` directory it downloads was removed afterwards.)
+
+**Two caveats are written into the code rather than left implicit:** the EKS module applies its module-level tags to both the cluster and node security groups, so `securityGroupSelectorTerms` may match two — check on first apply; and Helm installs a chart's `crds/` on first install but never on upgrade, so bumping the Karpenter version across an API change needs the CRDs applied out of band first.
+
 ### Verification
 
 | Check | Result |
@@ -84,14 +99,17 @@ Nothing replays SSE events — there is no event log — so a client that has mi
 | `helm template` — staging, prod | pass, values confirmed in the rendered output |
 | `helm template` — default overlay | **fails**, pre-existing Bitnami redis image-verification error; reproduced with the change stashed |
 | `kubeconform` | **not run** — not installed locally; CI runs it |
-| `terraform validate` | **not run** — local binary 1.5.4, config requires ≥ 1.7.0 |
+| `terraform fmt -check -recursive infra/terraform/` | pass |
+| `terraform validate` (`modules/eks`, standalone init) | **pass** — see the E2 section; the *environments* still cannot be validated locally (1.5.4 vs ≥ 1.7.0) |
+| `helm lint` / `helm template` — karpenter-nodepool chart | pass, rendered manifests parse as YAML |
+| `terraform plan` against AWS | **not run** — no credentials, no account, and apply is an owner-only hard stop |
 | Anything against a cluster | **not run** — there is no cluster |
 
 ### Not done
 
 - **Nothing here is deploy-verified.** The preStop/endpoint-removal timing, the HPA `behavior` block, the zone spread and metrics-server have all been reasoned about and rendered, never observed.
 - **C3 (PgBouncer) deliberately deferred.** It needs `DATABASE_URL` split into discrete host/user/password across `setup.sh`, the `Makefile`, ExternalSecrets and Secrets Manager, plus a new 6×-aliased subchart and a PgBouncer auth decision (`auth_query` vs userlist under SCRAM) — none of it verifiable without a cluster. Note that plan decision #4 (one shared RDS instance) makes C3 a **prerequisite** for A3, not an optimisation: 380 fleet-wide connections need `max_connections` ≥ 475, which constrains the instance class.
-- **E2 (Karpenter)** cloud-only, open. **E4 (KEDA)** deferred by plan decision #3.
+- **E4 (KEDA)** deferred by plan decision #3.
 - `infra/helm/Chart.lock` is still deliberately dirty and wants its own commit.
 - No PR opened; no merge to main.
 
