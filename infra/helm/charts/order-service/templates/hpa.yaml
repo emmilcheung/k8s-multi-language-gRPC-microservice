@@ -18,10 +18,21 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+    {{- /*
+    Memory is opt-in here, unlike the other service charts, because this one runs
+    a JVM: the heap is reserved up front and released back lazily, so RSS tracks
+    what the process has ever needed rather than what it needs now. As a scaling
+    signal that is close to a constant — it stays high after load subsides, which
+    blocks scale-in, and it rises during GC pressure, which is when adding pods
+    helps least. Set targetMemoryUtilizationPercentage only if you have a reason
+    the heap sizing does not already cover.
+    */}}
+    {{- if .Values.autoscaling.targetMemoryUtilizationPercentage }}
     - type: Resource
       resource:
         name: memory
         target:
           type: Utilization
           averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
 {{- end }}
