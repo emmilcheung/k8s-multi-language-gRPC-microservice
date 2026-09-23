@@ -2,8 +2,19 @@
 # Overridden per-environment in values-local.yaml (minikube) and values-prod.yaml (EKS).
 
 global:
-  # Image registry prefix — set to minikube's local registry or GHCR
-  imageRegistry: "ghcr.io/your-org"
+  # Registry prefix for this repo's own service images (the nine charts under
+  # charts/ that build from services/). Empty means a bare repository name,
+  # which is what minikube's in-cluster Docker daemon serves locally.
+  serviceImageRegistry: "ghcr.io/your-org"
+  # SR-40. Deliberately empty, and it must stay empty. The Bitnami subcharts
+  # (postgresql, mongodb, redis, kafka) read global.imageRegistry and let it
+  # override their own image.registry, so a first-party registry here rewrites
+  # docker.io/bitnami/* to images that registry does not host: ImagePullBackOff
+  # at deploy time, and redis's NOTES.txt aborts the whole `helm template` run
+  # before that. Neither a per-chart image.registry nor a subchart-scoped
+  # global can undo it — Helm copies parent globals over the subchart's own.
+  # First-party charts read serviceImageRegistry above instead.
+  imageRegistry: ""
   # Image pull policy: Always in production, IfNotPresent in local
   imagePullPolicy: IfNotPresent
   # Namespace all resources land in
@@ -170,7 +181,7 @@ apollo-router:
   replicaCount: 2
   image:
     # Apollo Router is published to GHCR — not built from this repo's source.
-    # The repository field is the full image path; global.imageRegistry is NOT prepended.
+    # The repository field is the full image path; global.serviceImageRegistry is NOT prepended.
     repository: ghcr.io/apollographql/router
     tag: "v2.1.1"
   resources:

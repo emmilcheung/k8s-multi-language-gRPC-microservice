@@ -1,7 +1,7 @@
 # Global defaults — overridden by the umbrella chart when rendered together.
 # These safe defaults allow standalone `helm lint` to succeed.
 global:
-  imageRegistry: ""
+  serviceImageRegistry: ""
   imagePullPolicy: IfNotPresent
 
 replicaCount: 2

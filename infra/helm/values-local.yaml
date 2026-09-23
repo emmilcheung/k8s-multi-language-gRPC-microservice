@@ -13,7 +13,7 @@
 
 global:
   # Use images built directly into minikube's Docker daemon
-  imageRegistry: ""
+  serviceImageRegistry: ""
   imagePullPolicy: IfNotPresent
   namespace: ticketing
   security:

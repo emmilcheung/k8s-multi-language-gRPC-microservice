@@ -31,10 +31,10 @@ Service account name — uses .Values.serviceAccount.name if set, otherwise full
 
 {{/*
 Full image reference: [registry/]repository:tag
-Prepends global.imageRegistry when set (non-empty), otherwise uses repository directly.
+Prepends global.serviceImageRegistry when set (non-empty), otherwise uses repository directly.
 */}}
 {{- define "order-service.image" -}}
-{{- $registry := .Values.global.imageRegistry | default "" }}
+{{- $registry := .Values.global.serviceImageRegistry | default "" }}
 {{- $repo := .Values.image.repository }}
 {{- $tag := .Values.image.tag | default "latest" }}
 {{- if $registry }}

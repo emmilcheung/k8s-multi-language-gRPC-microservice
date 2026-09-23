@@ -474,7 +474,7 @@ jobs:
             echo "Validating ${chart_name}"
             helm template "${chart_name}" "${chart}" \
               --set global.serviceMesh.enabled=false \
-              --set global.imageRegistry='' \
+              --set global.serviceImageRegistry='' \
               | kubeconform -summary -strict -ignore-missing-schemas
           done
 
