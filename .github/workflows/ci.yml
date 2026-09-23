@@ -459,11 +459,11 @@ jobs:
 
       - name: Enforce no latest tags in infra Helm values
         run: |
-          if grep -RE "tag:\s*latest" infra/helm; then
-            echo "FAIL: tag: latest is not allowed under infra/helm"
+          if grep -RE "tag:\s*latest" infra/helm infra/queue-system; then
+            echo "FAIL: tag: latest is not allowed under infra/helm or infra/queue-system"
             exit 1
           fi
-          echo "OK: no tag: latest found under infra/helm"
+          echo "OK: no tag: latest found under infra/helm or infra/queue-system"
 
       - name: Validate rendered service charts with kubeconform
         run: |

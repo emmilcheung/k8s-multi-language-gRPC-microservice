@@ -153,7 +153,7 @@ FIFO; admission tokens are HMAC-signed and **single-use** (replay-proof).
   page + API on `:4100`. Arm the client gate via env (see `services/client/.env.example`):
   `QUEUE_GATE_ARMED=true QUEUE_EVENT_ID=<id> QUEUE_URL=http://localhost:4100 QUEUE_HMAC_SECRET=<32+ chars>`.
 - **Kubernetes:** standalone chart `infra/queue-system/` (own namespace + Redis, HPA, PDB,
-  Ingress on the queue subdomain): `helm install queue infra/queue-system --set queue.hmacSecret=<secret>`.
+  Ingress on the queue subdomain): `helm install queue infra/queue-system --set image.tag=<tag> --set queue.hmacSecret=<secret>`.
 - **Arm/disarm:** flip `QUEUE_GATE_ARMED` on the connector and the event config — the gate and
   the Kong reserve-mutation backstop are inert until armed.
 

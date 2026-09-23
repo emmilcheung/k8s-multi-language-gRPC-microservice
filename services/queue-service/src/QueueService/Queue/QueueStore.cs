@@ -8,10 +8,14 @@ public sealed class QueueStore(IConnectionMultiplexer mux)
 {
     private IDatabase Db => mux.GetDatabase();
 
-    private static string Cfg(string e) => $"q:{e}:cfg";
-    private static string PreQueue(string e) => $"q:{e}:prequeue";
-    private static string LateCtr(string e) => $"q:{e}:late";
-    private static string LatePos(string e) => $"q:{e}:latepos";
+    // SR-17. The event id sits inside a literal hash tag (`{{` is a literal brace
+    // in an interpolated string), so every key for one event hashes to the same
+    // Redis Cluster slot. FreezeLua and EnqueueLateLua each take two of these keys
+    // in one script, which a cluster refuses with CROSSSLOT unless they share a slot.
+    private static string Cfg(string e) => $"q:{{{e}}}:cfg";
+    private static string PreQueue(string e) => $"q:{{{e}}}:prequeue";
+    private static string LateCtr(string e) => $"q:{{{e}}}:late";
+    private static string LatePos(string e) => $"q:{{{e}}}:latepos";
 
     // Atomic: add to the pre-queue under a hard size cap (NX), then (re)set the
     // key TTL. Returns false iff the cap is reached and the member is not present.
