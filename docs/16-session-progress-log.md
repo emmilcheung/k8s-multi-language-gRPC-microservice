@@ -9,6 +9,34 @@
 
 ---
 
+## Session: 2026-09-29 — SR-40, SR-17, SR-16 merged; bookworm-slim openssl refresh ✅ MERGED (not deploy-verified)
+
+**PRs:** #148 (`8d822da`), #145 (`bd70891`), #146 (`7291bf1`), #147 (`72082e0`), all merged by the owner.
+
+Three register items, each outside M3's scope, landed from sibling branches cut from `main` @ `3e66626`.
+The owner skipped the grouped smoke run, so none of them has met a live cluster.
+
+- **SR-40, #145.** First-party charts now read `global.serviceImageRegistry`.
+  `global.imageRegistry` is pinned to `""`, so Bitnami subcharts keep pulling from docker.io instead of the private registry.
+- **SR-17, #146.** Every queue-service Redis key for an event now shares the `{eventId}` hash tag, so multi-key scripts are Redis Cluster safe.
+  A test pins the slot calculation against a CRC16 oracle.
+  The queue-system chart pins its image (`SET_BY_CI`, `redis:7.4.2-alpine`), the no-`latest` CI guard now covers `infra/queue-system`, and the single-writer Redis uses the `Recreate` strategy.
+  **Rollout note:** the key rename orphans queue state already held in Redis. Do not deploy during an on-sale.
+- **SR-16, #147.** `OrderExpirySweepJob` is a Postgres backstop for orders whose expiration-service job was lost.
+  It sweeps `CREATED` and `AWAITING_PAYMENT` orders past `expires_at` plus a grace period (defaults: 300 s grace, 200 per batch, every 60 s; `ORDER_EXPIRY_SWEEP_*`).
+  It runs one transaction per order, and the `@Version` check makes a race between replicas safe.
+  `V7` adds the partial index `idx_orders_open_expires_at`, and a Testcontainers EXPLAIN test pins its use.
+  Flyway runs the index as a plain `CREATE INDEX`, which takes a SHARE lock, so apply V7 outside an on-sale.
+
+**CI incident, #148.** #145 and #146 failed Trivy on openssl CVEs (CVE-2026-42767 and others) and tzdata DLA-4792-1, all fixed by Debian on 2026-09-28.
+The GHA buildx cache keys on the FROM digest plus the RUN text, so the `apt-get upgrade` layer stayed stale.
+Bumping the `bookworm-slim` digest in the expiration, ticket, attendance and venue Dockerfiles invalidated that layer.
+The Trivy severity gate was not narrowed.
+
+**Owner decisions still open:** a daily cache-bust build-arg so fresh Debian fixes don't wait for a digest bump; the grouped smoke / deploy verification of these three items.
+
+---
+
 ## Session: 2026-09-22 — feat(kong,helm): M2 agent half — topics, an unloadable gateway, a meshed broker port, external secrets, a Mongo replica set ⏳ PARTLY DEPLOY-VERIFIED (E2E not run)
 
 **Branch:** `feat/scalability-m2` (cut from `fix/local-cluster-bringup`, which is still unmerged and holds the chart fixes this depends on) · commits `dac1dec`, `f1c2f97`, `f321cd9`, `ceefb4a`, `4b95bc9`, `4f54974`, `44a167d`
