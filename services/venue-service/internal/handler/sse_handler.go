@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"fmt"
+	"math/rand/v2"
 	"net/http"
 
 	"github.com/acme/venue-service/internal/sse"
@@ -12,7 +14,35 @@ import (
 type SSEPublisher interface {
 	Subscribe(planID string) *sse.Client
 	Unsubscribe(c *sse.Client)
+	Draining() <-chan struct{}
+	IsDraining() bool
 }
+
+// Reconnect spread during a drain. When a pod goes away every stream it holds
+// reconnects at once, and they all land on the remaining pods together — the
+// scale-in equivalent of a thundering herd, at exactly the moment there is less
+// capacity to absorb it. SSE lets the server set the client's reconnect delay
+// with a `retry:` field, so each stream is given its own delay drawn from this
+// window instead of the browser default (~3 s for everyone, simultaneously).
+const (
+	reconnectDelayMinMS = 500
+	reconnectDelayMaxMS = 5000
+)
+
+// resyncFrame tells the client its seat map can no longer be trusted and it
+// must re-read GET /api/seating-plans/:planId/availability, whose response
+// carries the version to resume from.
+//
+// There is no event log to replay from, so a client that has missed anything —
+// because it reconnected onto a different pod, or because its buffer overflowed
+// — cannot be caught up with deltas. Saying so explicitly is the only honest
+// option; the alternative is a client that keeps applying changes to a seat map
+// that silently diverged, and shows seats as free that are not.
+const resyncFrame = "event: resync\ndata: {\"reason\":\"%s\"}\n\n"
+
+// lastEventIDHeader is the header a browser EventSource replays automatically
+// on reconnect, carrying the last `id:` it saw.
+const lastEventIDHeader = "Last-Event-ID"
 
 // SSEHandler handles GET /api/seating-plans/:planId/events (text/event-stream).
 type SSEHandler struct {
@@ -44,6 +74,16 @@ func (h *SSEHandler) Stream(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResponse("planId is required"))
 	}
 
+	// Refuse to open a stream we are about to close. Between SIGTERM and the
+	// endpoint removal reaching every kube-proxy, this pod still receives new
+	// connections; handing one a stream would only make the client reconnect a
+	// second time.
+	if h.broadcaster.IsDraining() {
+		c.Response().Header().Set("Retry-After", "1")
+		return c.JSON(http.StatusServiceUnavailable,
+			errorResponse("venue-service is shutting down; retry"))
+	}
+
 	w := c.Response()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -68,15 +108,49 @@ func (h *SSEHandler) Stream(c echo.Context) error {
 		flusher.Flush()
 	}
 
+	// A cursor on the request means this is a reconnect, so the client held a
+	// seat map built from events this pod never saw and cannot resend.
+	if cursor := c.Request().Header.Get(lastEventIDHeader); cursor != "" {
+		h.log.Info("SSE client reconnected with a cursor; asking it to resync",
+			zap.String("planId", planID), zap.String("lastEventId", cursor))
+		if _, writeErr := fmt.Fprintf(w, resyncFrame, "reconnect"); writeErr == nil {
+			flusher.Flush()
+		}
+	}
+
 	ctx := c.Request().Context()
 	for {
 		select {
 		case <-ctx.Done():
 			h.log.Info("SSE client disconnected", zap.String("planId", planID))
 			return nil
+		case <-h.broadcaster.Draining():
+			// Ending the stream is what makes the client reconnect — an SSE
+			// client treats a closed stream as its cue. The retry field sets
+			// how long it waits, jittered so the pod's streams do not all come
+			// back at the same instant.
+			delay := reconnectDelayMinMS +
+				rand.IntN(reconnectDelayMaxMS-reconnectDelayMinMS)
+			if _, writeErr := fmt.Fprintf(w, "retry: %d\n\n", delay); writeErr == nil {
+				flusher.Flush()
+			}
+			h.log.Info("SSE stream released for shutdown",
+				zap.String("planId", planID), zap.Int("retryMs", delay))
+			return nil
 		case msg, open := <-client.MsgChan:
 			if !open {
 				return nil
+			}
+			// Check before writing: the message in hand is the one after the
+			// gap, so the client must be told to resync before it applies it.
+			if client.Gapped() {
+				h.log.Warn("SSE client missed messages; asking it to resync",
+					zap.String("planId", planID))
+				if _, writeErr := fmt.Fprintf(w, resyncFrame, "buffer-overflow"); writeErr != nil {
+					h.log.Warn("SSE write error",
+						zap.String("planId", planID), zap.Error(writeErr))
+					return nil
+				}
 			}
 			if _, writeErr := w.Write([]byte(msg)); writeErr != nil {
 				h.log.Warn("SSE write error",
@@ -84,8 +158,6 @@ func (h *SSEHandler) Stream(c echo.Context) error {
 				return nil
 			}
 			flusher.Flush()
-		case <-c.Request().Context().Done():
-			return nil
 		}
 	}
 }

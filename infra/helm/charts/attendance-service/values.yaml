@@ -13,6 +13,10 @@ env:
   HTTP_PORT: "3007"
   LOG_LEVEL: info
   TICKET_SERVICE_URL: "ticket-service:50051"
+  # pgx pool ceiling per pod. The database sees this times the pod
+  # count, so read it with autoscaling.maxReplicas below; the fleet-wide
+  # budget is in docs/05-data-conventions.md.
+  DB_POOL_MAX: "10"
 
 secretRef: attendance-service-secrets  # contains DATABASE_URL, KAFKA_BROKERS, QR_SIGNING_KEY, TICKET_SERVICE_URL, X_USER_ID_SIGNING_KEY
 

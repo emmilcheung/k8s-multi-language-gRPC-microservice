@@ -1,0 +1,29 @@
+# Every value here is supplied by modules/eks/main.tf. The defaults exist so the
+# chart can be rendered and linted on its own.
+
+# EKS cluster name; also the value of the karpenter.sh/discovery tag on the
+# subnets and security groups Karpenter is allowed to use.
+clusterName: ticketing
+
+# IAM role Karpenter-launched nodes assume. Created by the Karpenter submodule.
+nodeIamRole: ""
+
+capacityTypes:
+  - on-demand
+
+instanceCategories:
+  - c
+  - m
+  - r
+
+# Ceiling on total vCPU across all Karpenter-managed nodes.
+cpuLimit: 200
+
+# How long a node sits empty or underutilised before it is removed.
+consolidateAfter: 2m
+
+# Maximum node lifetime, so AMI patches land.
+nodeExpiry: 720h
+
+# Root EBS volume size in GiB.
+volumeSizeGi: 50

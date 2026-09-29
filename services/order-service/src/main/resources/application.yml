@@ -15,7 +15,11 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 10
+      # Sized against the connection budget in docs/05-data-conventions.md:
+      # this number times the HPA maxReplicas is what the database sees from this
+      # service. Overridable so the pool and the replica ceiling can be tuned
+      # together in the chart rather than requiring a rebuild.
+      maximum-pool-size: ${DB_POOL_MAX:8}
       connection-timeout: 30000
       idle-timeout: 600000
       max-lifetime: 1800000

@@ -60,7 +60,15 @@ func main() {
 		log.Fatal("database migration failed", zap.Error(err))
 	}
 
-	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		log.Fatal("invalid DATABASE_URL", zap.Error(err))
+	}
+	// Stated rather than inherited: pgx defaults to max(4, GOMAXPROCS), which
+	// moves with the container's CPU limit, so the connection budget would
+	// change whenever someone retuned resources. See DB_POOL_MAX in config.
+	poolCfg.MaxConns = int32(cfg.DBPoolMax)
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
 	if err != nil {
 		log.Fatal("failed to create postgres pool", zap.Error(err))
 	}

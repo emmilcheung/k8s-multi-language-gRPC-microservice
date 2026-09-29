@@ -293,7 +293,7 @@ secrets: _check-secrets _namespace
 		\
 		_apply user-service-secrets \
 			--from-literal=DATABASE_URL="postgresql://users_user:users-local-secret@ticketing-postgres-users:5432/users_db" \
-			--from-literal=DB_POOL_MAX="20" \
+			--from-literal=DB_POOL_MAX="12" \
 			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
 	'
 	@echo "All secrets created."
@@ -452,6 +452,8 @@ _minikube-start:
 		echo "Starting minikube (5 CPU, 7851 MB RAM)..."; \
 		minikube start --cpus=5 --memory=7851 --disk-size=50g --driver=docker; \
 	fi
+	@echo "Enabling metrics-server (E1/SR-09 — HPAs have no signal without it)..."
+	@minikube addons enable metrics-server
 
 _namespace:
 	@kubectl create namespace $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null

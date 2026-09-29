@@ -14,6 +14,9 @@ env:
 
 # Name of a Kubernetes Secret containing:
 #   DATABASE_URL, DB_POOL_MAX
+# DB_POOL_MAX must stay within the connection budget in docs/05-data-conventions.md:
+# at autoscaling.maxReplicas below, 12 per pod is the ceiling. It lives in the
+# Secret rather than here, so nothing in this chart can enforce it.
 secretRef: user-service-secrets
 
 # External Secrets (off unless global.externalSecrets.enabled is true). Uncomment

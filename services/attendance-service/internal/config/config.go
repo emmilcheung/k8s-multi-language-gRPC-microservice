@@ -19,6 +19,7 @@ type Config struct {
 	Port                  int
 	LogLevel              string
 	DatabaseURL           string
+	DBPoolMax             int
 	KafkaBrokers          []string
 	KafkaSecurityProtocol string
 	KafkaSASLMechanism    string
@@ -40,6 +41,17 @@ func Load() (*Config, error) {
 
 	env := getEnv("APP_ENV", "development")
 	logLevel := getEnv("LOG_LEVEL", "info")
+
+	// Postgres pool ceiling for this process. What the database sees is this
+	// number times the pod count, so it belongs next to the HPA maxReplicas that
+	// multiplies it; see the connection budget in docs/05-data-conventions.md.
+	// pgx's own default is max(4, GOMAXPROCS), which varies with the CPU limit
+	// and so is not a number anyone budgeted for.
+	dbPoolMaxStr := getEnv("DB_POOL_MAX", "10")
+	dbPoolMax, err := strconv.Atoi(dbPoolMaxStr)
+	if err != nil || dbPoolMax < 1 {
+		errs = append(errs, fmt.Sprintf("DB_POOL_MAX must be a positive integer, got %q", dbPoolMaxStr))
+	}
 
 	portStr := getEnv("HTTP_PORT", "3007")
 	port, err := strconv.Atoi(portStr)
@@ -128,6 +140,7 @@ func Load() (*Config, error) {
 		Port:                  port,
 		LogLevel:              logLevel,
 		DatabaseURL:           databaseURL,
+		DBPoolMax:             dbPoolMax,
 		KafkaBrokers:          kafkaBrokers,
 		KafkaSecurityProtocol: kafkaSecurityProtocol,
 		KafkaSASLMechanism:    kafkaSASLMechanism,

@@ -18,6 +18,7 @@ type Config struct {
 	LogLevel              string
 	MongoURI              string
 	MongoDB               string
+	MongoMaxPoolSize      int
 	KafkaBrokers          []string
 	KafkaSecurityProtocol string
 	KafkaSASLMechanism    string
@@ -57,6 +58,16 @@ func Load() (*Config, error) {
 	}
 
 	mongoDB := getEnv("MONGO_DB", "tickets")
+
+	// Per-pod MongoDB connection pool. The budget that matters is
+	// MONGO_MAX_POOL_SIZE x HPA maxReplicas, summed over every service pointed at
+	// the same deployment, so this is an env value rather than a constant: it has
+	// to be tunable next to the replica count that multiplies it.
+	mongoMaxPoolStr := getEnv("MONGO_MAX_POOL_SIZE", "50")
+	mongoMaxPoolSize, err := strconv.Atoi(mongoMaxPoolStr)
+	if err != nil || mongoMaxPoolSize < 1 {
+		errs = append(errs, fmt.Sprintf("MONGO_MAX_POOL_SIZE must be a positive integer, got %q", mongoMaxPoolStr))
+	}
 	redisURL := getEnv("REDIS_URL", "")
 
 	kafkaBrokersStr := os.Getenv("KAFKA_BROKERS")
@@ -114,6 +125,7 @@ func Load() (*Config, error) {
 		LogLevel:              logLevel,
 		MongoURI:              mongoURI,
 		MongoDB:               mongoDB,
+		MongoMaxPoolSize:      mongoMaxPoolSize,
 		KafkaBrokers:          kafkaBrokers,
 		KafkaSecurityProtocol: kafkaSecurityProtocol,
 		KafkaSASLMechanism:    kafkaSASLMechanism,

@@ -76,7 +76,15 @@ func main() {
 	}
 
 	// PostgreSQL connection pool.
-	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		log.Fatal("invalid DATABASE_URL", zap.Error(err))
+	}
+	// Stated rather than inherited: pgx defaults to max(4, GOMAXPROCS), which
+	// moves with the container's CPU limit, so the connection budget would
+	// change whenever someone retuned resources. See DB_POOL_MAX in config.
+	poolCfg.MaxConns = int32(cfg.DBPoolMax)
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
 	if err != nil {
 		log.Fatal("failed to create postgres pool", zap.Error(err))
 	}
@@ -299,6 +307,14 @@ func main() {
 	case <-egCtx.Done():
 		log.Error("server error — initiating shutdown")
 	}
+
+	// Release the SSE streams before asking the HTTP server to shut down.
+	// e.Shutdown waits for in-flight requests to finish, and an SSE stream never
+	// finishes on its own — without this it would block for the full timeout
+	// below and then cut every connection mid-frame. Draining first lets each
+	// stream end cleanly, with a jittered reconnect delay so the clients do not
+	// all return to the surviving pods at once.
+	sseBroadcaster.Drain()
 
 	grpcCancel()
 	consumerCancel()
