@@ -12,6 +12,7 @@ import {
   HttpStatus,
   ForbiddenException,
   UnauthorizedException,
+  UseFilters,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { OAuthService } from './oauth.service';
@@ -28,6 +29,10 @@ import type {
   ConsentResult,
 } from './oauth.dto';
 import { UserIdSignatureValidator } from '../../common/security/user-id-signature.validator';
+import {
+  OAuthExceptionFilter,
+  OAuthRegistrationExceptionFilter,
+} from './oauth-exception.filter';
 
 @Controller()
 export class OAuthController {
@@ -50,6 +55,7 @@ export class OAuthController {
   // POST /oauth/token
   @Post('oauth/token')
   @HttpCode(HttpStatus.OK)
+  @UseFilters(OAuthExceptionFilter)
   async token(@Body() body: TokenBody, @Req() req: Request) {
     return this.oauthService.token(body, req);
   }
@@ -57,6 +63,7 @@ export class OAuthController {
   // POST /oauth/revoke
   @Post('oauth/revoke')
   @HttpCode(HttpStatus.OK)
+  @UseFilters(OAuthExceptionFilter)
   async revoke(@Body() body: RevokeBody): Promise<{ ok: boolean }> {
     await this.oauthService.revoke(body);
     return { ok: true };
@@ -98,6 +105,7 @@ export class OAuthController {
   // POST /oauth/clients/register — RFC 7591 dynamic client registration (public, no JWT)
   @Post('oauth/clients/register')
   @HttpCode(HttpStatus.CREATED)
+  @UseFilters(OAuthRegistrationExceptionFilter)
   async register(
     @Body() body: RegisterClientBody,
   ): Promise<RegisterClientResponse> {
