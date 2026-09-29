@@ -1,4 +1,5 @@
 using QueueService.Queue;
+using StackExchange.Redis;
 using Xunit;
 
 [Collection("redis")]
@@ -83,9 +84,66 @@ public class QueueStoreTests(RedisFixture fx)
     {
         var store = NewStore(out var eid);
         await store.EnqueuePreQueueAsync(eid, "a", 0.1, NoCap, ttlSeconds: 120);
-        var ttl = await fx.Mux.GetDatabase().KeyTimeToLiveAsync($"q:{eid}:prequeue");
+        var ttl = await fx.Mux.GetDatabase().KeyTimeToLiveAsync($"q:{{{eid}}}:prequeue");
         Assert.NotNull(ttl);
         Assert.InRange(ttl!.Value.TotalSeconds, 1, 120);
+    }
+
+    // SR-17. FreezeLua touches cfg + prequeue and EnqueueLateLua touches latepos +
+    // late in one script. On a Redis Cluster (or ElastiCache in cluster mode) a
+    // script whose keys hash to different slots is refused with CROSSSLOT, so the
+    // freeze never happens and no latecomer is ever given a position: the waiting
+    // room stops admitting at exactly the moment an on-sale opens.
+    //
+    // The test Redis is standalone, where the client's own HashSlot returns -1 for
+    // every key (so it would pass vacuously) and CLUSTER KEYSLOT is refused. KeySlot
+    // below is the cluster spec's routing function instead, pinned to values taken
+    // from a real cluster-enabled redis:7 so it cannot drift from the server's.
+    private static int KeySlot(string key)
+    {
+        var open = key.IndexOf('{');
+        if (open >= 0)
+        {
+            var close = key.IndexOf('}', open + 1);
+            if (close > open + 1) key = key.Substring(open + 1, close - open - 1);
+        }
+        ushort crc = 0; // CRC16/XMODEM: poly 0x1021, init 0
+        foreach (var b in System.Text.Encoding.UTF8.GetBytes(key))
+        {
+            crc ^= (ushort)(b << 8);
+            for (var i = 0; i < 8; i++)
+                crc = (crc & 0x8000) != 0 ? (ushort)((crc << 1) ^ 0x1021) : (ushort)(crc << 1);
+        }
+        return crc % 16384;
+    }
+
+    [Theory]
+    [InlineData("somekey", 11058)]
+    [InlineData("foo{hash_tag}", 2515)]
+    [InlineData("q:E-abc:cfg", 3073)]      // the pre-SR-17 layout: cfg and prequeue
+    [InlineData("q:E-abc:prequeue", 5656)] // in different slots -> CROSSSLOT
+    [InlineData("q:{E-abc}:cfg", 8481)]
+    [InlineData("q:{E-abc}:prequeue", 8481)]
+    [InlineData("{}x", 10595)]             // empty tag: whole key is hashed
+    [InlineData("a{}b{c}", 7353)]          // only the first '{' counts
+    public void KeySlot_matches_a_real_cluster(string key, int slot)
+        => Assert.Equal(slot, KeySlot(key));
+
+    [Fact]
+    public async Task All_keys_for_one_event_share_a_hash_slot()
+    {
+        var store = NewStore(out var eid);
+        await store.SetConfigAsync(new EventConfig(eid, DateTimeOffset.UtcNow, 100, true, null));
+        await store.EnqueuePreQueueAsync(eid, "a", 0.1, NoCap, Ttl);
+        var frozen = await store.FreezePreQueueSizeAsync(eid);
+        await store.EnqueueLateAsync(eid, "L1", frozen, Ttl);
+
+        var server = fx.Mux.GetServer(fx.Mux.GetEndPoints()[0]);
+        var keys = new List<RedisKey>();
+        await foreach (var k in server.KeysAsync(pattern: $"*{eid}*")) keys.Add(k);
+
+        Assert.Equal(4, keys.Count); // cfg, prequeue, late, latepos
+        Assert.Single(keys.Select(k => KeySlot(k!)).Distinct());
     }
 
     [Fact]
@@ -109,7 +167,7 @@ public class QueueStoreTests(RedisFixture fx)
             Enumerable.Range(0, 50).Select(_ => store.EnqueueLateAsync(eid, "same", 10, Ttl)));
 
         Assert.All(positions, p => Assert.Equal(10, p));               // all identical
-        var counter = (long)await fx.Mux.GetDatabase().StringGetAsync($"q:{eid}:late");
+        var counter = (long)await fx.Mux.GetDatabase().StringGetAsync($"q:{{{eid}}}:late");
         Assert.Equal(1, counter);                                      // exactly one slot consumed
     }
 }

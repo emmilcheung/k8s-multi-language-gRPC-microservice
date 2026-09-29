@@ -1,6 +1,9 @@
 image:
   repository: queue-service
-  tag: latest
+  # Set per deploy (--set image.tag=<git sha>), like every chart under infra/helm.
+  # Never `latest` (repo rule I-04): with IfNotPresent, nodes keep whatever
+  # `latest` they cached first, so replicas silently run different builds.
+  tag: SET_BY_CI
   pullPolicy: IfNotPresent
 
 # Used only when autoscaling.enabled is false.
@@ -27,7 +30,10 @@ pdb:
   minAvailable: 2
 
 redis:
-  image: redis:7-alpine
+  # Exact version, not a floating `7-alpine`: this pod holds queue state, and a
+  # floating tag lets a reschedule onto a fresh node quietly change the Redis
+  # version underneath the AOF file the old one wrote.
+  image: redis:7.4.2-alpine
   # AOF persistence so a restart recovers queue state (avoids fail-open where an
   # empty Redis + advancing serving(t) instantly admits everyone).
   persistence:

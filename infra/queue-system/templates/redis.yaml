@@ -19,6 +19,13 @@ metadata:
   labels: {{- include "queue-system.labels" . | nindent 4 }}
 spec:
   replicas: 1
+  # SR-17. One writer on a ReadWriteOnce volume. The default RollingUpdate
+  # starts the new pod before stopping the old one, which either wedges on a
+  # Multi-Attach error (new pod on another node) or runs two AOF writers on the
+  # same /data (same node). Recreate stops the old pod first. The brief outage
+  # is the cost of a single-pod Redis; for no outage, set redis.external.host.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: queue-redis
