@@ -28,11 +28,14 @@ This skill is used to validate code hygiene for changed services after an agent 
    - `cd services/payment-service && pnpm lint && pnpm tsc --noEmit`
    - `cd services/user-service && pnpm lint && pnpm tsc --noEmit`
    - `cd services/client && pnpm lint && pnpm tsc --noEmit`
-   - `cd services/ticket-service && go vet ./...`
-   - `cd services/expiration-service && go vet ./...`
-   - `cd services/venue-service && go vet ./...`
+   - `cd services/ticket-service && go vet ./... && golangci-lint run`
+   - `cd services/expiration-service && go vet ./... && golangci-lint run`
+   - `cd services/venue-service && go vet ./... && golangci-lint run`
+   - `cd services/attendance-service && go vet ./... && golangci-lint run`
    - `cd services/order-service && mvn -q checkstyle:check`
-3. If the change touches additional services, run the corresponding service lint commands from the CI workflow.
+   - `cd services/queue-service && dotnet build -c Release`
+   - Proto changes: `buf lint` (from the repo root, where `buf.yaml` lives)
+3. `.github/workflows/ci.yml` is the source of truth; if it and this list disagree, run what CI runs. `golangci-lint` may not be installed locally — if you skip it, say so in the result.
 4. If any command fails, do not mark the loop complete. Investigate the failure, fix the code, and rerun.
 
 ## CI sync
@@ -44,6 +47,6 @@ This skill is used to validate code hygiene for changed services after an agent 
 ## Notes
 
 - For TypeScript services, `pnpm lint` is the style gate, `pnpm tsc --noEmit` is the type-check gate.
-- For Go services, `go vet ./...` is the lint-style static verification gate.
+- For Go services, `go vet ./...` plus `golangci-lint run` are the static verification gates.
 - For Java, `mvn -q checkstyle:check` is the style gate.
 - The skill is intentionally service-specific so it can scale with the repository’s heterogeneous stack.

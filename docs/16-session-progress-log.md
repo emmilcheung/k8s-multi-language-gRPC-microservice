@@ -9,6 +9,33 @@
 
 ---
 
+## Session: 2026-09-29 — chore(agent): instruction-surface audit against main ⏳ AWAITING REVIEW
+
+Audited the agent instruction surface (`CLAUDE.md`, `AGENTS.md`, service `AGENTS.md`,
+the three project skills, orchestration docs) at `main@d58726c` for rules that had
+drifted from the repo or were written for older models. Service `AGENTS.md` files were
+clean — every prohibition there encodes a real security or business constraint.
+
+Fixed:
+
+- `end-to-end-check` pointed at `services/client/test/**`; the suite lives in `tests/`.
+- `lint-check` claimed CI alignment but omitted `golangci-lint`, `attendance-service`,
+  `queue-service` and `buf lint`; `ci.yml` is now named the source of truth, and a skipped
+  local `golangci-lint` must be reported.
+- `CLAUDE.md` Rule 6 set 4K-per-task / 30K-per-session token limits that every session
+  exceeds at startup; replaced with "keep context lean, say when a task outgrows its size".
+- `AGENTS.md` said `docs/15` has 10 hard stops; it has 12.
+- Orchestration docs pinned model versions (and claimed `Plan` "auto-uses sonnet");
+  now describe roles. Worker templates gain "don't invoke skills or write a plan" —
+  Haiku workers were observed detouring into planning skills.
+- Audit prompt: dropped the hardcoded service list and the "prefer deletion" framing.
+
+**Left open (flag only):** `SUBAGENT_ORCHESTRATION.md` still carries the April WS2–WS9H
+batch history as if current; `CLAUDE.md` Rule 5 addresses LLM calls this repo doesn't
+make; `AGENTS.md` "Last Updated" date is stale. None of the changes were behaviour-probed.
+
+---
+
 ## Session: 2026-09-23 — feat(scalability): M3 continued — zone spread, a metrics source, and SSE that survives a scale-in ⏳ NOT DEPLOY-VERIFIED
 
 **Branch:** `feat/scalability-m3` (unmerged, no PR). Continues the entry below; same branch, six more commits. M3 is now C1, C2, E1, E2, E3, E5, E6 done and C3, E4 open — but **M3's exit criterion is "HPA scales on real metrics; pool budget holds at HPA max with no connection refusals", which needs a cluster.** M3 cannot close here no matter what else lands.

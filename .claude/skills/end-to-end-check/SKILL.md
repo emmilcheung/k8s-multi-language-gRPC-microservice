@@ -10,7 +10,7 @@ This skill is used when a code change may affect application workflows or introd
 ## When to use
 
 - After implementing code changes that touch business logic, API flows, client behavior, or cross-service interactions.
-- When the client E2E test suite under `services/client/test/**/*` needs to be validated or updated.
+- When the client E2E test suite under `services/client/tests/**/*` needs to be validated or updated.
 - When verifying that root-level `docker-compose.yml` infrastructure is available for end-to-end execution.
 
 ## Goals
@@ -25,8 +25,8 @@ This skill is used when a code change may affect application workflows or introd
 ## Process
 
 1. Inspect the diff and changed files to understand what new workflow or logic was introduced.
-2. Identify the relevant client test coverage in `services/client/test/**/*` and the mapping from changed behavior to existing tests.
-3. If coverage is missing, add a focused, resilient E2E test to `services/client/test/**/*` that exercises the changed workflow.
+2. Identify the relevant client test coverage in `services/client/tests/**/*` and the mapping from changed behavior to existing tests.
+3. If coverage is missing, add a focused, resilient E2E test to `services/client/tests/**/*` that exercises the changed workflow.
 4. Before running tests, ensure Docker is available:
    - Use `docker info >/dev/null` or `docker version` to verify the daemon is running.
    - If Docker is not running on macOS, open it with `open -a Docker` and wait until it is ready.

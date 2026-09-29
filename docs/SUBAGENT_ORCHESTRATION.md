@@ -7,12 +7,12 @@ This document records how this project uses the Manager-Worker orchestration pat
 ## Pattern in Use: Manager-Worker
 
 ```text
-Main agent (Sonnet/Opus)  ←─ manages, designs, reviews, validates
+Main agent (session model) ←─ manages, designs, reviews, validates
         │
-        ├── Worker (Haiku) ─ code generation, parallel
-        ├── Worker (Haiku) ─ testing, parallel
-        ├── Worker (Haiku) ─ exploration, parallel
-        └── Worker (Haiku) ─ documentation, parallel
+        ├── Worker (Sonnet) ─ code generation, parallel
+        ├── Worker (Sonnet) ─ testing, parallel
+        ├── Worker (Sonnet) ─ exploration, parallel
+        └── Worker (Sonnet) ─ documentation, parallel
 ```
 
 **Manager responsibilities in this project:**
@@ -86,6 +86,7 @@ DO NOT:
 - Modify files outside the list above
 - Add features not listed
 - Refactor unrelated code
+- Invoke skills or write a plan — this spec is the plan
 
 VERIFY:
 - Run: `go test ./...` (or appropriate test command)
