@@ -116,7 +116,8 @@ export class OAuthService {
 
     let userId: string;
     try {
-      const payload = await this.authService.verifyAccessToken(accessToken);
+      const payload =
+        await this.authService.verifySessionAccessToken(accessToken);
       userId = payload.sub;
     } catch {
       const next = encodeURIComponent(absoluteAuthorizeUrl);

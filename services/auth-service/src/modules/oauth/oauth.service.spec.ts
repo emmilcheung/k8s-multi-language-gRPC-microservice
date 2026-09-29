@@ -76,3 +76,34 @@ describe('OAuthService refresh_token grant', () => {
     expect(codeStore.getSessionScope).not.toHaveBeenCalled();
   });
 });
+
+describe('OAuthService authorize session check (F11b)', () => {
+  it('sends a request whose cookie holds an OAuth access token to sign-in instead of consent', async () => {
+    const { service, authService, consentStore } = makeService();
+    const req = {
+      cookies: { token: 'oauth.access.token' },
+      originalUrl: '/oauth/authorize?client_id=ticketing-mcp',
+      headers: {},
+    } as unknown as Request;
+
+    const { redirectUrl } = await service.authorize(
+      {
+        response_type: 'code',
+        client_id: 'ticketing-mcp',
+        redirect_uri: 'http://127.0.0.1:19836/callback',
+        scope: 'orders:create payments:create',
+        code_challenge: 'x'.repeat(43),
+        code_challenge_method: 'S256',
+      } as never,
+      req,
+    );
+
+    expect(authService.verifySessionAccessToken).toHaveBeenCalledWith(
+      'oauth.access.token',
+    );
+    expect(
+      redirectUrl.startsWith('http://localhost:4000/auth/signin?next='),
+    ).toBe(true);
+    expect(consentStore.storePendingConsent).not.toHaveBeenCalled();
+  });
+});

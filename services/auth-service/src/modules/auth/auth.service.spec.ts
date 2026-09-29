@@ -548,4 +548,54 @@ describe('AuthService', () => {
       expect(redisSet).not.toHaveBeenCalled();
     });
   });
+
+  describe('verifySessionAccessToken (F11b)', () => {
+    // /oauth/authorize treats its cookie as proof of a signed-in user. An
+    // OAuth access token must not count: a tickets:read agent could otherwise
+    // authorize itself for every scope (spec F11 chain).
+    const base = { sub: 'uuid-1', email: 'user@example.com', jti: 'jti-1' };
+
+    it('rejects an OAuth access token', async () => {
+      const { service } = makeAuthService({
+        jwtService: {
+          verifyAsync: vi.fn().mockResolvedValue({
+            ...base,
+            scope: 'tickets:read',
+            client_id: 'ticketing-mcp',
+          }),
+        },
+      });
+      await expect(
+        service.verifySessionAccessToken('oauth.jwt'),
+      ).rejects.toMatchObject({
+        response: { error: { code: 'INVALID_TOKEN' } },
+      });
+    });
+
+    it('accepts a browser session token', async () => {
+      const { service } = makeAuthService({
+        jwtService: { verifyAsync: vi.fn().mockResolvedValue(base) },
+      });
+      await expect(
+        service.verifySessionAccessToken('session.jwt'),
+      ).resolves.toMatchObject({ sub: 'uuid-1' });
+    });
+  });
+
+  it('stamps client_id on every OAuth access token (C-1 invariant: Kong guards and F11b rely on it)', () => {
+    const { service, jwtService } = makeAuthService();
+    service.issueAccessTokenForOAuth(
+      'uuid-1',
+      'user@example.com',
+      'orders:read',
+      'ticketing-mcp',
+    );
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    expect(jwtService.sign).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client_id: 'ticketing-mcp',
+        scope: 'orders:read',
+      }),
+    );
+  });
 });

@@ -349,6 +349,24 @@ export class AuthService {
   }
 
   /**
+   * Verify a token that must represent a signed-in browser session. OAuth
+   * access tokens (they carry client_id, C-1) are rejected: a delegated grant
+   * is never a session (F11b).
+   */
+  async verifySessionAccessToken(token: string): Promise<JwtPayload> {
+    const payload = await this.verifyAccessToken(token);
+    if (payload.client_id !== undefined) {
+      throw new UnauthorizedException({
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Access token is invalid or expired',
+        },
+      });
+    }
+    return payload;
+  }
+
+  /**
    * Blacklist a JWT access token by its JTI until it expires (S-04).
    * Decodes the token without verification (Kong already validated it upstream).
    * Stores the JTI in Redis with TTL = remaining token lifetime so the key
