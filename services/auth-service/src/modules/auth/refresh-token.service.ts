@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import type Redis from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.module';
+import { OAUTH_SESSION_SCOPE_KEY_PREFIX } from '../oauth/oauth-code-store.service';
 
 const DEFAULT_REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60;
 const REFRESH_SESSION_KEY_PREFIX = 'auth-service:refresh:session';
@@ -22,8 +23,19 @@ export interface RefreshSession {
   ipAddress: string | null;
 }
 
+/** Who may rotate a refresh session: the browser, or one OAuth client (C-11). */
+export type RefreshAudience =
+  | { kind: 'browser' }
+  | { kind: 'oauth'; clientId: string };
+
 interface RefreshTokenRecord extends RefreshSession {
   tokenHash: string;
+  /**
+   * OAuth client that owns the session; null for a browser session. Absent on
+   * records written before F1; resolveOAuthClientId falls back to the
+   * session-scope marker for those (removed by WS-N at deploy + 7 d).
+   */
+  oauthClientId?: string | null;
 }
 
 /**
@@ -109,7 +121,10 @@ export class RefreshTokenService {
         typeof parsed.lastRotatedAt === 'string' &&
         (parsed.userAgent === null || typeof parsed.userAgent === 'string') &&
         (parsed.ipAddress === null || typeof parsed.ipAddress === 'string') &&
-        typeof parsed.tokenHash === 'string'
+        typeof parsed.tokenHash === 'string' &&
+        (!('oauthClientId' in parsed) ||
+          parsed.oauthClientId === null ||
+          typeof parsed.oauthClientId === 'string')
       ) {
         return parsed as RefreshTokenRecord;
       }
@@ -192,8 +207,49 @@ export class RefreshTokenService {
     return record;
   }
 
-  /** Issue a new refresh token for the given userId; returns the opaque token ID. */
-  async issue(userId: string, metadata: SessionMetadata = {}): Promise<string> {
+  /**
+   * The OAuth client that owns a session, or null for a browser session.
+   * Legacy records carry no owner: the session-scope marker decides (no marker
+   * means browser), and a marker we cannot read fails closed.
+   */
+  private async resolveOAuthClientId(
+    record: RefreshTokenRecord,
+  ): Promise<string | null> {
+    if (record.oauthClientId !== undefined) {
+      return record.oauthClientId;
+    }
+    const marker = await this.redis.get(
+      `${OAUTH_SESSION_SCOPE_KEY_PREFIX}:${record.sessionId}`,
+    );
+    if (marker === null) {
+      return null;
+    }
+    try {
+      const parsed: unknown = JSON.parse(marker);
+      if (
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        'clientId' in parsed &&
+        typeof parsed.clientId === 'string'
+      ) {
+        return parsed.clientId;
+      }
+    } catch {
+      // fall through: unreadable marker
+    }
+    throw this.invalidRefreshToken();
+  }
+
+  /**
+   * Issue a new refresh token; returns the opaque token. `oauthClientId` is the
+   * OAuth client that owns the session, or null for a browser sign-in. It is
+   * required so every caller has to choose.
+   */
+  async issue(
+    userId: string,
+    metadata: SessionMetadata,
+    oauthClientId: string | null,
+  ): Promise<string> {
     const sessionId = randomUUID();
     const now = new Date().toISOString();
     const { token, tokenHash } = this.buildToken(sessionId);
@@ -206,17 +262,30 @@ export class RefreshTokenService {
       lastRotatedAt: now,
       userAgent: normalizedMetadata.userAgent,
       ipAddress: normalizedMetadata.ipAddress,
+      oauthClientId,
     };
 
     await this.persistSession(record);
     return token;
   }
 
+  /**
+   * Rotate a refresh token for the given audience. A session owned by another
+   * audience is rejected before anything is written, so its real holder keeps
+   * a working token (F1, F1b).
+   */
   async rotate(
     token: string,
-    metadata: SessionMetadata = {},
+    metadata: SessionMetadata,
+    audience: RefreshAudience,
   ): Promise<{ userId: string; refreshToken: string; sessionId: string }> {
     const record = await this.loadValidatedRecord(token);
+    const owner = await this.resolveOAuthClientId(record);
+    const expected = audience.kind === 'oauth' ? audience.clientId : null;
+    if (owner !== expected) {
+      throw this.invalidRefreshToken();
+    }
+
     const { token: refreshToken, tokenHash } = this.buildToken(
       record.sessionId,
     );
@@ -228,6 +297,7 @@ export class RefreshTokenService {
       lastRotatedAt: new Date().toISOString(),
       userAgent: normalizedMetadata.userAgent ?? record.userAgent,
       ipAddress: normalizedMetadata.ipAddress ?? record.ipAddress,
+      oauthClientId: owner,
     };
 
     await this.persistSession(updatedRecord);

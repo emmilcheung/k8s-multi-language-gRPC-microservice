@@ -228,7 +228,11 @@ describe('AuthService', () => {
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1', {});
+      expect(refreshTokenService.issue).toHaveBeenCalledWith(
+        'uuid-1',
+        {},
+        null,
+      );
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(logger.info).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -311,7 +315,11 @@ describe('AuthService', () => {
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1', {});
+      expect(refreshTokenService.issue).toHaveBeenCalledWith(
+        'uuid-1',
+        {},
+        null,
+      );
       expect(
         (
           signinAbuseProtectionService as unknown as {

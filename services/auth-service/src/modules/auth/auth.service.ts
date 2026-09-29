@@ -128,6 +128,7 @@ export class AuthService {
     const refreshToken = await this.refreshTokenService.issue(
       user.id,
       sessionMetadata,
+      null,
     );
     return { accessToken, refreshToken };
   }
@@ -213,6 +214,7 @@ export class AuthService {
     const refreshToken = await this.refreshTokenService.issue(
       user.id,
       sessionMetadata,
+      null,
     );
     return { accessToken, refreshToken };
   }

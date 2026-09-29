@@ -303,6 +303,7 @@ describe('AuthController', () => {
       expect(refreshTokenService.rotate).toHaveBeenCalledWith(
         'old-refresh-id',
         { userAgent: 'VitestBrowser/2.0', ipAddress: null },
+        { kind: 'browser' },
       );
       expect(authService.issueAccessTokenForUser).toHaveBeenCalledWith(
         'user-uuid-1',

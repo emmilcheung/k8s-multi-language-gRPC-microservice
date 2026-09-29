@@ -139,6 +139,7 @@ export class AuthController {
     const { userId, refreshToken } = await this.refreshTokenService.rotate(
       oldRefreshToken,
       this.sessionMetadataFromRequest(req),
+      { kind: 'browser' },
     );
 
     const accessToken = await this.authService.issueAccessTokenForUser(userId);

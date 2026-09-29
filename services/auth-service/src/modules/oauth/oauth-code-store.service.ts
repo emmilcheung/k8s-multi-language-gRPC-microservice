@@ -5,7 +5,8 @@ import { REDIS_CLIENT } from '../redis/redis.module';
 
 const CODE_TTL_SECONDS = 600; // 10 minutes
 const CODE_KEY_PREFIX = 'auth-service:oauth:code';
-const SESSION_SCOPE_KEY_PREFIX = 'auth-service:oauth:session-scope';
+export const OAUTH_SESSION_SCOPE_KEY_PREFIX =
+  'auth-service:oauth:session-scope';
 
 export interface AuthorizationCodeRecord {
   code: string;
@@ -32,7 +33,7 @@ export class OAuthCodeStoreService {
   }
 
   private sessionScopeKey(sessionId: string): string {
-    return `${SESSION_SCOPE_KEY_PREFIX}:${sessionId}`;
+    return `${OAUTH_SESSION_SCOPE_KEY_PREFIX}:${sessionId}`;
   }
 
   /** Generate and store a new authorization code. Returns the opaque code string. */

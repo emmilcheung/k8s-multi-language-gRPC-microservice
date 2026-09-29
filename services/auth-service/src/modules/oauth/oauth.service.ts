@@ -268,10 +268,11 @@ export class OAuthService {
       req.ip ??
       null;
     const userAgent = req.headers['user-agent'] ?? null;
-    const rawRefreshToken = await this.refreshTokenService.issue(user.id, {
-      ipAddress,
-      userAgent,
-    });
+    const rawRefreshToken = await this.refreshTokenService.issue(
+      user.id,
+      { ipAddress, userAgent },
+      client.clientId,
+    );
 
     // Store scope metadata alongside the session for future refresh_token grants
     const sessionId =
@@ -317,13 +318,17 @@ export class OAuthService {
     let newRefreshToken: string;
     let sessionId: string;
     try {
-      const result = await this.refreshTokenService.rotate(body.refresh_token, {
-        ipAddress:
-          (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
-          req.ip ??
-          null,
-        userAgent: req.headers['user-agent'] ?? null,
-      });
+      const result = await this.refreshTokenService.rotate(
+        body.refresh_token,
+        {
+          ipAddress:
+            (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
+            req.ip ??
+            null,
+          userAgent: req.headers['user-agent'] ?? null,
+        },
+        { kind: 'oauth', clientId: client.clientId },
+      );
       userId = result.userId;
       newRefreshToken = result.refreshToken;
       sessionId = result.sessionId;
@@ -337,7 +342,7 @@ export class OAuthService {
     // Retrieve scope from session metadata
     const scopeMeta = await this.codeStore.getSessionScope(sessionId);
     if (!scopeMeta || scopeMeta.clientId !== body.client_id) {
-      // Session exists but has no OAuth scope (it's a browser session, not an OAuth session)
+      // rotate() already proved the session belongs to this client; a missing marker means its scope TTL lapsed.
       throw new UnauthorizedException({
         error: 'invalid_grant',
         error_description: 'Refresh token was not issued to this client',
