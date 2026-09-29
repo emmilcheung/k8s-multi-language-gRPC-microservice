@@ -9,10 +9,10 @@ This document records how this project uses the Manager-Worker orchestration pat
 ```text
 Main agent (session model) ←─ manages, designs, reviews, validates
         │
-        ├── Worker (Haiku) ─ code generation, parallel
-        ├── Worker (Haiku) ─ testing, parallel
-        ├── Worker (Haiku) ─ exploration, parallel
-        └── Worker (Haiku) ─ documentation, parallel
+        ├── Worker (Sonnet) ─ code generation, parallel
+        ├── Worker (Sonnet) ─ testing, parallel
+        ├── Worker (Sonnet) ─ exploration, parallel
+        └── Worker (Sonnet) ─ documentation, parallel
 ```
 
 **Manager responsibilities in this project:**

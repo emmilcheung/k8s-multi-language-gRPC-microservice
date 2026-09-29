@@ -1,11 +1,11 @@
 ---
 name: orchestrate
-description: Activates Manager-Worker orchestration mode. Use when a task spans multiple services, files, or workstreams and benefits from parallel agent execution. The main agent takes the manager role; Haiku subagents handle implementation.
+description: Activates Manager-Worker orchestration mode. Use when a task spans multiple services, files, or workstreams and benefits from parallel agent execution. The main agent takes the manager role; Sonnet subagents handle implementation.
 ---
 
 # Orchestrate — Manager-Worker Agentic Workflow
 
-You are now in **manager mode**. Your role is to design, decompose, delegate, review, and validate. You do **not** write implementation code directly — you assign that to Haiku subagents and review their output.
+You are now in **manager mode**. Your role is to design, decompose, delegate, review, and validate. You do **not** write implementation code directly — you assign that to Sonnet subagents and review their output.
 
 ---
 
@@ -14,7 +14,7 @@ You are now in **manager mode**. Your role is to design, decompose, delegate, re
 | Role | Model | Responsibilities | Does NOT do |
 |---|---|---|---|
 | **Manager** (you) | Session model | Design, planning, decomposition, review, validation, integration decisions | Line-by-line implementation |
-| **Worker** | `haiku` | Code generation, test execution, file exploration, documentation, routine CRUD | Architecture decisions, security reviews, cross-service integration |
+| **Worker** | `sonnet` (current Sonnet) | Code generation, test execution, file exploration, documentation, routine CRUD | Architecture decisions, security reviews, cross-service integration |
 
 ---
 
@@ -175,13 +175,13 @@ Commands to run after implementation:
 |---|---|
 | Planning, decomposition, design | manager (you) |
 | Reviewing worker output | manager (you) |
-| Parallel code generation | `haiku` (worker; subagent) |
-| Parallel test running | `haiku` (worker; subagent) |
+| Parallel code generation | `sonnet` (worker; subagent) |
+| Parallel test running | `sonnet` (worker; subagent) |
 | Complex debugging, unknown failure | manager, or a specialist subagent on the session model |
-| Large codebase exploration | `haiku` with `Explore` subagent type |
+| Large codebase exploration | `sonnet` with `Explore` subagent type |
 | Architecture + planning only | `Plan` subagent type |
 
-In Agent tool calls: set `model: "haiku"` for workers; omit for manager-level tasks (inherits your model).
+In Agent tool calls: set `model: "sonnet"` for workers; omit for manager-level tasks (inherits your model).
 
 ---
 
@@ -250,25 +250,25 @@ Before marking a workstream complete:
 
 ```python
 # Parallel batch (all independent)
-Agent(subagent_type="general-purpose", model="haiku",
+Agent(subagent_type="general-purpose", model="sonnet",
       description="WS-A: Add address field to venues",
       prompt="[Full spec for WS-A]",
       run_in_background=True)
 
-Agent(subagent_type="general-purpose", model="haiku",
+Agent(subagent_type="general-purpose", model="sonnet",
       description="WS-B: Server-side filter in ticket service",
       prompt="[Full spec for WS-B]",
       run_in_background=True)
 
 # Exploration (understand before implementing)
-Agent(subagent_type="Explore", model="haiku",
+Agent(subagent_type="Explore", model="sonnet",
       description="Explore venue repo patterns",
       prompt="Find and summarise: handler pattern, repo interface, model struct for venues. Report only what the implementation needs.",
       run_in_background=True)
 
 # Sequential (depends on prior batch)
 # Wait for completions first, then:
-Agent(subagent_type="general-purpose", model="haiku",
+Agent(subagent_type="general-purpose", model="sonnet",
       description="WS-C: Integration (depends on WS-A and WS-B)",
       prompt="[Full spec for WS-C, includes outputs from A and B]",
       run_in_background=False)  # foreground: need result before continuing
