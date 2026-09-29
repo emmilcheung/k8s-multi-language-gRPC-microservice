@@ -119,6 +119,7 @@ beforeAll(async () => {
           const result = z
             .object({
               DATABASE_URL: z.string(),
+              DB_POOL_MAX: z.coerce.number().int().positive().default(12),
               STRIPE_SECRET_KEY: z.string(),
               KAFKA_BROKERS: z.string(),
               NODE_ENV: z.string().default('test'),

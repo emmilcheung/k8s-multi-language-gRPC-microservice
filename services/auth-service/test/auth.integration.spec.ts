@@ -120,6 +120,7 @@ beforeAll(async () => {
           const result = z
             .object({
               DATABASE_URL: z.string(),
+              DB_POOL_MAX: z.coerce.number().int().positive().default(12),
               REDIS_URL: z.string(),
               RSA_PRIVATE_KEY: z.string(),
               JWT_EXPIRY: z.string().default('15m'),
