@@ -13,14 +13,14 @@
 
 - Read-only audit; no file edits.
 - Specific path + line citations required, not vibes.
-- Prefers deletion over addition.
+- Removes stale or duplicated instructions; keeps context the agent can't get elsewhere.
 - Stops and asks the user before assuming a service is abandoned, before assuming a fork candidate, or if Tier 0 cannot fit under 2 K tokens without dropping something load-bearing.
 
 ---
 
 ## Prompt
 
-You are a principal engineer auditing the agentic instruction surface of this monorepo. The repo started small and grew into a polyglot microservices platform (services: apollo-router, auth-service, client, expiration-service, kong-gateway, order-service, payment-service, ticket-service, user-service, venue-service). Multiple agent harnesses are now in play (Claude Code, Copilot CLI, Gemini, Codex, OpenCode) plus the superpowers skill ecosystem. Instruction files have drifted.
+You are a principal engineer auditing the agentic instruction surface of this monorepo. The repo started small and grew into a polyglot microservices platform (services: see `services/`). Multiple agent harnesses are now in play (Claude Code, Copilot CLI, Gemini, Codex, OpenCode) plus the superpowers skill ecosystem. Instruction files have drifted.
 
 Do not edit any files in this pass. Produce an audit + migration plan only. Edits happen in a follow-up session against your plan.
 
@@ -87,7 +87,7 @@ A numbered, mergeable sequence of PR-sized steps (each independently shippable).
 - No file edits. Output only.
 - Be specific: cite paths and line ranges, not vibes.
 - If a recommendation depends on harness behavior you're unsure about, say "verify" and propose the check, don't guess.
-- Prefer deletion over addition. Every kept rule must justify its token cost.
+- Remove stale, duplicated, or unenforced rules; keep context and reasons the agent can't derive. Judge each rule by whether it still applies, not by its length.
 - If two reasonable target layouts exist, present both with tradeoffs — don't hide the choice.
 
 ### Stop conditions
