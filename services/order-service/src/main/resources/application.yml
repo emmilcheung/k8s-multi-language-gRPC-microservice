@@ -122,6 +122,13 @@ redis:
 order:
   expiration:
     minutes: ${ORDER_EXPIRATION_MINUTES:15}
+  # SR-16 backstop for expiration-service's asynq jobs, which a Redis failover can
+  # lose. Orders still open this long past expires_at are expired from Postgres.
+  # The grace leaves the normal asynq -> Kafka path time to win.
+  expiry-sweep:
+    interval-ms: ${ORDER_EXPIRY_SWEEP_INTERVAL_MS:60000}
+    grace-seconds: ${ORDER_EXPIRY_SWEEP_GRACE_SECONDS:300}
+    batch-size: ${ORDER_EXPIRY_SWEEP_BATCH_SIZE:200}
 
 outbox:
   relay:
