@@ -113,9 +113,7 @@ func (h *SSEHandler) Stream(c echo.Context) error {
 	if cursor := c.Request().Header.Get(lastEventIDHeader); cursor != "" {
 		h.log.Info("SSE client reconnected with a cursor; asking it to resync",
 			zap.String("planId", planID), zap.String("lastEventId", cursor))
-		if _, writeErr := w.Write(
-			[]byte(fmt.Sprintf(resyncFrame, "reconnect")),
-		); writeErr == nil {
+		if _, writeErr := fmt.Fprintf(w, resyncFrame, "reconnect"); writeErr == nil {
 			flusher.Flush()
 		}
 	}
@@ -133,9 +131,7 @@ func (h *SSEHandler) Stream(c echo.Context) error {
 			// back at the same instant.
 			delay := reconnectDelayMinMS +
 				rand.IntN(reconnectDelayMaxMS-reconnectDelayMinMS)
-			if _, writeErr := w.Write(
-				[]byte(fmt.Sprintf("retry: %d\n\n", delay)),
-			); writeErr == nil {
+			if _, writeErr := fmt.Fprintf(w, "retry: %d\n\n", delay); writeErr == nil {
 				flusher.Flush()
 			}
 			h.log.Info("SSE stream released for shutdown",
@@ -150,9 +146,7 @@ func (h *SSEHandler) Stream(c echo.Context) error {
 			if client.Gapped() {
 				h.log.Warn("SSE client missed messages; asking it to resync",
 					zap.String("planId", planID))
-				if _, writeErr := w.Write(
-					[]byte(fmt.Sprintf(resyncFrame, "buffer-overflow")),
-				); writeErr != nil {
+				if _, writeErr := fmt.Fprintf(w, resyncFrame, "buffer-overflow"); writeErr != nil {
 					h.log.Warn("SSE write error",
 						zap.String("planId", planID), zap.Error(writeErr))
 					return nil
