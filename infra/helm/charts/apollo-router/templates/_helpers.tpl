@@ -32,7 +32,7 @@ Service account name — uses .Values.serviceAccount.name if set, otherwise full
 {{/*
 Full image reference: repository:tag
 Apollo Router is published to GHCR; the repository field already contains the full
-image path (ghcr.io/apollographql/router), so we never prepend global.imageRegistry.
+image path (ghcr.io/apollographql/router), so we never prepend global.serviceImageRegistry.
 */}}
 {{- define "apollo-router.image" -}}
 {{- $repo := .Values.image.repository }}

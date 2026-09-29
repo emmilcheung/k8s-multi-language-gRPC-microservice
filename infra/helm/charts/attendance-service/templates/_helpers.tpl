@@ -31,11 +31,11 @@ Service account name — uses .Values.serviceAccount.name if set, otherwise full
 
 {{/*
 Full image reference: [registry/]repository:tag
-Prepends global.imageRegistry when set (non-empty), otherwise uses repository directly.
+Prepends global.serviceImageRegistry when set (non-empty), otherwise uses repository directly.
 */}}
 {{- define "attendance-service.image" -}}
 {{- $global := .Values.global | default dict }}
-{{- $registry := $global.imageRegistry | default "" }}
+{{- $registry := $global.serviceImageRegistry | default "" }}
 {{- $repo := .Values.image.repository }}
 {{- $tag := .Values.image.tag | default "latest" }}
 {{- if $registry }}
