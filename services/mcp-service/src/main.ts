@@ -14,7 +14,17 @@ function boot(): void {
     process.exit(1);
   }
 
-  const logger = pino({ level: config.LOG_LEVEL, name: 'mcp-service' });
+  const logger = pino({
+    level: config.LOG_LEVEL,
+    name: 'mcp-service',
+    // Never log credentials, even if a request or config object is logged later.
+    redact: [
+      'req.headers.authorization',
+      'headers.authorization',
+      'TOKEN_EXCHANGE_CLIENT_SECRET',
+      'config.TOKEN_EXCHANGE_CLIENT_SECRET',
+    ],
+  });
   const app = createApp({
     config,
     jwks: createRemoteJWKSet(new URL(config.AUTH_JWKS_URL)),
