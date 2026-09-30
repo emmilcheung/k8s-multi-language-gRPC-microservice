@@ -75,6 +75,19 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- with .Values.global.publicOrigin }}
+            {{- $origin := trimSuffix "/" . }}
+            # One owner-set origin drives every OAuth URL. Unset emits nothing, so
+            # production fails loud at startup (oauth-config.ts refineOAuthConfig).
+            - name: OAUTH_ISSUER
+              value: {{ $origin | quote }}
+            - name: OAUTH_API_AUDIENCE
+              value: {{ printf "%s/api" $origin | quote }}
+            - name: OAUTH_MCP_RESOURCE
+              value: {{ printf "%s/mcp" $origin | quote }}
+            - name: OAUTH_RESOURCES
+              value: {{ printf "%s/mcp,%s/api" $origin $origin | quote }}
+            {{- end }}
           {{- if .Values.secretRef }}
           envFrom:
             - secretRef:

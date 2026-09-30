@@ -17,6 +17,11 @@ global:
   imageRegistry: ""
   # Image pull policy: Always in production, IfNotPresent in local
   imagePullPolicy: IfNotPresent
+  # Public https origin of the gateway (Kong/CloudFront), no path. auth-service
+  # derives OAUTH_ISSUER, OAUTH_API_AUDIENCE (<origin>/api), OAUTH_MCP_RESOURCE
+  # (<origin>/mcp) and OAUTH_RESOURCES from it. Empty emits none of them: local
+  # falls back to dev defaults, production refuses to start. Set per overlay.
+  publicOrigin: ""
   # Namespace all resources land in
   namespace: ticketing
   serviceMesh:
