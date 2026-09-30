@@ -38,6 +38,11 @@ auth-service:
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
     OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     OTEL_SERVICE_NAME: auth-service
+    OAUTH_ISSUER: "http://localhost:8000"
+    OAUTH_RESOURCES: "http://localhost:8000/mcp,http://localhost:8000/api"
+    OAUTH_MCP_RESOURCE: "http://localhost:8000/mcp"
+    OAUTH_API_AUDIENCE: "http://localhost:8000/api"
+    OAUTH_ISSUER_ENABLED: "false"
   resources:
     requests:
       cpu: 50m
