@@ -22,6 +22,8 @@ import { OAuthConsentStoreService } from './oauth-consent-store.service';
 import type { ConsentSummary } from './oauth-consent-store.service';
 import { OAUTH_SCOPE_NAMES } from './oauth-scopes';
 import { verifyPkceChallenge } from './pkce.util';
+import { redirectUriMatches } from './oauth-redirect.util';
+import { readOAuthConfig, resolveOAuthTokenIssuer } from './oauth-config';
 import type {
   AuthorizeQuery,
   TokenBody,
@@ -50,6 +52,39 @@ export class OAuthService {
     if (staticClient) return staticClient;
     const dynamic = await this.dynamicClientService.findClient(clientId);
     return dynamic ? dynamicToStaticShape(dynamic) : null;
+  }
+
+  /** RFC 8707 / C-2: a resource must be an exact member of OAUTH_RESOURCES. */
+  private assertAllowedResource(resource: string | undefined): void {
+    if (
+      resource !== undefined &&
+      !readOAuthConfig(this.config).resources.includes(resource)
+    ) {
+      throw new BadRequestException({
+        error: 'invalid_target',
+        error_description: 'resource is not a recognised resource server',
+      });
+    }
+  }
+
+  /** Every token audience and issuer decision is made here (C-1, D3). */
+  private mintAccessToken(
+    userId: string,
+    scope: string,
+    clientId: string,
+    resource: string | undefined,
+  ): string {
+    const cfg = readOAuthConfig(this.config);
+    return this.authService.issueAccessTokenForOAuth(userId, scope, clientId, {
+      aud: resource ?? cfg.apiAudience,
+      iss: resolveOAuthTokenIssuer(cfg),
+    });
+  }
+
+  /** RFC 9207: tell the client which AS produced this authorization response. */
+  private withIssuer(url: URL): URL {
+    url.searchParams.set('iss', readOAuthConfig(this.config).issuer);
+    return url;
   }
 
   /**
@@ -84,12 +119,13 @@ export class OAuthService {
         error_description: 'Unknown client_id',
       });
     }
-    if (!client.redirectUris.includes(query.redirect_uri)) {
+    if (!redirectUriMatches(client.redirectUris, query.redirect_uri)) {
       throw new BadRequestException({
         error: 'invalid_request',
         error_description: 'redirect_uri not registered for this client',
       });
     }
+    this.assertAllowedResource(query.resource);
 
     // 3. Check user is authenticated via access token cookie
     const cookieName = this.config.get<string>('JWT_COOKIE_NAME', 'token');
@@ -151,6 +187,7 @@ export class OAuthService {
         codeChallenge: query.code_challenge,
         codeChallengeMethod: query.code_challenge_method,
         state: query.state,
+        resource: query.resource,
       });
       return {
         redirectUrl: `${clientBase}/oauth/consent?request_id=${requestId}`,
@@ -165,10 +202,11 @@ export class OAuthService {
       codeChallenge: query.code_challenge,
       codeChallengeMethod: query.code_challenge_method,
       redirectUri: query.redirect_uri,
+      resource: query.resource,
     });
 
-    // 7. Redirect to client with code + state
-    const redirectUrl = new URL(query.redirect_uri);
+    // 7. Redirect to client with code + state + iss
+    const redirectUrl = this.withIssuer(new URL(query.redirect_uri));
     redirectUrl.searchParams.set('code', code);
     if (query.state) redirectUrl.searchParams.set('state', query.state);
 
@@ -212,6 +250,9 @@ export class OAuthService {
       });
     }
 
+    // Reject an unknown resource before the code is consumed (RFC 8707).
+    this.assertAllowedResource(body.resource);
+
     // Consume the code (single-use — deleted from Redis on read)
     const record = await this.codeStore.consumeCode(body.code);
     if (!record) {
@@ -231,6 +272,15 @@ export class OAuthService {
       throw new BadRequestException({
         error: 'invalid_grant',
         error_description: 'redirect_uri mismatch',
+      });
+    }
+
+    // RFC 8707 §2: the token request may not name a different resource than
+    // the authorization request did (none at authorize means the default).
+    if (body.resource !== undefined && body.resource !== record.resource) {
+      throw new BadRequestException({
+        error: 'invalid_target',
+        error_description: 'resource does not match the authorization request',
       });
     }
 
@@ -258,11 +308,11 @@ export class OAuthService {
     }
 
     // Issue tokens
-    const accessToken = this.authService.issueAccessTokenForOAuth(
+    const accessToken = this.mintAccessToken(
       user.id,
-      user.email,
       record.scope,
       client.clientId,
+      record.resource,
     );
 
     const ipAddress =
@@ -282,7 +332,11 @@ export class OAuthService {
     if (sessionId) {
       await this.codeStore.storeSessionScope(
         sessionId,
-        { scope: record.scope, clientId: client.clientId },
+        {
+          scope: record.scope,
+          clientId: client.clientId,
+          resource: record.resource,
+        },
         client.refreshTokenLifetimeSeconds,
       );
     }
@@ -314,6 +368,8 @@ export class OAuthService {
         error_description: 'Unknown client_id',
       });
     }
+
+    this.assertAllowedResource(body.resource);
 
     // Rotate the refresh token
     let userId: string;
@@ -351,7 +407,20 @@ export class OAuthService {
       });
     }
 
-    // Look up user for email claim
+    // A refresh may not switch audience; sessions from before the resource
+    // parameter existed (no resource on the record) are bound to the default.
+    if (
+      body.resource !== undefined &&
+      body.resource !==
+        (scopeMeta.resource ?? readOAuthConfig(this.config).apiAudience)
+    ) {
+      throw new BadRequestException({
+        error: 'invalid_target',
+        error_description: 'resource does not match the original grant',
+      });
+    }
+
+    // Confirm the user still exists
     const user = await this.usersRepo.findById(userId);
     if (!user) {
       throw new BadRequestException({
@@ -363,15 +432,19 @@ export class OAuthService {
     // Re-store scope with refreshed TTL
     await this.codeStore.storeSessionScope(
       sessionId,
-      { scope: scopeMeta.scope, clientId: client.clientId },
+      {
+        scope: scopeMeta.scope,
+        clientId: client.clientId,
+        resource: scopeMeta.resource,
+      },
       client.refreshTokenLifetimeSeconds,
     );
 
-    const accessToken = this.authService.issueAccessTokenForOAuth(
+    const accessToken = this.mintAccessToken(
       user.id,
-      user.email,
       scopeMeta.scope,
       client.clientId,
+      scopeMeta.resource,
     );
 
     return {
@@ -497,7 +570,7 @@ export class OAuthService {
     }
 
     if (!approve) {
-      const denyUrl = new URL(record.redirectUri);
+      const denyUrl = this.withIssuer(new URL(record.redirectUri));
       denyUrl.searchParams.set('error', 'access_denied');
       denyUrl.searchParams.set(
         'error_description',
@@ -515,9 +588,10 @@ export class OAuthService {
       codeChallenge: record.codeChallenge,
       codeChallengeMethod: record.codeChallengeMethod,
       redirectUri: record.redirectUri,
+      resource: record.resource,
     });
 
-    const redirectUrl = new URL(record.redirectUri);
+    const redirectUrl = this.withIssuer(new URL(record.redirectUri));
     redirectUrl.searchParams.set('code', code);
     if (record.state) redirectUrl.searchParams.set('state', record.state);
     return { redirectUrl: redirectUrl.toString() };

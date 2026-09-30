@@ -10,6 +10,7 @@ import { RefreshTokenService } from './refresh-token.service';
 import { SigninAbuseProtectionService } from './signin-abuse-protection.service';
 import { RedisModule } from '../redis/redis.module';
 import { SecurityModule } from '../../common/security/security.module';
+import { readOAuthConfig } from '../oauth/oauth-config';
 import { parseRsaPrivateKey } from './rsa-key.util';
 
 @Module({
@@ -43,7 +44,8 @@ import { parseRsaPrivateKey } from './rsa-key.util';
           },
           verifyOptions: {
             algorithms: ['RS256'],
-            issuer: 'auth-service',
+            // OAuth tokens carry OAUTH_ISSUER once WS-K flips OAUTH_ISSUER_ENABLED (D3).
+            issuer: ['auth-service', readOAuthConfig(config).issuer],
           },
         };
       },

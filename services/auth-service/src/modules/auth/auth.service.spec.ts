@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import type { UsersRepository } from '../users/users.repository';
+import { JwtService as RealJwtService } from '@nestjs/jwt';
 import type { JwtService } from '@nestjs/jwt';
 import type { ConfigService } from '@nestjs/config';
 import type { PinoLogger } from 'nestjs-pino';
@@ -584,18 +585,71 @@ describe('AuthService', () => {
 
   it('stamps client_id on every OAuth access token (C-1 invariant: Kong guards and F11b rely on it)', () => {
     const { service, jwtService } = makeAuthService();
-    service.issueAccessTokenForOAuth(
-      'uuid-1',
-      'user@example.com',
-      'orders:read',
-      'ticketing-mcp',
-    );
+    service.issueAccessTokenForOAuth('uuid-1', 'orders:read', 'ticketing-mcp', {
+      aud: 'http://localhost:8000/api',
+      iss: 'auth-service',
+    });
     // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(jwtService.sign).toHaveBeenCalledWith(
       expect.objectContaining({
         client_id: 'ticketing-mcp',
         scope: 'orders:read',
       }),
+      expect.anything(),
     );
+  });
+
+  describe('token claims (C-1)', () => {
+    // makeJwtService spreads its overrides, which drops prototype methods, so
+    // bind the real ones explicitly.
+    const realJwt = () => {
+      const jwt = new RealJwtService({
+        privateKey: TEST_RSA_PEM,
+        signOptions: {
+          algorithm: 'RS256',
+          expiresIn: '15m',
+          issuer: 'auth-service',
+        },
+      });
+      return {
+        sign: jwt.sign.bind(jwt),
+        decode: jwt.decode.bind(jwt),
+      } as unknown as JwtService;
+    };
+
+    it('E-3: an OAuth token carries the requested aud and the chosen iss, and no email or roles (MCP tokens are audience-bound and PII-free)', () => {
+      const jwt = realJwt();
+      const { service } = makeAuthService({ jwtService: jwt });
+      const token = service.issueAccessTokenForOAuth(
+        'uuid-1',
+        'orders:read',
+        'ticketing-mcp',
+        { aud: 'http://localhost:8000/mcp', iss: 'http://localhost:8000' },
+      );
+      const claims = jwt.decode(token) as Record<string, unknown>;
+      expect(claims).toMatchObject({
+        iss: 'http://localhost:8000',
+        aud: 'http://localhost:8000/mcp',
+        sub: 'uuid-1',
+        client_id: 'ticketing-mcp',
+        scope: 'orders:read',
+      });
+      expect(claims).not.toHaveProperty('email');
+      expect(claims).not.toHaveProperty('roles');
+      expect(claims.jti).toEqual(expect.any(String));
+    });
+
+    it('E-3: a browser token still has iss auth-service and no aud, so Kong and REST see no change', async () => {
+      const jwt = realJwt();
+      const { service } = makeAuthService({
+        jwtService: jwt,
+        usersRepo: { findById: vi.fn().mockResolvedValue(makeUser()) },
+      });
+      const token = await service.issueAccessTokenForUser('uuid-1');
+      const claims = jwt.decode(token) as Record<string, unknown>;
+      expect(claims.iss).toBe('auth-service');
+      expect(claims).not.toHaveProperty('aud');
+      expect(claims).not.toHaveProperty('client_id');
+    });
   });
 });

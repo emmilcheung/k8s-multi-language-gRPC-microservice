@@ -16,6 +16,7 @@ export interface PendingConsent {
   codeChallenge: string;
   codeChallengeMethod: string;
   state?: string;
+  resource?: string;
   createdAt: string;
 }
 
