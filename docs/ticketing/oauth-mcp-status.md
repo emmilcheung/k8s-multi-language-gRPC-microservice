@@ -9,7 +9,7 @@
 
 ## Summary
 
-Enables AI agents (Claude Code, etc.) to interact with the ticketing platform as the authenticated user, without ever holding user credentials. The MCP server runs on the user's machine, holds OAuth2 tokens in the OS keychain, and calls Kong with a standard Bearer JWT. Kong, auth-service, and all downstream services require zero breaking changes.
+Enables AI agents (Claude Code, etc.) to interact with the ticketing platform as the authenticated user, without ever holding user credentials. The MCP server runs on the user's machine, stores OAuth2 tokens as plaintext JSON at `~/.config/ticketing-mcp/tokens.json` (mode 0600), and calls Kong with a standard Bearer JWT. Kong, auth-service, and all downstream services require zero breaking changes.
 
 ---
 
@@ -144,7 +144,7 @@ Implemented on branch `feature/oauth-mcp-phase2`.
 | Kong scope enforcement | ✅ Done | `plugins/jwt-scope.lua`, `build.sh` (SCOPE_CHECK_LUA handler), `kong.base.yml` (orders + payments routes split for per-scope pre-function) |
 | Dynamic client registration | ✅ Done | `oauth/dynamic-client.service.ts`, `POST /oauth/clients/register` (RFC 7591), Kong `oauth-public` route |
 | Consent screen UI | ✅ Done | `oauth-consent-store.service.ts`, `GET`/`POST /oauth/consent/:requestId`, Next.js `/oauth/consent` page with scope labels + destructive warning |
-| `.claude/mcp.json` snippet | ✅ Done | `.claude/mcp.json` (project-level Claude Code config), `docs/ticketing/mcp-setup.md` |
+| `.mcp.json` snippet | ✅ Done | `.mcp.json` (project-level Claude Code config), `docs/ticketing/mcp-setup.md` |
 
 ### How consent works for third-party clients
 
@@ -158,7 +158,7 @@ GET /oauth/authorize (dynamic client_id, user authenticated)
   → Next.js client-side redirects browser to callback
 ```
 
-First-party clients (`ticketing-mcp`) are auto-approved without the consent step.
+Every client, including first-party `ticketing-mcp`, goes through the consent step. `isFirstParty` is not set for any client (decision D5).
 
 ---
 

@@ -62,7 +62,7 @@ sequenceDiagram
     actor DEV as Developer (terminal)
     participant CLI as Claude / MCP client
     participant MCP as ticketing-mcp-server (local)
-    participant KC as OS Keychain
+    participant KC as Token file (0600)
     participant FE as client (Next.js SSR)
     participant K as kong-gateway
     participant AS as auth-service (NestJS)
@@ -124,7 +124,7 @@ sequenceDiagram
     AS->>RD: GET + DEL oauth:code:<code> · verify S256(code_verifier)==stored challenge
     AS->>RD: SET refresh:<jti> + oauth:session-scope:<sid> {scope, clientId} TTL 24h
     AS-->>MCP: { access_token (15m, +scope+client_id claims), refresh_token, expires_in, scope }
-    MCP->>KC: store tokens in OS keychain (never on disk)
+    MCP->>KC: store tokens as plaintext JSON (~/.config/ticketing-mcp/tokens.json)
     end
 
     %% ----------- FLOW D: Authenticated MCP tool call --------------
@@ -137,7 +137,7 @@ sequenceDiagram
       MCP->>K: POST /oauth/token (grant_type=refresh_token)
       K->>AS: forward · rotate · return new tokens
       AS-->>MCP: new { access_token, refresh_token }
-      MCP->>KC: update keychain
+      MCP->>KC: update token file
     end
     MCP->>K: POST /orders<br/>Authorization: Bearer <jwt>
     K->>K: jwt plugin · verify RS256 via JWKS (kid match) · check exp/iss

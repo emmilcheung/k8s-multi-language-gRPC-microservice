@@ -320,7 +320,7 @@ Engineering standards live in [`AGENTS.md`](AGENTS.md), which indexes the standa
 
 ### Agent-driven MCP Operations
 
-This workspace includes a local ticketing MCP server in `packages/ticketing-mcp-server` plus an agent-side client config in `.claude/mcp.json`.
+This workspace includes a local ticketing MCP server in `packages/ticketing-mcp-server` plus a project MCP config in `.mcp.json`.
 
 This MCP setup allows Claude Code and other MCP-compatible agents to call ticketing workflows directly over stdio, using OAuth2 Authorization Code + PKCE for secure authentication and forwarding requests through Kong at `http://localhost:8000`.
 
@@ -330,7 +330,7 @@ The server runs locally, authenticates with OAuth2 Authorization Code + PKCE, an
 
 Key points:
 - MCP server package: `packages/ticketing-mcp-server`
-- Agent-side config: `.claude/mcp.json`
+- Agent-side config: `.mcp.json` (project scope)
 - Claude Code discovers the config automatically when the workspace is opened.
 - Auth tokens are stored securely in `~/.config/ticketing-mcp/tokens.json`.
 - Tools include event search, seat availability, order creation/cancellation, payment processing, and session revocation.

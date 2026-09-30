@@ -37,7 +37,7 @@ Do not edit any files in this pass. Produce an audit + migration plan only. Edit
 - Root: `CLAUDE.md`, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`
 - Standards: `docs/01-guiding-principles.md` through `docs/17-agent-workflow.md`, plus `docs/SUBAGENT_ORCHESTRATION.md`
 - Per-service: every `services/*/AGENTS.md` and `services/*/CLAUDE.md`
-- Harness config: `.claude/settings.json`, `.claude/settings.local.json`, `.claude/skills/`, `.claude/mcp.json`, `.opencode/`, `.agents/`, `.superpowers/`, `.github/copilot-instructions.md` (if present), `GEMINI.md` (if present)
+- Harness config: `.claude/settings.json`, `.claude/settings.local.json`, `.claude/skills/`, `.mcp.json`, `.opencode/`, `.agents/`, `.superpowers/`, `.github/copilot-instructions.md` (if present), `GEMINI.md` (if present)
 - Sample what the agent actually loads at startup (token-cost ballpark per file is enough — no need for exact tokenizer).
 
 ### Deliverables (in chat, in this order)

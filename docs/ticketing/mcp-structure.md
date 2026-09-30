@@ -6,7 +6,7 @@ This document explains how the ticketing MCP is structured, how to install and r
 
 The ticketing MCP is a local helper process that exposes authenticated ticketing operations to an MCP-compatible agent. The server runs locally, obtains OAuth2 tokens via PKCE, and forwards requests through the Kong gateway to the ticketing APIs.
 
-The agent-side client is not a separate npm package in this repo. The "client" is the MCP-compatible agent configuration in `.claude/mcp.json`, which tells the agent how to launch the local MCP server.
+The agent-side client is not a separate npm package in this repo. The "client" is the MCP host (for example Claude Code), configured by `.mcp.json` at the repository root to launch the local MCP server.
 
 ## MCP structure
 
@@ -15,7 +15,7 @@ The agent-side client is not a separate npm package in this repo. The "client" i
 - `packages/ticketing-mcp-server/src/auth/` — handles OAuth2 Authorization Code + PKCE, browser login, callback handling, refresh token flow, and secure local token storage.
 - `packages/ticketing-mcp-server/src/client/api-client.ts` — makes authenticated requests through Kong, injects the Bearer token, and refreshes tokens automatically.
 - `packages/ticketing-mcp-server/src/tools/` — domain-specific tool adapters for events, seats, orders, and payments.
-- `.claude/mcp.json` — agent-side config that tells an MCP-compatible client how to launch the server.
+- `.mcp.json`: project MCP config that tells an MCP host how to launch the server.
 
 ## Install and run the MCP server
 
@@ -31,7 +31,7 @@ The compiled entry point is `packages/ticketing-mcp-server/dist/index.js`.
 
 ## Agent client configuration
 
-The project includes a ready-to-use agent config at `.claude/mcp.json`:
+The project includes a ready-to-use config at `.mcp.json`:
 
 ```json
 {
@@ -95,7 +95,8 @@ The server exposes authenticated ticketing tools that map to gateway endpoints:
 - `create_seated_order`
 - `cancel_order`
 - `get_payment`
+- `list_payment_methods`
 - `pay_for_order`
-- `revoke_oauth_session`
+- `pay_for_order_with_default`
 
 All calls are routed through Kong at `TICKETING_API_URL`, and the server uses the stored OAuth2 tokens to authenticate as the current user.
