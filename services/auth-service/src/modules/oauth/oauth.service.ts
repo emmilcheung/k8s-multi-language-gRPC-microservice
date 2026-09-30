@@ -20,6 +20,7 @@ import type { OAuthClient } from './oauth-clients.config';
 import { DynamicClientService } from './dynamic-client.service';
 import { OAuthConsentStoreService } from './oauth-consent-store.service';
 import type { ConsentSummary } from './oauth-consent-store.service';
+import { OAUTH_SCOPE_NAMES } from './oauth-scopes';
 import { verifyPkceChallenge } from './pkce.util';
 import type {
   AuthorizeQuery,
@@ -526,11 +527,9 @@ export class OAuthService {
   async registerClient(
     body: RegisterClientBody,
   ): Promise<RegisterClientResponse> {
-    const ALL_SCOPES =
-      'tickets:read orders:read orders:create orders:cancel payments:read payments:create venues:read seating:read seating:hold';
     const requestedScopes = body.scope
       ? body.scope.split(' ').filter(Boolean)
-      : ALL_SCOPES.split(' ');
+      : [...OAUTH_SCOPE_NAMES];
 
     // Validate redirect_uris: must be HTTPS or localhost
     for (const uri of body.redirect_uris) {

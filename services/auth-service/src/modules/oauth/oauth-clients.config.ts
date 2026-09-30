@@ -1,16 +1,7 @@
-export const OAUTH_SCOPES = [
-  'tickets:read',
-  'orders:read',
-  'orders:create',
-  'orders:cancel',
-  'payments:read',
-  'payments:create',
-  'venues:read',
-  'seating:read',
-  'seating:hold',
-] as const;
+import { OAUTH_SCOPE_NAMES } from './oauth-scopes';
+import type { OAuthScope } from './oauth-scopes';
 
-export type OAuthScope = (typeof OAUTH_SCOPES)[number];
+export type { OAuthScope };
 
 export interface OAuthClient {
   clientId: string;
@@ -31,7 +22,7 @@ export const OAUTH_CLIENTS: OAuthClient[] = [
     redirectUris: ['http://127.0.0.1:19836/callback'],
     grantTypes: ['authorization_code'],
     pkceRequired: true,
-    allowedScopes: [...OAUTH_SCOPES],
+    allowedScopes: [...OAUTH_SCOPE_NAMES],
     accessTokenLifetimeSeconds: 900,
     refreshTokenLifetimeSeconds: 24 * 60 * 60,
   },
@@ -59,7 +50,7 @@ export function dynamicToStaticShape(
     redirectUris: dynamic.redirectUris,
     grantTypes: dynamic.grantTypes,
     allowedScopes: dynamic.allowedScopes.filter((s): s is OAuthScope =>
-      (OAUTH_SCOPES as readonly string[]).includes(s),
+      (OAUTH_SCOPE_NAMES as readonly string[]).includes(s),
     ),
     pkceRequired: dynamic.pkceRequired,
     accessTokenLifetimeSeconds: dynamic.accessTokenLifetimeSeconds,
