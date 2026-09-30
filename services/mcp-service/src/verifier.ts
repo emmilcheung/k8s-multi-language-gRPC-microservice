@@ -16,6 +16,16 @@ interface VerifierOptions {
 const invalid = (message: string): OAuthError =>
   new OAuthError(OAuthErrorCode.InvalidToken, message);
 
+const isTokenDefect = (err: unknown): err is Error =>
+  err instanceof errors.JWTClaimValidationFailed ||
+  err instanceof errors.JWTExpired ||
+  err instanceof errors.JWSSignatureVerificationFailed ||
+  err instanceof errors.JWSInvalid ||
+  err instanceof errors.JWTInvalid ||
+  err instanceof errors.JOSEAlgNotAllowed ||
+  // Unknown `kid`: the token names a key auth-service does not publish.
+  err instanceof errors.JWKSNoMatchingKey;
+
 /**
  * Verifies MCP access tokens per contract C-1: RS256 only, exact `iss`, exact
  * `aud` = this resource, unexpired. The audience check is what stops a token
@@ -33,15 +43,11 @@ export function createVerifier(opts: VerifierOptions): OAuthTokenVerifier {
           requiredClaims: ['exp', 'sub'],
         }));
       } catch (err) {
-        // Only token defects are the client's fault. A JWKS outage (timeout,
-        // network) must surface as a server error, not tell clients their
-        // valid token is bad and trigger pointless re-authorization.
-        if (
-          err instanceof errors.JOSEError &&
-          !(err instanceof errors.JWKSTimeout)
-        ) {
-          throw invalid(err.message);
-        }
+        // Only token defects are the client's fault. JWKS infrastructure
+        // failures (non-200, malformed JWKS, timeout, network) must surface as
+        // a server error, not tell clients their valid token is bad and
+        // trigger pointless re-authorization.
+        if (isTokenDefect(err)) throw invalid(err.message);
         throw err;
       }
       if (typeof payload.client_id !== 'string' || !payload.client_id) {

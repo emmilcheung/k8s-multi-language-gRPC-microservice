@@ -1,11 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { createRemoteJWKSet } from 'jose';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from './app.ts';
-import { mintToken, stubJwks, testConfig } from './testkit.ts';
+import {
+  mintToken,
+  mintUnsecuredToken,
+  permissiveHmacJwks,
+  stubJwks,
+  testConfig,
+} from './testkit.ts';
 
 const app = createApp({ config: testConfig, jwks: stubJwks });
 
-const initialize = (token?: string): Promise<Response> =>
-  app(
+const initialize = (
+  token?: string,
+  target: typeof app = app,
+): Promise<Response> =>
+  target(
     new Request(testConfig.MCP_RESOURCE, {
       method: 'POST',
       headers: {
@@ -57,8 +69,23 @@ describe('token verification', () => {
     expect(res.status).toBe(401);
   });
 
-  it('G-3: an HS256 token is rejected (RS256 only, no algorithm confusion)', async () => {
-    const res = await initialize(await mintToken({ hs256: true }));
+  it('G-3: a token signed by a different key with the published kid is rejected, so signatures are really verified', async () => {
+    const res = await initialize(await mintToken({ wrongKey: true }));
+    expect(res.status).toBe(401);
+    expect(res.headers.get('www-authenticate')).toContain('invalid_token');
+  });
+
+  it('G-3: an alg none token is rejected', async () => {
+    const res = await initialize(mintUnsecuredToken());
+    expect(res.status).toBe(401);
+  });
+
+  it('G-3: an HS256 token is rejected even when the key resolver would supply an HMAC key (pins the RS256 allowlist)', async () => {
+    const permissive = createApp({
+      config: testConfig,
+      jwks: permissiveHmacJwks,
+    });
+    const res = await initialize(await mintToken({ hs256: true }), permissive);
     expect(res.status).toBe(401);
   });
 
@@ -75,6 +102,46 @@ describe('token verification', () => {
   it('accepts a valid token', async () => {
     const res = await initialize(await mintToken());
     expect(res.status).toBe(200);
+  });
+});
+
+describe('JWKS outage', () => {
+  let jwksServer: Server | undefined;
+  afterEach(() => {
+    jwksServer?.close();
+    jwksServer = undefined;
+  });
+
+  async function appWithJwks(
+    status: number,
+    body: string,
+  ): Promise<typeof app> {
+    jwksServer = createServer((_req, res) => {
+      res.writeHead(status, { 'content-type': 'application/json' }).end(body);
+    });
+    await new Promise<void>((r) => jwksServer!.listen(0, '127.0.0.1', r));
+    const { port } = jwksServer.address() as AddressInfo;
+    return createApp({
+      config: testConfig,
+      jwks: createRemoteJWKSet(new URL(`http://127.0.0.1:${port}/jwks`)),
+    });
+  }
+
+  it('a JWKS 500 gives a 5xx, not a 401 that would send clients into re-authorization', async () => {
+    const res = await initialize(
+      await mintToken(),
+      await appWithJwks(500, '{}'),
+    );
+    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.headers.get('www-authenticate')).toBeNull();
+  });
+
+  it('a malformed JWKS gives a 5xx, not a 401', async () => {
+    const res = await initialize(
+      await mintToken(),
+      await appWithJwks(200, '{"keys":"nope"}'),
+    );
+    expect(res.status).toBeGreaterThanOrEqual(500);
   });
 });
 

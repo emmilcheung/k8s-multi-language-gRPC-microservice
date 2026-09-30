@@ -21,6 +21,7 @@ export const testConfig: Config = {
 };
 
 const { publicKey, privateKey } = await generateKeyPair('RS256');
+const { privateKey: otherPrivateKey } = await generateKeyPair('RS256');
 const jwk = { ...(await exportJWK(publicKey)), kid: 'test-key', alg: 'RS256' };
 
 /** Stub JWKS holding only the test key; stands in for auth-service's endpoint. */
@@ -34,6 +35,33 @@ interface MintOptions {
   expiresIn?: string;
   /** Sign with HS256 instead of the RSA key (algorithm-confusion attempt). */
   hs256?: boolean;
+  /** Sign with a different RSA key that reuses the published `kid` (forgery). */
+  wrongKey?: boolean;
+}
+
+/** Secret an attacker would use for HS256; a permissive resolver may return it. */
+export const hmacSecret = new TextEncoder().encode(
+  'an-hs256-secret-of-sufficient-length!!',
+);
+
+/** Resolver that hands back the HMAC secret for any header, so only the alg allowlist can reject HS256. */
+export const permissiveHmacJwks: JWTVerifyGetKey = () =>
+  Promise.resolve(hmacSecret);
+
+/** Unsecured JWT (`alg: none`, empty signature) with otherwise valid claims. */
+export function mintUnsecuredToken(): string {
+  const b64 = (o: object): string =>
+    Buffer.from(JSON.stringify(o)).toString('base64url');
+  const now = Math.floor(Date.now() / 1000);
+  return `${b64({ alg: 'none', typ: 'JWT' })}.${b64({
+    iss: testConfig.OAUTH_ISSUER,
+    aud: testConfig.MCP_RESOURCE,
+    sub: 'user-1',
+    client_id: 'test-client',
+    scope: 'tickets:read',
+    iat: now,
+    exp: now + 300,
+  })}.`;
 }
 
 /** Mints a C-1 "MCP token" shape by default; override one claim per test. */
@@ -53,9 +81,9 @@ export async function mintToken(opts: MintOptions = {}): Promise<string> {
   if (opts.hs256) {
     return jwt
       .setProtectedHeader({ alg: 'HS256', kid: 'test-key' })
-      .sign(new TextEncoder().encode('an-hs256-secret-of-sufficient-length!!'));
+      .sign(hmacSecret);
   }
   return jwt
     .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
-    .sign(privateKey);
+    .sign(opts.wrongKey ? otherPrivateKey : privateKey);
 }
