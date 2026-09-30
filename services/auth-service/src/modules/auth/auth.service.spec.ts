@@ -617,6 +617,9 @@ describe('AuthService', () => {
       } as unknown as JwtService;
     };
 
+    const claimsOf = (jwt: JwtService, token: string) =>
+      jwt.decode<unknown>(token) as Record<string, unknown>;
+
     it('E-3: an OAuth token carries the requested aud and the chosen iss, and no email or roles (MCP tokens are audience-bound and PII-free)', () => {
       const jwt = realJwt();
       const { service } = makeAuthService({ jwtService: jwt });
@@ -626,7 +629,7 @@ describe('AuthService', () => {
         'ticketing-mcp',
         { aud: 'http://localhost:8000/mcp', iss: 'http://localhost:8000' },
       );
-      const claims = jwt.decode(token) as Record<string, unknown>;
+      const claims = claimsOf(jwt, token);
       expect(claims).toMatchObject({
         iss: 'http://localhost:8000',
         aud: 'http://localhost:8000/mcp',
@@ -646,7 +649,7 @@ describe('AuthService', () => {
         usersRepo: { findById: vi.fn().mockResolvedValue(makeUser()) },
       });
       const token = await service.issueAccessTokenForUser('uuid-1');
-      const claims = jwt.decode(token) as Record<string, unknown>;
+      const claims = claimsOf(jwt, token);
       expect(claims.iss).toBe('auth-service');
       expect(claims).not.toHaveProperty('aud');
       expect(claims).not.toHaveProperty('client_id');
