@@ -9,6 +9,30 @@
 
 ---
 
+## Session: 2026-09-30 — test(e2e): Wave-1 OAuth boundary regressions pin the exit gate ⏳ AWAITING OWNER APPROVAL (Wave 2)
+
+**Branch:** `feat/mcp-platform-wave1` (Task 7, the Wave-1 exit gate; Tasks 1–6 already committed on this branch). Per controller ruling, Task 7 ran and committed on this branch instead of a fresh `test/mcp-wave1-exit-gate` off `main`; the PR/hand-off half of the brief's Step 3 is deferred to a `finishing-a-development-branch` pass with the owner.
+
+**Wave 1 is closed:** F1, F1b, F2, F3, F5, F6, F9, F11, F11b and F12. Appended three regression tests to `services/client/tests/e2e/oauth-agent-boundaries.spec.ts` (`sessions and grants never convert into each other`) pinning the cross-service invariant that OAuth grants and browser sessions never convert into each other:
+
+- `an OAuth access token is not a session at /oauth/authorize (F11b)`
+- `an OAuth refresh token cannot mint a browser session, and survives the attempt (F1)`
+- `a browser refresh token is refused at /oauth/token in RFC shape, and the browser stays signed in (F1b, F9)`
+
+All 13 tests in the spec pass; full Playwright suite 70 passed / 1 skipped-by-design set (queue-gate armed tests) / 1 pre-existing failure unrelated to Wave 1 (see Concerns below); both queue-gate modes (disarmed and armed) verified as in Task 5 Step 6; full client unit suite green (207 passed / 2 skipped); lint + `tsc --noEmit` clean on the touched file.
+
+**Known gap (carried forward, not fixed here):** the queue gate checks the pass HMAC only — it has no `exp`, event or single-use check (`services/kong-gateway/plugins/queue-gate.lua`). Tracked as a Wave 2+ hardening item.
+
+**F1 owner decision (2026-09-30): Option A.** The shipped code (`e36c7b1`) implements Option A's behaviour: a legacy session-scope-marker fallback in `RefreshTokenService.resolveOAuthClientId`. That fallback means a pre-deploy OAuth refresh session idle past 24h is indistinguishable from a browser session until it naturally expires (≤7 days post-deploy). The owner accepted that window and the fallback is removed at deploy + 7 days (tracked as WS-N). Option B (force-logout every untagged session at deploy) was rejected as unacceptable UX.
+
+**Concerns:**
+- The full Playwright suite has one failure, triaged as **PRE-EXISTING** (not caused by this branch): `ticketing.spec.ts:999` ("authenticated user can manage a seated ticket plan lifecycle (Phase 3)") fails at line 1083, `toBeVisible` timeout waiting for "Create Replacement Plan" after clicking "Deactivate Plan" a second time. A `--trace on` rerun's network log shows every response in the flow is 200/304 — zero 403/429/`insufficient_scope`, so Kong's OAuth-deny guards and the queue gate are ruled out, and `local.yml`/the running Kong container were confirmed disarmed and unchanged at the time. The only anomaly is the *prior* step's "Reactivate Plan" POST to `/api/seating-plans/.../activate`, which shows client status `-1` (browser-cancelled) because the test's own `expect.poll` fires `page.reload({ waitUntil: "domcontentloaded" })` ~5ms after the click, before the request settles; the reload itself then finds the plan already reactivated (server processed it anyway) and the poll passes. The actual failing step — the second "Deactivate Plan" click at line 1082 — produces **no network request at all**, consistent with a hydration race: the button is visible right after a `domcontentloaded` reload before React re-attaches its click handler, so the click is a no-op and the subsequent 18s wait for "Create Replacement Plan" times out. This is a timing race in the test's own reload-then-click pattern (`ticketing.spec.ts` lines 1062–1083), not something Task 7 introduced or that Kong/auth reject; Task 7 touched no seating-plan/venue code. Flagging for owner triage (tighten the poll to wait on hydration, e.g. an interactability check, before Wave 2 opens); not fixed here per the no-app-code-changes constraint on this triage.
+- `CreateOrder INTERNAL_ERROR` and similar GraphQL error log lines during the full suite are the known noise from the stale order-service image, not real failures.
+
+Full report: `.superpowers/sdd/2026-09-29-mcp-platform-upgrade/task-7-report.md`.
+
+---
+
 ## Session: 2026-09-29 — chore(agent): instruction-surface audit against main ⏳ AWAITING REVIEW
 
 Audited the agent instruction surface (`CLAUDE.md`, `AGENTS.md`, service `AGENTS.md`,

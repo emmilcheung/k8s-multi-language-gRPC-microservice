@@ -128,6 +128,7 @@ export class AuthService {
     const refreshToken = await this.refreshTokenService.issue(
       user.id,
       sessionMetadata,
+      null,
     );
     return { accessToken, refreshToken };
   }
@@ -213,6 +214,7 @@ export class AuthService {
     const refreshToken = await this.refreshTokenService.issue(
       user.id,
       sessionMetadata,
+      null,
     );
     return { accessToken, refreshToken };
   }
@@ -343,6 +345,24 @@ export class AuthService {
       }
     }
 
+    return payload;
+  }
+
+  /**
+   * Verify a token that must represent a signed-in browser session. OAuth
+   * access tokens (they carry client_id, C-1) are rejected: a delegated grant
+   * is never a session (F11b).
+   */
+  async verifySessionAccessToken(token: string): Promise<JwtPayload> {
+    const payload = await this.verifyAccessToken(token);
+    if (payload.client_id !== undefined) {
+      throw new UnauthorizedException({
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Access token is invalid or expired',
+        },
+      });
+    }
     return payload;
   }
 

@@ -515,6 +515,8 @@ kong:
     proxy_error_log: /dev/stderr
     admin_error_log: /dev/stderr
     log_level: info
+    # queue-gate.lua needs resty.openssl.hmac; everything else stays sandboxed (D13).
+    untrusted_lua_sandbox_requires: resty.openssl.hmac
   ingressController:
     enabled: false
   proxy:

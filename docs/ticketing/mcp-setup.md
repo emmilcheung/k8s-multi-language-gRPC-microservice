@@ -27,7 +27,7 @@ The compiled entry point lands at `packages/ticketing-mcp-server/dist/index.js`.
 
 ## Claude Code Configuration
 
-The `.claude/mcp.json` file is already checked into the repository. Claude Code automatically discovers it when you open this project. No manual configuration is required.
+The `.mcp.json` file at the repository root is checked in. Claude Code discovers it when you open this project and asks you to approve the project server once.
 
 ```json
 {
@@ -94,7 +94,7 @@ The access token issued at login encodes only the scopes you approved. Kong enfo
 
 ## Revoking Access
 
-**Via Claude Code** — ask the agent to call the `revoke_oauth_session` MCP tool.
+**Via the web app:** open Settings → Security & sessions. Approving the `ticketing-mcp` OAuth flow creates a refresh session for your account like any browser sign-in, so it appears in the same session list — click **Revoke** on that row to end it. The list does not show which client owns a session, so if you have more than one active session you cannot tell them apart there; use the API call below to revoke every `ticketing-mcp` session at once instead.
 
 **Via the API** (manual):
 
@@ -104,7 +104,7 @@ curl -X DELETE http://localhost:8000/oauth/clients/ticketing-mcp \
   -H "Authorization: Bearer <your-access-token>"
 ```
 
-This invalidates all active sessions for the `ticketing-mcp` client tied to your account.
+This revokes every refresh session the `ticketing-mcp` client holds for your account. Access tokens already issued stay valid until they expire (at most 15 minutes).
 
 ---
 
@@ -123,7 +123,7 @@ If your Kong proxy runs on a different port, set the environment variable before
 export TICKETING_API_URL=http://localhost:9000
 ```
 
-Or update the `env` block in `.claude/mcp.json` for a permanent local override (do not commit that change).
+Or update the `env` block in `.mcp.json` for a permanent local override (do not commit that change).
 
 **Browser does not open during OAuth login**
 The server prints the authorization URL to stderr. Copy it manually into your browser to complete the flow.

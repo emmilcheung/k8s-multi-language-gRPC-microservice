@@ -45,7 +45,7 @@ node dist/index.js
 
 ### Agent integration
 
-Use the repository-level `.claude/mcp.json` configuration to launch the MCP server from Claude Code or any MCP-compatible agent.
+Use the repository-level `.mcp.json` configuration to launch the MCP server from Claude Code or any MCP host.
 
 ## Authentication
 
@@ -93,7 +93,7 @@ Note: the ticketing API should be available at `http://localhost:8000` when runn
 - `src/auth/` — OAuth2 PKCE flow, login, refresh handling, and secure token storage
 - `src/client/api-client.ts` — HTTP client with Bearer token injection, refresh logic, and retry handling
 - `src/tools/` — tool adapters for the ticketing domains
-- `.claude/mcp.json` — agent-side configuration for Claude Code and MCP-compatible clients
+- `.mcp.json`: project MCP config for Claude Code and other MCP hosts
 
 ## Architecture
 

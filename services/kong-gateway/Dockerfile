@@ -7,6 +7,8 @@
 # Environment variables required at runtime:
 #   KONG_ENV               : target environment (local | minikube | dev | staging | prod)
 #   KONG_RSA_PUBLIC_KEY    : RSA public key PEM contents (multi-line, injected at runtime)
+#   QUEUE_HMAC_SECRET      : (optional) queue pass-signing secret, injected at runtime; required
+#                            outside local/minikube when QUEUE_GATE_ARMED is "true"
 #
 # Kong configuration env vars (passed through to Kong itself):
 #   KONG_DATABASE, KONG_DECLARATIVE_CONFIG, KONG_PROXY_LISTEN, etc.
@@ -41,6 +43,11 @@ RUN chmod +x /docker-entrypoint-kong-gw.sh
 # can write the rendered config without running as root at runtime.
 # The kong user/group are provided by the upstream kong:3.7-ubuntu base image.
 RUN mkdir -p /etc/kong && chown kong:kong /etc/kong
+
+# queue-gate.lua verifies waiting-room passes with resty.openssl.hmac. Kong's
+# untrusted Lua sandbox blocks require() by default (F12); allow exactly this
+# module. Helm sets the same value in infra/helm/values.yaml kong.env.
+ENV KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES=resty.openssl.hmac
 
 # Switch to the non-root kong user before the entrypoint runs.
 # AGENTS.md §10.1: "Never run as root."

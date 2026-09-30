@@ -1,37 +1,29 @@
 -- jwt-scope.lua
--- Enforces OAuth scope on Bearer JWT tokens at the Kong gateway boundary.
+-- OAuth scope gate for routes that admit OAuth access tokens (D9, C-10).
 --
--- SCOPE ENFORCEMENT BEHAVIOR:
---   ✓ Bearer/API-token JWTs: Scope claim is validated against the required scope.
---     If scope is missing or insufficient, request is rejected with 403 Forbidden.
+-- Runs as the FIRST post-function access entry, after the jwt plugin has
+-- verified the token, and reads that verified token from
+-- kong.ctx.shared.authenticated_jwt_token. A token sent as the `token` cookie
+-- is therefore checked exactly like an Authorization: Bearer one (F11).
 --
---   ✗ Cookie-based session tokens: These carry no `scope` claim and bypass this
---     check by design. This is an accepted temporary limitation (see F-14).
---     Downstream services must apply additional authorization logic if needed.
---     Future versions may implement scope parity for session tokens (not in roadmap).
+--   no `scope` and no `client_id` -> browser session / anonymous token -> pass
+--   otherwise                     -> OAuth access token -> must hold
+--                                    SCOPE_PLACEHOLDER, else 403. A `client_id`
+--                                    token without `scope` is refused.
 --
--- Why no require "cjson":
---   Kong's pre-function Lua sandbox blocks all require() calls (same as
---   post-function). We extract claims via Lua string patterns instead.
---   Safe because scope values use only alphanumeric characters and colons.
+-- Why no require "cjson": Kong's untrusted Lua sandbox blocks require() (only
+-- resty.openssl.hmac is allow-listed, for queue-gate.lua). Claims are read
+-- with string patterns; safe because the token is already verified and scope
+-- values use only letters and colons.
 --
--- SCOPE_PLACEHOLDER is replaced by build.sh with the actual required scope
--- (e.g. "orders:read") before writing kong.yml.
---
--- This file is the single canonical copy. build.sh inlines its content into
--- every scope-protected route's `pre-function` plugin block at render time.
+-- SCOPE_PLACEHOLDER is replaced by build.sh with the required scope (e.g.
+-- "orders:read"). build.sh requires every jwt route to carry exactly one of
+-- this check or oauth-deny.lua, inside its post-function.
 
 local scope_required = "SCOPE_PLACEHOLDER"
 
--- Only inspect Authorization: Bearer ... headers (OAuth tokens).
--- Cookie-based requests carry no scope claim and must pass through.
-local auth_header = kong.request.get_header("Authorization")
-if not auth_header then
-  return
-end
-
-local token_str = auth_header:match("^[Bb]earer%s+(.+)$")
-if not token_str then
+local token_str = kong.ctx.shared.authenticated_jwt_token
+if type(token_str) ~= "string" then
   return
 end
 
@@ -54,10 +46,12 @@ end
 -- Extract the `scope` claim value (space-separated string).
 local scope = payload_json:match('"scope"%s*:%s*"([^"]+)"')
 if not scope then
-  -- No scope claim → this is a session/cookie token, not an OAuth bearer token.
-  -- By design, session tokens bypass scope checks (F-14 limitation).
-  -- Authorization decisions for these requests defer to downstream services.
-  return
+  if not payload_json:find('"client_id"%s*:') then
+    -- Browser session or anonymous token: not an OAuth grant, nothing to gate.
+    return
+  end
+  -- OAuth token with no scope claim grants nothing: fail closed.
+  scope = ""
 end
 
 -- Check that the required scope appears as a whitespace-delimited token.
@@ -71,9 +65,13 @@ for token in scope:gmatch("%S+") do
 end
 
 if not found then
+  -- RFC 6750 section 3.1 insufficient_scope response.
   kong.response.exit(
     403,
-    '{"statusCode":403,"error":"Forbidden","message":"Insufficient scope: ' .. scope_required .. ' required"}',
-    { ["Content-Type"] = "application/json" }
+    '{"error":"insufficient_scope","error_description":"The access token lacks the required scope: ' .. scope_required .. '"}',
+    {
+      ["Content-Type"] = "application/json",
+      ["WWW-Authenticate"] = 'Bearer error="insufficient_scope", scope="' .. scope_required .. '"',
+    }
   )
 end
