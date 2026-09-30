@@ -59,4 +59,31 @@ describe('redirectUriMatches', () => {
       redirectUriMatches(['https://a.example/cb'], 'https://a.example/cb2'),
     ).toBe(false);
   });
+  it('rejects userinfo on a loopback URI (http://user@127.0.0.1 can mislead a user about the real host)', () => {
+    expect(
+      redirectUriMatches(registered, 'http://user@127.0.0.1:1234/callback'),
+    ).toBe(false);
+    expect(
+      redirectUriMatches(registered, 'http://user:pw@127.0.0.1:1234/callback'),
+    ).toBe(false);
+  });
+
+  it('rejects a lookalike host such as localhost.evil.com (only the exact loopback names may vary the port)', () => {
+    const localhostReg = ['http://localhost:1/cb'];
+    expect(
+      redirectUriMatches(localhostReg, 'http://localhost.evil.com:1234/cb'),
+    ).toBe(false);
+    expect(redirectUriMatches(localhostReg, 'http://evil.com:1234/cb')).toBe(
+      false,
+    );
+  });
+
+  it('rejects an IPv6 zone id (fe80::1%25eth0 is not the loopback address)', () => {
+    expect(
+      redirectUriMatches(['http://[::1]/cb'], 'http://[::1%25eth0]:1234/cb'),
+    ).toBe(false);
+    expect(
+      redirectUriMatches(['http://[::1]/cb'], 'http://[::1%eth0]:1234/cb'),
+    ).toBe(false);
+  });
 });

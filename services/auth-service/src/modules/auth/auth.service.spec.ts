@@ -14,6 +14,7 @@ import type { PinoLogger } from 'nestjs-pino';
 import type { RefreshTokenService } from './refresh-token.service';
 import type { SigninAbuseProtectionService } from './signin-abuse-protection.service';
 import * as argon2 from 'argon2';
+import { buildJwtOptions } from './auth.module';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -653,6 +654,61 @@ describe('AuthService', () => {
       expect(claims.iss).toBe('auth-service');
       expect(claims).not.toHaveProperty('aud');
       expect(claims).not.toHaveProperty('client_id');
+    });
+  });
+  describe('OAUTH_ISSUER verification (D3)', () => {
+    const OAUTH_ISS = 'https://ticketing.example.com';
+    // Real JwtService built from the module's own options, so the accepted
+    // issuers are the ones production uses.
+    const realJwt = () => {
+      const config = {
+        getOrThrow: () => TEST_RSA_PEM,
+        get: (key: string, fallback?: unknown) =>
+          ({ OAUTH_ISSUER: OAUTH_ISS })[key] ?? fallback,
+      } as unknown as ConfigService;
+      const jwt = new RealJwtService(buildJwtOptions(config));
+      return {
+        jwt,
+        bound: {
+          sign: jwt.sign.bind(jwt),
+          verifyAsync: jwt.verifyAsync.bind(jwt),
+        } as unknown as JwtService,
+      };
+    };
+    const sign = (jwt: RealJwtService, iss: string, extra = {}) =>
+      jwt.sign({ sub: 'uuid-1', jti: 'j1', ...extra }, { issuer: iss });
+
+    it('JwtModule verification accepts auth-service and OAUTH_ISSUER, and rejects any other issuer', async () => {
+      const { jwt } = realJwt();
+      await expect(
+        jwt.verifyAsync(sign(jwt, 'auth-service')),
+      ).resolves.toMatchObject({ iss: 'auth-service' });
+      await expect(
+        jwt.verifyAsync(sign(jwt, OAUTH_ISS)),
+      ).resolves.toMatchObject({ iss: OAUTH_ISS });
+      await expect(
+        jwt.verifyAsync(sign(jwt, 'https://evil.example.com')),
+      ).rejects.toThrow();
+    });
+
+    it('F11b still holds with the new issuer: an OAuth token with iss=OAUTH_ISSUER is rejected as a session', async () => {
+      const { jwt, bound } = realJwt();
+      const { service } = makeAuthService({ jwtService: bound });
+      const oauthToken = sign(jwt, OAUTH_ISS, {
+        client_id: 'ticketing-mcp',
+        scope: 'tickets:read',
+        aud: 'https://ticketing.example.com/mcp',
+      });
+      await expect(
+        service.verifySessionAccessToken(oauthToken),
+      ).rejects.toMatchObject({
+        response: { error: { code: 'INVALID_TOKEN' } },
+      });
+      // Control: the same token minus client_id verifies, so the rejection is
+      // the client_id gate and not an issuer failure.
+      await expect(
+        service.verifySessionAccessToken(sign(jwt, OAUTH_ISS)),
+      ).resolves.toMatchObject({ sub: 'uuid-1' });
     });
   });
 });
