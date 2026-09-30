@@ -9,6 +9,30 @@
 
 ---
 
+## Session: 2026-09-30 — test(e2e): Wave-1 OAuth boundary regressions pin the exit gate ⏳ AWAITING OWNER APPROVAL (Wave 2)
+
+**Branch:** `feat/mcp-platform-wave1` (Task 7, the Wave-1 exit gate; Tasks 1–6 already committed on this branch). Per controller ruling, Task 7 ran and committed on this branch instead of a fresh `test/mcp-wave1-exit-gate` off `main`; the PR/hand-off half of the brief's Step 3 is deferred to a `finishing-a-development-branch` pass with the owner.
+
+**Wave 1 is closed:** F1, F1b, F2, F3, F5, F6, F9, F11, F11b and F12. Appended three regression tests to `services/client/tests/e2e/oauth-agent-boundaries.spec.ts` (`sessions and grants never convert into each other`) pinning the cross-service invariant that OAuth grants and browser sessions never convert into each other:
+
+- `an OAuth access token is not a session at /oauth/authorize (F11b)`
+- `an OAuth refresh token cannot mint a browser session, and survives the attempt (F1)`
+- `a browser refresh token is refused at /oauth/token in RFC shape, and the browser stays signed in (F1b, F9)`
+
+All 13 tests in the spec pass; full Playwright suite 70 passed / 1 skipped-by-design set (queue-gate armed tests) / 1 pre-existing failure unrelated to Wave 1 (see Concerns below); both queue-gate modes (disarmed and armed) verified as in Task 5 Step 6; full client unit suite green (207 passed / 2 skipped); lint + `tsc --noEmit` clean on the touched file.
+
+**Known gap (carried forward, not fixed here):** the queue gate checks the pass HMAC only — it has no `exp`, event or single-use check (`services/kong-gateway/plugins/queue-gate.lua`). Tracked as a Wave 2+ hardening item.
+
+**F1 owner option chosen:** Option A (spec §6, Owner row) — accept the residual risk that a pre-deploy OAuth refresh session idle past 24h is indistinguishable from a browser session until it naturally expires (≤7 days post-deploy), and remove the legacy session-scope-marker fallback in `RefreshTokenService.resolveOAuthClientId` at deploy + 7 days (tracked as WS-N). Confirmed from the shipped code (`e36c7b1`): new records carry `oauthClientId` directly; only records written before F1 fall back to the marker.
+
+**Concerns:**
+- The full Playwright suite has one failure unrelated to this task's scope: `ticketing.spec.ts:999` ("authenticated user can manage a seated ticket plan lifecycle (Phase 3)") failed on the second `deactivate plan` → `create replacement plan` transition. This is **not** the documented flake at `ticketing.spec.ts:1180`. Rerun in isolation with `--repeat-each=3`: 1 passed, 2 failed — so it is not a rare flake, it fails more often than not. Task 7 touched no seating-plan/venue code, so this is out of scope to fix here; flagging for owner triage before Wave 2 opens.
+- `CreateOrder INTERNAL_ERROR` and similar GraphQL error log lines during the full suite are the known noise from the stale order-service image, not real failures.
+
+Full report: `.superpowers/sdd/2026-09-29-mcp-platform-upgrade/task-7-report.md`.
+
+---
+
 ## Session: 2026-09-29 — chore(agent): instruction-surface audit against main ⏳ AWAITING REVIEW
 
 Audited the agent instruction surface (`CLAUDE.md`, `AGENTS.md`, service `AGENTS.md`,

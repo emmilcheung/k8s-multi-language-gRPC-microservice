@@ -7,7 +7,7 @@
  * Spec: F2, F11, D9, C-10.
  */
 import { test, expect } from "@playwright/test";
-import { KONG_URL, obtainOAuthAccessToken, signupViaApi } from "./_helpers/oauth";
+import { KONG_URL, authorizeUrl, obtainOAuthAccessToken, signupViaApi } from "./_helpers/oauth";
 
 let session: { accessToken: string; refreshToken: string };
 let oauth: { accessToken: string; refreshToken: string };
@@ -76,5 +76,50 @@ test.describe("everything that worked before still works", () => {
 
   test("an anonymous visitor still reaches GraphQL", async () => {
     expect((await gql({})).status).toBe(200);
+  });
+});
+
+test.describe("sessions and grants never convert into each other", () => {
+  test("an OAuth access token is not a session at /oauth/authorize (F11b)", async () => {
+    const res = await fetch(authorizeUrl("orders:create payments:create", "x".repeat(43)), {
+      redirect: "manual",
+      headers: { Cookie: `token=${oauth.accessToken}` },
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("/auth/signin?next=");
+  });
+
+  test("an OAuth refresh token cannot mint a browser session, and survives the attempt (F1)", async () => {
+    const grant = await obtainOAuthAccessToken(session.accessToken);
+    const browser = await fetch(`${KONG_URL}/api/auth/refresh`, {
+      method: "POST",
+      headers: { Cookie: `refreshToken=${grant.refreshToken}` },
+    });
+    expect(browser.status).toBe(401);
+
+    const agent = await fetch(`${KONG_URL}/oauth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: grant.refreshToken, client_id: "ticketing-mcp" }),
+    });
+    expect(agent.status).toBe(200);
+  });
+
+  test("a browser refresh token is refused at /oauth/token in RFC shape, and the browser stays signed in (F1b, F9)", async () => {
+    const user = await signupViaApi();
+    const agent = await fetch(`${KONG_URL}/oauth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: user.refreshToken, client_id: "ticketing-mcp" }),
+    });
+    expect(agent.status).toBe(400);
+    expect(agent.headers.get("cache-control")).toBe("no-store");
+    expect(await agent.json()).toMatchObject({ error: "invalid_grant" });
+
+    const browser = await fetch(`${KONG_URL}/api/auth/refresh`, {
+      method: "POST",
+      headers: { Cookie: `refreshToken=${user.refreshToken}` },
+    });
+    expect(browser.status).toBe(200);
   });
 });
