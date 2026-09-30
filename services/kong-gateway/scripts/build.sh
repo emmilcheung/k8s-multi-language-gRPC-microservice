@@ -8,6 +8,8 @@
 #   plugins/jwt-sub.lua         — inlined into every protected route
 #   plugins/jwt-scope.lua       — inlined for scope-protected routes
 #   plugins/role-check.lua      — inlined for role-protected routes
+#   plugins/oauth-deny.lua      — inlined for routes that refuse OAuth tokens
+#   plugins/queue-gate.lua      — inlined for waiting-room gated routes
 #   KONG_RSA_PUBLIC_KEY (env)   — RSA public key; never stored in values files
 #   KONG_RATE_LIMIT_REDIS_HOST  — managed-Redis endpoint; not knowable at commit time
 #
@@ -115,6 +117,7 @@ redis_host_env     = sys.argv[8]
 
 scope_lua_path     = lua_path.replace('jwt-sub.lua', 'jwt-scope.lua')
 role_lua_path      = lua_path.replace('jwt-sub.lua', 'role-check.lua')
+deny_lua_path      = lua_path.replace('jwt-sub.lua', 'oauth-deny.lua')
 
 # ── Load values files ──────────────────────────────────────────────────────────
 def load_values(path):
@@ -206,6 +209,31 @@ rsa_block = '\n'.join(RSA_INDENT + line for line in rsa_lines)
 with open(base_template_path) as f:
     content = f.read()
 
+# ── Lint: every jwt route declares its OAuth policy (D9) ─────────────────────
+# A route that verifies JWTs must say whether OAuth access tokens may use it:
+# {{SCOPE_CHECK_LUA:<scope>}} admits tokens that hold <scope>, {{OAUTH_DENY_LUA}}
+# refuses them. Exactly one, inside the post-function: the guards read the
+# token the jwt plugin verified, which a pre-function cannot see. A route that
+# forgets fails the build instead of silently admitting agents (F11).
+OAUTH_GUARD_RE = re.compile(r'\{\{(?:SCOPE_CHECK_LUA:[^}]+|OAUTH_DENY_LUA)\}\}')
+bad_routes = []
+for block in re.split(r'\n(?=      - name: )', content):
+    lines = [l for l in block.split('\n') if not l.lstrip().startswith('#')]
+    block = '\n'.join(lines) + '\n'
+    if '          - name: jwt\n' not in block:
+        continue
+    guards = [m.start() for m in OAUTH_GUARD_RE.finditer(block)]
+    post = block.find('          - name: post-function\n')
+    if len(guards) != 1 or post == -1 or guards[0] < post:
+        bad_routes.append(lines[0].strip())
+if bad_routes:
+    print('ERROR: each jwt route needs exactly one OAuth guard '
+          '(SCOPE_CHECK_LUA or OAUTH_DENY_LUA) in its post-function:',
+          file=sys.stderr)
+    for r in bad_routes:
+        print(f'  {r}', file=sys.stderr)
+    sys.exit(1)
+
 # ── Substitute {{JWT_SUB_LUA}} (multi-line, placeholder may have leading spaces) ──
 content = re.sub(r'[ \t]*\{\{JWT_SUB_LUA\}\}', lua_block, content)
 
@@ -227,6 +255,13 @@ def replace_scope_check(m):
     return make_scope_lua(scope_lua_content, scope, LUA_INDENT)
 
 content = re.sub(r'[ \t]*\{\{SCOPE_CHECK_LUA:([^}]+)\}\}', replace_scope_check, content)
+
+# ── Substitute {{OAUTH_DENY_LUA}} ────────────────────────────────────────────
+with open(deny_lua_path) as f:
+    deny_lua_block = '\n'.join(
+        LUA_INDENT + line for line in f.read().rstrip('\n').splitlines())
+
+content = re.sub(r'[ \t]*\{\{OAUTH_DENY_LUA\}\}', lambda m: deny_lua_block, content)
 
 # ── Substitute {{ROLE_CHECK_LUA:<role>}} placeholders ────────────────────────
 # Similar to SCOPE_CHECK_LUA, each occurrence encodes the required role:
