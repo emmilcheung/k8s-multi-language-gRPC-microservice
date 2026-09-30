@@ -31,9 +31,24 @@ local b64, sig = token:match("^([^%.]+)%.([^%.]+)$")
 if not b64 then
   return kong.response.exit(403, { message = "waiting room: malformed pass" })
 end
-local hmac = require("resty.openssl.hmac").new("{{QUEUE_HMAC_SECRET}}", "sha256")
+local secret = "{{QUEUE_HMAC_SECRET}}"
+if secret == "" then
+  -- build.sh refuses to render this; never accept a pass signed with an empty key.
+  return kong.response.exit(503, { message = "waiting room unavailable" })
+end
+local hmac = require("resty.openssl.hmac").new(secret, "sha256")
 hmac:update(b64)
 local expected = ngx.encode_base64(hmac:final()):gsub("%+", "-"):gsub("/", "_"):gsub("=+$", "")
-if expected ~= sig then
+-- Constant-time compare: length check, then accumulate the byte differences
+-- over the whole string (no early return). The sandbox has no bit library, so
+-- the accumulator sums absolute differences instead of XOR-ing; it is zero only
+-- when every byte matches.
+local diff = #expected == #sig and 0 or 1
+if diff == 0 then
+  for i = 1, #expected do
+    diff = diff + math.abs(expected:byte(i) - sig:byte(i))
+  end
+end
+if diff ~= 0 then
   return kong.response.exit(403, { message = "waiting room: invalid pass" })
 end

@@ -26,6 +26,7 @@
 #   - KONG_RSA_PUBLIC_KEY is not set or empty
 #   - <env> is missing or has no matching values/<env>.yml
 #   - RATE_LIMIT_POLICY is `redis` but no Redis host resolves
+#   - QUEUE_GATE_ARMED is `true` but QUEUE_HMAC_SECRET is empty
 #   - any placeholder remains unresolved after substitution
 
 set -euo pipefail
@@ -179,6 +180,16 @@ if values.get('RATE_LIMIT_POLICY') == 'redis' and not values.get('RATE_LIMIT_RED
     print('ERROR: RATE_LIMIT_POLICY is "redis" but RATE_LIMIT_REDIS_HOST is empty.', file=sys.stderr)
     print('  Set KONG_RATE_LIMIT_REDIS_HOST to the managed Redis endpoint, e.g.:', file=sys.stderr)
     print('    export KONG_RATE_LIMIT_REDIS_HOST="$(terraform output -raw elasticache_primary_endpoint)"', file=sys.stderr)
+    sys.exit(1)
+
+# ── Validate: an armed queue gate needs an HMAC secret ────────────────────────
+# QUEUE_HMAC_SECRET is rendered into queue-gate.lua at build time (which is also
+# container start, via docker-entrypoint.sh). An armed gate with no secret would
+# verify passes against an empty key, so fail before Kong starts. The value is
+# never printed.
+if values.get('QUEUE_GATE_ARMED') == 'true' and not values.get('QUEUE_HMAC_SECRET'):
+    print('ERROR: QUEUE_GATE_ARMED is "true" but QUEUE_HMAC_SECRET is empty.', file=sys.stderr)
+    print('  Set QUEUE_HMAC_SECRET in the values file to the queue-service pass-signing secret.', file=sys.stderr)
     sys.exit(1)
 
 # ── Load and indent jwt-sub.lua ───────────────────────────────────────────────
