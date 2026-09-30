@@ -35,11 +35,16 @@ test.describe("OAuth tokens are refused outside their scope", () => {
       const res = await fetch(`${KONG_URL}/api/users/sessions`, { headers: headers() });
       expect(res.status).toBe(403);
       expect(await res.json()).toMatchObject({ error: "insufficient_scope" });
+      expect(res.headers.get("www-authenticate")).toBe('Bearer error="insufficient_scope"');
     });
 
     test(`scoped route refuses an OAuth token lacking the scope, sent as ${how} (F11 cookie bypass)`, async () => {
       const res = await fetch(`${KONG_URL}/api/payments/methods`, { headers: headers() });
       expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: "insufficient_scope" });
+      expect(res.headers.get("www-authenticate")).toMatch(
+        /^Bearer error="insufficient_scope", scope="[a-z]+:[a-z]+"$/,
+      );
     });
   }
 

@@ -28,8 +28,13 @@ b64_payload = b64_payload .. string.rep("=", pad)
 
 local payload_json = ngx.decode_base64(b64_payload)
 if payload_json and payload_json:find('"client_id"%s*:') then
-  return kong.response.exit(403, {
-    error = "insufficient_scope",
-    error_description = "OAuth access tokens are not accepted on this route",
-  })
+  -- RFC 6750 section 3.1: no scope grants access here, so no scope= parameter.
+  return kong.response.exit(
+    403,
+    '{"error":"insufficient_scope","error_description":"This route is not available to OAuth clients"}',
+    {
+      ["Content-Type"] = "application/json",
+      ["WWW-Authenticate"] = 'Bearer error="insufficient_scope"',
+    }
+  )
 end

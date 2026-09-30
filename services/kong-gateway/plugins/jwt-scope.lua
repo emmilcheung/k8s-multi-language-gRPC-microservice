@@ -65,9 +65,13 @@ for token in scope:gmatch("%S+") do
 end
 
 if not found then
+  -- RFC 6750 section 3.1 insufficient_scope response.
   kong.response.exit(
     403,
-    '{"statusCode":403,"error":"Forbidden","message":"Insufficient scope: ' .. scope_required .. ' required"}',
-    { ["Content-Type"] = "application/json" }
+    '{"error":"insufficient_scope","error_description":"The access token lacks the required scope: ' .. scope_required .. '"}',
+    {
+      ["Content-Type"] = "application/json",
+      ["WWW-Authenticate"] = 'Bearer error="insufficient_scope", scope="' .. scope_required .. '"',
+    }
   )
 end
