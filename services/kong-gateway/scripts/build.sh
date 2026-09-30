@@ -12,6 +12,9 @@
 #   plugins/queue-gate.lua      — inlined for waiting-room gated routes
 #   KONG_RSA_PUBLIC_KEY (env)   — RSA public key; never stored in values files
 #   KONG_RATE_LIMIT_REDIS_HOST  — managed-Redis endpoint; not knowable at commit time
+#   QUEUE_HMAC_SECRET (env)     — queue pass-signing secret; when non-empty it wins over the
+#                                 values files. Required outside local/minikube once
+#                                 QUEUE_GATE_ARMED is "true" (the committed dev default is refused)
 #
 # Usage:
 #   KONG_RSA_PUBLIC_KEY="$(cat /path/to/public.pem)" ./scripts/build.sh <env> [output-file]
@@ -27,6 +30,8 @@
 #   - <env> is missing or has no matching values/<env>.yml
 #   - RATE_LIMIT_POLICY is `redis` but no Redis host resolves
 #   - QUEUE_GATE_ARMED is `true` but QUEUE_HMAC_SECRET is empty
+#   - QUEUE_GATE_ARMED is `true`, <env> is not local/minikube, and the effective
+#     QUEUE_HMAC_SECRET is the committed _defaults.yml dev value (or empty)
 #   - any placeholder remains unresolved after substitution
 
 set -euo pipefail
@@ -103,7 +108,9 @@ python3 - \
   "${KONG_RSA_PUBLIC_KEY}" \
   "${KONG_SIGNING_KEY}" \
   "${KONG_RATE_LIMIT_REDIS_HOST}" \
+  "${ENV}" \
   <<'PYEOF'
+import os
 import sys
 import re
 
@@ -115,6 +122,7 @@ output_path        = sys.argv[5]
 rsa_public_key     = sys.argv[6]
 signing_key        = sys.argv[7]
 redis_host_env     = sys.argv[8]
+target_env         = sys.argv[9]
 
 scope_lua_path     = lua_path.replace('jwt-sub.lua', 'jwt-scope.lua')
 role_lua_path      = lua_path.replace('jwt-sub.lua', 'role-check.lua')
@@ -138,6 +146,7 @@ def load_values(path):
     return values
 
 values = load_values(defaults_path)
+default_queue_secret = values.get('QUEUE_HMAC_SECRET', '')
 values.update(load_values(env_values_path))  # env overrides defaults
 
 # ── Environment override for the managed-Redis endpoint ───────────────────────
@@ -146,6 +155,14 @@ values.update(load_values(env_values_path))  # env overrides defaults
 # values file and inject it at render time.
 if redis_host_env:
     values['RATE_LIMIT_REDIS_HOST'] = redis_host_env
+
+# ── Environment override for the queue pass-signing secret ────────────────────
+# Read from os.environ (not argv) so it never shows in a process listing. Mirrors
+# KONG_RSA_PUBLIC_KEY: the real secret is injected at container start; the values
+# files only carry a dev default.
+queue_secret_env = os.environ.get('QUEUE_HMAC_SECRET', '')
+if queue_secret_env:
+    values['QUEUE_HMAC_SECRET'] = queue_secret_env
 
 # ── Expand {{KEY}} references that appear inside values themselves ────────────
 # Lets a values file name its namespace once and derive all nine HOST_* FQDNs
@@ -190,6 +207,19 @@ if values.get('RATE_LIMIT_POLICY') == 'redis' and not values.get('RATE_LIMIT_RED
 if values.get('QUEUE_GATE_ARMED') == 'true' and not values.get('QUEUE_HMAC_SECRET'):
     print('ERROR: QUEUE_GATE_ARMED is "true" but QUEUE_HMAC_SECRET is empty.', file=sys.stderr)
     print('  Set QUEUE_HMAC_SECRET in the values file to the queue-service pass-signing secret.', file=sys.stderr)
+    sys.exit(1)
+
+# ── Validate: an armed gate outside local must not use the committed dev secret ─
+# _defaults.yml carries a dev QUEUE_HMAC_SECRET that is public in git. If no env
+# values file or runtime QUEUE_HMAC_SECRET replaces it, anyone could forge a
+# qq_pass cookie. Compared against the value as loaded; never printed.
+if (values.get('QUEUE_GATE_ARMED') == 'true'
+        and target_env not in ('local', 'minikube')
+        and values.get('QUEUE_HMAC_SECRET', '') in ('', default_queue_secret)):
+    print('ERROR: QUEUE_GATE_ARMED is "true" for environment '
+          f'"{target_env}" but QUEUE_HMAC_SECRET is empty or the committed dev default.', file=sys.stderr)
+    print('  Inject QUEUE_HMAC_SECRET into the container from a secret (same value as the', file=sys.stderr)
+    print('  queue-service Queue__HmacSecret); never commit it to a values file.', file=sys.stderr)
     sys.exit(1)
 
 # ── Load and indent jwt-sub.lua ───────────────────────────────────────────────

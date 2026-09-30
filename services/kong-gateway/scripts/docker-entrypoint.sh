@@ -8,6 +8,10 @@
 # Required env vars:
 #   KONG_ENV             : local | minikube | dev | staging | prod  (default: local)
 #   KONG_RSA_PUBLIC_KEY  : RSA public key PEM (multi-line)
+#
+# Optional env vars:
+#   QUEUE_HMAC_SECRET    : queue pass-signing secret; overrides the values files and is
+#                          required outside local/minikube when QUEUE_GATE_ARMED is "true"
 
 set -euo pipefail
 

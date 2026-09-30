@@ -7,6 +7,8 @@
 # Environment variables required at runtime:
 #   KONG_ENV               : target environment (local | minikube | dev | staging | prod)
 #   KONG_RSA_PUBLIC_KEY    : RSA public key PEM contents (multi-line, injected at runtime)
+#   QUEUE_HMAC_SECRET      : (optional) queue pass-signing secret, injected at runtime; required
+#                            outside local/minikube when QUEUE_GATE_ARMED is "true"
 #
 # Kong configuration env vars (passed through to Kong itself):
 #   KONG_DATABASE, KONG_DECLARATIVE_CONFIG, KONG_PROXY_LISTEN, etc.
