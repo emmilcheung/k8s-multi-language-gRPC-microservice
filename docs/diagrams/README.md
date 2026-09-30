@@ -7,6 +7,31 @@ modules under `infra/terraform/`).
 Built for **job-hunting portfolio use**. Each diagram is generated from source, so
 it stays in sync with the code and survives PR review.
 
+## v3: one framework, AWS-icon style for every diagram
+
+All diagrams are now drawn in the same AWS reference-architecture style (official AWS icons,
+one line colour per meaning, grouped zones, numbered steps, a "production takeaway" box).
+They share `awsdiagram.py`, a small Python framework on top of the `diagrams` icon package:
+
+| File | Diagram | Layout |
+|---|---|---|
+| `01-aws-infrastructure.py` | Three-AZ infrastructure (VPC, subnets, NAT, RDS, Redis, MSK) | free placement |
+| `02-data-model.py` | Database-per-service data model | table cards |
+| `04-data-flow-sequence.py` | Reservation + payment saga | sequence |
+| `05-auth-flows.py` | Six auth flows A to F | sequence |
+| `06-waiting-room-flow.py` | Virtual waiting room | sequence |
+| `07-search-dataflow.py` | OpenSearch CQRS index + query | sequence |
+| `08-aws-architecture.py` | Service-level AWS architecture (replaces the C4 Mermaid) | free placement |
+
+```bash
+pip install diagrams playwright pillow && playwright install chromium
+python3 render.py        # redraws every NN-*.py; writes NN-*.svg + NN-*.png
+```
+
+The Mermaid sources and their HTML viewers are kept for reference, but the index page, the
+navigation bars and the root README now point at the new `.svg` files. The Tooling section
+below describes the original Mermaid/Graphviz approach.
+
 ## Tooling choice (why these three, not one)
 
 | Tool | What it's best at | Used for |
@@ -29,7 +54,7 @@ v2/
 ├── 01-aws-infrastructure.png       # raster preview
 ├── 02-data-model.mermaid           # ER source (paste into mermaid.live)
 ├── 02-data-model.html              # self-contained preview
-├── 03-c4-container.mermaid
+├── 03-c4-container.mermaid       # older Mermaid C4 source, kept for reference
 ├── 03-c4-container.html
 ├── 04-data-flow-sequence.mermaid
 ├── 04-data-flow-sequence.html
@@ -39,6 +64,8 @@ v2/
 ├── 06-waiting-room-flow.html
 ├── 07-search-dataflow.mermaid      # OpenSearch CQRS index + query sequence
 ├── 07-search-dataflow.html
+├── 08-aws-architecture.py        # AWS-icon architecture diagram source (start here)
+├── 08-aws-architecture.svg / .png
 ├── render.py                       # regenerates everything
 ├── index.html                      # landing page linking all diagrams
 └── README.md                       # this file

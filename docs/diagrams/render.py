@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render helper for the v2 diagrams.
 
-  1. Re-runs 01-aws-infrastructure.py to refresh the SVG + PNG.
+  1. Re-runs every NN-*.py drawing script (AWS icons, awsdiagram.py) to refresh the SVG + PNG.
   2. Wraps each .mermaid source in a self-contained HTML page that loads
      Mermaid from a CDN, so the user can double-click the HTML and preview.
   3. Produces an index.html landing page that links all four diagrams.
@@ -76,12 +76,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <div class="nav">
     <a href="index.html">← Index</a>
     <a href="01-aws-infrastructure.svg">AWS Infra (SVG)</a>
-    <a href="02-data-model.html">Data Model</a>
-    <a href="03-c4-container.html">C4 Container</a>
-    <a href="04-data-flow-sequence.html">Data Flow</a>
-    <a href="05-auth-flows.html">Auth Flows</a>
-    <a href="06-waiting-room-flow.html">Waiting Room</a>
-    <a href="07-search-dataflow.html">Search Dataflow</a>
+    <a href="02-data-model.svg">Data Model</a>
+    <a href="08-aws-architecture.svg">Architecture (AWS)</a>
+    <a href="04-data-flow-sequence.svg">Data Flow</a>
+    <a href="05-auth-flows.svg">Auth Flows</a>
+    <a href="06-waiting-room-flow.svg">Waiting Room</a>
+    <a href="07-search-dataflow.svg">Search Dataflow</a>
   </div>
   <header>
     <h1>{title}</h1>
@@ -155,43 +155,43 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
       waiting room, and the OpenSearch search dataflow. Generated from source — kept in sync with the code.</p>
     <div class="grid">
       <a class="tile" href="01-aws-infrastructure.svg">
-        <span class="badge b-aws">Graphviz · SVG/PNG</span>
+        <span class="badge b-aws">AWS icons · SVG/PNG</span>
         <h2>1 · AWS Infrastructure</h2>
         <p>Reference production architecture on EKS: VPC, MSK, RDS Multi-AZ,
           ElastiCache, Kong, edge services, observability, IRSA.</p>
       </a>
-      <a class="tile" href="02-data-model.html">
-        <span class="badge b-mer">Mermaid · ER</span>
+      <a class="tile" href="02-data-model.svg">
+        <span class="badge b-aws">AWS icons · SVG/PNG</span>
         <h2>2 · Data Model</h2>
         <p>Per-service database ownership. Dotted lines mark
           <i>logical</i> cross-service references (no enforced FKs).</p>
       </a>
-      <a class="tile" href="03-c4-container.html">
-        <span class="badge b-mer">Mermaid · C4</span>
-        <h2>3 · C4 Container Diagram</h2>
-        <p>All 10 services grouped by domain (Identity · Catalog · Transaction),
-          showing REST, gRPC, GraphQL Federation and Kafka protocols.</p>
+      <a class="tile" href="08-aws-architecture.svg">
+        <span class="badge b-aws">AWS icons · SVG/PNG</span>
+        <h2>3 · AWS Architecture (service view)</h2>
+        <p>Edge → VPC → EKS services grouped by domain (Identity · Catalog · Transaction),
+          with REST, gRPC, GraphQL Federation and Kafka flows on one page.</p>
       </a>
-      <a class="tile" href="04-data-flow-sequence.html">
-        <span class="badge b-mer">Mermaid · Sequence</span>
+      <a class="tile" href="04-data-flow-sequence.svg">
+        <span class="badge b-aws">AWS icons · SVG/PNG</span>
         <h2>4 · Data Flow / Saga</h2>
         <p>Full reservation → payment → finalize / expire flow with
           CloudEvents on MSK, transactional outbox, DLQ.</p>
       </a>
-      <a class="tile" href="05-auth-flows.html">
-        <span class="badge b-mer">Mermaid · Sequence</span>
+      <a class="tile" href="05-auth-flows.svg">
+        <span class="badge b-aws">AWS icons · SVG/PNG</span>
         <h2>5 · Auth Flows</h2>
         <p>Signup / login / refresh, RS256 JWT issuance, and JWKS
           distribution to Kong for gateway-side verification.</p>
       </a>
-      <a class="tile" href="06-waiting-room-flow.html">
-        <span class="badge b-mer">Mermaid · Sequence</span>
+      <a class="tile" href="06-waiting-room-flow.svg">
+        <span class="badge b-aws">AWS icons · SVG/PNG</span>
         <h2>6 · Virtual Waiting Room</h2>
         <p>Onsale surge gate: pre-queue fair draw, rate-based admission,
           single-use HMAC pass, clean-URL redemption.</p>
       </a>
-      <a class="tile" href="07-search-dataflow.html">
-        <span class="badge b-mer">Mermaid · Sequence</span>
+      <a class="tile" href="07-search-dataflow.svg">
+        <span class="badge b-aws">AWS icons · SVG/PNG</span>
         <h2>7 · Search Dataflow</h2>
         <p>OpenSearch CQRS read model: Kafka-fed index path and the
           ranked query path with live Mongo hydration + regex fallback.</p>
@@ -212,10 +212,12 @@ def wrap_mermaid(src: Path, out: Path, title: str) -> None:
 
 
 def main() -> None:
-    # Rebuild the infra SVG/PNG.
-    infra_py = HERE / "01-aws-infrastructure.py"
-    print("→ rendering AWS infrastructure (Graphviz)…")
-    subprocess.run(["python3", str(infra_py)], cwd=HERE, check=True)
+    # Redraw every AWS-icon diagram (shared framework: awsdiagram.py).
+    for script in ("01-aws-infrastructure.py", "02-data-model.py", "04-data-flow-sequence.py",
+                   "05-auth-flows.py", "06-waiting-room-flow.py", "07-search-dataflow.py",
+                   "08-aws-architecture.py"):
+        print(f"→ drawing {script} …")
+        subprocess.run(["python3", str(HERE / script)], cwd=HERE, check=True)
 
     # Wrap each Mermaid source in an HTML page.
     for src_name, out_name, title in MERMAID_DIAGRAMS:

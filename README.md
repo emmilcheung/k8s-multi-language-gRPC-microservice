@@ -78,9 +78,15 @@ The embedded SVGs below are the local thumbnails from `docs/diagrams/`, but the 
 
 ![Data model diagram](docs/diagrams/02-data-model.svg)
 
-![C4 container diagram](docs/diagrams/03-c4-container.svg)
+![AWS architecture diagram](docs/diagrams/08-aws-architecture.svg)
 
 ![Data flow sequence diagram](docs/diagrams/04-data-flow-sequence.svg)
+
+![Auth flows diagram](docs/diagrams/05-auth-flows.svg)
+
+![Virtual waiting room diagram](docs/diagrams/06-waiting-room-flow.svg)
+
+![Search dataflow diagram](docs/diagrams/07-search-dataflow.svg)
 
 > Open `docs/diagrams/index.html` for a browser-based diagram landing page.
 

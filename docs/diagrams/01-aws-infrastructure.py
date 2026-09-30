@@ -1,297 +1,126 @@
-"""AWS infrastructure diagram for the ticketing microservices platform.
+"""AWS infrastructure view: how the platform is laid out across three Availability Zones.
+Source of truth: infra/terraform/modules (vpc, eks, rds, elasticache, msk, kong, cloudfront), environments/prod
+  - VPC 10.2.0.0/16, 3 AZs, public /20 + private /20 + intra /20 per AZ, one NAT gateway per AZ (prod)
+  - EKS 1.30 (managed node group m5.large 3-20 + Karpenter, IRSA), public API endpoint
+  - RDS PostgreSQL 16 Multi-AZ, encrypted, 7-day backups; ElastiCache Redis 3 nodes with failover
+  - MSK Kafka 3.7 KRaft, 3 brokers (kafka.m5.large, 100 GB EBS, TLS in transit)
+Run: python3 01-aws-infrastructure.py"""
+from awsdiagram import Canvas, NAVY, GREY, REST, DATA, EGRESS, KAFKA, PHASE_COLORS
+from diagrams.aws.analytics import ManagedStreamingForKafka
+from diagrams.aws.compute import ECR, EC2, EKS, Fargate
+from diagrams.aws.database import ElasticacheForRedis, RDSPostgresqlInstance
+from diagrams.aws.devtools import XRay
+from diagrams.aws.general import Users
+from diagrams.aws.management import Cloudtrail, Cloudwatch
+from diagrams.aws.network import CloudFront, InternetGateway, NATGateway, NLB, Route53
+from diagrams.aws.security import ACM, IAMRole, KMS, SecretsManager, Shield, WAF
+from diagrams.aws.storage import S3
 
-Renders to SVG + PNG using python-graphviz. Uses the official AWS colour palette
-and service glyphs so the output is recognisable without bundled icon assets.
+W, H = 2300, 1700
+c = Canvas(W, H, "AWS infrastructure: three Availability Zones, no single point of failure",
+           "Public subnets hold only load balancers and NAT. Workloads and data sit in private subnets. Everything below the edge is Multi-AZ.")
+c.header(1150)
 
-Run:
-    python3 01-aws-infrastructure.py
-Outputs:
-    01-aws-infrastructure.svg
-    01-aws-infrastructure.png
-"""
+c.rect(190, 100, 2100, 1520, NAVY, "white", "", 1.8, 2)
+c.text(212, 126, "AWS Cloud  -  us-east-1", 17, "bold", NAVY, "start")
 
-from graphviz import Digraph
+# ---------------------------------------------------------------- edge
+c.group(230, 145, 2020, 175, "Edge: TLS, DDoS and bot filtering before traffic reaches the VPC", "#B7791F", "#FFF8E7")
+c.icon(95, 240, Users, "Customers", 64, 30)
+c.icon(360, 232, WAF, "AWS WAF")
+c.icon(440, 232, Shield, "Shield")
+c.icon(1040, 232, CloudFront, "CloudFront\norigin: https-only")
+c.icon(1420, 232, Route53, "Route 53")
+c.icon(1700, 232, ACM, "ACM\nTLS certificates")
+c.line([(140, 240), (325, 240)], NAVY, label="HTTPS", lpos=(232, 230))
+c.line([(475, 240), (1005, 240)], NAVY, label="filtered traffic", lpos=(740, 230))
+c.line([(1385, 240), (1075, 240)], NAVY, dash="6 4", label="DNS", lpos=(1230, 230))
 
-# AWS brand palette
-AWS_ORANGE = "#FF9900"
-AWS_NAVY = "#232F3E"
-AWS_BLUE = "#1A73E8"
-AWS_GREEN = "#7AA116"
-AWS_RED = "#DD3522"
-AWS_PURPLE = "#7D3C98"
-SUBNET_BG = "#EAF2FB"
-VPC_BG = "#F7F8FA"
-REGION_BG = "#FFFFFF"
+# ---------------------------------------------------------------- VPC
+c.group(230, 350, 1600, 1000, "VPC 10.2.0.0/16", "#8C4FFF", "#FCFAFF", "", 16, 2)
+c.icon(1830, 350, InternetGateway, "", 44)
+c.text(1830, 388, "Internet\nGateway", 10, "normal", NAVY)
 
+AZ = ["us-east-1a", "us-east-1b", "us-east-1c"]
+X0 = [255, 790, 1325]
+AW = 490
+PUB = ["10.2.64.0/20", "10.2.80.0/20", "10.2.96.0/20"]
+PRV = ["10.2.0.0/20", "10.2.16.0/20", "10.2.32.0/20"]
+INT = ["10.2.128.0/20", "10.2.144.0/20", "10.2.160.0/20"]
+for i in range(3):
+    x, cx = X0[i], X0[i] + AW / 2
+    c.group(x, 395, AW, 940, AZ[i], "#146EB4", "none", "6 4", 16)
+    # public subnet
+    c.group(x + 14, 430, AW - 28, 150, f"Public  {PUB[i]}", "#3F8624", "#F4F9F0", "", 13)
+    c.icon(cx - 20, 500, NLB, "NLB node\n(Kong proxy)", 50, 26, 11)
+    c.icon(cx + 110, 500, NATGateway, "NAT gateway\n(one per AZ)", 50, 26, 11)
+    # private app subnet
+    c.group(x + 14, 600, AW - 28, 300, f"Private  {PRV[i]}", "#008A8C", "#EEF9F9", "", 13)
+    c.icon(cx - 150, 690, EC2, "m5.large\nworker node", 46, 26, 11)
+    c.icon(cx - 20, 690, Fargate, "kong-gateway\npod", 46, 26, 11)
+    c.icon(cx + 90, 690, Fargate, "service\npods", 46, 26, 11)
+    c.icon(cx + 185, 690, Fargate, "Karpenter\nnodes", 46, 26, 11)
+    c.text(cx, 795, "Managed node group 3-20 nodes; pods spread over AZs by topology constraints", 10.5, "normal", GREY, italic=True)
+    c.text(cx, 812, f"Intra subnet {INT[i]}: EKS control-plane ENIs", 10.5, "normal", GREY)
+    c.icon(cx, 862, EKS, "", 32)
+    # data tier
+    c.group(x + 14, 920, AW - 28, 395, "Data tier (private, no public route)", "#B0209A", "#FEF4FD", "", 13)
 
-def _to_html_label(label: str) -> str:
-    """If label is already HTML (wrapped in <...>), return as-is; else escape newlines."""
-    if label.startswith("<") and label.endswith(">"):
-        return label
-    return label.replace("\n", "\\n")
+# data icons
+def dt(i, y, cls, label, size=50):
+    c.icon(X0[i] + AW / 2, y, cls, label, size, 26, 11)
 
+dt(0, 1005, RDSPostgresqlInstance, "RDS PostgreSQL 16\nprimary (x3 instances)")
+dt(1, 1005, RDSPostgresqlInstance, "RDS standby\nsynchronous replica")
+c.text(X0[2] + AW / 2, 1005, "", 11)
+c.line([(X0[0] + AW / 2 + 70, 1005), (X0[1] + AW / 2 - 70, 1005)], DATA, dash="6 4", tail=True, sw=2,
+       label="Multi-AZ sync", lpos=((X0[0] + X0[1] + AW) / 2, 992))
+dt(0, 1130, ElasticacheForRedis, "Redis primary")
+dt(1, 1130, ElasticacheForRedis, "Redis replica")
+dt(2, 1130, ElasticacheForRedis, "Redis replica")
+c.line([(X0[0] + AW / 2 + 60, 1130), (X0[1] + AW / 2 - 60, 1130)], DATA, dash="6 4", tail=False, sw=2)
+c.line([(X0[1] + AW / 2 + 60, 1130), (X0[2] + AW / 2 - 60, 1130)], DATA, dash="6 4", tail=False, sw=2,
+       label="async replication + auto failover", lpos=((X0[1] + X0[2] + AW) / 2 - 150, 1117))
+dt(0, 1250, ManagedStreamingForKafka, "MSK broker 1")
+dt(1, 1250, ManagedStreamingForKafka, "MSK broker 2")
+dt(2, 1250, ManagedStreamingForKafka, "MSK broker 3")
+c.line([(X0[0] + AW / 2 + 60, 1250), (X0[1] + AW / 2 - 60, 1250)], KAFKA, tail=True, sw=2.2)
+c.line([(X0[1] + AW / 2 + 60, 1250), (X0[2] + AW / 2 - 60, 1250)], KAFKA, tail=True, sw=2.2,
+       label="partition replicas (KRaft)", lpos=((X0[1] + X0[2] + AW) / 2 - 150, 1237), lcolor=KAFKA)
 
-def node(g, name, label, fillcolor, shape="box", fontcolor="#FFFFFF"):
-    # For HTML-labels, replace any literal newlines introduced by Python string
-    # literals with <br/>, since HTML-label parsers don't honour \n.
-    if label.startswith("<") and label.endswith(">"):
-        label = label.replace("\n", "<br/>")
-    g.node(
-        name,
-        label=label,
-        style="filled,rounded",
-        shape=shape,
-        fillcolor=fillcolor,
-        fontcolor=fontcolor,
-        fontname="Helvetica",
-        fontsize="11",
-        penwidth="1.5",
-        color=AWS_NAVY,
-    )
+# traffic from CloudFront to each NLB node
+by = 340
+c.line([(1040, 290), (1040, by)], REST, head=False)
+c.line([(X0[0] + AW / 2 - 20, by), (X0[2] + AW / 2 - 20, by)], REST, head=False)
+for i in range(3):
+    c.line([(X0[i] + AW / 2 - 20, by), (X0[i] + AW / 2 - 20, 470)], REST)
+c.text(1040 + 8, by - 8, "", 10)
+c.badge(1016, 318, 1, 11)
+# NLB -> kong pod in the same AZ
+for i in range(3):
+    cx = X0[i] + AW / 2
+    c.line([(cx - 20, 556), (cx - 20, 662)], REST, sw=2)
+c.callout(1850, 1200, 400, "Outbound only", "Private pods reach the Internet through the NAT gateway in their own AZ "
+          "(Stripe API, SES, package registries). Nothing on the Internet can open a connection into a private subnet.",
+          "#ED7100", "#FFF5EA", 11.5)
 
+# ---------------------------------------------------------------- right column: AWS-managed and shared services
+c.group(1850, 350, 400, 830, "AWS-managed and shared services", "#C7254E", "#FFF5F7")
+items = [(EKS, "EKS control plane\nKubernetes 1.30, AWS-managed"), (ECR, "ECR\nimages, scan on push"),
+         (IAMRole, "IAM + IRSA\nOIDC role per service account"), (SecretsManager, "Secrets Manager\nvia External Secrets"),
+         (KMS, "KMS\nRDS, MSK, EBS, Redis"), (Cloudwatch, "CloudWatch\nlogs, RED metrics, alarms"),
+         (XRay, "X-Ray\nOTel traces"), (Cloudtrail, "CloudTrail\nAPI audit log"), (S3, "S3\nTerraform state, backups")]
+for k, (cls, lab) in enumerate(items):
+    r, col = divmod(k, 2)
+    if k == 8:
+        col = 0
+    c.icon(1935 + col * 190, 430 + r * 145, cls, lab, 50, 26, 11)
 
-def svc_node(g, name, aws_label, descr):
-    """Node styled as an AWS service tile."""
-    label = f"<<b>{aws_label}</b><br/><font point-size='9'>{descr}</font>>"
-    node(g, name, label, AWS_NAVY, fontcolor="#FFFFFF")
-
-
-def pod_node(g, name, svc_label, tech):
-    label = f"<<b>{svc_label}</b><br/><font point-size='9'>{tech}</font>>"
-    node(g, name, label, AWS_ORANGE, fontcolor=AWS_NAVY)
-
-
-def db_node(g, name, aws_label, descr):
-    label = f"<<b>{aws_label}</b><br/><font point-size='9'>{descr}</font>>"
-    node(g, name, label, AWS_BLUE, fontcolor="#FFFFFF")
-
-
-def mq_node(g, name, aws_label, descr):
-    label = f"<<b>{aws_label}</b><br/><font point-size='9'>{descr}</font>>"
-    node(g, name, label, AWS_PURPLE, fontcolor="#FFFFFF")
-
-
-def ext_node(g, name, label):
-    node(g, name, label, AWS_GREEN, shape="ellipse", fontcolor="#FFFFFF")
-
-
-def build() -> Digraph:
-    g = Digraph("aws_infra", format="svg")
-    g.attr(
-        rankdir="TB",
-        compound="true",
-        splines="polyline",
-        fontname="Helvetica",
-        labelloc="t",
-        label=(
-            "<<b>Ticketing Platform &#8211; AWS Production Reference Architecture</b>"
-            "<br/><font point-size='10'>Multi-AZ EKS on VPC &#8226; MSK Kafka &#8226; RDS Multi-AZ &#8226; "
-            "ElastiCache &#8226; Kong at edge &#8226; CloudWatch/X-Ray/CloudTrail observability</font>>"
-        ),
-        bgcolor="#FFFFFF",
-        nodesep="0.30",
-        ranksep="0.55",
-        newrank="true",
-        size="14,22!",
-        ratio="compress",
-    )
-    g.attr("node", margin="0.16,0.08")
-    g.attr("edge", color=AWS_NAVY, fontname="Helvetica", fontsize="9", fontcolor=AWS_NAVY)
-
-    # --- External actors -----------------------------------------------------
-    with g.subgraph(name="cluster_users") as c:
-        c.attr(label="Internet", style="dashed", color=AWS_NAVY, fontname="Helvetica")
-        ext_node(c, "user", "End Users\n(browser, mobile)")
-        ext_node(c, "stripe", "Stripe\n(external PSP)")
-
-    # --- Edge / DNS / WAF ----------------------------------------------------
-    with g.subgraph(name="cluster_edge") as c:
-        c.attr(label="AWS Global Edge", style="rounded,filled",
-               fillcolor="#FDF6E3", color=AWS_NAVY, fontname="Helvetica")
-        svc_node(c, "route53", "Route 53",
-                 "DNS, health-checked\nfailover routing")
-        svc_node(c, "cloudfront", "CloudFront",
-                 "Static assets CDN\nfor Next.js build")
-        svc_node(c, "waf", "AWS WAF",
-                 "OWASP Top-10\nrate limits, bot block")
-        svc_node(c, "acm", "ACM",
-                 "TLS certs for\nALB + CloudFront")
-
-    # --- Region / VPC --------------------------------------------------------
-    with g.subgraph(name="cluster_region") as region:
-        region.attr(label="Region: ap-east-1", style="rounded,filled",
-                    fillcolor=REGION_BG, color=AWS_NAVY, fontname="Helvetica")
-
-        with region.subgraph(name="cluster_vpc") as vpc:
-            vpc.attr(label="VPC  10.0.0.0/16  (3 AZs, NAT per AZ in prod)",
-                     style="rounded,filled", fillcolor=VPC_BG, color=AWS_NAVY,
-                     fontname="Helvetica")
-
-            # ---- Public subnets ---------------------------------------------
-            with vpc.subgraph(name="cluster_public") as pub:
-                pub.attr(label="Public Subnets (ELB/NAT)", style="rounded,filled",
-                         fillcolor=SUBNET_BG, color=AWS_NAVY, fontname="Helvetica")
-                svc_node(pub, "alb", "Application Load Balancer",
-                         "AWS LB Controller\nIngress → Kong")
-                svc_node(pub, "nat", "NAT Gateway",
-                         "egress for private subnets")
-                svc_node(pub, "igw", "Internet Gateway", "ingress")
-
-            # ---- Private/app subnets – EKS ----------------------------------
-            with vpc.subgraph(name="cluster_private") as priv:
-                priv.attr(label="Private Subnets — EKS Worker Nodes (Karpenter + Managed Groups)",
-                          style="rounded,filled", fillcolor=SUBNET_BG,
-                          color=AWS_NAVY, fontname="Helvetica")
-
-                svc_node(priv, "eks", "Amazon EKS",
-                         "Kubernetes 1.30 control plane\nnamespace: ticketing")
-
-                with priv.subgraph(name="cluster_kong_ns") as k:
-                    k.attr(label="kong namespace", style="rounded,dashed",
-                           color=AWS_NAVY, fontname="Helvetica")
-                    pod_node(k, "kong", "kong-gateway",
-                             "Edge gateway • JWT auth\nrate-limit • CORS • CSRF")
-
-                with priv.subgraph(name="cluster_ns") as ns:
-                    ns.attr(label="ticketing namespace (9 services)",
-                            style="rounded,dashed", color=AWS_NAVY,
-                            fontname="Helvetica")
-
-                    pod_node(ns, "client", "client",
-                             "Next.js 15 (SSR) • TS")
-                    pod_node(ns, "auth", "auth-service",
-                             "NestJS 10 • Node 24")
-                    pod_node(ns, "user", "user-service",
-                             "NestJS 10 • Node 24")
-                    pod_node(ns, "ticket", "ticket-service",
-                             "Go 1.23 • Echo v4 • gRPC")
-                    pod_node(ns, "venue", "venue-service",
-                             "Go 1.23 • Echo v4 • gRPC")
-                    pod_node(ns, "order", "order-service",
-                             "Java 21 • Spring Boot 4")
-                    pod_node(ns, "payment", "payment-service",
-                             "NestJS 10 • Node 24")
-                    pod_node(ns, "expiration", "expiration-service",
-                             "Go 1.23 • Redis timers")
-
-            # ---- Data subnets -----------------------------------------------
-            with vpc.subgraph(name="cluster_data") as data:
-                data.attr(label="Data Subnets (Multi-AZ, no public egress)",
-                          style="rounded,filled", fillcolor=SUBNET_BG,
-                          color=AWS_NAVY, fontname="Helvetica")
-
-                db_node(data, "rds_auth", "RDS PostgreSQL",
-                        "auth_db • Multi-AZ\nusers, sessions")
-                db_node(data, "rds_user", "RDS PostgreSQL",
-                        "user_db • profiles,\npreferences, billing")
-                db_node(data, "rds_order", "RDS PostgreSQL",
-                        "order_db • orders,\noutbox (Spring)")
-                db_node(data, "rds_payment", "RDS PostgreSQL",
-                        "payment_db • charges,\nledger, webhooks")
-                db_node(data, "docdb", "DocumentDB",
-                        "Mongo-compatible\ntickets, venues, seats")
-                db_node(data, "elasticache", "ElastiCache Redis",
-                        "cluster mode • Multi-AZ\ntimers, cache, idempotency")
-                mq_node(data, "msk", "Amazon MSK",
-                        "3-broker Kafka\nCloudEvents envelopes")
-                mq_node(data, "glue_sr", "Glue Schema Registry",
-                        "Avro/JSON Schema\nfor MSK topics")
-
-        # ---- Security / Ops sidecar -----------------------------------------
-        with region.subgraph(name="cluster_ops") as ops:
-            ops.attr(label="Security & Observability", style="rounded,filled",
-                     fillcolor="#FDEEEE", color=AWS_RED, fontname="Helvetica")
-            svc_node(ops, "iam", "IAM + IRSA",
-                     "per-pod roles\nleast privilege")
-            svc_node(ops, "sm", "Secrets Manager",
-                     "DB creds, JWT signing,\nStripe API keys")
-            svc_node(ops, "kms", "KMS",
-                     "envelope encryption\nfor RDS/S3/MSK")
-            svc_node(ops, "ecr", "ECR",
-                     "container registry\nimage scanning")
-            svc_node(ops, "cw", "CloudWatch",
-                     "logs + RED metrics\n+ alarms")
-            svc_node(ops, "xray", "X-Ray",
-                     "distributed traces\nOTel collector")
-            svc_node(ops, "ct", "CloudTrail",
-                     "API audit log")
-            svc_node(ops, "backup", "AWS Backup + S3",
-                     "RDS/DocDB snapshots,\nlong-term archive")
-
-    # -------- Edges ----------------------------------------------------------
-    # Ingress path
-    g.edge("user", "route53", label="HTTPS")
-    g.edge("route53", "cloudfront", label="static")
-    g.edge("route53", "waf", label="api")
-    g.edge("waf", "alb")
-    g.edge("cloudfront", "alb", style="dashed", label="origin")
-    g.edge("alb", "kong", label="Ingress")
-    g.edge("acm", "alb", style="dotted", arrowhead="none", label="TLS")
-
-    # Kong routes into the mesh
-    g.edge("kong", "client", label="SSR")
-    g.edge("kong", "auth")
-    g.edge("kong", "user")
-    g.edge("kong", "ticket", label="REST")
-    g.edge("kong", "venue", label="REST")
-    g.edge("kong", "order")
-    g.edge("kong", "payment")
-
-    # Internal gRPC
-    g.edge("order", "ticket", label="gRPC ReserveQuota", color=AWS_GREEN)
-    g.edge("order", "venue", label="gRPC ReserveSeats", color=AWS_GREEN)
-
-    # Outbound to Stripe
-    g.edge("payment", "nat", style="dashed")
-    g.edge("nat", "stripe", label="HTTPS out")
-    g.edge("stripe", "kong", style="dashed", label="webhook")
-
-    # Databases ownership (bold lines)
-    g.edge("auth", "rds_auth")
-    g.edge("user", "rds_user")
-    g.edge("order", "rds_order")
-    g.edge("payment", "rds_payment")
-    g.edge("ticket", "docdb")
-    g.edge("venue", "docdb")
-    g.edge("expiration", "elasticache", label="timers")
-    g.edge("ticket", "elasticache", style="dashed", label="cache")
-    g.edge("order", "elasticache", style="dashed", label="idempotency")
-
-    # Kafka (MSK) — every service produces/consumes
-    for s in ("order", "payment", "ticket", "venue", "expiration"):
-        g.edge(s, "msk", color=AWS_PURPLE, label="events")
-    g.edge("msk", "glue_sr", style="dotted", label="schemas")
-
-    # Security / ops wiring — consolidated (one representative arrow from the
-    # EKS cluster, not one-per-service, to keep the picture readable).
-    g.edge("eks", "cw", style="dotted", color="#888888",
-           label="structured logs + RED metrics")
-    g.edge("eks", "xray", style="dotted", color="#888888",
-           label="OTel traces")
-    g.edge("sm", "eks", style="dotted", color=AWS_RED, label="External Secrets")
-    g.edge("iam", "eks", style="dotted", color=AWS_RED, label="IRSA")
-    g.edge("ecr", "eks", style="dotted", color="#888888", label="images")
-    g.edge("rds_order", "backup", style="dotted", color="#888888",
-           label="snapshots")
-    g.edge("docdb", "backup", style="dotted", color="#888888")
-    g.edge("kms", "rds_order", style="dotted", color=AWS_RED, label="encrypt")
-    g.edge("ct", "cw", style="dotted", color="#888888")
-
-    return g
-
-
-if __name__ == "__main__":
-    import os
-
-    g = build()
-    g.render("01-aws-infrastructure", format="svg", cleanup=False)
-    g.render("01-aws-infrastructure", format="png", cleanup=False)
-    # Graphviz Python keeps the intermediate source as a bare filename; rename
-    # to `.gv` for clarity and drop duplicates if they exist.
-    bare = "01-aws-infrastructure"
-    if os.path.exists(bare):
-        try:
-            os.replace(bare, bare + ".gv")
-        except OSError:
-            os.remove(bare)
-    print("Rendered 01-aws-infrastructure.{svg,png,gv}")
+# ---------------------------------------------------------------- footer
+c.callout(230, 1385, 1600, "Production takeaway",
+          "Loss of one AZ removes one NLB node, one NAT gateway, one third of the workers, and one RDS or Redis node, and the rest carries on: "
+          "RDS fails over to its synchronous standby, Redis promotes a replica, Kafka elects new partition leaders, and EKS reschedules pods. "
+          "Cost note: this is why prod runs one NAT gateway per AZ; dev uses a single NAT to save about $36 per month per removed gateway.",
+          "#232F3E", "#F3F5F8", 12.5)
+c.legend(230, 1555, ["rest", "data", "kafka"])
+c.save("01-aws-infrastructure")
