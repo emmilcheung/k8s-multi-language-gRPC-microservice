@@ -95,6 +95,14 @@ expiration-service:
   topologySpreadConstraints:
     enabled: true
 
+mcp-service:
+  networkPolicy:
+    enabled: true
+  topologySpreadConstraints:
+    enabled: true
+  autoscaling:
+    minReplicas: 3
+
 attendance-service:
   networkPolicy:
     enabled: true

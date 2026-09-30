@@ -38,6 +38,10 @@ dependencies:
   - name: user-service
     version: "0.1.0"
     repository: "file://charts/user-service"
+  - name: mcp-service
+    version: "0.1.0"
+    repository: "file://charts/mcp-service"
+    condition: mcp-service.enabled
   - name: apollo-router
     version: "0.1.0"
     repository: "file://charts/apollo-router"

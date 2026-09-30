@@ -1,0 +1,114 @@
+replicaCount: 2
+
+image:
+  repository: mcp-service
+  tag: SET_BY_CI
+  pullPolicy: IfNotPresent
+
+service:
+  port: 3000
+
+# Non-secret configuration. The service refuses to boot unless every URL below
+# is valid, so an environment overlay must set MCP_RESOURCE, OAUTH_ISSUER and
+# PUBLIC_WEB_URL to its public origins; the in-cluster URLs default to the
+# umbrella's service names.
+env:
+  NODE_ENV: production
+  PORT: "3000"
+  MCP_RESOURCE: ""
+  OAUTH_ISSUER: ""
+  PUBLIC_WEB_URL: ""
+  AUTH_JWKS_URL: "http://ticketing-auth-service:3000/.well-known/jwks.json"
+  KONG_INTERNAL_URL: "http://ticketing-kong-proxy:8000"
+  TOKEN_EXCHANGE_URL: "http://ticketing-auth-service:3000/oauth/token"
+  TOKEN_EXCHANGE_CLIENT_ID: mcp-service
+
+# Name of a Kubernetes Secret containing: TOKEN_EXCHANGE_CLIENT_SECRET
+secretRef: mcp-service-secrets
+
+# External Secrets (off unless global.externalSecrets.enabled is true). Uncomment
+# to override the global switch for this chart alone — the key being present is
+# what makes it win, so `enabled: false` here pins the out-of-band Secret even in
+# an environment that has the operator.
+# externalSecrets:
+#   enabled: true
+#   remoteKey: ticketing-prod/mcp-service   # default is <namespace>/<chart name>
+
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# startupProbe runs before liveness/readiness. Gives the container up to
+# failureThreshold × periodSeconds (60 s) to complete startup before Kubernetes
+# considers it failed. Once startupProbe succeeds, the kubelet switches to the
+# regular liveness and readiness probes.
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  failureThreshold: 12
+  periodSeconds: 5
+  timeoutSeconds: 5
+
+terminationGracePeriodSeconds: 30
+
+rollingUpdate:
+  maxSurge: 1
+  maxUnavailable: 0
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAntiAffinity:
+  enabled: true
+
+topologySpreadConstraints:
+  # Enable in production (multi-AZ EKS) to spread pods across availability zones.
+  # Requires nodes labelled with topology.kubernetes.io/zone (standard on EKS).
+  # Disabled by default (not applicable in single-node minikube).
+  enabled: false
+
+networkPolicy:
+  # Enable in staging/production to restrict pod-to-pod communication.
+  # Disabled by default to avoid breaking local (minikube) environments.
+  enabled: false
+  # Egress targets (ports of the Kong proxy, mcp-service and the OTel collector).
+  kongPort: 8000
+  authServicePort: 3000
+  otelCollectorPort: 4317
