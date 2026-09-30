@@ -94,7 +94,7 @@ The access token issued at login encodes only the scopes you approved. Kong enfo
 
 ## Revoking Access
 
-**Via the web app:** there is no MCP tool for this. Use the API call below.
+**Via the web app:** open Settings → Security & sessions. Approving the `ticketing-mcp` OAuth flow creates a refresh session for your account like any browser sign-in, so it appears in the same session list — click **Revoke** on that row to end it. The list does not show which client owns a session, so if you have more than one active session you cannot tell them apart there; use the API call below to revoke every `ticketing-mcp` session at once instead.
 
 **Via the API** (manual):
 
