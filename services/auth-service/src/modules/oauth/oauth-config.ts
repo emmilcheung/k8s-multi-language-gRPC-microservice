@@ -45,6 +45,31 @@ function isAbsoluteUrl(value: string): boolean {
   }
 }
 
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** Production URLs must be https, non-loopback and fragment-free. */
+function assertProdSafeUrl(
+  key: string,
+  value: string,
+  fail: (key: string, message: string) => void,
+): void {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return; // shape errors are reported by the caller
+  }
+  if (url.protocol !== 'https:') {
+    fail(key, `${key} must use https in production: ${value}`);
+  }
+  if (LOOPBACK_HOSTS.has(url.hostname)) {
+    fail(key, `${key} must not point at localhost in production: ${value}`);
+  }
+  if (url.hash || value.includes('#')) {
+    fail(key, `${key} must not contain a fragment: ${value}`);
+  }
+}
+
 interface OAuthEnv {
   NODE_ENV?: string;
   OAUTH_ISSUER?: string;
@@ -75,8 +100,15 @@ export function refineOAuthConfig(
   ] as const;
   if (prod) {
     for (const k of keys) {
-      if (!config[k]) fail(k, `${k} is required in production`);
+      if (!config[k]) {
+        fail(
+          k,
+          `${k} is required in production: set the public https origin (Helm global.publicOrigin) that derives it`,
+        );
+      }
     }
+    if (config.OAUTH_ISSUER)
+      assertProdSafeUrl('OAUTH_ISSUER', config.OAUTH_ISSUER, fail);
   }
 
   const resources = parseResources(
@@ -88,7 +120,16 @@ export function refineOAuthConfig(
         'OAUTH_RESOURCES',
         `OAUTH_RESOURCES member is not an absolute URL: ${r}`,
       );
+      continue;
     }
+    // RFC 8707 §2: a resource identifier must not contain a fragment.
+    if (new URL(r).hash || r.includes('#')) {
+      fail(
+        'OAUTH_RESOURCES',
+        `OAUTH_RESOURCES member must not contain a fragment: ${r}`,
+      );
+    }
+    if (prod) assertProdSafeUrl('OAUTH_RESOURCES', r, fail);
   }
   const mcp = config.OAUTH_MCP_RESOURCE ?? `${DEV_ORIGIN}/mcp`;
   const api = config.OAUTH_API_AUDIENCE ?? `${DEV_ORIGIN}/api`;

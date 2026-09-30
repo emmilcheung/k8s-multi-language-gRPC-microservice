@@ -81,4 +81,94 @@ describe('OAuth resource config (C-2)', () => {
     expect(r.success).toBe(false);
     expect(JSON.stringify(r.error?.issues)).toContain('OAUTH_ISSUER');
   });
+  describe('production URL safety', () => {
+    const prodSchema = z
+      .object({ NODE_ENV: z.string(), ...oauthEnvFields })
+      .superRefine(refineOAuthConfig);
+    const origin = 'https://ticketing.example.com';
+    const prod = {
+      NODE_ENV: 'production',
+      OAUTH_ISSUER: origin,
+      OAUTH_RESOURCES: `${origin}/mcp,${origin}/api`,
+      OAUTH_MCP_RESOURCE: `${origin}/mcp`,
+      OAUTH_API_AUDIENCE: `${origin}/api`,
+    };
+    const messages = (input: object) => {
+      const r = prodSchema.safeParse(input);
+      return r.success ? null : JSON.stringify(r.error.issues);
+    };
+
+    it('accepts a public https origin', () => {
+      expect(prodSchema.safeParse(prod).success).toBe(true);
+    });
+
+    it('a missing origin error names global.publicOrigin so the operator knows what to set', () => {
+      const out = messages({ NODE_ENV: 'production' });
+      expect(out).toContain('OAUTH_ISSUER is required in production');
+      expect(out).toContain('global.publicOrigin');
+    });
+
+    it.each([
+      [
+        'http issuer',
+        { OAUTH_ISSUER: 'http://ticketing.example.com' },
+        'https',
+      ],
+      ['localhost issuer', { OAUTH_ISSUER: 'https://localhost' }, 'localhost'],
+      ['127.0.0.1 issuer', { OAUTH_ISSUER: 'https://127.0.0.1' }, 'localhost'],
+      ['[::1] issuer', { OAUTH_ISSUER: 'https://[::1]' }, 'localhost'],
+      ['issuer fragment', { OAUTH_ISSUER: `${origin}#x` }, 'fragment'],
+    ])(
+      'rejects %s (copy-pasted dev values must not boot in prod)',
+      (_n, over, msg) => {
+        expect(messages({ ...prod, ...over })).toContain(msg);
+      },
+    );
+
+    it.each([
+      ['http resource', 'http://ticketing.example.com/mcp', 'https'],
+      ['localhost resource', 'https://localhost/mcp', 'localhost'],
+      ['loopback resource', 'https://127.0.0.1/mcp', 'localhost'],
+      ['ipv6 loopback resource', 'https://[::1]/mcp', 'localhost'],
+    ])('rejects a %s in OAUTH_RESOURCES', (_n, bad, msg) => {
+      const out = messages({
+        ...prod,
+        OAUTH_RESOURCES: `${bad},${origin}/api`,
+        OAUTH_MCP_RESOURCE: bad,
+      });
+      expect(out).toContain(msg);
+    });
+
+    it('the dev localhost values still pass outside production', () => {
+      expect(
+        prodSchema.safeParse({ NODE_ENV: 'development', ...valid }).success,
+      ).toBe(true);
+    });
+  });
+
+  it.each(['development', 'production'])(
+    'rejects a resource fragment in %s (RFC 8707 forbids it)',
+    (env) => {
+      const base =
+        env === 'production'
+          ? {
+              OAUTH_ISSUER: 'https://t.example.com',
+              OAUTH_RESOURCES:
+                'https://t.example.com/mcp#f,https://t.example.com/api',
+              OAUTH_MCP_RESOURCE: 'https://t.example.com/mcp#f',
+              OAUTH_API_AUDIENCE: 'https://t.example.com/api',
+            }
+          : {
+              ...valid,
+              OAUTH_RESOURCES: `${valid.OAUTH_MCP_RESOURCE}#f,${valid.OAUTH_API_AUDIENCE}`,
+              OAUTH_MCP_RESOURCE: `${valid.OAUTH_MCP_RESOURCE}#f`,
+            };
+      const r = z
+        .object({ NODE_ENV: z.string(), ...oauthEnvFields })
+        .superRefine(refineOAuthConfig)
+        .safeParse({ NODE_ENV: env, ...base });
+      expect(r.success).toBe(false);
+      expect(JSON.stringify(r.error?.issues)).toContain('fragment');
+    },
+  );
 });
