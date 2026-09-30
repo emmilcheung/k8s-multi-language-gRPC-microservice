@@ -328,6 +328,62 @@ describe('E-2 / E-3: resource binds code and token audience', () => {
     expect(body).toMatchObject({ error: 'invalid_target' });
   });
 
+  it('a rejected refresh resource mismatch does not rotate: the same refresh token still works afterwards', async () => {
+    const { service, codeStore, refreshTokenService, authService } =
+      makeService();
+    codeStore.getSessionScope.mockResolvedValue({
+      scope: 'tickets:read',
+      clientId: 'ticketing-mcp',
+      resource: MCP,
+    });
+    const refresh = (resource?: string) =>
+      service.token(
+        {
+          grant_type: 'refresh_token',
+          client_id: 'ticketing-mcp',
+          refresh_token: 'sid.secret',
+          ...(resource ? { resource } : {}),
+        } as never,
+        tokenReq,
+      );
+
+    expect(await errorOf(refresh(API))).toMatchObject({
+      error: 'invalid_target',
+    });
+    expect(refreshTokenService.rotate).not.toHaveBeenCalled();
+
+    const ok = await refresh(MCP);
+    expect(ok).toMatchObject({ refresh_token: 'sid2.secret' });
+    expect(refreshTokenService.rotate).toHaveBeenCalledTimes(1);
+    expect(authService.issueAccessTokenForOAuth).toHaveBeenCalledWith(
+      'user-1',
+      'tickets:read',
+      'ticketing-mcp',
+      expect.objectContaining({ aud: MCP }),
+    );
+  });
+
+  it('refresh applies the token-endpoint rule: no resource bound means an explicit default audience is rejected, without burning the token', async () => {
+    const { service, codeStore, refreshTokenService } = makeService();
+    codeStore.getSessionScope.mockResolvedValue({
+      scope: 'tickets:read',
+      clientId: 'ticketing-mcp',
+    });
+    const body = await errorOf(
+      service.token(
+        {
+          grant_type: 'refresh_token',
+          client_id: 'ticketing-mcp',
+          refresh_token: 'sid.secret',
+          resource: API,
+        } as never,
+        tokenReq,
+      ),
+    );
+    expect(body).toMatchObject({ error: 'invalid_target' });
+    expect(refreshTokenService.rotate).not.toHaveBeenCalled();
+  });
+
   it('the consent path keeps the resource: pending consent stores it and approval puts it on the code', async () => {
     const { service, consentStore, codeStore } = makeService();
     await service.authorize(

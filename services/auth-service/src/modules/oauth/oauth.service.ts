@@ -371,6 +371,31 @@ export class OAuthService {
 
     this.assertAllowedResource(body.resource);
 
+    // A refresh may not switch audience. Same rule as the authorization_code
+    // grant: an explicit resource must equal the one bound to the grant (none
+    // bound means the default, which cannot be requested explicitly). Checked
+    // before rotate() so a rejected mismatch does not burn the refresh token.
+    // Only the client that owns the session is told about a mismatch; any other
+    // caller falls through to rotate(), which rejects it as invalid_grant.
+    if (body.resource !== undefined) {
+      const sessionId = this.refreshTokenService.extractSessionId(
+        body.refresh_token,
+      );
+      const bound = sessionId
+        ? await this.codeStore.getSessionScope(sessionId)
+        : null;
+      if (
+        bound &&
+        bound.clientId === client.clientId &&
+        body.resource !== bound.resource
+      ) {
+        throw new BadRequestException({
+          error: 'invalid_target',
+          error_description: 'resource does not match the original grant',
+        });
+      }
+    }
+
     // Rotate the refresh token
     let userId: string;
     let newRefreshToken: string;
@@ -404,19 +429,6 @@ export class OAuthService {
       throw new UnauthorizedException({
         error: 'invalid_grant',
         error_description: 'Refresh token was not issued to this client',
-      });
-    }
-
-    // A refresh may not switch audience; sessions from before the resource
-    // parameter existed (no resource on the record) are bound to the default.
-    if (
-      body.resource !== undefined &&
-      body.resource !==
-        (scopeMeta.resource ?? readOAuthConfig(this.config).apiAudience)
-    ) {
-      throw new BadRequestException({
-        error: 'invalid_target',
-        error_description: 'resource does not match the original grant',
       });
     }
 
