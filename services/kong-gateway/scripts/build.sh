@@ -161,6 +161,31 @@ if redis_host_env:
 # KONG_RSA_PUBLIC_KEY: the real secret is injected at container start; the values
 # files only carry a dev default.
 queue_secret_env = os.environ.get('QUEUE_HMAC_SECRET', '')
+
+# The secret is substituted verbatim into a Lua string literal (queue-gate.lua),
+# and the gate must use the exact bytes queue-service signs with. So reject, never
+# escape, anything that would break or alter the literal. Runs whether or not the
+# gate is armed (an injected `"` breaks Lua even when disarmed). Never prints the value.
+def check_queue_secret_embeddable(secret, source):
+    if not secret:
+        return
+    bad = []
+    if '"' in secret:
+        bad.append('a double quote (")')
+    if '\\' in secret:
+        bad.append('a backslash (\\)')
+    if re.search(r'[\x00-\x1f\x7f]', secret):
+        bad.append('a control character (including newline or carriage return)')
+    if '{{' in secret:
+        bad.append('the sequence "{{"')
+    if bad:
+        print(f'ERROR: QUEUE_HMAC_SECRET ({source}) cannot be embedded safely in the queue gate Lua; '
+              f'it contains {", ".join(bad)}.', file=sys.stderr)
+        print('  Use a secret without these characters (e.g. base64 or hex); the gate needs the', file=sys.stderr)
+        print('  exact bytes queue-service uses, so it is rejected rather than escaped.', file=sys.stderr)
+        sys.exit(1)
+
+check_queue_secret_embeddable(queue_secret_env, 'environment')
 if queue_secret_env:
     values['QUEUE_HMAC_SECRET'] = queue_secret_env
 
@@ -187,6 +212,11 @@ def expand_values(values, rounds=5):
     return values
 
 values = expand_values(values)
+# Expand the default the same way as the effective value so the comparison below
+# is like-for-like (a {{KEY}} in the default would otherwise never match).
+default_queue_secret = re.sub(r'\{\{([A-Z_][A-Z0-9_]*)\}\}',
+                              lambda m: values.get(m.group(1), m.group(0)), default_queue_secret)
+check_queue_secret_embeddable(values.get('QUEUE_HMAC_SECRET', ''), 'after expansion')
 
 # ── Validate: the redis policy needs a host ───────────────────────────────────
 # Kong's rate-limiting schema makes redis.host conditionally required when
@@ -212,7 +242,7 @@ if values.get('QUEUE_GATE_ARMED') == 'true' and not values.get('QUEUE_HMAC_SECRE
 # ── Validate: an armed gate outside local must not use the committed dev secret ─
 # _defaults.yml carries a dev QUEUE_HMAC_SECRET that is public in git. If no env
 # values file or runtime QUEUE_HMAC_SECRET replaces it, anyone could forge a
-# qq_pass cookie. Compared against the value as loaded; never printed.
+# qq_pass cookie. Compared against the expanded default; never printed.
 if (values.get('QUEUE_GATE_ARMED') == 'true'
         and target_env not in ('local', 'minikube')
         and values.get('QUEUE_HMAC_SECRET', '') in ('', default_queue_secret)):

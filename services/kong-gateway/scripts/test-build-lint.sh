@@ -64,7 +64,7 @@ if out="$("${WORK}/scripts/build.sh" staging "${WORK}/out.yml" 2>&1)"; then
   echo "FAIL: build.sh accepted an armed staging gate with the committed dev secret" >&2
   exit 1
 fi
-if ! grep -q "QUEUE_HMAC_SECRET" <<<"${out}"; then
+if ! grep -q "committed dev default" <<<"${out}"; then
   echo "FAIL: build.sh failed, but not with the queue secret error:" >&2
   echo "${out}" >&2
   exit 1
@@ -94,3 +94,51 @@ if ! out="$("${WORK}/scripts/build.sh" local "${WORK}/out.yml" 2>&1)"; then
   exit 1
 fi
 echo "PASS: build.sh allows the dev queue secret on an armed local gate"
+
+# ── Unsafe secrets are rejected whatever the source, armed or not ────────────
+# Values are built at runtime and never echoed; only the output is checked for a leak.
+expect_unsafe_rejected() {  # <label> <secret> <marker-substring-to-check-for-leak>
+  local label="$1" secret="$2" leak="$3"
+  if out="$(QUEUE_HMAC_SECRET="${secret}" "${WORK}/scripts/build.sh" staging "${WORK}/out.yml" 2>&1)"; then
+    echo "FAIL: build.sh accepted a QUEUE_HMAC_SECRET containing ${label}" >&2
+    exit 1
+  fi
+  if ! grep -q "cannot be embedded safely" <<<"${out}" || ! grep -q "QUEUE_HMAC_SECRET" <<<"${out}"; then
+    echo "FAIL: ${label}: build.sh failed, but not with the embeddable-secret error" >&2
+    exit 1
+  fi
+  if grep -qF -e "${leak}" <<<"${out}"; then
+    echo "FAIL: ${label}: build.sh output leaked the secret" >&2
+    exit 1
+  fi
+  echo "PASS: build.sh rejects a QUEUE_HMAC_SECRET containing ${label}"
+}
+RAND="$(python3 -c 'import secrets; print(secrets.token_hex(12))')"
+NL=$'\n'
+# Disarmed staging on purpose: the check must not depend on the gate being armed.
+sed -i.bak '/^QUEUE_GATE_ARMED:/d' "${WORK}/values/staging.yml" && rm -f "${WORK}/values/staging.yml.bak"
+expect_unsafe_rejected 'a double quote' "${RAND}\"; error(\"x\") --" "${RAND}"
+expect_unsafe_rejected 'a backslash' "${RAND}\\n${RAND}" "${RAND}"
+expect_unsafe_rejected 'a newline' "${RAND}${NL}${RAND}" "${RAND}"
+expect_unsafe_rejected 'a placeholder brace pair' "${RAND}{{${RAND}" "${RAND}"
+
+# disarmed staging + committed default -> builds (nothing to forge without the gate)
+if ! out="$("${WORK}/scripts/build.sh" staging "${WORK}/out.yml" 2>&1)"; then
+  echo "FAIL: build.sh rejected disarmed staging with the default secret:" >&2
+  echo "${out}" >&2
+  exit 1
+fi
+echo "PASS: build.sh builds disarmed staging with the default queue secret"
+
+# An empty env var must not clobber a values-file secret
+printf '\nQUEUE_HMAC_SECRET: "%s"\n' "${INJECTED_SECRET}" >> "${WORK}/values/staging.yml"
+if ! out="$(QUEUE_HMAC_SECRET="" "${WORK}/scripts/build.sh" staging "${WORK}/out.yml" 2>&1)"; then
+  echo "FAIL: build.sh failed with an empty env secret and a values-file secret:" >&2
+  echo "${out}" >&2
+  exit 1
+fi
+if ! grep -qF -e "${INJECTED_SECRET}" "${WORK}/out.yml" || grep -qF -e "${DEFAULT_SECRET}" "${WORK}/out.yml"; then
+  echo "FAIL: an empty QUEUE_HMAC_SECRET env var clobbered the values-file secret" >&2
+  exit 1
+fi
+echo "PASS: an empty QUEUE_HMAC_SECRET env var does not clobber a values-file secret"
