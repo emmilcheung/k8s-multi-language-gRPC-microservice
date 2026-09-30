@@ -230,7 +230,7 @@ class OrderServiceTest {
         when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
 
         OrderResponse response = orderTransactionService.createOrderTransactional(
-                userId, ticketId, reserveResponse, reservationId, 1);
+                userId, ticketId, reserveResponse, reservationId, 1, null);
 
         verify(orderTicketRepository).save(any(OrderTicket.class));
         verify(orderRepository).save(any(Order.class));
@@ -249,7 +249,7 @@ class OrderServiceTest {
         when(orderRepository.save(orderCaptor.capture())).thenAnswer(inv -> inv.getArgument(0));
 
         orderTransactionService.createOrderTransactional(
-                userId, ticketId, reserveResponse, reservationId, quantity);
+                userId, ticketId, reserveResponse, reservationId, quantity, null);
 
         Order saved = orderCaptor.getValue();
         assertThat(saved.getReservationId()).isEqualTo(reservationId);
@@ -714,5 +714,32 @@ class OrderServiceTest {
                 .add(new BigDecimal(response.getFacilityFee()))
                 .add(new BigDecimal(response.getTax()));
         assertThat(totalComputed).isEqualByComparingTo(new BigDecimal(response.getTotal()));
+    }
+
+    // ── WS-F pre-check: retry after a compensated seated reserve ───────────────
+
+    @Test
+    void F_pre_seated_retry_on_released_reservation_is_409_exhausted_and_creates_nothing() {
+        UUID seatId = UUID.randomUUID();
+        UUID planId = UUID.randomUUID();
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+        req.setPlanId(planId.toString());
+        req.setSeatIds(List.of(seatId.toString()));
+        req.setQuantity(1);
+        when(venueServiceClient.getSeatingPlan(planId.toString()))
+                .thenReturn(GetSeatingPlanResponse.newBuilder().setAssignmentMode("manual").build());
+        // venue-service rejects a reserve on a RELEASED id (server.go ReserveHeldSeats); the key's
+        // derived reservationId is therefore permanently dead and only a new key can succeed.
+        when(venueServiceClient.reserveHeldSeats(
+                anyString(), anyString(), any(UUID.class), eq(userId), anyList(), any(Instant.class)))
+                .thenThrow(new com.ticketing.orders.grpc.ReservationReleasedException(
+                        "reservation x was already released"));
+
+        assertThatThrownBy(() -> orderService.createSeatedOrder(userId, req, "retry-key-0009"))
+                .isInstanceOf(com.ticketing.orders.exception.IdempotencyKeyExhaustedException.class);
+
+        verify(orderRepository, never()).save(any());
+        verify(venueServiceClient, never()).releaseSeatReservation(any(), anyString());
     }
 }

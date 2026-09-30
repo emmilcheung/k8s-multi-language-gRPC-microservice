@@ -76,12 +76,13 @@ public class OrderTransactionService {
      * @param reserveResponse the gRPC ReserveQuota response (contains title, price, etc.)
      * @param reservationId  the UUID used as the idempotency key for ReserveQuota
      * @param quantity       number of units being purchased
+     * @param requestFingerprint sha256 of the request body when created with an Idempotency-Key, else null
      * @return the created order as a response DTO
      */
     @Transactional
     public OrderResponse createOrderTransactional(
             UUID userId, UUID ticketId, ReserveQuotaResponse reserveResponse,
-            UUID reservationId, int quantity) {
+            UUID reservationId, int quantity, String requestFingerprint) {
 
         // Upsert the local ticket replica from the authoritative gRPC response.
         // In normal production flow this row already exists (written by TicketEventConsumer
@@ -97,6 +98,7 @@ public class OrderTransactionService {
 
         OffsetDateTime expiresAt = OffsetDateTime.now().plusMinutes(expirationMinutes);
         Order order = new Order(userId, OrderStatus.CREATED, expiresAt, ticket, reservationId, quantity);
+        order.setRequestFingerprint(requestFingerprint);
         orderRepository.save(order);
 
         // Write outbox message in the same transaction — this is the invariant that

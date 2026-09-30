@@ -15,9 +15,12 @@ import com.ticketing.orders.event.OrderCompletedEvent;
 import com.ticketing.orders.exception.BadRequestException;
 import com.ticketing.orders.exception.ConflictException;
 import com.ticketing.orders.exception.ForbiddenException;
+import com.ticketing.orders.exception.IdempotencyKeyExhaustedException;
+import com.ticketing.orders.exception.IdempotencyKeyReusedException;
 import com.ticketing.orders.exception.NotFoundException;
 import com.ticketing.orders.grpc.AutoAssignAndReserveResponse;
 import com.ticketing.orders.grpc.ReserveHeldSeatsResponse;
+import com.ticketing.orders.grpc.ReservationReleasedException;
 import com.ticketing.orders.grpc.ReserveQuotaResponse;
 import com.ticketing.orders.grpc.TicketServiceClient;
 import com.ticketing.orders.grpc.VenueServiceClient;
@@ -36,6 +39,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -134,9 +138,29 @@ public class OrderService {
      * </ol>
      */
     public OrderResponse createOrder(UUID userId, CreateOrderRequest request) {
+        return createOrder(userId, request, null).order();
+    }
+
+    /**
+     * C-8: as {@link #createOrder(UUID, CreateOrderRequest)}, but with an optional
+     * {@code Idempotency-Key}. With a key the reservationId is derived from (user, key), a
+     * retry replays the existing order, and a concurrent duplicate collapses onto the winner.
+     */
+    public CreateOrderResult createOrder(UUID userId, CreateOrderRequest request, String idempotencyKey) {
         UUID ticketId = request.getTicketId();
         int quantity = request.getQuantity();
         UUID reservationId = UUID.randomUUID();
+        String fingerprint = null;
+        if (idempotencyKey != null) {
+            IdempotencyKeys.requireValid(idempotencyKey);
+            reservationId = IdempotencyKeys.reservationId(userId, idempotencyKey);
+            fingerprint = IdempotencyKeys.fingerprint(objectMapper, request);
+            Optional<OrderResponse> replay = findReplay(userId, reservationId, fingerprint);
+            if (replay.isPresent()) {
+                return new CreateOrderResult(replay.get(), true);
+            }
+        }
+        final UUID resId = reservationId;
 
         // Set reservation expiry to order expiry + a small buffer so that ticket-service's
         // expiry worker does not reclaim the reservation before the order TX commits.
@@ -145,18 +169,24 @@ public class OrderService {
         // Step 1: reserve quota outside the DB transaction (network I/O must not hold a
         // connection).  This is the authoritative availability check — no Redisson lock needed.
         ReserveQuotaResponse reserveResponse = ticketServiceClient.reserveQuota(
-                ticketId.toString(), reservationId, userId, quantity, reservationExpiresAt);
+                ticketId.toString(), resId, userId, quantity, reservationExpiresAt);
 
         // Step 2: create order + outbox in a single DB transaction.
         try {
-            return orderTransactionService.createOrderTransactional(
-                    userId, ticketId, reserveResponse, reservationId, quantity);
+            return new CreateOrderResult(orderTransactionService.createOrderTransactional(
+                    userId, ticketId, reserveResponse, resId, quantity, fingerprint), false);
         } catch (Exception e) {
+            // C-8: a same-key request that committed first owns this reservation. Releasing it
+            // would strand the winner's order, so return the winner and do NOT compensate.
+            Optional<OrderResponse> winner = findWinner(idempotencyKey, userId, resId, fingerprint);
+            if (winner.isPresent()) {
+                return new CreateOrderResult(winner.get(), true);
+            }
             // Compensation: release the reservation so inventory is returned immediately.
             log.error("Order TX failed after successful ReserveQuota — compensating reservationId={} ticketId={}",
-                    reservationId, ticketId, e);
-            compensate("ga", reservationId,
-                    () -> ticketServiceClient.releaseReservation(reservationId, "COMPENSATION"));
+                    resId, ticketId, e);
+            compensate("ga", resId,
+                    () -> ticketServiceClient.releaseReservation(resId, "COMPENSATION"));
             throw e;
         }
     }
@@ -181,6 +211,11 @@ public class OrderService {
      * call to {@code ReleaseSeatReservation} is made so seats are not held indefinitely.
      */
     public OrderResponse createSeatedOrder(UUID userId, CreateOrderRequest request) {
+        return createSeatedOrder(userId, request, null).order();
+    }
+
+    /** C-8: as {@link #createSeatedOrder(UUID, CreateOrderRequest)}, with an optional {@code Idempotency-Key}. */
+    public CreateOrderResult createSeatedOrder(UUID userId, CreateOrderRequest request, String idempotencyKey) {
         request.validate();
 
         UUID ticketId = request.getTicketId();
@@ -188,6 +223,18 @@ public class OrderService {
         OrderType orderType = request.determineOrderType();
 
         UUID reservationId = UUID.randomUUID();
+        String fingerprint = null;
+        if (idempotencyKey != null) {
+            IdempotencyKeys.requireValid(idempotencyKey);
+            reservationId = IdempotencyKeys.reservationId(userId, idempotencyKey);
+            fingerprint = IdempotencyKeys.fingerprint(objectMapper, request);
+            Optional<OrderResponse> replay = findReplay(userId, reservationId, fingerprint);
+            if (replay.isPresent()) {
+                return new CreateOrderResult(replay.get(), true);
+            }
+        }
+        final UUID resId = reservationId;
+        final String fp = fingerprint;
         Instant reservationExpiresAt = Instant.now().plus(expirationMinutes + 1, ChronoUnit.MINUTES);
 
         // WS4: Fetch plan and validate assignment mode matches the order type.
@@ -208,8 +255,13 @@ public class OrderService {
         if (orderType == OrderType.MANUAL_SEATED) {
             List<String> seatIds = request.getSeatIds();
 
-            ReserveHeldSeatsResponse reserveResponse = venueServiceClient.reserveHeldSeats(
-                    planId, ticketId.toString(), reservationId, userId, seatIds, reservationExpiresAt);
+            ReserveHeldSeatsResponse reserveResponse;
+            try {
+                reserveResponse = venueServiceClient.reserveHeldSeats(
+                        planId, ticketId.toString(), resId, userId, seatIds, reservationExpiresAt);
+            } catch (ReservationReleasedException e) {
+                throw new IdempotencyKeyExhaustedException();
+            }
 
             if (!reserveResponse.getSuccess()) {
                 List<String> unavailable = reserveResponse.getUnavailableSeatIdsList();
@@ -217,15 +269,19 @@ public class OrderService {
             }
 
             try {
-                return seatedOrderTransactionService.createSeatedOrderTransactional(
+                return new CreateOrderResult(seatedOrderTransactionService.createSeatedOrderTransactional(
                         userId, ticketId, UUID.fromString(planId),
-                        reservationId, quantity, reserveResponse.getSeatsList(),
-                        OrderType.MANUAL_SEATED, null);
+                        resId, quantity, reserveResponse.getSeatsList(),
+                        OrderType.MANUAL_SEATED, null, fp), false);
             } catch (Exception e) {
+                Optional<OrderResponse> winner = findWinner(idempotencyKey, userId, resId, fp);
+                if (winner.isPresent()) {
+                    return new CreateOrderResult(winner.get(), true);
+                }
                 log.error("Seated order TX failed after ReserveHeldSeats — compensating "
-                        + "reservationId={} ticketId={}", reservationId, ticketId, e);
-                compensate("seated_manual", reservationId,
-                        () -> venueServiceClient.releaseSeatReservation(reservationId, "COMPENSATION"));
+                        + "reservationId={} ticketId={}", resId, ticketId, e);
+                compensate("seated_manual", resId,
+                        () -> venueServiceClient.releaseSeatReservation(resId, "COMPENSATION"));
                 throw e;
             }
         }
@@ -233,22 +289,52 @@ public class OrderService {
         // AUTO_ASSIGN_SEATED
         String sectionId = request.getSectionId();
 
-        AutoAssignAndReserveResponse assignResponse = venueServiceClient.autoAssignAndReserve(
-                planId, ticketId.toString(), sectionId, reservationId, userId,
-                quantity, reservationExpiresAt);
+        AutoAssignAndReserveResponse assignResponse;
+        try {
+            assignResponse = venueServiceClient.autoAssignAndReserve(
+                    planId, ticketId.toString(), sectionId, resId, userId,
+                    quantity, reservationExpiresAt);
+        } catch (ReservationReleasedException e) {
+            throw new IdempotencyKeyExhaustedException();
+        }
 
         try {
-            return seatedOrderTransactionService.createSeatedOrderTransactional(
+            return new CreateOrderResult(seatedOrderTransactionService.createSeatedOrderTransactional(
                     userId, ticketId, UUID.fromString(planId),
-                    reservationId, quantity, assignResponse.getSeatsList(),
-                    OrderType.AUTO_ASSIGN_SEATED, UUID.fromString(sectionId));
+                    resId, quantity, assignResponse.getSeatsList(),
+                    OrderType.AUTO_ASSIGN_SEATED, UUID.fromString(sectionId), fp), false);
         } catch (Exception e) {
+            Optional<OrderResponse> winner = findWinner(idempotencyKey, userId, resId, fp);
+            if (winner.isPresent()) {
+                return new CreateOrderResult(winner.get(), true);
+            }
             log.error("Seated order TX failed after AutoAssignAndReserve — compensating "
-                    + "reservationId={} ticketId={}", reservationId, ticketId, e);
-            compensate("seated_auto", reservationId,
-                    () -> venueServiceClient.releaseSeatReservation(reservationId, "COMPENSATION"));
+                    + "reservationId={} ticketId={}", resId, ticketId, e);
+            compensate("seated_auto", resId,
+                    () -> venueServiceClient.releaseSeatReservation(resId, "COMPENSATION"));
             throw e;
         }
+    }
+
+    // ── Idempotency (C-8) ─────────────────────────────────────────────────────
+
+    /**
+     * Existing order for a derived reservationId: same fingerprint is a replay, a different
+     * one is key reuse.
+     */
+    private Optional<OrderResponse> findReplay(UUID userId, UUID reservationId, String fingerprint) {
+        return orderRepository.findByReservationIdAndUserId(reservationId, userId).map(order -> {
+            if (!fingerprint.equals(order.getRequestFingerprint())) {
+                throw new IdempotencyKeyReusedException();
+            }
+            return OrderResponse.from(order, orderSeatRepository.findAllByOrderId(order.getId()));
+        });
+    }
+
+    /** After a failed create TX: the same-key winner, if this request carried a key and lost the race. */
+    private Optional<OrderResponse> findWinner(
+            String idempotencyKey, UUID userId, UUID reservationId, String fingerprint) {
+        return idempotencyKey == null ? Optional.empty() : findReplay(userId, reservationId, fingerprint);
     }
 
     // ── Read ──────────────────────────────────────────────────────────────────

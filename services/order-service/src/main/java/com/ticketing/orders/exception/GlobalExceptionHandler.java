@@ -39,6 +39,21 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, "CONFLICT", ex.getMessage(), List.of());
     }
 
+    @ExceptionHandler(ValidationFailedException.class)
+    public ResponseEntity<Map<String, Object>> handleValidationFailed(ValidationFailedException ex) {
+        return error(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", ex.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(IdempotencyKeyReusedException.class)
+    public ResponseEntity<Map<String, Object>> handleKeyReused(IdempotencyKeyReusedException ex) {
+        return error(HttpStatus.UNPROCESSABLE_ENTITY, "IDEMPOTENCY_KEY_REUSED", ex.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(IdempotencyKeyExhaustedException.class)
+    public ResponseEntity<Map<String, Object>> handleKeyExhausted(IdempotencyKeyExhaustedException ex) {
+        return error(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_EXHAUSTED", ex.getMessage(), List.of());
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException ex) {
         List<Map<String, String>> details = ex.getBindingResult().getFieldErrors().stream()
