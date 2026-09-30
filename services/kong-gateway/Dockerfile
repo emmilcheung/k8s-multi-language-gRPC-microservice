@@ -42,6 +42,11 @@ RUN chmod +x /docker-entrypoint-kong-gw.sh
 # The kong user/group are provided by the upstream kong:3.7-ubuntu base image.
 RUN mkdir -p /etc/kong && chown kong:kong /etc/kong
 
+# queue-gate.lua verifies waiting-room passes with resty.openssl.hmac. Kong's
+# untrusted Lua sandbox blocks require() by default (F12); allow exactly this
+# module. Helm sets the same value in infra/helm/values.yaml kong.env.
+ENV KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES=resty.openssl.hmac
+
 # Switch to the non-root kong user before the entrypoint runs.
 # AGENTS.md §10.1: "Never run as root."
 USER kong

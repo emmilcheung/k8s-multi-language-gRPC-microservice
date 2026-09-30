@@ -118,6 +118,7 @@ redis_host_env     = sys.argv[8]
 scope_lua_path     = lua_path.replace('jwt-sub.lua', 'jwt-scope.lua')
 role_lua_path      = lua_path.replace('jwt-sub.lua', 'role-check.lua')
 deny_lua_path      = lua_path.replace('jwt-sub.lua', 'oauth-deny.lua')
+queue_lua_path     = lua_path.replace('jwt-sub.lua', 'queue-gate.lua')
 
 # ── Load values files ──────────────────────────────────────────────────────────
 def load_values(path):
@@ -262,6 +263,25 @@ with open(deny_lua_path) as f:
         LUA_INDENT + line for line in f.read().rstrip('\n').splitlines())
 
 content = re.sub(r'[ \t]*\{\{OAUTH_DENY_LUA\}\}', lambda m: deny_lua_block, content)
+
+# ── Substitute {{QUEUE_GATE_LUA:<mode>}} ─────────────────────────────────────
+# Modes: graphql-reserve (gate bodies containing "reserve") and always (gate
+# every request). The Lua keeps its {{QUEUE_*}} scalars; the pass below fills them.
+QUEUE_GATE_MODES = ('graphql-reserve', 'always')
+
+with open(queue_lua_path) as f:
+    queue_lua_content = f.read()
+
+def replace_queue_gate(m):
+    mode = m.group(1)
+    if mode not in QUEUE_GATE_MODES:
+        print(f'ERROR: unknown queue gate mode {mode!r}; expected one of {QUEUE_GATE_MODES}',
+              file=sys.stderr)
+        sys.exit(1)
+    lines = queue_lua_content.replace('QUEUE_GATE_MODE_PLACEHOLDER', mode).rstrip('\n').splitlines()
+    return '\n'.join(LUA_INDENT + line for line in lines)
+
+content = re.sub(r'[ \t]*\{\{QUEUE_GATE_LUA:([^}]+)\}\}', replace_queue_gate, content)
 
 # ── Substitute {{ROLE_CHECK_LUA:<role>}} placeholders ────────────────────────
 # Similar to SCOPE_CHECK_LUA, each occurrence encodes the required role:
