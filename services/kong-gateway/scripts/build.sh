@@ -213,7 +213,7 @@ with open(base_template_path) as f:
 # ── Lint: every jwt route declares its OAuth policy (D9) ─────────────────────
 # A route that verifies JWTs must say whether OAuth access tokens may use it:
 # {{SCOPE_CHECK_LUA:<scope>}} admits tokens that hold <scope>, {{OAUTH_DENY_LUA}}
-# refuses them. Exactly one, inside the post-function: the guards read the
+# refuses them. Exactly one, as the FIRST post-function access entry: the guards read the
 # token the jwt plugin verified, which a pre-function cannot see. A route that
 # forgets fails the build instead of silently admitting agents (F11).
 OAUTH_GUARD_RE = re.compile(r'\{\{(?:SCOPE_CHECK_LUA:[^}]+|OAUTH_DENY_LUA)\}\}')
@@ -223,13 +223,20 @@ for block in re.split(r'\n(?=      - name: )', content):
     block = '\n'.join(lines) + '\n'
     if '          - name: jwt\n' not in block:
         continue
-    guards = [m.start() for m in OAUTH_GUARD_RE.finditer(block)]
+    guards = OAUTH_GUARD_RE.findall(block)
     post = block.find('          - name: post-function\n')
-    if len(guards) != 1 or post == -1 or guards[0] < post:
+    if len(guards) != 1 or post == -1:
+        bad_routes.append(lines[0].strip())
+        continue
+    # The guard must sit in the FIRST `- |` entry of the post-function access
+    # list, so nothing (e.g. a header-injecting entry) runs before it. Compare
+    # entries by their `- |` markers, not by indentation depth.
+    entries = re.split(r'^[ \t]*- \|[ \t]*$', block[post:], flags=re.M)[1:]
+    if not entries or not OAUTH_GUARD_RE.search(entries[0]):
         bad_routes.append(lines[0].strip())
 if bad_routes:
     print('ERROR: each jwt route needs exactly one OAuth guard '
-          '(SCOPE_CHECK_LUA or OAUTH_DENY_LUA) in its post-function:',
+          '(SCOPE_CHECK_LUA or OAUTH_DENY_LUA) as the FIRST entry of its post-function access list:',
           file=sys.stderr)
     for r in bad_routes:
         print(f'  {r}', file=sys.stderr)
