@@ -87,7 +87,13 @@ export KONG_RSA_PUBLIC_KEY="$(cat /path/to/public.pem)"
 | `JWT_COOKIE_NAME` | `token` | Cookie name Kong reads the JWT from |
 | `RATE_LIMIT_ANONYMOUS_PER_MINUTE` | `300` | Anonymous IP rate limit (requests/min) |
 | `RATE_LIMIT_POLICY` | `local` | `local` (dev) or `redis` (staging/prod) |
+| `HOST_MCP` | `mcp-service:3000` | mcp-service upstream (`/mcp`, protected-resource metadata) |
+| `RATE_LIMIT_MCP_PER_MINUTE` | `600` | `/mcp` per-IP rate limit (requests/min) |
 | `KONG_RSA_PUBLIC_KEY` | — | **Env var only.** RSA public key PEM. |
+| `KONG_OAUTH_ISSUER` | `http://localhost:8000` (local, minikube only) | Public origin of the OAuth issuer (same as auth-service `OAUTH_ISSUER`). Keys the second `jwt_secret` and derives the REST audience `<origin>/api`. **Required for dev/staging/prod; the build fails without it.** Must be a bare origin, https outside local/minikube. |
+
+The OAuth issuer must stay in step with auth-service: set `OAUTH_ISSUER_ENABLED=true` only for an
+environment whose Kong was rendered with the matching `KONG_OAUTH_ISSUER` (compose and minikube do).
 
 ## Route summary
 
@@ -96,9 +102,17 @@ export KONG_RSA_PUBLIC_KEY="$(cat /path/to/public.pem)"
 | `/api/users/signup`, `/signin`, `/signout` | POST | Public |
 | `/api/users/currentuser` | GET | JWT required |
 | `/.well-known/jwks.json` | GET | Public |
+| `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp` | GET | Public (to mcp-service) |
+| `/mcp` | POST, GET, DELETE | No Kong JWT; mcp-service verifies the `<origin>/mcp` token. Inbound `X-User-*` cleared, rate-limited per IP |
 | `/api/tickets` | GET | Public |
 | `/api/tickets/:id` | GET | Public |
 | `/api/tickets`, `/api/tickets/:id` | POST, PUT, PATCH, DELETE | JWT required |
 | `/api/orders`, `/api/orders/:id` | GET, POST, DELETE | JWT required |
 | `/api/payments`, `/api/payments/:id` | GET, POST | JWT required |
 | `/` (catch-all) | ALL | Public (Next.js SSR) |
+
+## REST audience rule
+
+`plugins/jwt-scope.lua` refuses (401 `token audience not accepted`) an OAuth token (one with `client_id`) whose `aud` does not contain `<KONG_OAUTH_ISSUER>/api`, so an MCP-audience token cannot be replayed on REST routes. Tokens without `aud` are tolerated until WS-N; browser tokens (no `client_id`) are unaffected.
+
+`scripts/test-build-lint.sh` asserts the routes that have no jwt plugin (and so escape the guard lint): `/mcp` and the protected-resource route.

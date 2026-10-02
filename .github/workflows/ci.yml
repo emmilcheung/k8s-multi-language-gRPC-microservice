@@ -932,6 +932,9 @@ jobs:
           # hash). build.sh refuses to render without it, so CI supplies a syntactic
           # stand-in — this job only parses the config, it never connects.
           KONG_RATE_LIMIT_REDIS_HOST: redis.ci.invalid
+          # dev/staging/prod have no committed OAuth issuer origin (build.sh
+          # refuses to render the MCP routes without one); syntactic stand-in.
+          KONG_OAUTH_ISSUER: https://ticketing.ci.invalid
 
   # ── ticket-service (Go 1.25 / Echo v4 / confluent-kafka-go CGO) ────────────
   ticket:

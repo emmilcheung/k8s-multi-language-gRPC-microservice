@@ -11,6 +11,13 @@
 --                                    SCOPE_PLACEHOLDER, else 403. A `client_id`
 --                                    token without `scope` is refused.
 --
+-- REST audience rule (C-10): an OAuth token (has `client_id`) that carries an
+-- `aud` not containing API_AUDIENCE_PLACEHOLDER is refused 401 before the scope
+-- check. This is what keeps an MCP-audience token (aud <origin>/mcp) out of REST
+-- routes; only the exchanged API-audience token passes. A token with no `aud` is
+-- tolerated until WS-N makes `aud` mandatory. Browser tokens have no client_id
+-- and are never subject to it.
+--
 -- Why no require "cjson": Kong's untrusted Lua sandbox blocks require() (only
 -- resty.openssl.hmac is allow-listed, for queue-gate.lua). Claims are read
 -- with string patterns; safe because the token is already verified and scope
@@ -21,6 +28,7 @@
 -- this check or oauth-deny.lua, inside its post-function.
 
 local scope_required = "SCOPE_PLACEHOLDER"
+local api_audience = "API_AUDIENCE_PLACEHOLDER"
 
 local token_str = kong.ctx.shared.authenticated_jwt_token
 if type(token_str) ~= "string" then
@@ -41,6 +49,30 @@ b64_payload = b64_payload .. string.rep("=", pad)
 local payload_json = ngx.decode_base64(b64_payload)
 if not payload_json then
   return
+end
+
+-- REST audience rule. `aud` is a JSON string or an array of strings; match the
+-- audience as a whole quoted value inside that claim only.
+if payload_json:find('"client_id"%s*:') then
+  local aud_at = payload_json:match('"aud"%s*:%s*()')
+  if aud_at then
+    local aud_value
+    if payload_json:sub(aud_at, aud_at) == "[" then
+      aud_value = payload_json:match("^%[(.-)%]", aud_at)
+    else
+      aud_value = payload_json:match('^("[^"]*")', aud_at)
+    end
+    if not (aud_value and aud_value:find('"' .. api_audience .. '"', 1, true)) then
+      return kong.response.exit(
+        401,
+        '{"error":"invalid_token","error_description":"token audience not accepted"}',
+        {
+          ["Content-Type"] = "application/json",
+          ["WWW-Authenticate"] = 'Bearer error="invalid_token", error_description="token audience not accepted"',
+        }
+      )
+    end
+  end
 end
 
 -- Extract the `scope` claim value (space-separated string).

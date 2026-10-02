@@ -12,6 +12,10 @@
 #   plugins/queue-gate.lua      — inlined for waiting-room gated routes
 #   KONG_RSA_PUBLIC_KEY (env)   — RSA public key; never stored in values files
 #   KONG_RATE_LIMIT_REDIS_HOST  — managed-Redis endpoint; not knowable at commit time
+#   KONG_OAUTH_ISSUER (env)     — public origin of the OAuth issuer (= auth-service OAUTH_ISSUER, no
+#                                 path). Keys the second jwt_secret and derives the REST audience
+#                                 <origin>/api. local/minikube default to http://localhost:8000
+#                                 from their values files; dev/staging/prod must supply it
 #   QUEUE_HMAC_SECRET (env)     — queue pass-signing secret; when non-empty it wins over the
 #                                 values files. Required outside local/minikube once
 #                                 QUEUE_GATE_ARMED is "true" (the committed dev default is refused)
@@ -28,6 +32,8 @@
 # Exits non-zero if:
 #   - KONG_RSA_PUBLIC_KEY is not set or empty
 #   - <env> is missing or has no matching values/<env>.yml
+#   - the OAuth issuer (KONG_OAUTH_ISSUER, or OAUTH_ISSUER in the values file) is missing, is not a
+#     bare origin, or is not https outside local/minikube
 #   - RATE_LIMIT_POLICY is `redis` but no Redis host resolves
 #   - QUEUE_GATE_ARMED is `true` but QUEUE_HMAC_SECRET is empty
 #   - QUEUE_GATE_ARMED is `true`, <env> is not local/minikube, and the effective
@@ -156,6 +162,16 @@ values.update(load_values(env_values_path))  # env overrides defaults
 if redis_host_env:
     values['RATE_LIMIT_REDIS_HOST'] = redis_host_env
 
+# ── OAuth issuer origin (second jwt_secret + REST audience) ──────────────────
+# Every environment renders the MCP routes, and once auth-service flips
+# OAUTH_ISSUER_ENABLED its tokens carry iss=<this origin>. A gateway rendered
+# without it would 401 every OAuth token, so a missing value fails the build
+# rather than falling back to a hard-coded origin. A trailing slash is trimmed to
+# match auth-service's own normalisation.
+oauth_issuer_env = os.environ.get('KONG_OAUTH_ISSUER', '')
+if oauth_issuer_env:
+    values['OAUTH_ISSUER'] = oauth_issuer_env
+
 # ── Environment override for the queue pass-signing secret ────────────────────
 # Read from os.environ (not argv) so it never shows in a process listing. Mirrors
 # KONG_RSA_PUBLIC_KEY: the real secret is injected at container start; the values
@@ -217,6 +233,20 @@ values = expand_values(values)
 default_queue_secret = re.sub(r'\{\{([A-Z_][A-Z0-9_]*)\}\}',
                               lambda m: values.get(m.group(1), m.group(0)), default_queue_secret)
 check_queue_secret_embeddable(values.get('QUEUE_HMAC_SECRET', ''), 'after expansion')
+
+# ── Validate: the OAuth issuer is a bare origin ───────────────────────────────
+oauth_issuer = values.get('OAUTH_ISSUER', '').rstrip('/')
+if not re.match(r'^https?://[A-Za-z0-9.-]+(:[0-9]+)?$', oauth_issuer):
+    print('ERROR: KONG_OAUTH_ISSUER is missing or not a bare origin (scheme://host[:port], no path/query).', file=sys.stderr)
+    print('  Set it to the same origin as auth-service OAUTH_ISSUER (global.publicOrigin), e.g.:', file=sys.stderr)
+    print('    export KONG_OAUTH_ISSUER="https://ticketing.example.com"', file=sys.stderr)
+    sys.exit(1)
+if target_env not in ('local', 'minikube') and not oauth_issuer.startswith('https://'):
+    print(f'ERROR: KONG_OAUTH_ISSUER must be https for environment "{target_env}" (auth-service refuses a plain-http issuer in production).', file=sys.stderr)
+    sys.exit(1)
+values['OAUTH_ISSUER'] = oauth_issuer
+# The REST audience is <origin>/api, matching auth-service OAUTH_API_AUDIENCE.
+oauth_api_audience = oauth_issuer + '/api'
 
 # ── Validate: the redis policy needs a host ───────────────────────────────────
 # Kong's rate-limiting schema makes redis.host conditionally required when
@@ -322,7 +352,8 @@ content = re.sub(r'[ \t]*\{\{JWT_SUB_LUA\}\}', lua_block, content)
 # build.sh reads jwt-scope.lua, replaces SCOPE_PLACEHOLDER with the captured
 # scope string, indents 18 spaces, and substitutes inline.
 def make_scope_lua(scope_lua_content, scope, indent):
-    replaced = scope_lua_content.replace('SCOPE_PLACEHOLDER', scope)
+    replaced = (scope_lua_content.replace('SCOPE_PLACEHOLDER', scope)
+                .replace('API_AUDIENCE_PLACEHOLDER', oauth_api_audience))
     lines = replaced.rstrip('\n').splitlines()
     return '\n'.join(indent + line for line in lines)
 

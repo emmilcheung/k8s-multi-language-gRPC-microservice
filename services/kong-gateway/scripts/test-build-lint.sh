@@ -7,6 +7,10 @@
 #      access entry must fail the build.
 #   2. Queue secret: an armed gate outside local must refuse the committed dev
 #      QUEUE_HMAC_SECRET (without printing it) and accept an injected one.
+#   3. MCP routes (WS-K): the /mcp and protected-resource routes carry no jwt
+#      plugin, so the guard lint cannot see them; assert them here. Also the
+#      second jwt_secret and the REST audience rule, and that a missing issuer
+#      fails the build instead of rendering a gateway that rejects every OAuth token.
 #
 # Usage: ./scripts/test-build-lint.sh
 
@@ -32,6 +36,8 @@ PYEOF
 
 # A throwaway placeholder is enough: the lint runs before the key is used.
 export KONG_RSA_PUBLIC_KEY="lint-test-placeholder"
+# Every env renders the MCP routes, so every build needs the OAuth issuer origin (K-5).
+export KONG_OAUTH_ISSUER="https://ticketing.example.com"
 if out="$("${WORK}/scripts/build.sh" local "${WORK}/out.yml" 2>&1)"; then
   echo "FAIL: build.sh accepted a route with the OAuth guard as the second entry" >&2
   exit 1
@@ -142,3 +148,129 @@ if ! grep -qF -e "${INJECTED_SECRET}" "${WORK}/out.yml" || grep -qF -e "${DEFAUL
   exit 1
 fi
 echo "PASS: an empty QUEUE_HMAC_SECRET env var does not clobber a values-file secret"
+
+# ── WS-K: MCP routes, second jwt_secret, REST audience rule ──────────────────
+# These routes have no jwt plugin, so the guard lint above ignores them by
+# construction. Without these checks a refactor could silently put a jwt plugin
+# (and its guard obligations) on /mcp, or drop the X-User-* clearing that stops
+# a client spoofing identity to mcp-service.
+unset QUEUE_HMAC_SECRET
+sed -i.bak '/^QUEUE_GATE_ARMED:/d' "${WORK}/values/local.yml" && rm -f "${WORK}/values/local.yml.bak"
+ISSUER="https://ticketing.example.com"
+export KONG_OAUTH_ISSUER="${ISSUER}"
+if ! out="$("${WORK}/scripts/build.sh" local "${WORK}/mcp.yml" 2>&1)"; then
+  echo "FAIL: build.sh rejected local with an OAuth issuer:" >&2
+  echo "${out}" >&2
+  exit 1
+fi
+
+# route_block <rendered-file> <route-name>: print that route's YAML block
+route_block() {
+  python3 - "$1" "$2" <<'PYEOF'
+import re, sys
+text = open(sys.argv[1]).read()
+for block in re.split(r'\n(?=      - name: )', text):
+    if block.lstrip().startswith('- name: ' + sys.argv[2] + '\n'):
+        print(block)
+        break
+PYEOF
+}
+
+MCP_BLOCK="$(route_block "${WORK}/mcp.yml" mcp)"
+if [[ -z "${MCP_BLOCK}" ]]; then
+  echo "FAIL: K-4/K-5: no 'mcp' route rendered" >&2
+  exit 1
+fi
+if grep -q -- '- name: jwt$' <<<"${MCP_BLOCK}"; then
+  echo "FAIL: K-5: the /mcp route has a jwt plugin; mcp-service verifies its own audience-bound token" >&2
+  exit 1
+fi
+for h in X-User-Id X-User-Roles X-User-Id-Sig; do
+  if ! grep -q "${h}" <<<"${MCP_BLOCK}"; then
+    echo "FAIL: K-4: the /mcp route does not clear inbound ${h}" >&2
+    exit 1
+  fi
+done
+if ! grep -q 'limit_by: ip' <<<"${MCP_BLOCK}"; then
+  echo "FAIL: K-5: the /mcp route is not rate-limited by IP" >&2
+  exit 1
+fi
+echo "PASS: K-4/K-5: /mcp has no jwt plugin, clears X-User-* and is IP rate-limited"
+
+PRM_BLOCK="$(route_block "${WORK}/mcp.yml" mcp-protected-resource-metadata)"
+if [[ -z "${PRM_BLOCK}" ]] || grep -q -- '- name: jwt$' <<<"${PRM_BLOCK}" \
+   || ! grep -q 'oauth-protected-resource' <<<"${PRM_BLOCK}"; then
+  echo "FAIL: K-5: protected-resource metadata route missing, or has a jwt plugin" >&2
+  exit 1
+fi
+echo "PASS: K-5: protected-resource metadata is a public route without a jwt plugin"
+
+# Second jwt_secret: same RSA key, keyed on the issuer so tokens whose iss is the
+# OAuth issuer verify. Without it every exchanged/MCP token would be 401 once
+# auth-service flips OAUTH_ISSUER_ENABLED.
+if ! grep -q -- "- key: ${ISSUER}\$" "${WORK}/mcp.yml" \
+   || [[ "$(grep -c 'rsa_public_key:' "${WORK}/mcp.yml")" != "2" ]]; then
+  echo "FAIL: K-5: expected a second RS256 jwt_secret keyed on the OAuth issuer" >&2
+  exit 1
+fi
+echo "PASS: K-5: a second jwt_secret keyed on the OAuth issuer is rendered"
+
+# REST audience rule: the scope guard must name the API audience derived from the issuer.
+if [[ "$(grep -c "${ISSUER}/api\"" "${WORK}/mcp.yml")" -lt 1 ]]; then
+  echo "FAIL: K-1: the REST audience (${ISSUER}/api) is not rendered into the scope guard" >&2
+  exit 1
+fi
+if grep -q 'API_AUDIENCE_PLACEHOLDER' "${WORK}/mcp.yml"; then
+  echo "FAIL: K-1: an audience placeholder was left unresolved" >&2
+  exit 1
+fi
+echo "PASS: K-1: the scope guard embeds the API audience derived from the OAuth issuer"
+
+# Guard counts unchanged by the new routes (they carry no jwt plugin).
+SCOPE_N="$(grep -c '{{SCOPE_CHECK_LUA:' "${GATEWAY_DIR}/config/kong.base.yml")"
+DENY_N="$(grep -c '{{OAUTH_DENY_LUA}}' "${GATEWAY_DIR}/config/kong.base.yml")"
+if [[ "${SCOPE_N}" != "11" || "${DENY_N}" != "17" ]]; then
+  echo "FAIL: guard counts changed (scope=${SCOPE_N} deny=${DENY_N}, expected 11/17); a new jwt route needs a deliberate guard" >&2
+  exit 1
+fi
+echo "PASS: guard counts are SCOPE 11 / DENY 17"
+
+# The issuer is a build input: missing or malformed must fail loud, never fall
+# back to a hard-coded origin. dev/staging/prod have no values-file default.
+for e in dev staging prod; do
+  if out="$(env -u KONG_OAUTH_ISSUER "${WORK}/scripts/build.sh" "${e}" "${WORK}/x.yml" 2>&1)"; then
+    echo "FAIL: K-5: ${e} rendered the MCP routes without KONG_OAUTH_ISSUER" >&2
+    exit 1
+  fi
+  if ! grep -q 'KONG_OAUTH_ISSUER' <<<"${out}"; then
+    echo "FAIL: K-5: ${e}: build failed, but not naming KONG_OAUTH_ISSUER:" >&2
+    echo "${out}" >&2
+    exit 1
+  fi
+done
+echo "PASS: K-5: dev/staging/prod refuse to render without KONG_OAUTH_ISSUER"
+
+for bad in "https://ticketing.example.com/api" "ticketing.example.com" "https://ticketing.example.com?x=1"; do
+  if out="$(KONG_OAUTH_ISSUER="${bad}" "${WORK}/scripts/build.sh" prod "${WORK}/x.yml" 2>&1)"; then
+    echo "FAIL: K-5: prod accepted a non-origin issuer" >&2
+    exit 1
+  fi
+  if ! grep -q 'KONG_OAUTH_ISSUER' <<<"${out}"; then
+    echo "FAIL: K-5: non-origin issuer rejected, but not naming KONG_OAUTH_ISSUER" >&2
+    exit 1
+  fi
+done
+if KONG_OAUTH_ISSUER="http://ticketing.example.com" "${WORK}/scripts/build.sh" prod "${WORK}/x.yml" >/dev/null 2>&1; then
+  echo "FAIL: K-5: prod accepted a plain-http issuer (auth-service refuses it in production)" >&2
+  exit 1
+fi
+echo "PASS: K-5: a non-origin or non-https (outside local/minikube) issuer is rejected"
+
+# local keeps working with no env input (compose passes none): dev origin from the values file.
+if ! out="$(env -u KONG_OAUTH_ISSUER "${WORK}/scripts/build.sh" local "${WORK}/x.yml" 2>&1)" \
+   || ! grep -q -- '- key: http://localhost:8000$' "${WORK}/x.yml"; then
+  echo "FAIL: K-5: local did not fall back to the dev origin http://localhost:8000" >&2
+  echo "${out}" >&2
+  exit 1
+fi
+echo "PASS: K-5: local falls back to the dev origin from its values file"
