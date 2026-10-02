@@ -27,9 +27,9 @@ export type ToolScope = (typeof TOOL_SCOPES)[ToolName];
  * Scopes a tool needs beyond its C-7 scope because it makes more than one
  * upstream call: pay_for_order_with_default lists saved methods (payments:read)
  * before charging (payments:create). Without it the step-up would pass and the
- * upstream read would then 403.
+ * upstream read would then 403. C-7 was amended (2026-10-02) to say so.
  */
-const EXTRA_SCOPES: Partial<Record<ToolName, readonly ToolScope[]>> = {
+export const EXTRA_SCOPES: Partial<Record<ToolName, readonly ToolScope[]>> = {
   pay_for_order_with_default: ['payments:read'],
 };
 

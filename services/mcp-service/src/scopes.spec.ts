@@ -1,6 +1,12 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { SCOPES_SUPPORTED } from './app.ts';
-import { TOOL_SCOPES, requireScope } from './scopes.ts';
+import {
+  EXTRA_SCOPES,
+  TOOL_SCOPES,
+  requireScope,
+  scopesForTool,
+} from './scopes.ts';
 
 // FIXTURE: a copy of the scope registry in
 // services/auth-service/src/modules/oauth/oauth-scopes.ts (OAUTH_SCOPES keys).
@@ -41,6 +47,18 @@ describe('scope -> tool map (C-7)', () => {
     expect(Object.entries(TOOL_SCOPES)).toEqual(Object.entries(C7));
   });
 
+  it('J-1: the only tool needing more than its C-7 scope is pay_for_order_with_default (+ payments:read), per the C-7 amendment', () => {
+    // Pinned so the exception cannot grow silently: a new entry here widens
+    // what an agent token must hold, and that is a contract change (C-7).
+    expect(EXTRA_SCOPES).toEqual({
+      pay_for_order_with_default: ['payments:read'],
+    });
+    expect(scopesForTool('pay_for_order_with_default')).toEqual([
+      'payments:create',
+      'payments:read',
+    ]);
+  });
+
   it('J-1: every scope a tool needs exists in the auth-service registry (a rename there must fail here)', () => {
     for (const scope of Object.values(TOOL_SCOPES)) {
       expect(AUTH_SERVICE_REGISTRY).toContain(scope);
@@ -75,4 +93,28 @@ describe('requireScope challenge (C-6)', () => {
       }),
     ).toBeUndefined();
   });
+});
+
+// The fixture above only drifts on purpose if something compares it with the
+// real registry. That file exists in a repo checkout but not in the Docker
+// build context, so the guard skips there, loudly.
+const REGISTRY_FILE = new URL(
+  '../../auth-service/src/modules/oauth/oauth-scopes.ts',
+  import.meta.url,
+);
+describe('auth-service registry drift guard', () => {
+  it.skipIf(!existsSync(REGISTRY_FILE))(
+    'J-1: the fixture equals the keys of the real OAUTH_SCOPES registry (skipped when services/auth-service is not on disk, e.g. the Docker build context)',
+    () => {
+      const source = readFileSync(REGISTRY_FILE, 'utf8');
+      const body = /export const OAUTH_SCOPES = \{([\s\S]*?)\n\} as const/.exec(
+        source,
+      )?.[1];
+      expect(body, 'OAUTH_SCOPES literal found').toBeDefined();
+      const keys = [...body!.matchAll(/^ {2}'([a-z]+:[a-z]+)':/gm)].map(
+        (m) => m[1],
+      );
+      expect(keys).toEqual(AUTH_SERVICE_REGISTRY);
+    },
+  );
 });
