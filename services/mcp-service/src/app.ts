@@ -13,7 +13,7 @@ import { createMcpServer } from './server.ts';
 import { createVerifier } from './verifier.ts';
 
 /** C-3: every scope a client may request. The registry lives in auth-service. */
-const SCOPES_SUPPORTED = [
+export const SCOPES_SUPPORTED = [
   'tickets:read',
   'seating:read',
   'orders:read',
