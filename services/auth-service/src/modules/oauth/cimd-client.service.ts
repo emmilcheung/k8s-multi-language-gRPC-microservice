@@ -11,7 +11,7 @@ import {
 } from './cimd-fetcher';
 import type { CimdErrorCode, CimdFetchResult } from './cimd-fetcher';
 import { validateClientMetadataDocument } from './cimd-document';
-import type { OAuthClient } from './oauth-clients.config';
+import { isUrlClientId, type OAuthClient } from './oauth-clients.config';
 import { readOAuthConfig } from './oauth-config';
 
 export const CIMD_FETCH = Symbol('CIMD_FETCH');
@@ -45,10 +45,7 @@ export function cimdCacheTtlSeconds(cacheControl: string | undefined): number {
   return Math.min(Math.max(Number(m[1]), MIN_TTL_SECONDS), MAX_TTL_SECONDS);
 }
 
-/** A client_id that is URL-shaped is a CIMD candidate; it is never an opaque id. */
-export function isUrlClientId(clientId: string): boolean {
-  return /^https?:\/\//i.test(clientId);
-}
+export { isUrlClientId };
 
 type CacheRecord =
   | { v: 1; ok: true; client: OAuthClient }

@@ -66,6 +66,10 @@ function makeService(
     dynamicClientService as never,
     consentStore as never,
     { info: vi.fn(), warn: vi.fn() } as never,
+    {
+      resolve: vi.fn().mockResolvedValue({ ok: false, reason: 'disabled' }),
+      peek: vi.fn().mockResolvedValue(null),
+    } as never,
   );
   if (opts.firstParty) {
     // No registered client is first-party today, so the auto-approve branch

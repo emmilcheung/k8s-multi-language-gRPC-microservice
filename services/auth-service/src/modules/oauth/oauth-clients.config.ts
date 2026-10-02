@@ -79,3 +79,51 @@ export function dynamicToStaticShape(
     applicationType: dynamic.applicationType ?? 'web',
   };
 }
+
+/** A URL-shaped client_id is a CIMD candidate; it is never an opaque id. */
+export function isUrlClientId(clientId: string): boolean {
+  return /^https?:\/\//i.test(clientId);
+}
+
+export type OAuthDomainSource = 'client_id' | 'redirect_uri';
+
+export interface ClientDomain {
+  clientDomain?: string;
+  domainSource?: OAuthDomainSource;
+}
+
+function hostOf(uri: string, withPort: boolean): string | undefined {
+  try {
+    const u = new URL(uri);
+    return (withPort ? u.host : u.hostname) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The domain a user can check before trusting an app. A CIMD client is
+ * identified by the host of its client_id URL (what we fetched and verified). A
+ * static or dynamic client chooses its own display name, so what we can state is
+ * where the authorization code goes: the host of the redirect URI (the one in
+ * this request when known, otherwise every registered one).
+ */
+export function describeClientDomain(
+  clientId: string,
+  client: Pick<OAuthClient, 'redirectUris'> | null,
+  redirectUri?: string,
+): ClientDomain {
+  if (isUrlClientId(clientId)) {
+    const host = hostOf(clientId, false);
+    return host ? { clientDomain: host, domainSource: 'client_id' } : {};
+  }
+  const uris = redirectUri ? [redirectUri] : (client?.redirectUris ?? []);
+  const hosts = [
+    ...new Set(
+      uris.map((u) => hostOf(u, true)).filter((h): h is string => !!h),
+    ),
+  ];
+  return hosts.length > 0
+    ? { clientDomain: hosts.join(', '), domainSource: 'redirect_uri' }
+    : {};
+}

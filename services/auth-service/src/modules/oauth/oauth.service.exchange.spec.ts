@@ -98,6 +98,10 @@ function build(opts: Opts = {}) {
     } as never,
     {} as never,
     logger as never,
+    {
+      resolve: vi.fn().mockResolvedValue({ ok: false, reason: 'disabled' }),
+      peek: vi.fn().mockResolvedValue(null),
+    } as never,
   );
   const subjectIss = opts.flag ? ISSUER : 'auth-service';
   /** A token as the MCP-audience /oauth/token branch mints it. */

@@ -18,11 +18,14 @@ import {
   findClient,
   validateScopes,
   dynamicToStaticShape,
+  describeClientDomain,
+  isUrlClientId,
   MCP_SERVICE_CLIENT_ID,
   TOKEN_EXCHANGE_GRANT,
 } from './oauth-clients.config';
 import type { OAuthClient } from './oauth-clients.config';
 import { DynamicClientService } from './dynamic-client.service';
+import { CimdClientService } from './cimd-client.service';
 import { OAuthConsentStoreService } from './oauth-consent-store.service';
 import type { ConsentSummary } from './oauth-consent-store.service';
 import { OAUTH_SCOPE_NAMES } from './oauth-scopes';
@@ -60,6 +63,7 @@ export class OAuthService implements OnModuleInit {
     private readonly dynamicClientService: DynamicClientService,
     private readonly consentStore: OAuthConsentStoreService,
     @InjectPinoLogger(OAuthService.name) private readonly logger: PinoLogger,
+    private readonly cimd: CimdClientService,
   ) {}
 
   onModuleInit(): void {
@@ -70,12 +74,43 @@ export class OAuthService implements OnModuleInit {
     }
   }
 
-  /** Resolve a client by ID — checks static registry first, then dynamic Redis store. */
+  /**
+   * Resolve a client by ID. A URL-shaped id is a Client ID Metadata Document
+   * (cached, or fetched under the SSRF guard) and never touches the opaque-id
+   * stores; any other id checks the static registry, then the dynamic Redis store.
+   */
   async resolveClient(clientId: string): Promise<OAuthClient | null> {
+    if (isUrlClientId(clientId)) {
+      const r = await this.cimd.resolve(clientId);
+      return r.ok ? r.client : null;
+    }
     const staticClient = findClient(clientId);
     if (staticClient) return staticClient;
     const dynamic = await this.dynamicClientService.findClient(clientId);
     return dynamic ? dynamicToStaticShape(dynamic) : null;
+  }
+
+  /**
+   * /authorize is reachable without a session, and a CIMD client id costs an
+   * outbound fetch, so everything that can be checked without the client is
+   * checked first. Failure detail stays in the logs: telling the caller why a
+   * fetch failed (blocked address vs DNS vs timeout) would be an SSRF oracle.
+   */
+  private async resolveAuthorizeClient(
+    query: AuthorizeQuery,
+  ): Promise<OAuthClient | null> {
+    if (!isUrlClientId(query.client_id)) {
+      return this.resolveClient(query.client_id);
+    }
+    this.assertAllowedResource(query.resource);
+    const resolved = await this.cimd.resolve(query.client_id);
+    if (resolved.ok) return resolved.client;
+    if (resolved.reason === 'disabled') return null;
+    throw new BadRequestException({
+      error: 'invalid_client',
+      error_description:
+        'client_id metadata document could not be retrieved or is not valid',
+    });
   }
 
   /** RFC 8707 / C-2: a resource must be an exact member of OAUTH_RESOURCES. */
@@ -136,7 +171,7 @@ export class OAuthService implements OnModuleInit {
     }
 
     // 2. Validate client
-    const client = await this.resolveClient(query.client_id);
+    const client = await this.resolveAuthorizeClient(query);
     if (!client) {
       throw new BadRequestException({
         error: 'invalid_client',
@@ -205,6 +240,8 @@ export class OAuthService implements OnModuleInit {
       const requestId = await this.consentStore.storePendingConsent({
         clientId: client.clientId,
         clientName: client.clientName,
+        ...describeClientDomain(client.clientId, client, query.redirect_uri),
+        isFirstParty: client.source === undefined,
         userId,
         scope: grantedScopes.join(' '),
         redirectUri: query.redirect_uri,
@@ -708,11 +745,19 @@ export class OAuthService implements OnModuleInit {
         if (!scopeMeta) return; // Not an OAuth session — skip
 
         // Static registry first, then dynamic registrations (their id is a UUID,
-        // so the registered name is what the Connected-apps page must show).
-        const client = await this.resolveClient(scopeMeta.clientId);
+        // so the registered name is what the Connected-apps page must show). A
+        // CIMD id is looked up in the cache only: listing never fetches.
+        const id = scopeMeta.clientId;
+        const client = isUrlClientId(id)
+          ? await this.cimd.peek(id)
+          : await this.resolveClient(id);
+        const domain = describeClientDomain(id, client);
         results.push({
           clientId: scopeMeta.clientId,
-          clientName: client?.clientName ?? scopeMeta.clientId,
+          clientName:
+            client?.clientName ?? domain.clientDomain ?? scopeMeta.clientId,
+          ...domain,
+          isFirstParty: client !== null && client.source === undefined,
           scope: scopeMeta.scope,
           sessionId: session.sessionId,
           lastRotatedAt: session.lastRotatedAt,
@@ -770,6 +815,9 @@ export class OAuthService implements OnModuleInit {
       requestId: record.requestId,
       clientId: record.clientId,
       clientName: record.clientName,
+      clientDomain: record.clientDomain,
+      domainSource: record.domainSource,
+      isFirstParty: record.isFirstParty ?? false,
       scopes: record.scope.split(' ').filter(Boolean),
       expiresInSeconds: 600,
     };

@@ -153,6 +153,11 @@ export interface ClientCredentials {
 export interface OAuthClientSession {
   clientId: string;
   clientName: string;
+  /** Host the user can verify: the client_id host (CIMD) or the redirect URI host. */
+  clientDomain?: string;
+  domainSource?: 'client_id' | 'redirect_uri';
+  /** True for static-config clients; false for DCR and CIMD apps. */
+  isFirstParty: boolean;
   scope: string;
   sessionId: string;
   lastRotatedAt: string;
@@ -209,6 +214,9 @@ export interface ConsentDetails {
   requestId: string;
   clientId: string;
   clientName: string;
+  clientDomain?: string;
+  domainSource?: 'client_id' | 'redirect_uri';
+  isFirstParty: boolean;
   scopes: string[];
   expiresInSeconds: number;
 }
