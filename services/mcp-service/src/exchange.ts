@@ -6,12 +6,14 @@ const DEFAULT_MAX_ENTRIES = 1000;
 
 export class ExchangeError extends Error {
   /** HTTP status of the failed exchange; `undefined` for a network failure. */
-  constructor(readonly status?: number) {
+  readonly status: number | undefined;
+  constructor(status?: number) {
     super(
       status === undefined
         ? 'token exchange unreachable'
         : `token exchange rejected (${status})`,
     );
+    this.status = status;
   }
 }
 
