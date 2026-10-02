@@ -82,6 +82,9 @@ STRIPE_SECRET_KEY="$(_read_secret STRIPE_SECRET_KEY)"
 QR_SIGNING_KEY="$(_read_secret QR_SIGNING_KEY)"
 KONG_RSA_PUBLIC_KEY="$(_read_secret KONG_RSA_PUBLIC_KEY)"
 X_USER_ID_SIGNING_KEY="$(_read_secret X_USER_ID_SIGNING_KEY)"
+# Optional (mcp-service token exchange): SHA-256 hex of its client secret.
+# Empty = the exchange grant stays disabled; auth-service still boots.
+MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH="$(_read_secret MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH || true)"
 
 # Validate required secrets are present and non-empty
 for var in RSA_PRIVATE_KEY STRIPE_SECRET_KEY QR_SIGNING_KEY KONG_RSA_PUBLIC_KEY X_USER_ID_SIGNING_KEY; do
@@ -229,7 +232,8 @@ apply_secret auth-service-secrets \
   --from-literal=COOKIE_DOMAIN="localhost" \
   --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092" \
   --from-literal=REDIS_URL="redis://${REDIS_HOST}:6379" \
-  --from-literal=X_USER_ID_SIGNING_KEY="${X_USER_ID_SIGNING_KEY}"
+  --from-literal=X_USER_ID_SIGNING_KEY="${X_USER_ID_SIGNING_KEY}" \
+  --from-literal=MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH="${MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH}"
 
 # ticket-service-secrets
 apply_secret ticket-service-secrets \

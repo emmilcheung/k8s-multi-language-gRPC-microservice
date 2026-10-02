@@ -52,6 +52,26 @@ describe('OAuthExceptionFilter', () => {
     expect(setHeader).toHaveBeenCalledWith('Pragma', 'no-cache');
   });
 
+  it('keeps a Basic-auth invalid_client as 401 with the Basic challenge (RFC 6749 §5.2)', () => {
+    const { host, status, json, setHeader } = makeHost();
+    filter.catch(
+      new UnauthorizedException({
+        error: 'invalid_client',
+        error_description: 'Client authentication failed',
+      }),
+      host,
+    );
+    expect(status).toHaveBeenCalledWith(401);
+    expect(setHeader).toHaveBeenCalledWith(
+      'WWW-Authenticate',
+      'Basic realm="oauth"',
+    );
+    expect(json).toHaveBeenCalledWith({
+      error: 'invalid_client',
+      error_description: 'Client authentication failed',
+    });
+  });
+
   it('turns a real ValidationPipe rejection (e.g. an unknown `resource` field) into invalid_request', async () => {
     class Body {
       @IsString() grant_type!: string;

@@ -65,6 +65,7 @@ function makeService(
     config as never,
     dynamicClientService as never,
     consentStore as never,
+    { info: vi.fn(), warn: vi.fn() } as never,
   );
   if (opts.firstParty) {
     // No registered client is first-party today, so the auto-approve branch
