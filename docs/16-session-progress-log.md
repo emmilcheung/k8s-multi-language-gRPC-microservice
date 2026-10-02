@@ -9,9 +9,9 @@
 
 ---
 
-## Session: 2026-10-02 — feat(mcp): Wave 4 — client metadata documents, end-to-end spec, MCP docs ⏳ LOCAL, UNPUSHED
+## Session: 2026-10-02 — feat(mcp): Wave 4 — client metadata documents, end-to-end spec, MCP docs ⏳ IN PR, NOT MERGED
 
-**Branch:** `feat/mcp-platform-wave4` — lanes `feat/mcp-w4-{i,m}` merged `--no-ff` (I, then M), then merged `--no-ff` into the integration branch `feat/mcp-platform`. Nothing is pushed.
+**Branch:** `feat/mcp-platform-wave4` — lanes `feat/mcp-w4-{i,m}` merged `--no-ff` (I, then M), then merged `--no-ff` into the integration branch `feat/mcp-platform`. The wave and lane branches were deleted after the merge; the work is on `feat/mcp-platform`, in a PR to `main`.
 
 **What landed**
 
@@ -44,9 +44,9 @@ Ledger: `.superpowers/sdd/2026-10-02-mcp-wave4/` (`exit-gate.md`, per-lane repor
 
 ---
 
-## Session: 2026-10-02 — feat(mcp): Wave 3 — token exchange, MCP tools, consent UI, Kong `/mcp` ⏳ LOCAL, UNPUSHED
+## Session: 2026-10-02 — feat(mcp): Wave 3 — token exchange, MCP tools, consent UI, Kong `/mcp` ⏳ IN PR, NOT MERGED
 
-**Branch:** `feat/mcp-platform-wave3` — lanes `feat/mcp-w3-{l,h,j,k}` merged `--no-ff` (L → H → J, then K on top), then merged `--no-ff` into the integration branch `feat/mcp-platform`. Nothing is pushed.
+**Branch:** `feat/mcp-platform-wave3` — lanes `feat/mcp-w3-{l,h,j,k}` merged `--no-ff` (L → H → J, then K on top), then merged `--no-ff` into the integration branch `feat/mcp-platform`. The wave and lane branches were deleted after the merge.
 
 **What landed**
 
@@ -75,9 +75,9 @@ Ledger: `.superpowers/sdd/2026-10-02-mcp-wave3/` (`exit-gate.md`, per-lane repor
 
 ---
 
-## Session: 2026-10-02 — feat(mcp): Wave 2 — AS metadata, order idempotency, mcp-service scaffold ⏳ LOCAL, UNPUSHED
+## Session: 2026-10-02 — feat(mcp): Wave 2 — AS metadata, order idempotency, mcp-service scaffold ⏳ IN PR, NOT MERGED
 
-**Branch:** `feat/mcp-platform-wave2` — lanes `feat/mcp-w2-{e,f,g}` merged `--no-ff` (E → F → G), then merged `--no-ff` into the integration branch `feat/mcp-platform`. All MCP branches were rebased onto `main` `04307ee` first (integration with `--rebase-merges`). Nothing is pushed.
+**Branch:** `feat/mcp-platform-wave2` — lanes `feat/mcp-w2-{e,f,g}` merged `--no-ff` (E → F → G), then merged `--no-ff` into the integration branch `feat/mcp-platform`. All MCP branches were rebased onto `main` `04307ee` first (integration with `--rebase-merges`). The wave and lane branches were deleted after the merge.
 
 **What landed**
 
