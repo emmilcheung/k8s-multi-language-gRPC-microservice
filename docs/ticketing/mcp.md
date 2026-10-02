@@ -46,7 +46,7 @@ Three points that explain most of the design:
 | Derived idempotency keys | `services/mcp-service/src/idempotency.ts` |
 | Authorization server (authorize, token, exchange, consent, DCR) | `services/auth-service/src/modules/oauth/` |
 | Edge routes for `/mcp`, audience rule | `services/kong-gateway/config/kong.base.yml`, `plugins/jwt-scope.lua` |
-| Consent page, Settings, Connected apps | `services/client/app/oauth/consent/`, Settings page |
+| Consent page, Settings, Connected apps | `services/client/app/oauth/consent/`, `services/client/app/settings/` |
 | Scripted end-to-end proof | `services/client/tests/e2e/mcp-full-flow.spec.ts` |
 
 ---
@@ -75,7 +75,7 @@ The authorization server advertises seven scopes: `tickets:read`, `seating:read`
 ### Behaviours worth knowing
 
 - **Step-up.** A token missing a tool's scope gets `403` with `WWW-Authenticate: Bearer error="insufficient_scope", scope="<held + required>", resource_metadata=...`. A host that supports scope step-up re-runs the consent flow with the union, so the user is never asked for scopes they already granted. The first 401 challenge asks only for the read scopes (`tickets:read seating:read orders:read payments:read`), so write access is requested at the moment it is needed.
-- **Idempotent orders.** `create_order` derives an `Idempotency-Key` from `sha256(sub, tool, canonical arguments)`; an identical retry returns the same order with `replayed: true` instead of buying twice. Passing an explicit `idempotencyKey` overrides the derived one. `E2E: mcp-full-flow.spec.ts` asserts this against the real stack.
+- **Idempotent orders.** `create_order` derives an `Idempotency-Key` from `sha256(sub, tool, canonical arguments)`; an identical retry returns the same order with `replayed: true` instead of buying twice. Passing an explicit `idempotencyKey` overrides the derived one. `mcp-full-flow.spec.ts` asserts this against the real stack.
 - **Waiting room.** If the event is behind the queue, the tool fails with `WAITING_ROOM_ACTIVE` and returns the browser URL to join the queue; an agent cannot jump it.
 - **Errors are sanitised.** Tool failures return a short code and message, never an upstream stack, token or header. Upstream calls time out after 10 s.
 
@@ -125,7 +125,7 @@ The issuer origin is configured in three places that must be the same value, or 
 | Where | Setting |
 |---|---|
 | auth-service | `OAUTH_ISSUER` (and the derived `OAUTH_API_AUDIENCE` = `<origin>/api`, `OAUTH_MCP_RESOURCE` = `<origin>/mcp`, `OAUTH_RESOURCES`) |
-| mcp-service | `OAUTH_ISSUER`, `MCP_RESOURCE` |
+| mcp-service | `OAUTH_ISSUER`, `MCP_RESOURCE` (its token-exchange audience is derived as `<MCP_RESOURCE origin>/api` and must equal auth-service's `OAUTH_API_AUDIENCE`) |
 | Kong | `KONG_OAUTH_ISSUER` (builds the `<origin>/api` audience the REST rule checks) |
 
 In Kubernetes the Helm value `global.publicOrigin` derives the auth-service set; the deploy pipeline must set `KONG_OAUTH_ISSUER` to the same origin. Local compose uses `http://localhost:8000` for all of them. `KONG_OAUTH_ISSUER` is required for dev, staging and prod; only local and minikube have a default. See `services/kong-gateway/README.md`.
@@ -161,7 +161,7 @@ This needs an interactive terminal and a browser, so it is written down and has 
 | `403 insufficient_scope` naming a scope | The token lacks the tool's scope. A host with step-up support re-prompts consent; otherwise remove the app under Settings -> Connected apps and connect again, approving the extra scope. |
 | Every tool call fails with a token-exchange error | Exchange disabled or mismatched secret: `MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH` is empty, or is not the SHA-256 of `MCP_TOKEN_EXCHANGE_CLIENT_SECRET`. Recompute the hash and recreate auth-service and mcp-service. |
 | auth-service exits at startup mentioning the hash | `MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH` is set but is not 64 lowercase hex characters. |
-| mcp-service exits at startup | A required setting is missing (`MCP_RESOURCE`, `OAUTH_ISSUER`, `TOKEN_EXCHANGE_URL`, `KONG_INTERNAL_URL`, the client secret). It validates config before serving. |
+| mcp-service exits at startup | A required setting is missing (`MCP_RESOURCE`, `OAUTH_ISSUER`, `AUTH_JWKS_URL`, `TOKEN_EXCHANGE_URL`, `KONG_INTERNAL_URL`, `PUBLIC_WEB_URL`, `TOKEN_EXCHANGE_CLIENT_SECRET`). It validates config before serving. |
 | `429` from `/mcp` | Per-IP limit (`RATE_LIMIT_MCP_PER_MINUTE`). Everyone behind one NAT shares it. |
 | `WAITING_ROOM_ACTIVE` from `create_order` | The event is queued; open the URL in the result in a browser. |
 | `GET /mcp` returns 405 | By design; the server is stateless request/response. |
