@@ -33,7 +33,7 @@ Three points that explain most of the design:
 
 - **Two audiences.** The token the host holds is for `<origin>/mcp` and is useless against the REST API: Kong's `jwt-scope.lua` refuses an OAuth token whose `aud` is not `<origin>/api` (401 `token audience not accepted`). mcp-service never forwards the host's token; it exchanges it for an API-audience token per call.
 - **mcp-service goes through Kong.** It calls the public REST API, not internal gRPC, so scope checks, the waiting room and rate limits apply to agent traffic exactly as to a browser.
-- **Stateless.** `POST /mcp` carries one JSON-RPC request and gets one response. `GET /mcp` answers 405 (no server-initiated stream); `DELETE /mcp` is accepted.
+- **Stateless.** `POST /mcp` carries one JSON-RPC request and gets one response. `GET /mcp` and `DELETE /mcp` both answer `405` with JSON-RPC error `-32000 Method not allowed.` once the caller is authenticated (observed live through Kong; the SDK handler in `services/mcp-service/src/app.ts:149` serves the route), and `401` without a token. There is no server-initiated stream and no session to delete.
 
 ### Where the code is
 
@@ -70,7 +70,7 @@ Twelve tools. The scope column is what the token must carry; it comes from the r
 | `pay_for_order` | `payments:create` | Charge a saved payment method by id (from `list_payment_methods`). Raw card data is never accepted. |
 | `pay_for_order_with_default` | `payments:create` + `payments:read` | Pay with the saved default method. |
 
-The authorization server advertises seven scopes: `tickets:read`, `seating:read`, `orders:read`, `orders:create`, `orders:cancel`, `payments:read`, `payments:create`. The consent screen lists them with human labels from `GET /oauth/scopes` and marks the ones that act on the user's behalf as **Sensitive**.
+The authorization server advertises nine scopes (`scopes_supported`, `oauth-metadata.controller.ts:38`; registry in `oauth-scopes.ts`): the seven above, `tickets:read`, `seating:read`, `orders:read`, `orders:create`, `orders:cancel`, `payments:read`, `payments:create`, plus `venues:read` and `seating:hold`, which stay registered (and are in the dynamic-registration allow list, `dynamic-client.service.ts:29-39`) but are used by no tool. A client may be granted them; nothing happens with them. The consent screen lists them with human labels from `GET /oauth/scopes` and marks the ones that act on the user's behalf as **Sensitive**.
 
 ### Behaviours worth knowing
 
@@ -94,7 +94,9 @@ Then, inside Claude Code, run `/mcp`, pick `ticketing` and choose Authenticate. 
 
 Other hosts need only the URL `http://localhost:8000/mcp`: discovery, registration and PKCE follow from the 401 challenge.
 
-Revoke at any time in the web app under **Settings -> Connected apps**. Revocation stops refresh at once; an MCP access token already issued stays valid until it expires (up to 15 minutes; exchanged API tokens live at most 5 minutes). See the threat model for this accepted window.
+**Consent.** A host that registers itself (dynamic client registration, which is how Claude Code connects) always sees the consent screen. Consent is skipped only for a client whose entry in the static registry sets `isFirstParty: true` (`oauth.service.ts:201-203`); dynamic clients are hard-coded `false`, and at this commit the only static client (`ticketing-mcp`, `oauth-clients.config.ts:19-28`) does not set it, so no client skips consent today.
+
+**Revoke.** In the web app under **Settings -> Connected apps** (it calls `DELETE /oauth/clients/:clientId`, `services/client/app/settings/connected-apps.ts:59`; 204 on success, signed-in user only). That deletes the user's refresh sessions and grants for the client (`oauth.service.ts:728-745`), so the host cannot obtain new access tokens. A token already issued stays valid until it expires: access tokens live 15 minutes, exchanged API tokens at most 5. Refresh tokens live 24 hours (86400 s, both the static and dynamic client entries). See the threat model for the accepted window.
 
 ---
 
@@ -104,7 +106,9 @@ mcp-service is opt-in: it lives behind the `mcp` compose profile.
 
 1. **Create two related secrets in the git-ignored root `.env`** (the full recipe is the comment block in `.env.example`):
    - `MCP_TOKEN_EXCHANGE_CLIENT_SECRET`: a random value (`openssl rand -base64 32`). mcp-service presents it to auth-service as HTTP Basic client credentials for the token exchange.
-   - `MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH`: the lowercase-hex SHA-256 of that value (64 characters). auth-service stores only the hash. Empty means the exchange grant is disabled and every MCP tool call fails; a value that is not 64 hex characters stops auth-service at startup.
+   - `MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH`: the lowercase-hex SHA-256 of that value (64 characters), for example `printf %s "$SECRET" | sha256sum | cut -d' ' -f1`. auth-service stores only the hash. Empty means the exchange grant is disabled and every MCP tool call fails; a value that is not 64 hex characters stops auth-service at startup.
+
+   Those two, plus the `mcp` profile in step 2, are everything a working local run needs beyond the normal `.env` (RSA key pair, signing keys). Nothing else has to be set: `docker-compose.yml` already gives auth-service `OAUTH_ISSUER_ENABLED: "true"` and the issuer, resource and audience origins (`docker-compose.yml:311-316`), and gives mcp-service its issuer, JWKS and exchange URLs (`docker-compose.yml:352-362`). `OAUTH_ISSUER_ENABLED` matters because tokens carry `iss` only when it is on, and mcp-service rejects tokens without the expected issuer; outside compose (Helm, other environments) it must be set explicitly.
 2. **Start the stack with the profile:**
 
    ```bash
@@ -137,7 +141,9 @@ In Kubernetes the Helm value `global.publicOrigin` derives the auth-service set;
 
 ### Scripted (no Claude Code needed)
 
-`services/client/tests/e2e/mcp-full-flow.spec.ts` plays the host's part against a live stack through Kong, with the login and consent in a real browser page: discovery, dynamic registration, authorization code + PKCE with `resource`, `initialize`, `tools/list` (12), `search_events`, `create_order` twice (second `replayed: true`), `pay_for_order_with_default`, plus three negative edges (no token -> 401 with `resource_metadata`; MCP-audience token on REST -> 401; token without `orders:create` -> step-up 403). Run it like the other specs: stack up with `--profile mcp`, `pnpm dev --port 4000` in `services/client`, then `npx playwright test mcp-full-flow.spec.ts`. The payment step needs a saved card; with `STRIPE_SECRET_KEY=test_mock` the payment service runs in its deterministic mock mode. If the card cannot be saved, the step is skipped with a named reason rather than passing silently.
+`services/client/tests/e2e/mcp-full-flow.spec.ts` plays the host's part against a live stack through Kong, with the login and consent in a real browser page: discovery, dynamic registration, authorization code + PKCE with `resource`, `initialize`, `tools/list` (12), `search_events`, `create_order` twice (second `replayed: true`), `pay_for_order_with_default`, plus three negative edges (no token -> 401 with `resource_metadata`; MCP-audience token on REST -> 401 `token audience not accepted`; token without `orders:create` -> step-up 403). The spec records the protocol version negotiated at `initialize` as a Playwright annotation named `mcp-protocol-version` (visible in the HTML report and the test's annotations) and asserts it is one of the versions mcp-service is tested against, `2025-11-25` or `2026-07-28` (`services/mcp-service/src/protocol-eras.spec.ts:33,39`); the spec itself offers `2025-11-25`. Run it like the other specs: stack up with `--profile mcp` and the two exchange variables, `pnpm dev --port 4000` in `services/client`, then `npx playwright test mcp-full-flow.spec.ts`. Without mcp-service the spec fails immediately naming the missing profile. CI's `e2e` job starts mcp-service with an ephemeral exchange secret, so the spec runs there with the rest of the suite.
+
+The payment step needs a saved card, registered through Settings with the same Stripe mock `ticketing.spec.ts` uses. It asserts payment status `completed` and then polls `get_order` until the order is `complete`. It relies on payment-service running in `STRIPE_SECRET_KEY=test_mock` mode, which the spec cannot observe (it is a backend setting); a non-mock backend fails the status assertion rather than passing. It is skipped, with the reason in the run summary, only when card registration answers 5xx or 404, as in `ticketing.spec.ts`.
 
 ### Manual run with a real host (M-2) — owner step, not yet performed
 
@@ -165,7 +171,7 @@ This needs an interactive terminal and a browser, so it is written down and has 
 | mcp-service exits at startup | A required setting is missing (`MCP_RESOURCE`, `OAUTH_ISSUER`, `AUTH_JWKS_URL`, `TOKEN_EXCHANGE_URL`, `KONG_INTERNAL_URL`, `PUBLIC_WEB_URL`, `TOKEN_EXCHANGE_CLIENT_SECRET`). It validates config before serving. |
 | `429` from `/mcp` | Per-IP limit (`RATE_LIMIT_MCP_PER_MINUTE`). Everyone behind one NAT shares it. |
 | `WAITING_ROOM_ACTIVE` from `create_order` | The event is queued; open the URL in the result in a browser. |
-| `GET /mcp` returns 405 | By design; the server is stateless request/response. |
+| `GET /mcp` or `DELETE /mcp` returns 405 | By design; the server is stateless request/response. |
 | Consent page loads but Allow does nothing | The page is not hydrated yet; wait for the page to settle and click again. |
 
 ---
