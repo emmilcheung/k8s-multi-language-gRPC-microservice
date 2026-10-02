@@ -308,6 +308,14 @@ services:
         methods: [GET]
         strip_path: false
 
+      # Public: OAuth scope registry (C-7), read by the client's consent page to
+      # label scopes. Static, non-user-specific data; no jwt plugin, so no guard.
+      - name: auth-oauth-scopes
+        paths:
+          - /oauth/scopes
+        methods: [GET]
+        strip_path: false
+
   # ── ticket-service ────────────────────────────────────────────────────────────
   - name: ticket-service
     url: http://{{HOST_TICKETS}}
