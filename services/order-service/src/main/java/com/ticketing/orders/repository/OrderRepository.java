@@ -21,6 +21,13 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     Optional<Order> findByIdWithTicket(UUID id);
 
     /**
+     * WS-F: idempotent-retry lookup. reservation_id is derived from (userId, key), so the
+     * user check is defence in depth; uq_orders_reservation_id makes the result unique.
+     */
+    @Query("SELECT o FROM Order o JOIN FETCH o.ticket WHERE o.reservationId = :reservationId AND o.userId = :userId")
+    Optional<Order> findByReservationIdAndUserId(UUID reservationId, UUID userId);
+
+    /**
      * Returns true if an active (non-cancelled, non-complete) order exists for the given ticket.
      * Derived query — no JOIN FETCH needed; Spring Data generates an efficient EXISTS query (P-06).
      */

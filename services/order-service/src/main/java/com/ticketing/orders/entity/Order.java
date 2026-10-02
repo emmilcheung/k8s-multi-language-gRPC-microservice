@@ -46,6 +46,13 @@ public class Order {
     private UUID reservationId;
 
     /**
+     * WS-F: sha256 (hex) of the canonical JSON request body when the order was created with an
+     * Idempotency-Key; null otherwise. Lets a replay be told apart from key reuse with a new body.
+     */
+    @Column(name = "request_fingerprint", length = 64, updatable = false)
+    private String requestFingerprint;
+
+    /**
      * Number of units being purchased. Defaults to 1 (legacy path).
      */
     @Column(name = "quantity", nullable = false)
@@ -140,6 +147,8 @@ public class Order {
     public OrderTicket getTicket() { return ticket; }
     public UUID getReservationId() { return reservationId; }
     public int getQuantity() { return quantity; }
+    public String getRequestFingerprint() { return requestFingerprint; }
+    public void setRequestFingerprint(String requestFingerprint) { this.requestFingerprint = requestFingerprint; }
     public OrderType getOrderType() { return orderType; }
     public UUID getPlanId() { return planId; }
     public UUID getSectionId() { return sectionId; }

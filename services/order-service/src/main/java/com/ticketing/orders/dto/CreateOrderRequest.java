@@ -9,6 +9,9 @@ import jakarta.validation.constraints.Size;
 
 import java.util.List;
 
+// The Idempotency-Key request fingerprint is computed from this DTO's serialized form: changing its
+// fields or the mapper's inclusion rules changes fingerprints of stored orders, so a replay after
+// such a deploy would get a false 422 IDEMPOTENCY_KEY_REUSED.
 public class CreateOrderRequest {
 
     private static final String UUID_PATTERN =

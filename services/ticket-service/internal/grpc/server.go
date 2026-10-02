@@ -19,6 +19,11 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// ReservationInactivePrefix starts the FailedPrecondition message returned when a duplicate
+// ReserveQuota targets a reservation that is no longer RESERVED. order-service matches it
+// (TicketServiceClient.RESERVATION_INACTIVE_PREFIX) to tell it apart from the per-user limit.
+const ReservationInactivePrefix = "reservation no longer active: "
+
 // TicketGrpcServer implements the generated TicketServiceServer interface.
 type TicketGrpcServer struct {
 	v1.UnimplementedTicketServiceServer
@@ -189,6 +194,12 @@ func (s *TicketGrpcServer) ReserveQuota(ctx context.Context, req *v1.ReserveQuot
 			// We treat an existing RESERVED reservation with same id as idempotent success.
 			existing, findErr := s.repo.FindReservationByID(ctx, req.ReservationId)
 			if findErr == nil && existing.TicketID == req.TicketId && existing.UserID == req.UserId && existing.Quantity == int(req.Quantity) {
+				// Only a live reservation may be reused; a released/expired/sold one no longer
+				// holds inventory, so accepting it would let the caller oversell.
+				if existing.Status != repository.ReservationStatusReserved {
+					return nil, status.Errorf(codes.FailedPrecondition,
+						"%s%s is %s", ReservationInactivePrefix, req.ReservationId, existing.Status)
+				}
 				s.log.Info("grpc ReserveQuota: idempotent duplicate accepted",
 					zap.String("reservationId", req.ReservationId),
 				)

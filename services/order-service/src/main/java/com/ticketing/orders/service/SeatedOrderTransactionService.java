@@ -86,6 +86,7 @@ public class SeatedOrderTransactionService {
      * @param seats         seat details returned by the venue gRPC response
      * @param orderType     MANUAL_SEATED or AUTO_ASSIGN_SEATED
      * @param sectionId     section UUID for AUTO_ASSIGN_SEATED; null for MANUAL_SEATED
+     * @param requestFingerprint sha256 of the request body when created with an Idempotency-Key, else null
      * @return the created order as a response DTO (with seat summaries)
      * @throws NotFoundException if the local OrderTicket replica does not exist
      */
@@ -98,7 +99,8 @@ public class SeatedOrderTransactionService {
             int quantity,
             List<SeatDetail> seats,
             OrderType orderType,
-            UUID sectionId) {
+            UUID sectionId,
+            String requestFingerprint) {
 
         // Require the local ticket replica — for seated orders we do not have a
         // fresh gRPC title/price in the venue response, so we fall back to what
@@ -111,6 +113,7 @@ public class SeatedOrderTransactionService {
         OffsetDateTime expiresAt = OffsetDateTime.now().plusMinutes(expirationMinutes);
         Order order = new Order(userId, OrderStatus.CREATED, expiresAt, ticket,
                 reservationId, quantity, orderType, planId, sectionId);
+        order.setRequestFingerprint(requestFingerprint);
         orderRepository.save(order);
 
         // Persist one row per seat returned by venue-service.

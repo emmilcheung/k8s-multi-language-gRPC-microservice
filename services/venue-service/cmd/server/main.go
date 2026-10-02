@@ -173,6 +173,13 @@ func main() {
 	defer sweeperCancel()
 	go sweeper.Start(sweeperCtx)
 
+	// Reservation sweeper — expires RESERVED reservations past expires_at every
+	// 5 minutes (same cadence as ticket-service's quota reconciler).
+	resSweeper := hold.NewReservationSweeper(reservationRepo, 5*time.Minute, log)
+	resSweeperCtx, resSweeperCancel := context.WithCancel(context.Background())
+	defer resSweeperCancel()
+	go resSweeper.Start(resSweeperCtx)
+
 	// Redis reconciler — re-seeds the seat state hash after a Redis restart.
 	// Only started when Redis is configured; no-op otherwise.
 	var reconcilerCancel context.CancelFunc
