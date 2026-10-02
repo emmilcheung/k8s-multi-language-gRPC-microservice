@@ -312,7 +312,7 @@ services:
       # label scopes. Static, non-user-specific data; no jwt plugin, so no guard.
       - name: auth-oauth-scopes
         paths:
-          - /oauth/scopes
+          - ~/oauth/scopes$
         methods: [GET]
         strip_path: false
 
