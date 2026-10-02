@@ -44,6 +44,9 @@ auth-service:
     # jwt_secret for this origin (global.publicOrigin). Staging/prod keep the schema
     # default (false) until their origin and KONG_OAUTH_ISSUER are set together.
     OAUTH_ISSUER_ENABLED: "true"
+    # CIMD (WS-I) needs outbound HTTPS from auth-service. Local only: staging/prod keep the
+    # schema default (false) until the owner approves the egress NetworkPolicy opening.
+    OAUTH_CIMD_ENABLED: "true"
   resources:
     requests:
       cpu: 50m

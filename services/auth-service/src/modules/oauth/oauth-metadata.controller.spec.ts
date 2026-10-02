@@ -6,8 +6,8 @@ function makeController(env: Record<string, unknown> = {}) {
   return new OAuthMetadataController(config as never);
 }
 
-// C-4, verbatim from the spec, with client_id_metadata_document_supported
-// false until WS-I lands. Clients validate this document, so drift breaks discovery.
+// C-4, verbatim from the spec; client_id_metadata_document_supported follows
+// OAUTH_CIMD_ENABLED (off by default). Clients validate this document, so drift breaks discovery.
 const C4 = {
   issuer: 'http://localhost:8000',
   authorization_endpoint: 'http://localhost:8000/oauth/authorize',
@@ -41,6 +41,20 @@ const C4 = {
 describe('OAuthMetadataController', () => {
   it('E-6: the metadata JSON equals C-4 exactly', () => {
     expect(makeController().metadata()).toStrictEqual(C4);
+  });
+
+  it('I-8: client_id_metadata_document_supported follows OAUTH_CIMD_ENABLED, so clients are never told CIMD works when the fetch is off', () => {
+    expect(
+      makeController({ OAUTH_CIMD_ENABLED: true }).metadata()
+        .client_id_metadata_document_supported,
+    ).toBe(true);
+    expect(
+      makeController({ OAUTH_CIMD_ENABLED: false }).metadata()
+        .client_id_metadata_document_supported,
+    ).toBe(false);
+    expect(
+      makeController({}).metadata().client_id_metadata_document_supported,
+    ).toBe(false);
   });
 
   it('E-6: every endpoint is derived from OAUTH_ISSUER, ignoring a trailing slash', () => {

@@ -72,6 +72,19 @@ describe('OAuth resource config (C-2)', () => {
     ).toBe(false);
   });
 
+  it('I-8: OAUTH_CIMD_ENABLED defaults to false (auth-service opens no outbound fetches until an owner opts in) and a typo fails startup', () => {
+    expect(schema.parse(valid).OAUTH_CIMD_ENABLED).toBe(false);
+    expect(
+      schema.parse({ ...valid, OAUTH_CIMD_ENABLED: 'true' }).OAUTH_CIMD_ENABLED,
+    ).toBe(true);
+    expect(
+      schema.safeParse({ ...valid, OAUTH_CIMD_ENABLED: 'yes' }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({ ...valid, OAUTH_CIMD_ENABLED: '1' }).success,
+    ).toBe(false);
+  });
+
   it('production has no dev defaults: missing OAuth config fails loud', () => {
     const r = envSchema.safeParse({
       ...appBase,
