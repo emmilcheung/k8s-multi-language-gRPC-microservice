@@ -16,6 +16,23 @@ interface VerifierOptions {
 const invalid = (message: string): OAuthError =>
   new OAuthError(OAuthErrorCode.InvalidToken, message);
 
+/**
+ * jose `code`s that mean the token is bad. Matched by `code` as well as by
+ * class because `instanceof` fails if two copies of jose are ever loaded.
+ * Not listed on purpose: ERR_JWKS_TIMEOUT, ERR_JWKS_INVALID and network errors
+ * are infrastructure failures and must stay server errors.
+ */
+const TOKEN_DEFECT_CODES = new Set([
+  'ERR_JWT_CLAIM_VALIDATION_FAILED',
+  'ERR_JWT_EXPIRED',
+  'ERR_JWS_SIGNATURE_VERIFICATION_FAILED',
+  'ERR_JWS_INVALID',
+  'ERR_JWT_INVALID',
+  'ERR_JOSE_ALG_NOT_ALLOWED',
+  // Unknown `kid`: the token names a key auth-service does not publish.
+  'ERR_JWKS_NO_MATCHING_KEY',
+]);
+
 const isTokenDefect = (err: unknown): err is Error =>
   err instanceof errors.JWTClaimValidationFailed ||
   err instanceof errors.JWTExpired ||
@@ -23,8 +40,16 @@ const isTokenDefect = (err: unknown): err is Error =>
   err instanceof errors.JWSInvalid ||
   err instanceof errors.JWTInvalid ||
   err instanceof errors.JOSEAlgNotAllowed ||
-  // Unknown `kid`: the token names a key auth-service does not publish.
-  err instanceof errors.JWKSNoMatchingKey;
+  err instanceof errors.JWKSNoMatchingKey ||
+  (err instanceof Error &&
+    TOKEN_DEFECT_CODES.has((err as { code?: string }).code ?? ''));
+
+/**
+ * Tolerated clock skew between auth-service (signer) and this pod (verifier),
+ * in seconds. Ten seconds covers ordinary NTP drift across nodes while keeping
+ * the extra lifetime of an expired token negligible next to its 5-15 min life.
+ */
+const CLOCK_TOLERANCE_SECONDS = 10;
 
 /**
  * Verifies MCP access tokens per contract C-1: RS256 only, exact `iss`, exact
@@ -41,6 +66,7 @@ export function createVerifier(opts: VerifierOptions): OAuthTokenVerifier {
           issuer: opts.issuer,
           audience: opts.resource,
           requiredClaims: ['exp', 'sub'],
+          clockTolerance: CLOCK_TOLERANCE_SECONDS,
         }));
       } catch (err) {
         // Only token defects are the client's fault. JWKS infrastructure
