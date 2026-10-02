@@ -109,8 +109,10 @@ public class OrderService {
     /**
      * Run a compensation release without letting its failure mask the original
      * business exception. If the release itself fails, the reservation is NOT
-     * lost: ticket-service's expiry sweep reclaims holds past their
-     * {@code expiresAt}. We log loudly and count the failure so the condition
+     * lost: ticket-service's quota reconciler (reconciler/quota_reconciler.go) and
+     * venue-service's reservation sweeper (hold/reservation_sweeper.go, backed by
+     * ReservationRepo.SweepExpiredReservations) reclaim reservations past their
+     * {@code expiresAt}, each on a 5 min cadence (worst case ~21 min). We log loudly and count the failure so the condition
      * is alertable instead of silent.
      */
     private void compensate(String flow, UUID reservationId, Runnable release) {
@@ -352,9 +354,10 @@ public class OrderService {
      *
      * <p>Cost: a failed keyed order holds its quota until the reservation expires. The expiry
      * is order.expiration.minutes + 1 (default 16 min, set in this class); ticket-service
-     * reclaims it on its next reconciler sweep (5 min interval), so up to ~21 min. For
-     * venue-service the same expiresAt is stored on the seat reservation, but no
-     * reservation-expiry sweeper exists there, so held seats free via the hold sweeper/order expiry.
+     * reclaims it on its next reconciler sweep (reconciler/quota_reconciler.go, 5 min
+     * interval), so up to ~21 min. venue-service stores the same expiresAt on the seat
+     * reservation and reclaims it via hold/reservation_sweeper.go
+     * (ReservationRepo.SweepExpiredReservations, 5 min interval), also up to ~21 min.
      */
     private Optional<CreateOrderResult> keyedWinner(UUID userId, UUID reservationId, String fingerprint) {
         try {
