@@ -9,7 +9,7 @@ function setup(expiresIn = 300) {
   const fetchStub = (_url: string | URL | Request, init?: RequestInit) => {
     calls.push({
       headers: new Headers(init?.headers),
-      body: new URLSearchParams(String(init?.body)),
+      body: new URLSearchParams((init?.body as URLSearchParams).toString()),
     });
     return Promise.resolve(
       Response.json({
@@ -42,7 +42,7 @@ describe('token exchange client (C-5)', () => {
   it('J-5: sends the C-5 request shape (Basic client auth, token-exchange grant, API resource, narrow scope)', async () => {
     const { exchange, calls, nowSeconds } = setup();
     await exchange('mcp-jwt', nowSeconds() + 900, 'orders:create');
-    const { headers, body } = calls[0]!;
+    const { headers, body } = calls[0];
     expect(headers.get('authorization')).toBe(
       `Basic ${Buffer.from('mcp-service:throwaway-secret').toString('base64')}`,
     );

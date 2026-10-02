@@ -33,6 +33,7 @@ export function requireScope(scope: ToolScope): ScopeChallengeHandler {
   return ({ authInfo }) => {
     if (authInfo === undefined || authInfo.scopes.includes(scope)) return;
     // Non-empty by construction: `scope` is always last.
-    return { scopes: [...authInfo.scopes, scope] as [string, ...string[]] };
+    const [first, ...rest] = [...authInfo.scopes, scope];
+    return { scopes: [first, ...rest] };
   };
 }
