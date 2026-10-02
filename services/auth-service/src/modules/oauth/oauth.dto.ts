@@ -40,6 +40,11 @@ export class AuthorizeQuery {
   @IsNotEmpty()
   @IsIn(['S256'])
   code_challenge_method!: string;
+
+  /** RFC 8707 resource indicator; checked against OAUTH_RESOURCES. */
+  @IsString()
+  @IsOptional()
+  resource?: string;
 }
 
 /** Body for POST /oauth/token (application/x-www-form-urlencoded or JSON) */
@@ -70,6 +75,11 @@ export class TokenBody {
   @IsString()
   @IsOptional()
   refresh_token?: string;
+
+  /** RFC 8707 resource indicator; must match the one used at authorize. */
+  @IsString()
+  @IsOptional()
+  resource?: string;
 }
 
 /** Body for POST /oauth/revoke */

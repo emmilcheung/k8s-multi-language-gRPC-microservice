@@ -23,7 +23,8 @@ import { parseRsaPrivateKey } from './rsa-key.util';
 
 export interface JwtPayload {
   sub: string;
-  email: string;
+  /** Absent on OAuth2 access tokens (C-1). */
+  email?: string;
   jti: string;
   iat?: number;
   exp?: number;
@@ -52,7 +53,7 @@ const blacklisableAccessTokenSchema = z.object({
 
 const jwtPayloadSchema = z.object({
   sub: z.string().min(1),
-  email: z.email(),
+  email: z.email().optional(),
   jti: z.string().min(1),
   iat: z.number().int().optional(),
   exp: z.number().int().optional(),
@@ -254,26 +255,26 @@ export class AuthService {
   }
 
   /**
-   * Issue an access token for an OAuth2 client with specific scopes.
-   * Adds `scope` and `client_id` claims to the standard JWT payload.
-   * Used by the OAuth2 token endpoint only.
+   * Issue an access token for an OAuth2 client with specific scopes (C-1).
+   * Adds `scope` and `client_id`, and binds the token to `aud` (RFC 8707) and
+   * `iss` (D3). No `email` or `roles`: a delegated token carries only what the
+   * resource server needs. Used by the OAuth2 token endpoint only.
    */
   issueAccessTokenForOAuth(
     userId: string,
-    email: string,
     scope: string,
     clientId: string,
+    { aud, iss }: { aud: string; iss: string },
   ): string {
     const tokenPayload = {
       sub: userId,
-      email,
       jti: randomUUID(),
       scope,
       client_id: clientId,
     };
-    const token: unknown = (this.jwtService.sign as (p: unknown) => unknown)(
-      tokenPayload,
-    );
+    const token: unknown = (
+      this.jwtService.sign as (p: unknown, o: unknown) => unknown
+    )(tokenPayload, { audience: aud, issuer: iss });
     return token as string;
   }
 

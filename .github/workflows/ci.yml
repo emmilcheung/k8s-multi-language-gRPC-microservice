@@ -60,6 +60,7 @@ jobs:
       proto:      ${{ steps.filter.outputs.proto }}
       ticket:     ${{ steps.filter.outputs.ticket }}
       user:       ${{ steps.filter.outputs.user }}
+      mcp:        ${{ steps.filter.outputs.mcp }}
       venue:      ${{ steps.filter.outputs.venue }}
       queue:      ${{ steps.filter.outputs.queue }}
       skip-ci:    ${{ steps.set-skip-ci.outputs.skip-ci }}
@@ -114,6 +115,9 @@ jobs:
               - '.github/workflows/ci.yml'
             user:
               - 'services/user-service/**'
+              - '.github/workflows/ci.yml'
+            mcp:
+              - 'services/mcp-service/**'
               - '.github/workflows/ci.yml'
             venue:
               - 'services/venue-service/**'
@@ -771,6 +775,79 @@ jobs:
 
       - name: Load image for scanning
         run: docker load --input /tmp/user-service.tar
+        working-directory: .
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ── mcp-service (TypeScript / MCP SDK / pnpm / Vitest) ────────────────────
+  mcp:
+    name: mcp-service
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.mcp == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: services/mcp-service
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/mcp-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: services/mcp-service/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --silent
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/mcp-service
+          file: services/mcp-service/Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/mcp-service.tar
+
+      - name: Load image for scanning
+        run: docker load --input /tmp/mcp-service.tar
         working-directory: .
 
       - name: Scan image with Trivy
@@ -1636,7 +1713,7 @@ jobs:
     name: CI
     runs-on: ubuntu-24.04
     if: always()
-    needs: [changes, attendance, auth, client, expiration, graphql, helm-validate, queue, kong, order, payment, proto, ticket, user, venue, e2e]
+    needs: [changes, attendance, auth, client, expiration, graphql, helm-validate, queue, kong, mcp, order, payment, proto, ticket, user, venue, e2e]
     steps:
       - name: Check all jobs passed (or skip if only markdown changed)
         run: |

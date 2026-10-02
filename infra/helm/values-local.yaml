@@ -16,6 +16,8 @@ global:
   serviceImageRegistry: ""
   imagePullPolicy: IfNotPresent
   namespace: ticketing
+  # Kong on localhost (minikube tunnel); auth-service derives its OAuth URLs from it.
+  publicOrigin: "http://localhost:8000"
   security:
     allowInsecureImages: true
   serviceMesh:
@@ -38,6 +40,7 @@ auth-service:
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
     OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     OTEL_SERVICE_NAME: auth-service
+    OAUTH_ISSUER_ENABLED: "false"
   resources:
     requests:
       cpu: 50m
@@ -214,6 +217,17 @@ user-service:
     limits:
       cpu: 300m
       memory: 256Mi
+  autoscaling:
+    enabled: false
+
+mcp-service:
+  replicaCount: 1
+  env:
+    MCP_RESOURCE: http://localhost:8000/mcp
+    OAUTH_ISSUER: http://localhost:8000
+    PUBLIC_WEB_URL: http://localhost:3000
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
+    OTEL_SERVICE_NAME: mcp-service
   autoscaling:
     enabled: false
 

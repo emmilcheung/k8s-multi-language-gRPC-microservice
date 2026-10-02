@@ -213,8 +213,11 @@ public class VenueServiceClient {
             case RESOURCE_EXHAUSTED ->
                 new ResponseStatusException(HttpStatus.CONFLICT,
                         "Seats are no longer available");
-            case FAILED_PRECONDITION ->
-                new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+            // venue-service answers a reserve on a RELEASED/EXPIRED reservationId with this
+            // exact phrase; order-service turns it into IDEMPOTENCY_KEY_EXHAUSTED (C-8).
+            case FAILED_PRECONDITION -> description != null && description.contains("was already released")
+                ? new ReservationReleasedException(description)
+                : new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                         "Seats cannot be reserved in current state");
             case UNAVAILABLE, DEADLINE_EXCEEDED ->
                 new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
@@ -236,6 +239,14 @@ public class VenueServiceClient {
                 "Venue service is temporarily unavailable. Please try again shortly.");
     }
 
+    /** A released reservation is a business answer, not a venue outage: let it reach OrderService. */
+    @SuppressWarnings("unused")
+    private ReserveHeldSeatsResponse reserveHeldSeatsFallback(
+            String planId, String ticketId, UUID reservationId, UUID userId,
+            List<String> seatIds, Instant expiresAt, ReservationReleasedException ex) {
+        throw ex;
+    }
+
     @SuppressWarnings("unused")
     private ReserveHeldSeatsResponse reserveHeldSeatsFallback(
             String planId, String ticketId, UUID reservationId, UUID userId,
@@ -253,6 +264,13 @@ public class VenueServiceClient {
         log.warn("Circuit breaker OPEN for venue-service — rejecting autoAssignAndReserve planId={}", planId);
         throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                 "Venue service is temporarily unavailable. Please try again shortly.");
+    }
+
+    @SuppressWarnings("unused")
+    private AutoAssignAndReserveResponse autoAssignAndReserveFallback(
+            String planId, String ticketId, String sectionId, UUID reservationId,
+            UUID userId, int quantity, Instant expiresAt, ReservationReleasedException ex) {
+        throw ex;
     }
 
     @SuppressWarnings("unused")

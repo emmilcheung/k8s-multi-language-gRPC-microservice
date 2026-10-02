@@ -12,6 +12,7 @@
 #   GET  /api/users/currentuser            → auth-service   (JWT required)
 #   GET  /api/users/lookup                 → auth-service   (JWT required)
 #   GET  /.well-known/jwks.json            → auth-service   (public)
+#   GET  /.well-known/oauth-authorization-server → auth-service (public)
 #   GET  /api/tickets/*                    → ticket-service (public)
 #   *    /api/tickets/*                    → ticket-service (JWT required)
 #   *    /api/orders/*                     → order-service  (JWT required)
@@ -296,6 +297,14 @@ services:
       - name: auth-jwks
         paths:
           - /.well-known/jwks.json
+        methods: [GET]
+        strip_path: false
+
+      # Public: RFC 8414 Authorization Server Metadata (C-4). No jwt plugin, so
+      # no scope/deny guard applies. Clients discover the AS here before any token exists.
+      - name: auth-as-metadata
+        paths:
+          - /.well-known/oauth-authorization-server
         methods: [GET]
         strip_path: false
 

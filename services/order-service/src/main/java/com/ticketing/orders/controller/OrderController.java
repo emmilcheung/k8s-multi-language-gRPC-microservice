@@ -3,6 +3,7 @@ package com.ticketing.orders.controller;
 import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
 import com.ticketing.orders.security.UserIdSignatureValidator;
+import com.ticketing.orders.service.CreateOrderResult;
 import com.ticketing.orders.service.OrderService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -39,6 +40,8 @@ public class OrderController {
 
     private static final String USER_ID_HEADER = "X-User-Id";
     private static final String USER_ID_SIG_HEADER = "X-User-Id-Sig";
+    private static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
+    private static final String IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed";
 
     private final OrderService orderService;
     private final UserIdSignatureValidator signatureValidator;
@@ -52,10 +55,10 @@ public class OrderController {
     public ResponseEntity<OrderResponse> createOrder(
             @RequestHeader(USER_ID_HEADER) UUID userId,
             @RequestHeader(value = USER_ID_SIG_HEADER, required = false) String signature,
+            @RequestHeader(value = IDEMPOTENCY_KEY_HEADER, required = false) String idempotencyKey,
             @Valid @RequestBody CreateOrderRequest request) {
         validateUserIdSignature(userId.toString(), signature);
-        OrderResponse response = orderService.createOrder(userId, request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        return toResponse(orderService.createOrder(userId, request, idempotencyKey));
     }
 
     /**
@@ -66,10 +69,10 @@ public class OrderController {
     public ResponseEntity<OrderResponse> createSeatedOrder(
             @RequestHeader(USER_ID_HEADER) UUID userId,
             @RequestHeader(value = USER_ID_SIG_HEADER, required = false) String signature,
+            @RequestHeader(value = IDEMPOTENCY_KEY_HEADER, required = false) String idempotencyKey,
             @Valid @RequestBody CreateOrderRequest request) {
         validateUserIdSignature(userId.toString(), signature);
-        OrderResponse response = orderService.createSeatedOrder(userId, request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        return toResponse(orderService.createSeatedOrder(userId, request, idempotencyKey));
     }
 
     @GetMapping
@@ -96,6 +99,14 @@ public class OrderController {
             @PathVariable UUID id) {
         validateUserIdSignature(userId.toString(), signature);
         return ResponseEntity.ok(orderService.cancelOrder(id, userId));
+    }
+
+    /** 201 for a fresh order; 200 + Idempotent-Replayed for a replay of an Idempotency-Key. */
+    private static ResponseEntity<OrderResponse> toResponse(CreateOrderResult result) {
+        if (result.replayed()) {
+            return ResponseEntity.ok().header(IDEMPOTENT_REPLAYED_HEADER, "true").body(result.order());
+        }
+        return ResponseEntity.status(HttpStatus.CREATED).body(result.order());
     }
 
     private void validateUserIdSignature(String userId, String signature) {

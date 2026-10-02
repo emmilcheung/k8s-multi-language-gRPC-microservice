@@ -9,6 +9,32 @@
 
 ---
 
+## Session: 2026-10-02 — feat(mcp): Wave 2 — AS metadata, order idempotency, mcp-service scaffold ⏳ LOCAL, UNPUSHED
+
+**Branch:** `feat/mcp-platform-wave2` — lanes `feat/mcp-w2-{e,f,g}` merged `--no-ff` (E → F → G), then merged `--no-ff` into the integration branch `feat/mcp-platform`. All MCP branches were rebased onto `main` `04307ee` first (integration with `--rebase-merges`). Nothing is pushed.
+
+**What landed**
+
+- **WS-E (auth-service):** RFC 8414 metadata at `/.well-known/oauth-authorization-server` (public Kong route `auth-as-metadata`), `/oauth/scopes`, scope registry, RFC 8707 `resource` → `aud`, loopback redirect matching (RFC 8252 §7.3). The four `OAUTH_*` URLs derive from one Helm value, `global.publicOrigin`; unset in production, auth-service refuses to start and names the value. Production rejects http / loopback / fragment issuer and resource URLs. Refresh validates `resource` before rotating.
+- **WS-F (order-service, ticket-service, venue-service):** `Idempotency-Key` on `POST /api/orders` and `/api/orders/seated` (V8 migration: `request_fingerprint`, unique `reservation_id`). A keyed create never compensates on failure — the reservation is shared across retries, so releasing it could strand a sibling's committed order; expiry reclaims it instead (worst case ~21 min). ticket-service accepts a duplicate reserve only while RESERVED. **venue-service gained a reservation expiry sweep** (it stored `expires_at` and never acted on it), and release/finalize on an EXPIRED reservation are now safe.
+- **WS-G (mcp-service):** new resource-server scaffold — RS256-only bearer verification against the auth-service JWKS, RFC 9728 protected-resource metadata, 401 challenge, non-root image, Helm chart (disabled by default) with NetworkPolicy, compose `mcp` profile, CI job.
+
+**Exit gate (merged branch):** auth-service 177 unit / 25 integration; order-service checkstyle + 97 unit / 19 IT; ticket-service and venue-service `go vet` + `go test`; mcp-service 20 tests, image runs as uid 100; Kong `test-build-lint.sh` 10/10, local/staging/prod build + validate, guards SCOPE 11 / DENY 17. Umbrella chart renders the four `OAUTH_*` vars for local and when `publicOrigin` is set, none when unset. Through Kong on freshly built auth/order/ticket/venue/kong/mcp images: metadata issuer `http://localhost:8000`, `oauth-agent-boundaries.spec.ts` 13/13, live idempotency check 201 → 200 `Idempotent-Replayed: true` (same id) → 422 on a changed body.
+
+**Not verified:** the `mcp` compose profile (the secret is not in the local `.env`; the image was run standalone instead and token exchange was not exercised); payment/user/attendance/expiration images were not rebuilt; multi-replica sweep contention; any deploy.
+
+**Owner items**
+
+- Set `global.publicOrigin` (public https origin) in `values-staging.yaml` and `values-prod.yaml` before deploying — auth-service will not start without it.
+- Hard stop #10 review: Kong public route `auth-as-metadata`; mcp-service NetworkPolicy (ingress Kong:3000; egress DNS 53 to any, Kong 8000, auth-service 3000, otel-collector 4317; podSelector-only).
+- Hard stop #9: mcp-service dependencies, incl. `@modelcontextprotocol/client` 2.2.0 (devDependency, test-only).
+- Add `MCP_TOKEN_EXCHANGE_CLIENT_SECRET` to the local `.env`; run the V8 duplicate pre-check in non-local environments.
+- Acknowledge two known P0s the new venue sweep touches (tracked separately, not fixed here): a seat freed by a DB-only release stays un-holdable on the Redis manual-pick path; a seated order paid after its reservation expired now fails to finalize, as GA already does.
+
+Ledger: `.superpowers/sdd/2026-09-30-mcp-wave2/`.
+
+---
+
 ## Session: 2026-09-30 — test(e2e): Wave-1 OAuth boundary regressions pin the exit gate ⏳ AWAITING OWNER APPROVAL (Wave 2)
 
 **Branch:** `feat/mcp-platform-wave1` (Task 7, the Wave-1 exit gate; Tasks 1–6 already committed on this branch). Per controller ruling, Task 7 ran and committed on this branch instead of a fresh `test/mcp-wave1-exit-gate` off `main`; the PR/hand-off half of the brief's Step 3 is deferred to a `finishing-a-development-branch` pass with the owner.

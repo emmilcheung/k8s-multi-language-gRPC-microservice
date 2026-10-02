@@ -14,6 +14,10 @@
 # This value has to move with the broker; that is why it now lives per overlay
 # instead of once in values.yaml.
 global:
+  # OWNER ACTION: set the public https origin (no path, e.g. https://ticketing.example.com)
+  # before deploying. auth-service derives its OAuth issuer and audiences from it and
+  # refuses to start while it is empty.
+  publicOrigin: ""
   serviceMesh:
     linkerd:
       skipOutboundPorts: "9098"
@@ -94,6 +98,14 @@ expiration-service:
     enabled: true
   topologySpreadConstraints:
     enabled: true
+
+mcp-service:
+  networkPolicy:
+    enabled: true
+  topologySpreadConstraints:
+    enabled: true
+  autoscaling:
+    minReplicas: 3
 
 attendance-service:
   networkPolicy:

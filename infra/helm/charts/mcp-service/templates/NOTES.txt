@@ -1,0 +1,13 @@
+mcp-service deployed successfully.
+
+  Release:   {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Image:     {{ include "mcp-service.image" . }}
+
+Endpoints (in-cluster):
+  HTTP  http://{{ include "mcp-service.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+Health check:
+  GET /health
+
+The public /mcp route is added to Kong separately.
