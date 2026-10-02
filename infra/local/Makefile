@@ -296,7 +296,7 @@ secrets: _check-secrets _namespace
 			_apply mcp-service-secrets \
 				--from-literal=TOKEN_EXCHANGE_CLIENT_SECRET="$$MCP_TOKEN_EXCHANGE_CLIENT_SECRET"; \
 		else \
-			echo "  MCP_TOKEN_EXCHANGE_CLIENT_SECRET is empty: skipping mcp-service-secrets"; \
+			echo "  MCP_TOKEN_EXCHANGE_CLIENT_SECRET is empty or absent: skipping mcp-service-secrets"; \
 		fi; \
 		\
 		_apply user-service-secrets \
