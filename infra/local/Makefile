@@ -234,6 +234,7 @@ secrets: _check-secrets _namespace
 	STRIPE_SECRET_KEY='$(call _secret,STRIPE_SECRET_KEY)' \
 	QR_SIGNING_KEY='$(call _secret,QR_SIGNING_KEY)' \
 	X_USER_ID_SIGNING_KEY='$(call _secret,X_USER_ID_SIGNING_KEY)' \
+	MCP_TOKEN_EXCHANGE_CLIENT_SECRET='$(call _secret,MCP_TOKEN_EXCHANGE_CLIENT_SECRET)' \
 	 bash -c '\
 		_apply() { \
 			kubectl delete secret "$$1" -n $(NAMESPACE) --ignore-not-found=true 2>/dev/null; \
@@ -290,6 +291,13 @@ secrets: _check-secrets _namespace
 			--from-literal=QR_SIGNING_KEY="$$QR_SIGNING_KEY" \
 			--from-literal=TICKET_SERVICE_URL="ticketing-ticket-service.ticketing.svc.cluster.local:50051" \
 			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
+		\
+		if [ -n "$$MCP_TOKEN_EXCHANGE_CLIENT_SECRET" ]; then \
+			_apply mcp-service-secrets \
+				--from-literal=TOKEN_EXCHANGE_CLIENT_SECRET="$$MCP_TOKEN_EXCHANGE_CLIENT_SECRET"; \
+		else \
+			echo "  MCP_TOKEN_EXCHANGE_CLIENT_SECRET is empty: skipping mcp-service-secrets"; \
+		fi; \
 		\
 		_apply user-service-secrets \
 			--from-literal=DATABASE_URL="postgresql://users_user:users-local-secret@ticketing-postgres-users:5432/users_db" \
