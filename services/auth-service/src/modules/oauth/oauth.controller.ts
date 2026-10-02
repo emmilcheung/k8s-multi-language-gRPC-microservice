@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
   ForbiddenException,
+  BadRequestException,
   UnauthorizedException,
   UseFilters,
 } from '@nestjs/common';
@@ -30,6 +31,7 @@ import type {
   ConsentResult,
 } from './oauth.dto';
 import { TOKEN_EXCHANGE_GRANT } from './oauth-clients.config';
+import { OAuthUnavailableFilter } from './oauth-unavailable';
 import { UserIdSignatureValidator } from '../../common/security/user-id-signature.validator';
 import {
   OAuthExceptionFilter,
@@ -77,6 +79,7 @@ export class OAuthController {
 
   // GET /oauth/authorize
   @Get('oauth/authorize')
+  @UseFilters(OAuthUnavailableFilter)
   async authorize(
     @Query() query: AuthorizeQuery,
     @Req() req: Request,
@@ -124,13 +127,36 @@ export class OAuthController {
     return this.oauthService.listClients(userId);
   }
 
-  // DELETE /oauth/clients/:clientId
+  // DELETE /oauth/clients?client_id=<id> — the form for URL (CIMD) client ids,
+  // which contain ':' and '/' and must not sit in a path segment behind a proxy.
+  @Delete('oauth/clients')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async revokeClientByQuery(
+    @Query('client_id') clientId: unknown,
+    @Req() req: Request,
+  ): Promise<void> {
+    const userId = this.verifiedUserId(req);
+    if (
+      typeof clientId !== 'string' ||
+      clientId.length === 0 ||
+      clientId.length > 512
+    ) {
+      throw new BadRequestException('client_id is required');
+    }
+    await this.oauthService.revokeClient(userId, clientId);
+  }
+
+  // DELETE /oauth/clients/:clientId — original form, kept for opaque ids
   @Delete('oauth/clients/:clientId')
   @HttpCode(HttpStatus.NO_CONTENT)
   async revokeClient(
     @Param('clientId') clientId: string,
     @Req() req: Request,
   ): Promise<void> {
+    await this.oauthService.revokeClient(this.verifiedUserId(req), clientId);
+  }
+
+  private verifiedUserId(req: Request): string {
     const userId =
       (req.headers['x-user-id'] as string | undefined) ?? undefined;
     const userIdSig =
@@ -139,7 +165,7 @@ export class OAuthController {
     if (!this.signatureValidator.isValidSignature(userId, userIdSig)) {
       throw new UnauthorizedException('invalid X-User-Id-Sig signature');
     }
-    await this.oauthService.revokeClient(userId, clientId);
+    return userId;
   }
 
   // POST /oauth/clients/register — RFC 7591 dynamic client registration (public, no JWT)

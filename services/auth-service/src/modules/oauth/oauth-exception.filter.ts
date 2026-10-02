@@ -8,6 +8,10 @@ import {
 } from '@nestjs/common';
 import { Logger } from 'nestjs-pino';
 import type { Response } from 'express';
+import {
+  OAuthTemporarilyUnavailableException,
+  sendTemporarilyUnavailable,
+} from './oauth-unavailable';
 
 /** RFC 6749 §5.2 error body. */
 export interface OAuthErrorBody {
@@ -33,6 +37,10 @@ export class OAuthExceptionFilter implements ExceptionFilter {
     const response = host.switchToHttp().getResponse<Response>();
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('Pragma', 'no-cache');
+
+    if (exception instanceof OAuthTemporarilyUnavailableException) {
+      return sendTemporarilyUnavailable(response, exception);
+    }
 
     if (exception instanceof HttpException && exception.getStatus() < 500) {
       const status: number = exception.getStatus();

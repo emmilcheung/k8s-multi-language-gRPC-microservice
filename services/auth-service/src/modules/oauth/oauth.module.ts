@@ -7,6 +7,7 @@ import { OAuthMetadataController } from './oauth-metadata.controller';
 import { OAuthCodeStoreService } from './oauth-code-store.service';
 import { DynamicClientService } from './dynamic-client.service';
 import { OAuthConsentStoreService } from './oauth-consent-store.service';
+import { CimdClientService } from './cimd-client.service';
 import { SecurityModule } from '../../common/security/security.module';
 
 @Module({
@@ -22,6 +23,7 @@ import { SecurityModule } from '../../common/security/security.module';
     OAuthCodeStoreService,
     DynamicClientService,
     OAuthConsentStoreService,
+    CimdClientService,
   ],
   controllers: [OAuthController, OAuthMetadataController],
 })

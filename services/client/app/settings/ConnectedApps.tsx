@@ -2,6 +2,8 @@ import { Badge } from "@/components/ui/badge";
 import { RevokeButton } from "./RevokeButton";
 import type { ConnectedApp } from "./connected-apps";
 
+const MAX_REDIRECT_HOSTS = 3;
+
 function formatLastUsed(value?: string): string {
   if (!value) return "Unknown";
   const parsed = new Date(value);
@@ -40,8 +42,28 @@ export function ConnectedApps({
           className="flex flex-col gap-3 rounded border border-line p-3 sm:flex-row sm:items-center sm:justify-between"
         >
           <div className="min-w-0 space-y-1">
-            <p className="text-sm font-semibold">{app.name}</p>
-            {app.domain && <p className="text-xs text-mute">{app.domain}</p>}
+            <p className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+              {app.name}
+              <Badge variant="outline" data-testid="party-badge">
+                {app.isFirstParty ? "First-party" : "Third-party"}
+              </Badge>
+            </p>
+            {app.addresses?.documentHost && (
+              <p className="break-all text-xs text-mute" data-testid="app-document-host">
+                App identity document hosted at <span className="font-mono">{app.addresses.documentHost}</span>
+              </p>
+            )}
+            {app.addresses && app.addresses.redirectTargets.length > 0 && (
+              <p className="break-all text-xs text-mute" data-testid="app-redirect-hosts">
+                Redirects to{" "}
+                {app.addresses.redirectTargets
+                  .slice(0, MAX_REDIRECT_HOSTS)
+                  .map((t) => (t.loopback ? "an app on this device" : t.host))
+                  .join(", ")}
+                {app.addresses.redirectTargets.length > MAX_REDIRECT_HOSTS &&
+                  `, +${app.addresses.redirectTargets.length - MAX_REDIRECT_HOSTS} more`}
+              </p>
+            )}
             <div className="flex flex-wrap gap-1.5">
               {app.scopes.map((scope) => (
                 <Badge key={scope} variant="outline" className="font-mono">
