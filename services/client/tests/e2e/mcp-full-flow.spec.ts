@@ -193,7 +193,8 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
       }).toString();
       const res = await fetch(url, { redirect: "manual" });
       expect(res.status, clientId).toBe(400);
-      // The gateway wraps the OAuth error body in its own envelope; the error code is inside it.
+      // auth-service's global exception filter wraps the OAuth error in its own envelope
+      // ({error:{code,message}}, global-exception.filter.ts); the OAuth error code is inside the message.
       expect(await res.text()).toContain("invalid_client");
     }
   });
