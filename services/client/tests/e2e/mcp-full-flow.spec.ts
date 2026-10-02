@@ -37,8 +37,8 @@ import {
 import { KONG_URL, obtainOAuthAccessToken, signupViaApi } from "./_helpers/oauth";
 
 const MCP_URL = `${KONG_URL}/mcp`;
-// Protocol versions mcp-service is tested against (services/mcp-service/src/protocol-eras.spec.ts:33,39).
-const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2026-07-28"];
+// The version this host asks for in `initialize`; the server's answer is recorded, not hard-coded.
+const REQUESTED_PROTOCOL_VERSION = "2025-11-25";
 const HOST_REDIRECT = "http://127.0.0.1:19877/callback";
 const HOST_SCOPES = [
   "tickets:read",
@@ -109,7 +109,7 @@ function claims(jwt: string): Record<string, unknown> {
 
 /** Shared by the serial steps below; a step failing skips the rest. */
 const state = {
-  protocolVersion: SUPPORTED_PROTOCOL_VERSIONS[0],
+  protocolVersion: REQUESTED_PROTOCOL_VERSION,
   authServer: "",
   registrationEndpoint: "",
   authorizationEndpoint: "",
@@ -126,13 +126,14 @@ const state = {
 
 test.beforeAll(async () => {
   // Fail with the root cause, not eleven confusing failures, when the stack lacks mcp-service.
+  // A bounded wait, and a Kong 5xx or a refused connection also means "not running".
   let status: number | string;
   try {
-    status = (await fetch(MCP_URL, { method: "POST" })).status;
+    status = (await fetch(MCP_URL, { method: "POST", signal: AbortSignal.timeout(10_000) })).status;
   } catch (err) {
     status = err instanceof Error ? err.message : "unreachable";
   }
-  if (status === 404 || status === 502 || status === 503 || status === 504 || typeof status === "string") {
+  if ([404, 500, 502, 503, 504].includes(status as number) || typeof status === "string") {
     throw new Error(
       `mcp-service is not running (compose profile \`mcp\`): POST ${MCP_URL} answered ${status}. ` +
         "Start the stack with `docker compose --profile mcp up -d` and MCP_TOKEN_EXCHANGE_CLIENT_SECRET[_HASH] set.",
@@ -173,6 +174,28 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     state.registrationEndpoint = meta.registration_endpoint;
     state.authorizationEndpoint = meta.authorization_endpoint;
     state.tokenEndpoint = meta.token_endpoint;
+    // CIMD is on in the compose stack; the flag is only advertised when the fetch is enabled.
+    expect(meta.client_id_metadata_document_supported).toBe(true);
+  });
+
+  test("M-1 edge (CIMD): a URL client_id naming an internal address is refused as an invalid client, not a 5xx", async () => {
+    // No public document and no real external host is used. These hosts are block-listed
+    // (link-local metadata address, internal suffix) so the fetcher refuses before any connection.
+    for (const clientId of ["https://169.254.169.254/x.json", "https://foo.internal/x.json"]) {
+      const url = new URL(state.authorizationEndpoint);
+      url.search = new URLSearchParams({
+        response_type: "code",
+        client_id: clientId,
+        redirect_uri: HOST_REDIRECT,
+        code_challenge: "A".repeat(43),
+        code_challenge_method: "S256",
+        resource: MCP_URL,
+      }).toString();
+      const res = await fetch(url, { redirect: "manual" });
+      expect(res.status, clientId).toBe(400);
+      // The gateway wraps the OAuth error body in its own envelope; the error code is inside it.
+      expect(await res.text()).toContain("invalid_client");
+    }
   });
 
   test("M-1: dynamic client registration returns a client id for our loopback redirect", async () => {
@@ -265,15 +288,10 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     await expect(page.getByText("E2E MCP Host").first()).toBeVisible();
     await expect(page.getByText("Sensitive", { exact: true }).first()).toBeVisible();
 
-    // Root cause of the lost click: app/oauth/consent/ConsentActions.tsx is a client component whose
-    // buttons are enabled in the server HTML but have no handler until React hydrates, so an early
-    // click does nothing. Retry the click until the redirect arrives; correct both before and after
-    // the product fix that disables the buttons until mounted.
-    const allow = page.getByRole("button", { name: /allow access/i });
-    await expect(async () => {
-      if (!redirect) await allow.click({ timeout: 2000 });
-      await expect.poll(() => redirect?.searchParams.get("code") ?? "", { timeout: 3000 }).not.toBe("");
-    }).toPass({ timeout: 30_000 });
+    // The buttons are disabled until the client component has hydrated (ConsentActions.tsx), so
+    // Playwright's actionability wait already covers hydration: no extra wait or retry is needed.
+    await page.getByRole("button", { name: /allow access/i }).click();
+    await expect.poll(() => redirect?.searchParams.get("code") ?? "", { timeout: 30_000 }).not.toBe("");
     expect(redirect!.searchParams.get("state")).toBe("m1-state");
     // RFC 9207: the response names its issuer so a host can detect mix-up.
     expect(redirect!.searchParams.get("iss")).toBe(state.authServer);
@@ -316,8 +334,10 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     expect(init.status).toBe(200);
     expect(init.body?.result?.serverInfo?.name).toBeTruthy();
     state.protocolVersion = init.body?.result?.protocolVersion;
+    // Which version the server picked is recorded for the run report; only its shape is asserted,
+    // so a server upgrade does not fail this spec.
     test.info().annotations.push({ type: "mcp-protocol-version", description: String(state.protocolVersion) });
-    expect(SUPPORTED_PROTOCOL_VERSIONS).toContain(state.protocolVersion);
+    expect(state.protocolVersion).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 
     const list = await rpc(state.accessToken, "tools/list", {}, state.protocolVersion);
     expect(list.status).toBe(200);
@@ -381,6 +401,16 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     const read = await callTool(state.accessToken, "get_payment", { paymentId: payment.id });
     expect(read.body?.result?.isError).toBeFalsy();
     expect(read.body?.result?.structuredContent?.payment?.orderId).toBe(state.orderId);
+  });
+
+  test("M-1 edge: GET and DELETE on /mcp are 405 (stateless transport), not a session", async () => {
+    for (const method of ["GET", "DELETE"]) {
+      const res = await fetch(MCP_URL, {
+        method,
+        headers: { Authorization: `Bearer ${state.accessToken}`, Accept: "application/json, text/event-stream" },
+      });
+      expect(res.status, method).toBe(405);
+    }
   });
 
   test("M-1 edge (C-10): the MCP-audience token is refused on the REST API", async () => {
