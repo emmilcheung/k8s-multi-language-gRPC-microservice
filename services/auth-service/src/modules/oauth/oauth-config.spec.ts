@@ -172,3 +172,34 @@ describe('OAuth resource config (C-2)', () => {
     },
   );
 });
+
+describe('MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH (C-5)', () => {
+  const KEY = 'MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH';
+
+  it.each([undefined, ''])(
+    'boots with the hash %j: the grant is disabled, not the service (compose passes an empty string when unset)',
+    (v) => {
+      const r = envSchema.safeParse({
+        ...appBase,
+        ...(v === undefined ? {} : { [KEY]: v }),
+      });
+      expect(r.success).toBe(true);
+    },
+  );
+
+  it('accepts an argon2id hash', () => {
+    const r = envSchema.safeParse({
+      ...appBase,
+      [KEY]: '$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA',
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('fails startup on a value that is not an argon2id hash, without echoing it (a pasted plaintext secret must not reach logs)', () => {
+    const pasted = 'plaintext-secret-pasted-by-mistake';
+    const r = envSchema.safeParse({ ...appBase, [KEY]: pasted });
+    expect(r.success).toBe(false);
+    expect(JSON.stringify(r.error?.issues)).toContain(KEY);
+    expect(JSON.stringify(r.error?.issues)).not.toContain(pasted);
+  });
+});
