@@ -19,18 +19,12 @@ interface ConsentDetails {
   expiresInSeconds: number;
 }
 
-/** Human-readable label + description for each OAuth scope. */
-const SCOPE_LABELS: Record<string, { label: string; description: string }> = {
-  "tickets:read":    { label: "View tickets",       description: "See available events and ticket listings" },
-  "orders:read":     { label: "View orders",        description: "Read your order history and status" },
-  "orders:create":   { label: "Create orders",      description: "Purchase tickets on your behalf" },
-  "orders:cancel":   { label: "Cancel orders",      description: "Cancel existing ticket orders" },
-  "payments:read":   { label: "View payments",      description: "Read your payment history" },
-  "payments:create": { label: "Make payments",      description: "Initiate payments for orders" },
-  "venues:read":     { label: "View venues",        description: "See venue information and seating layouts" },
-  "seating:read":    { label: "View seating",       description: "Check seat availability" },
-  "seating:hold":    { label: "Hold seats",         description: "Reserve seats temporarily during purchase" },
-};
+/** One entry of the auth-service scope registry (GET /oauth/scopes, spec C-7). */
+interface ScopeInfo {
+  scope: string;
+  label: string;
+  sensitive: boolean;
+}
 
 // searchParams is a Promise in Next.js 15 App Router
 export default async function ConsentPage({
@@ -52,24 +46,40 @@ export default async function ConsentPage({
   }
 
   // Fetch consent details from auth-service (JWT protected — cookie is required)
+  // Labels and sensitivity come from the scope registry, so the consent text
+  // can never drift from what auth-service will actually grant. If the registry
+  // cannot be loaded we refuse to render rather than show unlabeled grants.
   let consent: ConsentDetails;
+  let registry: ScopeInfo[];
   try {
-    const res = await fetch(`${base()}/oauth/consent/${request_id}`, {
-      cache: "no-store",
-      headers: accessToken
-        ? { Cookie: `${ACCESS_TOKEN_COOKIE}=${accessToken}` }
-        : {},
-    });
+    const [res, scopesRes] = await Promise.all([
+      fetch(`${base()}/oauth/consent/${request_id}`, {
+        cache: "no-store",
+        headers: accessToken
+          ? { Cookie: `${ACCESS_TOKEN_COOKIE}=${accessToken}` }
+          : {},
+      }),
+      fetch(`${base()}/oauth/scopes`, { cache: "no-store" }),
+    ]);
     if (res.status === 404) notFound();
-    if (!res.ok) throw new Error(`${res.status}`);
+    if (!res.ok || !scopesRes.ok) throw new Error(`${res.status}/${scopesRes.status}`);
     consent = (await res.json()) as ConsentDetails;
-  } catch {
+    registry = (await scopesRes.json()) as ScopeInfo[];
+  } catch (err) {
+    // Status codes / error message only: never log the cookie or request headers.
+    console.error(
+      "[consent] failed to load consent details or scope registry:",
+      err instanceof Error ? err.message : String(err),
+    );
     notFound();
   }
 
-  const hasDestructive = consent.scopes.some((s) =>
-    ["orders:create", "orders:cancel", "payments:create", "seating:hold"].includes(s),
-  );
+  const scopeInfo = new Map(registry.map((s) => [s.scope, s]));
+  // Fail closed: a scope the registry cannot describe is treated as sensitive.
+  const hasSensitive = consent.scopes.some((s) => {
+    const info = scopeInfo.get(s);
+    return !info || info.sensitive;
+  });
 
   return (
     <div className="min-h-[70vh] flex flex-col justify-center items-center py-12 px-4">
@@ -102,18 +112,21 @@ export default async function ConsentPage({
             </p>
             <ul className="flex flex-col gap-2.5">
               {consent.scopes.map((scope) => {
-                const meta = SCOPE_LABELS[scope];
+                const meta = scopeInfo.get(scope);
                 return (
                   <li key={scope} className="flex items-start gap-3">
                     <Shield className="size-4 text-accent mt-0.5 shrink-0" />
                     <div className="flex flex-col gap-0.5 min-w-0">
                       <span className="text-sm font-medium text-ink">
-                        {meta?.label ?? scope}
+                        {meta ? meta.label : "Unrecognised permission"}
                       </span>
-                      {meta?.description && (
-                        <span className="text-xs text-mute">
-                          {meta.description}
-                        </span>
+                      {!meta && (
+                        <span className="text-xs font-mono text-mute break-all">{scope}</span>
+                      )}
+                      {(!meta || meta.sensitive) && (
+                        <Badge variant="destructive" className="w-fit">
+                          Sensitive
+                        </Badge>
                       )}
                     </div>
                   </li>
@@ -123,7 +136,7 @@ export default async function ConsentPage({
           </div>
 
           {/* Destructive warning */}
-          {hasDestructive && (
+          {hasSensitive && (
             <>
               <Separator />
               <div className="px-6 py-4 flex items-start gap-3 bg-amber-500/5 border-y border-amber-500/20">
