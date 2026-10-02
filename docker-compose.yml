@@ -313,7 +313,7 @@ services:
       OAUTH_MCP_RESOURCE: http://localhost:8000/mcp
       OAUTH_API_AUDIENCE: http://localhost:8000/api
       OAUTH_ISSUER_ENABLED: "false"
-      # argon2id hash of MCP_TOKEN_EXCHANGE_CLIENT_SECRET (see .env.example). Empty
+      # SHA-256 hex of MCP_TOKEN_EXCHANGE_CLIENT_SECRET (see .env.example). Empty
       # disables the RFC 8693 token-exchange grant; auth-service still boots.
       MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH: "${MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH:-}"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317

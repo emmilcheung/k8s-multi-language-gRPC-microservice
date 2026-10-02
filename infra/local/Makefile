@@ -234,6 +234,7 @@ secrets: _check-secrets _namespace
 	STRIPE_SECRET_KEY='$(call _secret,STRIPE_SECRET_KEY)' \
 	QR_SIGNING_KEY='$(call _secret,QR_SIGNING_KEY)' \
 	X_USER_ID_SIGNING_KEY='$(call _secret,X_USER_ID_SIGNING_KEY)' \
+	MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH='$(call _secret,MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH)' \
 	 bash -c '\
 		_apply() { \
 			kubectl delete secret "$$1" -n $(NAMESPACE) --ignore-not-found=true 2>/dev/null; \
@@ -248,7 +249,8 @@ secrets: _check-secrets _namespace
 			--from-literal=COOKIE_DOMAIN="localhost" \
 			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092" \
 			--from-literal=REDIS_URL="redis://ticketing-redis-master:6379" \
-			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
+			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY" \
+			--from-literal=MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH="$$MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH"; \
 		\
 		_apply ticket-service-secrets \
 			--from-literal=MONGO_URI="mongodb://mongo_user:mongo-local-secret@ticketing-mongodb-0.ticketing-mongodb-headless.ticketing.svc.cluster.local:27017/tickets?authSource=admin&replicaSet=rs0" \

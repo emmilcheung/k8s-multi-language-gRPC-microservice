@@ -18,7 +18,7 @@ env:
 
 # Name of a Kubernetes Secret containing:
 #   DATABASE_URL, JWT_SECRET, RSA_PRIVATE_KEY, KAFKA_BROKERS, REDIS_URL, X_USER_ID_SIGNING_KEY
-# Optional: MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH (argon2id hash of mcp-service's
+# Optional: MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH (lowercase hex SHA-256 of mcp-service's
 # client secret; absent = the RFC 8693 token-exchange grant is disabled)
 secretRef: auth-service-secrets
 
