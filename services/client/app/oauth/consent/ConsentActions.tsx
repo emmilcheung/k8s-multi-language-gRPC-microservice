@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle, XCircle } from "lucide-react";
 
@@ -8,7 +8,12 @@ interface ConsentActionsProps {
   requestId: string;
 }
 
+const noopSubscribe = () => () => {};
+
 export function ConsentActions({ requestId }: ConsentActionsProps) {
+  // R4: false on the server and during hydration, true afterwards, so a click
+  // cannot land before the handlers are attached.
+  const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
   const [pending, setPending] = useState<"approve" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,7 +52,7 @@ export function ConsentActions({ requestId }: ConsentActionsProps) {
         <Button
           variant="outline"
           className="flex-1 border-line text-mute hover:bg-destructive/10 hover:text-destructive hover:border-destructive/50"
-          disabled={pending !== null}
+          disabled={!mounted || pending !== null}
           onClick={() => submitConsent(false)}
         >
           {pending === "deny" ? (
@@ -59,7 +64,7 @@ export function ConsentActions({ requestId }: ConsentActionsProps) {
         </Button>
         <Button
           className="flex-1 font-semibold"
-          disabled={pending !== null}
+          disabled={!mounted || pending !== null}
           onClick={() => submitConsent(true)}
         >
           {pending === "approve" ? (

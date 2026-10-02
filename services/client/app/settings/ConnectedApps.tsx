@@ -2,6 +2,8 @@ import { Badge } from "@/components/ui/badge";
 import { RevokeButton } from "./RevokeButton";
 import type { ConnectedApp } from "./connected-apps";
 
+const MAX_REDIRECT_HOSTS = 3;
+
 function formatLastUsed(value?: string): string {
   if (!value) return "Unknown";
   const parsed = new Date(value);
@@ -46,12 +48,20 @@ export function ConnectedApps({
                 {app.isFirstParty ? "First-party" : "Third-party"}
               </Badge>
             </p>
-            {app.domain && (
-              <p className="text-xs text-mute">
-                <span>{app.domain}</span>{" "}
-                <span data-testid="domain-source">
-                  {app.domainSource === "client_id" ? "(app address)" : "(redirects to)"}
-                </span>
+            {app.addresses?.documentHost && (
+              <p className="break-all text-xs text-mute" data-testid="app-document-host">
+                App identity document hosted at <span className="font-mono">{app.addresses.documentHost}</span>
+              </p>
+            )}
+            {app.addresses && app.addresses.redirectTargets.length > 0 && (
+              <p className="break-all text-xs text-mute" data-testid="app-redirect-hosts">
+                Redirects to{" "}
+                {app.addresses.redirectTargets
+                  .slice(0, MAX_REDIRECT_HOSTS)
+                  .map((t) => (t.loopback ? "an app on this device" : t.host))
+                  .join(", ")}
+                {app.addresses.redirectTargets.length > MAX_REDIRECT_HOSTS &&
+                  `, +${app.addresses.redirectTargets.length - MAX_REDIRECT_HOSTS} more`}
               </p>
             )}
             <div className="flex flex-wrap gap-1.5">

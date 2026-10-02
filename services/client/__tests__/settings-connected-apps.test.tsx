@@ -141,9 +141,14 @@ describe("ConnectedApps section (L-2)", () => {
   });
 
   it("L-2: shows the domain when the listing provides one", () => {
-    render(<ConnectedApps apps={[{ ...app, domain: "claude.ai" }]} revokeAction={vi.fn()} />);
+    render(
+      <ConnectedApps
+        apps={[{ ...app, addresses: { redirectTargets: [{ host: "claude.ai", loopback: false }], redirectMismatch: false } }]}
+        revokeAction={vi.fn()}
+      />,
+    );
 
-    expect(screen.getByText("claude.ai")).toBeInTheDocument();
+    expect(screen.getByTestId("app-redirect-hosts")).toHaveTextContent("claude.ai");
   });
 
   it("L-2: each row has a Revoke form carrying its client id", () => {
@@ -179,25 +184,41 @@ describe("ConnectedApps section (L-2)", () => {
 describe("Connected apps domain and party marker (I-7 / ruling 7)", () => {
   const base: ConnectedApp = { clientId: "c", name: "Agent", isFirstParty: false, scopes: [] };
 
-  it("a CIMD app shows the host of its client_id, labelled as the app address", () => {
-    render(
-      <ConnectedApps
-        apps={[{ ...base, domain: "app.example.com", domainSource: "client_id" }]}
-        revokeAction={vi.fn()}
-      />,
-    );
-    expect(screen.getByText("app.example.com")).toBeInTheDocument();
-    expect(screen.getByTestId("domain-source")).toHaveTextContent("app address");
+  const withAddr = (documentHost: string | undefined, hosts: [string, boolean][]) => ({
+    ...base,
+    addresses: {
+      documentHost,
+      redirectTargets: hosts.map(([host, loopback]) => ({ host, loopback })),
+      redirectMismatch: false,
+    },
   });
 
-  it("a DCR app shows the redirect host, labelled as where it redirects, never as an identity", () => {
-    render(
-      <ConnectedApps
-        apps={[{ ...base, domain: "cb.example.org", domainSource: "redirect_uri" }]}
-        revokeAction={vi.fn()}
-      />,
-    );
-    expect(screen.getByTestId("domain-source")).toHaveTextContent("redirects to");
+  it("R1: a CIMD app shows its identity-document host and its registered redirect hosts as separate lines", () => {
+    render(<ConnectedApps apps={[withAddr("app.example.com", [["app.example.com", false]])]} revokeAction={vi.fn()} />);
+    expect(screen.getByTestId("app-document-host")).toHaveTextContent("App identity document hosted at app.example.com");
+    expect(screen.getByTestId("app-redirect-hosts")).toHaveTextContent("Redirects to app.example.com");
+  });
+
+  it("R1: a DCR app has no document line, only where it redirects", () => {
+    render(<ConnectedApps apps={[withAddr(undefined, [["cb.example.org", false]])]} revokeAction={vi.fn()} />);
+    expect(screen.queryByTestId("app-document-host")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-redirect-hosts")).toHaveTextContent("cb.example.org");
+  });
+
+  it("R1: a loopback redirect reads as an app on this device", () => {
+    render(<ConnectedApps apps={[withAddr(undefined, [["localhost", true]])]} revokeAction={vi.fn()} />);
+    expect(screen.getByTestId("app-redirect-hosts")).toHaveTextContent("an app on this device");
+    expect(screen.getByTestId("app-redirect-hosts")).not.toHaveTextContent("localhost");
+  });
+
+  it("M-10: at most 3 redirect hosts are listed, the rest collapse to +N more", () => {
+    const hosts: [string, boolean][] = ["a", "b", "c", "d", "e"].map((h) => [`${h}.example.com`, false]);
+    render(<ConnectedApps apps={[withAddr(undefined, hosts)]} revokeAction={vi.fn()} />);
+    const el = screen.getByTestId("app-redirect-hosts");
+    expect(el).toHaveTextContent("a.example.com");
+    expect(el).toHaveTextContent("c.example.com");
+    expect(el).not.toHaveTextContent("d.example.com");
+    expect(el).toHaveTextContent("+2 more");
   });
 
   it("marks a static app first-party and a DCR/CIMD app third-party", () => {
@@ -207,13 +228,12 @@ describe("Connected apps domain and party marker (I-7 / ruling 7)", () => {
     expect(screen.getByTestId("party-badge")).toHaveTextContent("Third-party");
   });
 
-  it("getConnectedApps maps the domain, its source and the party flag from the listing", async () => {
+  it("getConnectedApps maps the addresses and the party flag from the listing", async () => {
     serverApiMock.mockResolvedValueOnce([
       {
         clientId: "https://app.example.com/c.json",
         clientName: "Ex",
-        clientDomain: "app.example.com",
-        domainSource: "client_id",
+        addresses: { documentHost: "app.example.com", redirectTargets: [], redirectMismatch: false },
         isFirstParty: false,
         scope: "tickets:read",
         sessionId: "s",
@@ -221,6 +241,6 @@ describe("Connected apps domain and party marker (I-7 / ruling 7)", () => {
       },
     ]);
     const { apps } = await getConnectedApps();
-    expect(apps[0]).toMatchObject({ domain: "app.example.com", domainSource: "client_id", isFirstParty: false });
+    expect(apps[0]).toMatchObject({ addresses: { documentHost: "app.example.com" }, isFirstParty: false });
   });
 });

@@ -5,16 +5,20 @@ import { serverApi } from "@/lib/api";
 
 /**
  * Item of GET /oauth/clients (auth-service OAuthClientSession), one per session.
- * `clientName` is the registered name (static or dynamic client); `clientDomain`
- * is optional and only present once auth-service reports one.
+ * `clientName` is the registered name (static or dynamic client); `addresses`
+ * is optional and only present once auth-service reports it.
  */
-export type DomainSource = "client_id" | "redirect_uri";
+export interface ClientAddresses {
+  /** Host of the CIMD client_id URL (absent for static and DCR clients). */
+  documentHost?: string;
+  redirectTargets: { host: string; loopback: boolean }[];
+  redirectMismatch: boolean;
+}
 
 interface OAuthClientSession {
   clientId: string;
   clientName?: string;
-  clientDomain?: string;
-  domainSource?: DomainSource;
+  addresses?: ClientAddresses;
   isFirstParty?: boolean;
   scope: string;
   sessionId: string;
@@ -24,9 +28,7 @@ interface OAuthClientSession {
 export interface ConnectedApp {
   clientId: string;
   name: string;
-  domain?: string;
-  /** Where the domain comes from: the client_id URL (verified) or the redirect URI. */
-  domainSource?: DomainSource;
+  addresses?: ClientAddresses;
   /** True for apps configured by us; false for self-registered (DCR) and URL (CIMD) apps. */
   isFirstParty: boolean;
   scopes: string[];
@@ -47,8 +49,7 @@ export async function getConnectedApps(): Promise<{ apps: ConnectedApp[]; error?
     const app = byClient.get(s.clientId) ?? {
       clientId: s.clientId,
       name: s.clientName || s.clientId,
-      domain: s.clientDomain,
-      domainSource: s.domainSource,
+      addresses: s.addresses,
       isFirstParty: s.isFirstParty === true,
       scopes: [],
       lastUsedAt: undefined,

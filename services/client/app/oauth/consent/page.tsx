@@ -15,8 +15,11 @@ interface ConsentDetails {
   requestId: string;
   clientId: string;
   clientName: string;
-  clientDomain?: string;
-  domainSource?: "client_id" | "redirect_uri";
+  addresses?: {
+    documentHost?: string;
+    redirectTargets: { host: string; loopback: boolean }[];
+    redirectMismatch: boolean;
+  };
   isFirstParty?: boolean;
   scopes: string[];
   expiresInSeconds: number;
@@ -159,19 +162,48 @@ export default async function ConsentPage({
             <div className="flex flex-col gap-0.5">
               <span className="text-xs text-mute">Application</span>
               <span className="text-sm font-medium text-ink">{consent.clientName}</span>
-              {consent.clientDomain && (
-                <span className="text-xs text-mute" data-testid="consent-domain">
-                  {consent.domainSource === "client_id"
-                    ? "Verified address: "
-                    : "Sends you back to: "}
-                  <span className="font-mono text-ink">{consent.clientDomain}</span>
+              {consent.addresses?.documentHost && (
+                <span className="text-xs text-mute" data-testid="consent-document-host">
+                  App identity document hosted at{" "}
+                  <span className="font-mono text-ink">{consent.addresses.documentHost}</span>
+                </span>
+              )}
+              {consent.addresses && consent.addresses.redirectTargets.length > 0 && (
+                <span className="text-xs text-mute" data-testid="consent-redirect-host">
+                  After you allow, you are sent to{" "}
+                  {consent.addresses.redirectTargets.map((t) => (t.loopback ? "an app on this device" : t.host)).map(
+                    (label, i) => (
+                      <span key={label} className="font-mono text-ink">
+                        {i > 0 && ", "}
+                        {label}
+                      </span>
+                    ),
+                  )}
+                </span>
+              )}
+              {consent.addresses?.redirectMismatch && (
+                <span
+                  className="text-xs text-amber-700 dark:text-amber-400"
+                  role="note"
+                  data-testid="consent-mismatch"
+                >
+                  Caution: this app&apos;s identity document is hosted at{" "}
+                  <span className="font-mono">{consent.addresses.documentHost}</span>, but you will be sent to{" "}
+                  <span className="font-mono">
+                    {consent.addresses.redirectTargets.filter((t) => !t.loopback).map((t) => t.host).join(", ")}
+                  </span>
+                  .
                 </span>
               )}
               <Badge variant="outline" className="w-fit text-xs" data-testid="consent-party">
                 {consent.isFirstParty ? "First-party app" : "Third-party app"}
               </Badge>
             </div>
-            <Badge variant="outline" className="text-xs font-mono text-mute">
+            <Badge
+              variant="outline"
+              className="text-xs font-mono text-mute break-all"
+              data-testid="consent-client-id"
+            >
               {consent.clientId}
             </Badge>
           </div>
