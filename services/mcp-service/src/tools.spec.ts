@@ -1,105 +1,10 @@
-import { Client as ClientV1 } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport as TransportV1 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import {
-  Client as ClientV2,
-  StreamableHTTPClientTransport as TransportV2,
-} from '@modelcontextprotocol/client';
 import { describe, expect, it } from 'vitest';
-import { createApp } from './app.ts';
 import { TOOL_SCOPES } from './scopes.ts';
-import { mintToken, stubJwks, testConfig } from './testkit.ts';
-
-interface UpstreamCall {
-  url: URL;
-  method: string;
-  headers: Headers;
-  body: unknown;
-}
+import { ERAS, connect, harness, mintToken, testConfig } from './testkit.ts';
 
 const TICKET = '11111111-1111-4111-8111-111111111111';
 const ORDER = '22222222-2222-4222-8222-222222222222';
 const ALL_SCOPES = [...new Set(Object.values(TOOL_SCOPES))].join(' ');
-
-/** App wired to a stub exchange endpoint and a stub Kong; nothing leaves the process. */
-function harness(
-  respond: (call: UpstreamCall) => Response = () => Response.json({ id: 'x' }),
-) {
-  const calls: UpstreamCall[] = [];
-  const stubFetch: typeof fetch = (input, init) => {
-    const url = new URL(
-      input instanceof Request ? input.url : input.toString(),
-    );
-    if (url.href === testConfig.TOKEN_EXCHANGE_URL) {
-      return Promise.resolve(
-        Response.json({
-          access_token: 'api-audience-token',
-          token_type: 'Bearer',
-          expires_in: 300,
-        }),
-      );
-    }
-    const call: UpstreamCall = {
-      url,
-      method: init?.method ?? 'GET',
-      headers: new Headers(init?.headers),
-      body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
-    };
-    calls.push(call);
-    return Promise.resolve(respond(call));
-  };
-  const app = createApp({
-    config: testConfig,
-    jwks: stubJwks,
-    fetch: stubFetch,
-  });
-  const responses: Response[] = [];
-  const viaApp: typeof fetch = async (input, init) => {
-    const res = await app(new Request(input, init));
-    responses.push(res.clone());
-    return res;
-  };
-  return { calls, responses, viaApp };
-}
-
-type Era = 'legacy 2025-11-25' | 'modern 2026-07-28';
-const ERAS: Era[] = ['legacy 2025-11-25', 'modern 2026-07-28'];
-
-async function connect(era: Era, token: string, fetchFn: typeof fetch) {
-  const url = new URL(testConfig.MCP_RESOURCE);
-  const requestInit = { headers: { authorization: `Bearer ${token}` } };
-  if (era === 'legacy 2025-11-25') {
-    const client = new ClientV1({ name: 'v1', version: '0' });
-    await client.connect(new TransportV1(url, { fetch: fetchFn, requestInit }));
-    return client as unknown as CommonClient;
-  }
-  const client = new ClientV2(
-    { name: 'v2', version: '0' },
-    { versionNegotiation: { mode: 'auto' } },
-  );
-  await client.connect(new TransportV2(url, { fetch: fetchFn, requestInit }));
-  return client as unknown as CommonClient;
-}
-
-interface ToolResult {
-  isError?: boolean;
-  content: { type: string; text: string }[];
-  structuredContent?: Record<string, unknown>;
-}
-interface CommonClient {
-  listTools(): Promise<{
-    tools: {
-      name: string;
-      annotations?: Record<string, unknown>;
-      inputSchema: { properties?: Record<string, unknown> };
-      outputSchema?: unknown;
-    }[];
-  }>;
-  callTool(req: {
-    name: string;
-    arguments?: Record<string, unknown>;
-  }): Promise<ToolResult>;
-  close(): Promise<void>;
-}
 
 describe.each(ERAS)('MCP tools (%s)', (era) => {
   it('J-1: lists the twelve C-7 tools in a deterministic order, each with an outputSchema', async () => {
