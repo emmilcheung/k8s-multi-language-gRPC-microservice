@@ -198,4 +198,30 @@ describe('token exchange client (C-5)', () => {
       reject({ error: 'Secret text with spaces' }),
     ).rejects.toMatchObject({ status: 400, oauthError: undefined });
   });
+
+  it('R12: an exchange whose body stalls after the headers fails as an ExchangeError, not a raw abort', async () => {
+    const exchange = createTokenExchange({
+      url: URL_,
+      clientId: 'c',
+      clientSecret: 's',
+      resource: 'r',
+      timeoutMs: 30,
+      fetch: (_url, init) =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                init?.signal?.addEventListener('abort', () =>
+                  controller.error(new DOMException('t', 'TimeoutError')),
+                );
+              },
+            }),
+            { status: 200 },
+          ),
+        ),
+    });
+    await expect(
+      exchange('t', undefined, 'orders:read'),
+    ).rejects.toBeInstanceOf(ExchangeError);
+  });
 });

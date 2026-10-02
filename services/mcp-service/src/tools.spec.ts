@@ -580,7 +580,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('R4: search_events returns the next cursor (last id) only when the page was full', async () => {
+  it('R11: search_events offers no paging: no after input, no nextCursor, and it says the newest events only', async () => {
     const t = (id: string) => ({ id, title: 'T', price: '1.00' });
     const ids = [
       'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -592,16 +592,56 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
       await mintToken({ scope: ALL_SCOPES }),
       h.viaApp,
     );
+    const { tools } = await client.listTools();
+    const tool = tools.find((x) => x.name === 'search_events') as {
+      description?: string;
+      inputSchema: { properties?: Record<string, unknown> };
+    };
+    expect(Object.keys(tool.inputSchema.properties ?? {})).toEqual([
+      'available',
+      'limit',
+    ]);
+    expect(tool.description).toContain('newest');
+    expect(tool.description).toContain('100');
     const full = await client.callTool({
       name: 'search_events',
       arguments: { limit: 2 },
     });
-    expect(full.structuredContent?.nextCursor).toBe(ids[1]);
-    const short = await client.callTool({
-      name: 'search_events',
-      arguments: { limit: 3 },
+    expect(full.structuredContent).not.toHaveProperty('nextCursor');
+    await client.close();
+  });
+
+  it('R12: a handler that throws something unexpected becomes a sanitised error, never raw text', async () => {
+    const errors: unknown[][] = [];
+    const h = harness(
+      () =>
+        // `ok` is read outside any try block in the upstream client.
+        Object.defineProperty(new Response('{}'), 'ok', {
+          get() {
+            throw new Error('boom postgres://svc:hunter2@db');
+          },
+        }),
+      {
+        logger: {
+          warn: () => undefined,
+          error: (...a: unknown[]) => errors.push(a),
+        },
+      },
+    );
+    const client = await connect(
+      era,
+      await mintToken({ scope: ALL_SCOPES }),
+      h.viaApp,
+    );
+    const res = await client.callTool({
+      name: 'get_order',
+      arguments: { orderId: ORDER },
     });
-    expect(short.structuredContent).not.toHaveProperty('nextCursor');
+    expect(res.isError).toBe(true);
+    expect(res.structuredContent?.code).toBe('UPSTREAM_ERROR');
+    expect(JSON.stringify(res)).not.toContain('hunter2');
+    expect(JSON.stringify(errors)).not.toContain('hunter2');
+    expect(errors.length).toBeGreaterThan(0);
     await client.close();
   });
 

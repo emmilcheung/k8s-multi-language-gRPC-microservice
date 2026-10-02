@@ -175,11 +175,13 @@ export function createUpstream(opts: UpstreamOptions): Upstream {
         throw new ToolFailure(code);
       }
       const replayed = res.headers.get('idempotent-replayed') === 'true';
-      const text = await res.text();
-      if (!text) return { data: {}, replayed };
+      // The timeout also covers the body: a stall here aborts the read.
       try {
+        const text = await res.text();
+        if (!text) return { data: {}, replayed };
         return { data: JSON.parse(text) as unknown, replayed };
       } catch {
+        opts.logger?.warn({ tool }, 'upstream response body unreadable');
         throw new ToolFailure('UPSTREAM_ERROR');
       }
     },

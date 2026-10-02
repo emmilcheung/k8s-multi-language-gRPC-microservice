@@ -113,7 +113,6 @@ const orderOutput = orderShape;
 const createdOrderOutput = orderShape.extend({ replayed: z.boolean() });
 const ticketListOutput = z.looseObject({
   items: z.array(ticketShape),
-  nextCursor: z.string().optional(),
 });
 const orderListOutput = z.looseObject({ items: z.array(orderShape) });
 const paymentOutput = z.looseObject({ payment: paymentShape });
@@ -163,36 +162,27 @@ const TOOLS = [
   defineTool({
     name: 'search_events',
     description:
-      'List events and tickets page by page. There is no server-side title search: scan the returned titles yourself. Set available=false to include sold-out events. To get the next page pass the nextCursor from the previous result as `after` (it is the id of the last item; it is omitted when the page was not full, i.e. there are no more).',
+      'List the newest events and tickets (up to `limit`, max 100). Set available=false to include sold-out events. There is no server-side title search and no paging beyond this first page: scan the returned titles yourself.',
     input: z.object({
       available: z
         .boolean()
         .default(true)
         .describe('Only events with available tickets'),
-      limit: z.number().int().min(1).max(100).default(20).describe('Page size'),
-      after: z
-        .string()
-        .max(200)
-        .optional()
-        .describe('nextCursor from the previous page'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .default(20)
+        .describe('How many of the newest events to return (max 100)'),
     }),
     output: ticketListOutput,
     annotations: readOnly,
-    async run({ available, limit, after }, env) {
+    async run({ available, limit }, env) {
       const params = new URLSearchParams();
       if (available) params.set('available', 'true');
       params.set('limit', String(limit));
-      if (after) params.set('after', after);
-      const { items } = asItems(
-        await get(env, `/api/tickets?${params.toString()}`),
-      );
-      const last = items.at(-1) as { id?: unknown } | undefined;
-      return {
-        items,
-        ...(items.length >= limit && typeof last?.id === 'string'
-          ? { nextCursor: last.id }
-          : {}),
-      };
+      return asItems(await get(env, `/api/tickets?${params.toString()}`));
     },
   }),
   defineTool({
@@ -456,7 +446,21 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           }
           return succeed(data);
         } catch (err) {
-          if (!(err instanceof ToolFailure)) throw err;
+          if (!(err instanceof ToolFailure)) {
+            // Anything unexpected: fixed text out, only the tool and error
+            // class in the log (messages can carry upstream text or secrets).
+            deps.logger?.error(
+              {
+                tool: name,
+                errorName: err instanceof Error ? err.name : typeof err,
+              },
+              'unexpected tool failure',
+            );
+            return fail(
+              'UPSTREAM_ERROR',
+              new ToolFailure('UPSTREAM_ERROR').message,
+            );
+          }
           if (err.code === 'WAITING_ROOM_ACTIVE' && def.ticketId) {
             const handoffUrl = `${deps.publicWebUrl.replace(/\/$/, '')}/tickets/${(def.ticketId as (a: unknown) => string)(args)}`;
             return fail(err.code, `${err.message} Continue at ${handoffUrl}`, {

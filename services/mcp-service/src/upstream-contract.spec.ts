@@ -56,15 +56,17 @@ const ROWS: Row[] = [
   },
   {
     tool: 'search_events',
+    // `after` is ticket-service's opaque <createdAtUnixMilli>:<id> cursor, which REST never
+    // returns; a stale `after` argument must not reach the wire.
     args: { available: false, limit: 5, after: TICKET },
     scope: 'tickets:read',
     source:
-      'ticket_handler.go ListTickets (after = last id; available omitted = unfiltered)',
+      'ticket_handler.go ListTickets (first page only; available omitted = unfiltered)',
     calls: [
       {
         method: 'GET',
         path: '/api/tickets',
-        query: { limit: '5', after: TICKET },
+        query: { limit: '5' },
       },
     ],
   },
