@@ -18,6 +18,7 @@ import net from 'node:net';
 export type CimdErrorCode =
   | 'invalid_url'
   | 'dns_failed'
+  | 'dns_unavailable'
   | 'blocked_address'
   | 'connect_failed'
   | 'timeout'
@@ -49,7 +50,14 @@ export interface CimdAddress {
   address: string;
   family: number;
 }
-export type CimdResolver = (hostname: string) => Promise<CimdAddress[]>;
+/**
+ * Must honour `signal`: when it aborts (the single deadline) the lookup has to
+ * stop and settle, because the caller holds its in-flight slot until it does.
+ */
+export type CimdResolver = (
+  hostname: string,
+  signal: AbortSignal,
+) => Promise<CimdAddress[]>;
 
 export interface CimdTransportRequest {
   /** The vetted IP to connect to. The hostname must never be resolved again. */
@@ -97,6 +105,7 @@ for (const [net4, prefix] of [
   ['192.0.0.0', 24],
   ['192.0.2.0', 24],
   ['192.168.0.0', 16],
+  ['192.88.99.0', 24],
   ['198.18.0.0', 15],
   ['198.51.100.0', 24],
   ['203.0.113.0', 24],
@@ -120,6 +129,11 @@ for (const [net6, prefix] of [
   ['::ffff:0:0:0', 96],
   ['2001::', 32],
   ['2002::', 16],
+  // Deprecated site-local, discard-only, and other special-purpose ranges.
+  ['fec0::', 10],
+  ['100::', 64],
+  ['2001:2::', 48],
+  ['2001:10::', 28],
 ] as const) {
   blockList.addSubnet(net6, prefix, 'ipv6');
 }
@@ -151,6 +165,17 @@ export function isBlockedAddress(address: string): boolean {
 
 // ---------------------------------------------------------------------------
 // URL shape
+
+/** Names that can only mean something inside a private network. */
+const INTERNAL_SUFFIXES = [
+  '.internal',
+  '.local',
+  '.localhost',
+  '.svc',
+  '.cluster.local',
+  '.lan',
+  '.home.arpa',
+];
 
 const DOT_SEGMENTS = new Set(['.', '..', '%2e', '%2e%2e', '.%2e', '%2e.']);
 
@@ -195,6 +220,11 @@ export function parseClientIdUrl(raw: string): URL {
   if (!url.hostname.includes('.') || url.hostname.endsWith('.')) {
     throw bad('host must be a DNS name');
   }
+  if (INTERNAL_SUFFIXES.some((x) => url.hostname.endsWith(x))) {
+    // Refused before DNS so an attacker cannot probe internal Service names
+    // through the cluster resolver.
+    throw bad('internal-looking host name');
+  }
   if (rawPath === '/') throw bad('path must not be root');
   if (rawPath.split('/').some((s) => DOT_SEGMENTS.has(s.toLowerCase()))) {
     throw bad('dot segments not allowed');
@@ -206,8 +236,69 @@ export function parseClientIdUrl(raw: string): URL {
 // ---------------------------------------------------------------------------
 // Default seams
 
-const defaultResolve: CimdResolver = async (hostname) =>
-  dns.lookup(hostname, { all: true, verbatim: true });
+/** The slice of dns.promises.Resolver used here; tests inject a fake. */
+export interface CimdDnsResolver {
+  resolve4(hostname: string): Promise<string[]>;
+  resolve6(hostname: string): Promise<string[]>;
+  cancel(): void;
+}
+
+const DNS_TIMEOUT_MS = 1000;
+const DNS_TRIES = 2;
+const TERMINAL_DNS_CODES = new Set(['ENODATA', 'ENOTFOUND']);
+
+/**
+ * Resolves with c-ares (dns.promises.Resolver) instead of dns.lookup: getaddrinfo
+ * runs on the libuv threadpool that argon2 sign-in shares, so slow-DNS client_id
+ * URLs from unauthenticated callers could stall logins. c-ares is off the pool
+ * and cancellable. A and AAAA are queried in parallel (so /etc/hosts and
+ * resolv.conf search domains are not consulted, which is wanted); IPv4 comes
+ * first, and every address of both families is vetted by the caller.
+ */
+export function createDnsResolver(
+  opts: {
+    create?: (o: { timeout: number; tries: number }) => CimdDnsResolver;
+  } = {},
+): CimdResolver {
+  const create =
+    opts.create ?? ((o) => new dns.Resolver(o) as unknown as CimdDnsResolver);
+  return async (hostname, signal) => {
+    const resolver = create({ timeout: DNS_TIMEOUT_MS, tries: DNS_TRIES });
+    const cancel = () => resolver.cancel();
+    if (signal.aborted) cancel();
+    else signal.addEventListener('abort', cancel, { once: true });
+    try {
+      const [v4, v6] = await Promise.allSettled([
+        resolver.resolve4(hostname),
+        resolver.resolve6(hostname),
+      ]);
+      const out: CimdAddress[] = [];
+      if (v4.status === 'fulfilled') {
+        out.push(...v4.value.map((address) => ({ address, family: 4 })));
+      }
+      if (v6.status === 'fulfilled') {
+        out.push(...v6.value.map((address) => ({ address, family: 6 })));
+      }
+      if (out.length > 0) return out;
+      const codes = [v4, v6].map((r) =>
+        r.status === 'rejected'
+          ? String((r.reason as { code?: string }).code ?? '')
+          : 'ENODATA',
+      );
+      throw new CimdFetchError(
+        codes.every((c) => TERMINAL_DNS_CODES.has(c))
+          ? 'dns_failed'
+          : 'dns_unavailable',
+        codes.join(','),
+      );
+    } finally {
+      signal.removeEventListener('abort', cancel);
+      cancel();
+    }
+  };
+}
+
+const defaultResolve: CimdResolver = createDnsResolver();
 
 /**
  * Real transport: connects to the vetted IP itself, with `servername` and
@@ -290,11 +381,21 @@ export async function fetchClientMetadataDocument(
     timer = setTimeout(() => reject(new CimdFetchError('timeout')), timeoutMs);
   });
 
+  // Started here (not inside `work`) so the finally below can wait for it.
+  const lookup = Promise.resolve().then(() =>
+    resolve(url.hostname, ctrl.signal),
+  );
+  const lookupSettled = lookup.then(
+    () => undefined,
+    () => undefined,
+  );
+
   const work = (async (): Promise<CimdFetchResult> => {
     let answers: CimdAddress[];
     try {
-      answers = await resolve(url.hostname);
-    } catch {
+      answers = await lookup;
+    } catch (e) {
+      if (e instanceof CimdFetchError) throw e;
       throw new CimdFetchError('dns_failed');
     }
     if (ctrl.signal.aborted) throw new CimdFetchError('timeout');
@@ -305,7 +406,8 @@ export async function fetchClientMetadataDocument(
     if (answers.some((a) => isBlockedAddress(a.address))) {
       throw new CimdFetchError('blocked_address');
     }
-    const target = answers[0];
+    // IPv4 first; connect to the first vetted address only (no fallback loop).
+    const target = [...answers].sort((x, y) => x.family - y.family)[0];
 
     let res: CimdTransportResponse;
     try {
@@ -365,5 +467,8 @@ export async function fetchClientMetadataDocument(
     clearTimeout(timer);
     ctrl.abort();
     response?.close();
+    // Hold the caller's in-flight slot until the lookup has really settled
+    // (abort cancels the c-ares query, so this is prompt).
+    await lookupSettled;
   }
 }

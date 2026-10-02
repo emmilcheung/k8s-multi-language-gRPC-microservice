@@ -2,11 +2,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   CimdFetchError,
+  createDnsResolver,
   fetchClientMetadataDocument,
   isBlockedAddress,
   parseClientIdUrl,
 } from './cimd-fetcher';
 import type {
+  CimdDnsResolver,
   CimdResolver,
   CimdTransport,
   CimdTransportResponse,
@@ -435,5 +437,200 @@ describe('I-11: response validation closes the socket', () => {
         }),
       ),
     ).toBe('connect_failed');
+  });
+});
+
+describe('R2: DNS runs on c-ares (dns.promises.Resolver), not the libuv threadpool', () => {
+  function fakeDns(opts: {
+    v4?: string[] | Error;
+    v6?: string[] | Error;
+    hang?: boolean;
+  }) {
+    let rejectAll: (e: Error) => void = () => undefined;
+    const hung = new Promise<string[]>((_, rej) => {
+      rejectAll = rej;
+    });
+    hung.catch(() => undefined);
+    const cancel = vi.fn(() => rejectAll(codeErr('ECANCELLED')));
+    const answer = (v: string[] | Error | undefined) =>
+      opts.hang
+        ? hung
+        : v instanceof Error
+          ? Promise.reject(v)
+          : Promise.resolve(v ?? []);
+    const dns: CimdDnsResolver = {
+      resolve4: vi.fn(async () => answer(opts.v4)),
+      resolve6: vi.fn(async () => answer(opts.v6)),
+      cancel,
+    };
+    return { dns, cancel };
+  }
+  const codeErr = (code: string) =>
+    Object.assign(new Error(code), { code }) as Error;
+  const ctl = () => new AbortController().signal;
+
+  it('R2: queries A and AAAA and returns IPv4 first', async () => {
+    const { dns } = fakeDns({ v4: ['93.184.216.34'], v6: ['2606:4700::1111'] });
+    const out = await createDnsResolver({ create: () => dns })(
+      'a.example',
+      ctl(),
+    );
+    expect(out).toEqual([
+      { address: '93.184.216.34', family: 4 },
+      { address: '2606:4700::1111', family: 6 },
+    ]);
+  });
+
+  it('R2: ENODATA on one family is tolerated when the other answers', async () => {
+    const { dns } = fakeDns({
+      v4: codeErr('ENODATA'),
+      v6: ['2606:4700::1111'],
+    });
+    const out = await createDnsResolver({ create: () => dns })(
+      'a.example',
+      ctl(),
+    );
+    expect(out).toEqual([{ address: '2606:4700::1111', family: 6 }]);
+  });
+
+  it('R2: ENOTFOUND/ENODATA on both is a terminal dns_failed', async () => {
+    const { dns } = fakeDns({
+      v4: codeErr('ENOTFOUND'),
+      v6: codeErr('ENODATA'),
+    });
+    const e = await createDnsResolver({ create: () => dns })(
+      'a.example',
+      ctl(),
+    ).catch((x: unknown) => x);
+    expect(e).toMatchObject({ code: 'dns_failed' });
+  });
+
+  it('R2: a timeout or server failure is dns_unavailable (transient), never dns_failed', async () => {
+    for (const c of ['ETIMEOUT', 'ESERVFAIL', 'ECONNREFUSED']) {
+      const { dns } = fakeDns({ v4: codeErr(c), v6: codeErr('ENODATA') });
+      const e = await createDnsResolver({ create: () => dns })(
+        'a.example',
+        ctl(),
+      ).catch((x: unknown) => x);
+      expect(e, c).toMatchObject({ code: 'dns_unavailable' });
+    }
+  });
+
+  it('R2: a blocked address in EITHER family rejects the whole answer, with no connection', async () => {
+    const { dns } = fakeDns({ v4: ['93.184.216.34'], v6: ['fd00::1'] });
+    const { transport } = fakeTransport();
+    const code = await reason(
+      fetchClientMetadataDocument(URL_OK, {
+        resolve: createDnsResolver({ create: () => dns }),
+        transport,
+      }),
+    );
+    expect(code).toBe('blocked_address');
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('R2: the connection goes to the first IPv4 address even when the resolver listed IPv6 first', async () => {
+    const { transport } = fakeTransport();
+    await fetchClientMetadataDocument(URL_OK, {
+      resolve: async () => [
+        { address: '2606:4700::1111', family: 6 },
+        { address: PUBLIC_IP, family: 4 },
+      ],
+      transport,
+    });
+    expect(transport.mock.calls[0][0]).toMatchObject({
+      address: PUBLIC_IP,
+      family: 4,
+    });
+  });
+
+  it('R2: the deadline cancels the c-ares query and the fetch only returns once the lookup has settled', async () => {
+    const { dns, cancel } = fakeDns({ hang: true });
+    const { transport } = fakeTransport();
+    const started = Date.now();
+    const code = await reason(
+      fetchClientMetadataDocument(URL_OK, {
+        resolve: createDnsResolver({ create: () => dns }),
+        transport,
+        timeoutMs: 50,
+      }),
+    );
+    expect(code).toBe('timeout');
+    expect(cancel).toHaveBeenCalled();
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('R2: the resolver is cancelled in finally on success too, so nothing lingers', async () => {
+    const { dns, cancel } = fakeDns({ v4: ['93.184.216.34'] });
+    await createDnsResolver({ create: () => dns })('a.example', ctl());
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('R2: c-ares timeout and tries are set so one lookup cannot outlive the deadline', () => {
+    let seen: { timeout?: number; tries?: number } | undefined;
+    const { dns } = fakeDns({ v4: ['93.184.216.34'] });
+    void createDnsResolver({
+      create: (o) => {
+        seen = o;
+        return dns;
+      },
+    })('a.example', ctl());
+    expect(seen!.timeout! * seen!.tries!).toBeLessThanOrEqual(3000);
+  });
+});
+
+describe('M-5: wider block list and early reject of internal-looking names', () => {
+  it.each(['fec0::1', '100::1', '192.88.99.1', '2001:2::1', '2001:10::1'])(
+    'M-5: %s is blocked',
+    (ip) => expect(isBlockedAddress(ip)).toBe(true),
+  );
+
+  it.each([
+    'https://foo.internal/a.json',
+    'https://foo.local/a.json',
+    'https://foo.localhost/a.json',
+    'https://my.svc/a.json',
+    'https://x.svc.cluster.local/a.json',
+    'https://nas.lan/a.json',
+    'https://x.home.arpa/a.json',
+  ])('M-5: %s is rejected before any DNS', async (u) => {
+    const resolve = vi.fn(publicResolver);
+    const code = await reason(
+      fetchClientMetadataDocument(u, {
+        resolve,
+        transport: fakeTransport().transport,
+      }),
+    );
+    expect(code).toBe('invalid_url');
+    expect(resolve).not.toHaveBeenCalled();
+  });
+});
+
+describe('M-1 (fetcher level): the one deadline also cuts a slow drip', () => {
+  it('M-1: a body that drips a chunk every 30 ms is cut by the single deadline, not reset per chunk', async () => {
+    const close = vi.fn();
+    const transport: CimdTransport = async () => ({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: (async function* () {
+        for (let i = 0; i < 100; i++) {
+          await new Promise((r) => setTimeout(r, 30));
+          yield Buffer.from(' ');
+        }
+      })(),
+      close,
+    });
+    const started = Date.now();
+    const code = await reason(
+      fetchClientMetadataDocument(URL_OK, {
+        resolve: publicResolver,
+        transport,
+        timeoutMs: 120,
+      }),
+    );
+    expect(code).toBe('timeout');
+    expect(Date.now() - started).toBeLessThan(600);
+    expect(close).toHaveBeenCalled();
   });
 });
