@@ -6,9 +6,9 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
+import { createHash, timingSafeEqual } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
-import * as argon2 from 'argon2';
 import type { Request } from 'express';
 import { AuthService } from '../auth/auth.service';
 import { RefreshTokenService } from '../auth/refresh-token.service';
@@ -277,6 +277,13 @@ export class OAuthService implements OnModuleInit {
    * id and can only narrow scope. Client authentication happens first so an
    * unauthenticated caller learns nothing about the subject token.
    */
+  /**
+   * Known limit (accepted): revoking a connected app does not block exchange of
+   * an MCP access token already issued; it stays exchangeable until it expires
+   * (<= 15 min, as for any access token). Exchanged tokens live <= 5 min and
+   * never past the subject's exp. Only the jti blacklist and user deletion
+   * block exchange.
+   */
   private async tokenExchange(
     body: TokenBody,
     basic: ClientCredentials | undefined,
@@ -318,7 +325,6 @@ export class OAuthService implements OnModuleInit {
     try {
       subject = await this.authService.verifyOAuthSubjectToken(
         body.subject_token,
-        resolveOAuthTokenIssuer(cfg),
       );
     } catch {
       throw invalidSubject();
@@ -347,7 +353,10 @@ export class OAuthService implements OnModuleInit {
       }
     }
     const scope = granted.join(' ');
-    const expiresIn = Math.min(EXCHANGED_TOKEN_MAX_SECONDS, subject.exp - now);
+    // Absolute, computed once: the exchanged token never outlives the subject.
+    const iat = Math.floor(Date.now() / 1000);
+    const exp = Math.min(iat + EXCHANGED_TOKEN_MAX_SECONDS, subject.exp);
+    const expiresIn = exp - iat;
 
     const accessToken = this.authService.issueAccessTokenForOAuth(
       subject.sub,
@@ -357,7 +366,8 @@ export class OAuthService implements OnModuleInit {
         aud: cfg.apiAudience,
         iss: resolveOAuthTokenIssuer(cfg),
         act: { sub: MCP_SERVICE_CLIENT_ID },
-        expiresInSeconds: expiresIn,
+        iat,
+        exp,
       },
     );
 
@@ -385,7 +395,9 @@ export class OAuthService implements OnModuleInit {
   /**
    * Only the confidential mcp-service client may exchange, and only with its
    * client_secret_basic secret. Basic-auth failures are 401 (RFC 6749 §5.2);
-   * argon2.verify compares in constant time. With no configured hash nobody can
+   * the secret is machine-generated and high-entropy, so SHA-256 plus a
+   * constant-time compare suffices (a slow hash on this public endpoint would
+   * only be a CPU lever for attackers). With no configured hash nobody can
    * authenticate, which is how the grant is disabled.
    */
   private async authenticateExchangeClient(
@@ -428,11 +440,10 @@ export class OAuthService implements OnModuleInit {
     const hash = readTokenExchangeSecretHash(this.config);
     let authenticated = false;
     if (hash && basic) {
-      try {
-        authenticated = await argon2.verify(hash, basic.clientSecret);
-      } catch {
-        authenticated = false;
-      }
+      const presented = createHash('sha256')
+        .update(basic.clientSecret)
+        .digest();
+      authenticated = timingSafeEqual(presented, Buffer.from(hash, 'hex'));
     }
     if (!authenticated) throw failed();
   }

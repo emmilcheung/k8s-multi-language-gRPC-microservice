@@ -281,14 +281,20 @@ export class AuthService {
       aud,
       iss,
       act,
-      expiresInSeconds,
+      iat,
+      exp,
     }: {
       aud: string;
       iss: string;
       /** RFC 8693 actor claim, set only on exchanged tokens (C-1). */
       act?: { sub: string };
-      /** Overrides JWT_EXPIRY; exchanged tokens are shorter-lived (C-5). */
-      expiresInSeconds?: number;
+      /**
+       * Absolute iat/exp (epoch seconds) for exchanged tokens (C-5). Set
+       * together; replaces JWT_EXPIRY so the lifetime is computed once by the
+       * caller and cannot drift past the subject token's exp.
+       */
+      iat?: number;
+      exp?: number;
     },
   ): string {
     const tokenPayload = {
@@ -297,14 +303,17 @@ export class AuthService {
       scope,
       client_id: clientId,
       ...(act ? { act } : {}),
+      ...(iat !== undefined ? { iat } : {}),
     };
     const token: unknown = (
       this.jwtService.sign as (p: unknown, o: unknown) => unknown
     )(tokenPayload, {
       audience: aud,
       issuer: iss,
-      ...(expiresInSeconds !== undefined
-        ? { expiresIn: expiresInSeconds }
+      // jsonwebtoken derives exp = payload.iat + expiresIn, so with an explicit
+      // iat this yields exactly the absolute exp (no clock read at sign time).
+      ...(iat !== undefined && exp !== undefined
+        ? { expiresIn: exp - iat }
         : {}),
     });
     return token as string;
@@ -312,24 +321,18 @@ export class AuthService {
 
   /**
    * Verify an OAuth access token presented as an RFC 8693 subject (C-5):
-   * signature, exp, an `iss` equal to exactly what this server issues under the
-   * current OAUTH_ISSUER_ENABLED state, and the revocation blacklist. Unlike
+   * signature, exp, an `iss` that is either issuer this server can mint OAuth
+   * tokens under (the module's dual-issuer list, independent of
+   * OAUTH_ISSUER_ENABLED so tokens minted just before a flag flip still
+   * exchange), and the revocation blacklist. Unlike
    * verifyAccessToken it keeps `iss`/`aud`, which the caller must check.
    * Throws UnauthorizedException for any failure.
    */
-  async verifyOAuthSubjectToken(
-    token: string,
-    issuer: string,
-  ): Promise<OAuthSubjectClaims> {
+  async verifyOAuthSubjectToken(token: string): Promise<OAuthSubjectClaims> {
     let claims: OAuthSubjectClaims;
     try {
       claims = oauthSubjectSchema.parse(
-        await (
-          this.jwtService.verifyAsync as (
-            value: string,
-            options: unknown,
-          ) => Promise<unknown>
-        )(token, { issuer }),
+        await this.jwtService.verifyAsync<object>(token),
       );
     } catch {
       throw new UnauthorizedException({

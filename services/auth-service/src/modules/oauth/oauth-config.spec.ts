@@ -187,19 +187,23 @@ describe('MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH (C-5)', () => {
     },
   );
 
-  it('accepts an argon2id hash', () => {
-    const r = envSchema.safeParse({
-      ...appBase,
-      [KEY]: '$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA',
-    });
+  it('accepts a lowercase hex SHA-256 digest (64 chars)', () => {
+    const r = envSchema.safeParse({ ...appBase, [KEY]: 'a1'.repeat(32) });
     expect(r.success).toBe(true);
   });
 
-  it('fails startup on a value that is not an argon2id hash, without echoing it (a pasted plaintext secret must not reach logs)', () => {
-    const pasted = 'plaintext-secret-pasted-by-mistake';
-    const r = envSchema.safeParse({ ...appBase, [KEY]: pasted });
-    expect(r.success).toBe(false);
-    expect(JSON.stringify(r.error?.issues)).toContain(KEY);
-    expect(JSON.stringify(r.error?.issues)).not.toContain(pasted);
-  });
+  it.each([
+    ['plaintext', 'plaintext-secret-pasted-by-mistake'],
+    ['an old argon2 hash', '$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA'],
+    ['too short', 'a1'.repeat(31)],
+    ['uppercase hex', 'A1'.repeat(32)],
+  ])(
+    'fails startup on %s, without echoing it (a pasted secret must not reach logs)',
+    (_n, bad) => {
+      const r = envSchema.safeParse({ ...appBase, [KEY]: bad });
+      expect(r.success).toBe(false);
+      expect(JSON.stringify(r.error?.issues)).toContain(KEY);
+      expect(JSON.stringify(r.error?.issues)).not.toContain(bad);
+    },
+  );
 });

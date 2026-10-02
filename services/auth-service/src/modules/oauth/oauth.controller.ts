@@ -29,6 +29,7 @@ import type {
   ConsentDetails,
   ConsentResult,
 } from './oauth.dto';
+import { TOKEN_EXCHANGE_GRANT } from './oauth-clients.config';
 import { UserIdSignatureValidator } from '../../common/security/user-id-signature.validator';
 import {
   OAuthExceptionFilter,
@@ -40,6 +41,9 @@ import {
  * a Basic header that cannot be decoded is a failed authentication (401), not
  * something to ignore, so a broken client does not silently fall back.
  */
+/** RFC 6749 §2.3.1: form-urlencoded, so `+` is a space. */
+const formDecode = (v: string) => decodeURIComponent(v.replace(/\+/g, ' '));
+
 function parseBasicCredentials(
   header: string | undefined,
 ): ClientCredentials | undefined {
@@ -56,8 +60,8 @@ function parseBasicCredentials(
   if (sep < 1) throw invalid();
   try {
     return {
-      clientId: decodeURIComponent(decoded.slice(0, sep)),
-      clientSecret: decodeURIComponent(decoded.slice(sep + 1)),
+      clientId: formDecode(decoded.slice(0, sep)),
+      clientSecret: formDecode(decoded.slice(sep + 1)),
     };
   } catch {
     throw invalid();
@@ -87,11 +91,13 @@ export class OAuthController {
   @HttpCode(HttpStatus.OK)
   @UseFilters(OAuthExceptionFilter)
   async token(@Body() body: TokenBody, @Req() req: Request) {
-    return this.oauthService.token(
-      body,
-      req,
-      parseBasicCredentials(req.headers.authorization),
-    );
+    // Basic credentials only matter for the confidential token-exchange grant;
+    // public-client grants ignore the header exactly as before.
+    const basic =
+      body.grant_type === TOKEN_EXCHANGE_GRANT
+        ? parseBasicCredentials(req.headers.authorization)
+        : undefined;
+    return this.oauthService.token(body, req, basic);
   }
 
   // POST /oauth/revoke

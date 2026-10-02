@@ -28,7 +28,7 @@ export const oauthEnvFields = {
    */
   OAUTH_ISSUER_ENABLED: boolString,
   /**
-   * argon2id hash of the mcp-service client secret (C-5). Unset or empty
+   * lowercase hex SHA-256 of the mcp-service client secret (C-5). Unset or empty
    * disables the token-exchange grant (the client cannot authenticate); a set
    * but malformed value fails startup. See refineOAuthConfig.
    */
@@ -99,11 +99,11 @@ export function refineOAuthConfig(
     ctx.addIssue({ code: 'custom', path: [key], message });
 
   const secretHash = config.MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH;
-  if (secretHash && !secretHash.startsWith('$argon2id$')) {
+  if (secretHash && !/^[0-9a-f]{64}$/.test(secretHash)) {
     // A typo'd or plaintext value must never be silently treated as a hash.
     fail(
       'MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH',
-      'MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH must be an argon2id hash ($argon2id$...), never the plaintext secret',
+      'MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH must be the lowercase hex SHA-256 (64 chars) of the secret, never the plaintext secret',
     );
   }
 

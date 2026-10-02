@@ -1,11 +1,10 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { HttpException, ValidationPipe } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { Logger } from 'nestjs-pino';
-import * as argon2 from 'argon2';
-import { generateKeyPairSync, randomBytes } from 'crypto';
+import { createHash, generateKeyPairSync, randomBytes } from 'crypto';
 import type { Request } from 'express';
 import supertest from 'supertest';
 import { AuthService } from '../auth/auth.service';
@@ -29,14 +28,13 @@ const { privateKey: RSA_PEM } = generateKeyPairSync('rsa', {
   publicKeyEncoding: { type: 'spki', format: 'pem' },
 });
 const SECRET = randomBytes(24).toString('hex');
-let SECRET_HASH: string;
-beforeAll(async () => {
-  SECRET_HASH = await argon2.hash(SECRET, { type: argon2.argon2id });
-});
+const sha256Hex = (v: string) => createHash('sha256').update(v).digest('hex');
+const SECRET_HASH = sha256Hex(SECRET);
 
 interface Opts {
   flag?: boolean;
   hash?: string | null; // null = env unset
+  blacklisted?: boolean; // every jti is on the revocation blacklist
 }
 
 function build(opts: Opts = {}) {
@@ -65,9 +63,15 @@ function build(opts: Opts = {}) {
     config as never,
     {} as never,
     {} as never,
-    { get: vi.fn().mockResolvedValue(null) } as never,
+    {
+      get: vi.fn().mockResolvedValue(opts.blacklisted ? '1' : null),
+    } as never,
   );
-  const refreshTokenService = { issue: vi.fn(), rotate: vi.fn() };
+  const refreshTokenService = {
+    issue: vi.fn(),
+    rotate: vi.fn().mockRejectedValue(new Error('invalid')),
+    extractSessionId: vi.fn().mockReturnValue(null),
+  };
   const usersRepo = {
     findById: vi.fn().mockResolvedValue({ id: 'user-1', email: 'u@x.test' }),
   };
@@ -224,25 +228,45 @@ describe('H-2: the subject must be an MCP-audience token this server issued', ()
     expect(err.body).toMatchObject({ error: 'invalid_grant' });
   });
 
-  it('H-2: with OAUTH_ISSUER_ENABLED off the subject iss must be auth-service, not OAUTH_ISSUER', async () => {
-    const t = build({ flag: false });
-    await expect(
-      t.service.token(body(t.mcpToken({ iss: 'auth-service' })), req, BASIC_OK),
-    ).resolves.toMatchObject({ token_type: 'Bearer' });
-    const err = await errOf(
-      t.service.token(body(t.mcpToken({ iss: ISSUER })), req, BASIC_OK),
-    );
-    expect(err.body).toMatchObject({ error: 'invalid_grant' });
-  });
+  it.each([
+    [false, 'auth-service'],
+    [false, ISSUER],
+    [true, 'auth-service'],
+    [true, ISSUER],
+  ])(
+    'H-2 (R2): flag=%s, subject iss=%s -> exchanged (a token minted just before a flag flip must still work)',
+    async (flag, subjectIss) => {
+      const t = build({ flag });
+      const res = await t.service.token(
+        body(t.mcpToken({ iss: subjectIss })),
+        req,
+        BASIC_OK,
+      );
+      // The exchanged iss still follows the flag, whatever the subject carried.
+      expect(decode(t.jwt, res.access_token).iss).toBe(
+        flag ? ISSUER : 'auth-service',
+      );
+    },
+  );
 
-  it('H-2: with OAUTH_ISSUER_ENABLED on the subject iss must be OAUTH_ISSUER, not auth-service', async () => {
-    const t = build({ flag: true });
-    await expect(
-      t.service.token(body(t.mcpToken({ iss: ISSUER })), req, BASIC_OK),
-    ).resolves.toMatchObject({ token_type: 'Bearer' });
-    const err = await errOf(
-      t.service.token(body(t.mcpToken({ iss: 'auth-service' })), req, BASIC_OK),
-    );
+  it.each([false, true])(
+    'H-2 (R2): flag=%s: a third issuer is invalid_grant',
+    async (flag) => {
+      const t = build({ flag });
+      const err = await errOf(
+        t.service.token(
+          body(t.mcpToken({ iss: 'https://evil.example.com' })),
+          req,
+          BASIC_OK,
+        ),
+      );
+      expect(err.body).toMatchObject({ error: 'invalid_grant' });
+    },
+  );
+
+  it('H-2 (R3a): a subject whose jti was revoked (signout/blacklist) is invalid_grant', async () => {
+    const t = build({ blacklisted: true });
+    const err = await errOf(t.service.token(body(t.mcpToken()), req, BASIC_OK));
     expect(err.body).toMatchObject({ error: 'invalid_grant' });
   });
 
@@ -395,6 +419,39 @@ describe('H-5: the exchanged token equals the C-1 exchanged column', () => {
     expect(res.expires_in).toBe(300);
   });
 
+  describe('H-5 (R5): exp is absolute, min(now+300, subject.exp), computed once', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('a subject with 1 s left yields exp === subject exp and a matching expires_in', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-02T00:00:00.000Z'));
+      const t = build();
+      const subject = t.jwt.sign(
+        {
+          sub: 'user-1',
+          jti: 'j',
+          scope: 'tickets:read',
+          client_id: 'dyn-uuid',
+        },
+        { audience: MCP, issuer: 'auth-service', expiresIn: 1 },
+      );
+      const subjectExp = decode(t.jwt, subject).exp as number;
+      const res = await t.service.token(body(subject), req, BASIC_OK);
+      const claims = decode(t.jwt, res.access_token);
+      expect(claims.exp).toBe(subjectExp);
+      expect(res.expires_in).toBe(1);
+    });
+
+    it('a long-lived subject yields exp === iat + 300', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-02T00:00:00.000Z'));
+      const t = build();
+      const res = await t.service.token(body(t.mcpToken()), req, BASIC_OK);
+      const claims = decode(t.jwt, res.access_token);
+      expect(claims.exp).toBe((claims.iat as number) + 300);
+    });
+  });
+
   it('H-5: a subject whose user no longer exists is invalid_grant', async () => {
     const t = build();
     t.usersRepo.findById.mockResolvedValue(null);
@@ -542,6 +599,98 @@ describe('H-6: over HTTP a failed client_secret_basic is 401 + WWW-Authenticate'
     expect(res.body).toMatchObject({ error: 'invalid_request' });
     await nest.close();
   });
+});
+
+describe('Basic parsing and per-grant scope (R3b, R4, R6)', () => {
+  async function appFor(opts: Opts = {}) {
+    const t = build(opts);
+    const mod = await Test.createTestingModule({
+      controllers: [OAuthController],
+      providers: [
+        { provide: OAuthService, useValue: t.service },
+        { provide: UserIdSignatureValidator, useValue: {} },
+        { provide: Logger, useValue: { error: vi.fn() } },
+      ],
+    }).compile();
+    const nest: INestApplication = mod.createNestApplication();
+    nest.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
+    );
+    await nest.init();
+    return { nest, t };
+  }
+  const rawBasic = (userpass: string) =>
+    `Basic ${Buffer.from(userpass).toString('base64')}`;
+  const exchangeForm = (t: ReturnType<typeof build>) => ({
+    grant_type: GRANT,
+    subject_token: t.mcpToken(),
+    subject_token_type: ACCESS_TOKEN_TYPE,
+    resource: API,
+  });
+
+  it('R6: `+` in Basic credentials decodes to a space (RFC 6749 2.3.1 form-urlencoding)', async () => {
+    const { nest, t } = await appFor({ hash: sha256Hex('sec ret') });
+    const res = await supertest(nest.getHttpServer())
+      .post('/oauth/token')
+      .set('Authorization', rawBasic(`${MCP_CLIENT}:sec+ret`))
+      .type('form')
+      .send(exchangeForm(t));
+    expect(res.status).toBe(200);
+    await nest.close();
+  });
+
+  it('R6: a malformed percent-escape in Basic credentials is 401 invalid_client with the challenge', async () => {
+    const { nest, t } = await appFor();
+    const res = await supertest(nest.getHttpServer())
+      .post('/oauth/token')
+      .set('Authorization', rawBasic(`${MCP_CLIENT}:%zz`))
+      .type('form')
+      .send(exchangeForm(t));
+    expect(res.status).toBe(401);
+    expect(res.headers['www-authenticate']).toBe('Basic realm="oauth"');
+    await nest.close();
+  });
+
+  it('R4: a malformed Basic header on a refresh request is ignored exactly as before (400 invalid_grant, no challenge)', async () => {
+    const { nest } = await appFor();
+    const res = await supertest(nest.getHttpServer())
+      .post('/oauth/token')
+      .set('Authorization', 'Basic !!!not-base64!!!')
+      .type('form')
+      .send({
+        grant_type: 'refresh_token',
+        refresh_token: 'a.b',
+        client_id: 'dyn-uuid',
+      });
+    expect(res.status).toBe(400);
+    expect(res.headers['www-authenticate']).toBeUndefined();
+    expect(res.body).toMatchObject({ error: 'invalid_grant' });
+    await nest.close();
+  });
+
+  it.each([
+    [
+      'authorization_code',
+      { code: 'c', code_verifier: 'v', redirect_uri: 'http://127.0.0.1:1/cb' },
+    ],
+    ['refresh_token', { refresh_token: 'a.b' }],
+  ])(
+    'R3b: %s without client_id is 400 invalid_request',
+    async (grant, extra) => {
+      const { nest } = await appFor();
+      const res = await supertest(nest.getHttpServer())
+        .post('/oauth/token')
+        .type('form')
+        .send({ grant_type: grant, ...extra });
+      expect(res.status).toBe(400);
+      expect(res.body).toMatchObject({ error: 'invalid_request' });
+      await nest.close();
+    },
+  );
 });
 
 describe('H-7: logs never carry token material', () => {
