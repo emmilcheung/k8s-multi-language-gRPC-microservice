@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
+import { JwtModule, type JwtModuleOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { createPublicKey } from 'crypto';
 import type { StringValue } from 'ms';
@@ -10,7 +10,35 @@ import { RefreshTokenService } from './refresh-token.service';
 import { SigninAbuseProtectionService } from './signin-abuse-protection.service';
 import { RedisModule } from '../redis/redis.module';
 import { SecurityModule } from '../../common/security/security.module';
+import { readOAuthConfig } from '../oauth/oauth-config';
 import { parseRsaPrivateKey } from './rsa-key.util';
+
+/** JwtModule options: signs browser + OAuth tokens, verifies both issuers. Exported for tests. */
+export function buildJwtOptions(config: ConfigService): JwtModuleOptions {
+  const privateKey = parseRsaPrivateKey(
+    config.getOrThrow<string>('RSA_PRIVATE_KEY'),
+  );
+  // Derive the public key from the private key so JwtService can both
+  // sign (privateKey) and verify (publicKey) tokens in the same module.
+  // This is needed for the defense-in-depth verification in currentUser (S-03).
+  const publicKey = createPublicKey(privateKey)
+    .export({ type: 'spki', format: 'pem' })
+    .toString();
+  return {
+    privateKey,
+    publicKey,
+    signOptions: {
+      algorithm: 'RS256' as const,
+      expiresIn: config.get<string>('JWT_EXPIRY', '15m') as StringValue,
+      issuer: 'auth-service',
+    },
+    verifyOptions: {
+      algorithms: ['RS256'],
+      // OAuth tokens carry OAUTH_ISSUER once WS-K flips OAUTH_ISSUER_ENABLED (D3).
+      issuer: ['auth-service', readOAuthConfig(config).issuer],
+    },
+  };
+}
 
 @Module({
   imports: [
@@ -23,30 +51,7 @@ import { parseRsaPrivateKey } from './rsa-key.util';
     UsersModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
-        const privateKey = parseRsaPrivateKey(
-          config.getOrThrow<string>('RSA_PRIVATE_KEY'),
-        );
-        // Derive the public key from the private key so JwtService can both
-        // sign (privateKey) and verify (publicKey) tokens in the same module.
-        // This is needed for the defense-in-depth verification in currentUser (S-03).
-        const publicKey = createPublicKey(privateKey)
-          .export({ type: 'spki', format: 'pem' })
-          .toString();
-        return {
-          privateKey,
-          publicKey,
-          signOptions: {
-            algorithm: 'RS256' as const,
-            expiresIn: config.get<string>('JWT_EXPIRY', '15m') as StringValue,
-            issuer: 'auth-service',
-          },
-          verifyOptions: {
-            algorithms: ['RS256'],
-            issuer: 'auth-service',
-          },
-        };
-      },
+      useFactory: buildJwtOptions,
     }),
   ],
   providers: [AuthService, RefreshTokenService, SigninAbuseProtectionService],

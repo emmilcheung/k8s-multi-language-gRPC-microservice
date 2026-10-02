@@ -17,11 +17,15 @@ export interface AuthorizationCodeRecord {
   codeChallengeMethod: string;
   redirectUri: string;
   createdAt: string;
+  /** RFC 8707 resource requested at authorize; absent means the default audience. */
+  resource?: string;
 }
 
 export interface SessionScopeRecord {
   scope: string;
   clientId: string;
+  /** Audience the session's access tokens are bound to; absent on pre-resource sessions. */
+  resource?: string;
 }
 
 @Injectable()

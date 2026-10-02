@@ -3,8 +3,8 @@ import {
   findClient,
   validateScopes,
   OAUTH_CLIENTS,
-  OAUTH_SCOPES,
 } from './oauth-clients.config';
+import { OAUTH_SCOPE_NAMES } from './oauth-scopes';
 import type { OAuthClient } from './oauth-clients.config';
 
 describe('findClient', () => {
@@ -55,7 +55,7 @@ describe('validateScopes', () => {
   });
 
   it('ticketing-mcp allows every defined scope', () => {
-    const allScopes = [...OAUTH_SCOPES];
+    const allScopes = [...OAUTH_SCOPE_NAMES];
     const result = validateScopes(allScopes, fullClient);
     expect(result).toEqual(allScopes);
   });

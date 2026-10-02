@@ -307,6 +307,12 @@ services:
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
       X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
+      # OAuth AS metadata + resource allowlist (C-2, C-4). Dev values; WS-K flips ISSUER_ENABLED.
+      OAUTH_ISSUER: http://localhost:8000
+      OAUTH_RESOURCES: http://localhost:8000/mcp,http://localhost:8000/api
+      OAUTH_MCP_RESOURCE: http://localhost:8000/mcp
+      OAUTH_API_AUDIENCE: http://localhost:8000/api
+      OAUTH_ISSUER_ENABLED: "false"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: auth-service
     depends_on:
