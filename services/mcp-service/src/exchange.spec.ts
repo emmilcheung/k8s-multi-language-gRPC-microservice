@@ -161,4 +161,41 @@ describe('token exchange client (C-5)', () => {
     expect(String((err as Error).message)).not.toContain('LEAK-ME');
     expect(await exchange('tok', undefined, 's')).toBe('ok');
   });
+
+  it('R5: a hung exchange endpoint times out into a status-less failure instead of hanging every tool call', async () => {
+    const exchange = createTokenExchange({
+      url: URL_,
+      clientId: 'mcp-service',
+      clientSecret: 'throwaway-secret',
+      resource: 'http://localhost:8000/api',
+      timeoutMs: 20,
+      fetch: (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('timed out', 'TimeoutError')),
+          );
+        }),
+    });
+    await expect(exchange('t', undefined, 'orders:read')).rejects.toMatchObject(
+      { status: undefined, oauthError: undefined },
+    );
+  });
+
+  it('R5: only the RFC 6749 error code survives from a rejection body, and only if it looks like a code', async () => {
+    const reject = (body: unknown) =>
+      createTokenExchange({
+        url: URL_,
+        clientId: 'c',
+        clientSecret: 's',
+        resource: 'r',
+        fetch: () => Promise.resolve(Response.json(body, { status: 400 })),
+      })('t', undefined, 'orders:read');
+    await expect(reject({ error: 'invalid_grant' })).rejects.toMatchObject({
+      status: 400,
+      oauthError: 'invalid_grant',
+    });
+    await expect(
+      reject({ error: 'Secret text with spaces' }),
+    ).rejects.toMatchObject({ status: 400, oauthError: undefined });
+  });
 });

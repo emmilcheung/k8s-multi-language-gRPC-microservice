@@ -364,4 +364,269 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     expect(none.calls).toHaveLength(1);
     await c2.close();
   });
+
+  it('R5: only an invalid_grant exchange failure asks the user to re-authorize; every other failure is an operator-visible error', async () => {
+    const secretText = 'client secret mismatch for mcp-service';
+    const cases: [number, string][] = [
+      [401, 'invalid_client'],
+      [400, 'unauthorized_client'],
+      [400, 'invalid_target'],
+      [400, 'invalid_scope'],
+      [400, 'invalid_request'],
+      [500, 'server_error'],
+    ];
+    for (const [status, oauthError] of cases) {
+      const errors: unknown[][] = [];
+      const h = harness(undefined, {
+        exchange: () =>
+          Response.json(
+            { error: oauthError, error_description: secretText },
+            { status },
+          ),
+        logger: {
+          warn: () => undefined,
+          error: (...a: unknown[]) => errors.push(a),
+        },
+      });
+      const client = await connect(
+        era,
+        await mintToken({ scope: ALL_SCOPES }),
+        h.viaApp,
+      );
+      const res = await client.callTool({
+        name: 'get_order',
+        arguments: { orderId: ORDER },
+      });
+      expect(res.isError).toBe(true);
+      expect(res.structuredContent?.code, oauthError).toBe('UPSTREAM_ERROR');
+      expect(JSON.stringify(res)).not.toContain(secretText);
+      expect(h.calls, 'no upstream call without a token').toHaveLength(0);
+      const logged = errors.find((e) => String(e[1]).includes('exchange'));
+      expect(logged?.[0], oauthError).toEqual({
+        tool: 'get_order',
+        status,
+        oauthError,
+      });
+      expect(JSON.stringify(errors)).not.toContain(secretText);
+      await client.close();
+    }
+
+    const grant = harness(undefined, {
+      exchange: () =>
+        Response.json({ error: 'invalid_grant' }, { status: 400 }),
+    });
+    const c2 = await connect(
+      era,
+      await mintToken({ scope: ALL_SCOPES }),
+      grant.viaApp,
+    );
+    const res = await c2.callTool({
+      name: 'get_order',
+      arguments: { orderId: ORDER },
+    });
+    expect(res.structuredContent?.code).toBe('UNAUTHORIZED');
+    await c2.close();
+  });
+
+  it('R5: an unreachable exchange endpoint is an operator error, not a re-authorize', async () => {
+    const errors: unknown[][] = [];
+    const h = harness(undefined, {
+      exchange: () => {
+        throw new TypeError('connect ECONNREFUSED');
+      },
+      logger: {
+        warn: () => undefined,
+        error: (...a: unknown[]) => errors.push(a),
+      },
+    });
+    const client = await connect(
+      era,
+      await mintToken({ scope: ALL_SCOPES }),
+      h.viaApp,
+    );
+    const res = await client.callTool({
+      name: 'get_order',
+      arguments: { orderId: ORDER },
+    });
+    expect(res.structuredContent?.code).toBe('UPSTREAM_ERROR');
+    expect(errors[0]?.[0]).toEqual({
+      tool: 'get_order',
+      status: undefined,
+      oauthError: undefined,
+    });
+    await client.close();
+  });
+
+  it('R6: a replayed create reports replayed: true, a first create replayed: false', async () => {
+    for (const replayed of [false, true]) {
+      const h = harness((c) => {
+        const res = realisticReply(c);
+        return replayed
+          ? new Response(res.body, {
+              status: 200,
+              headers: {
+                'content-type': 'application/json',
+                'idempotent-replayed': 'true',
+              },
+            })
+          : res;
+      });
+      const client = await connect(
+        era,
+        await mintToken({ scope: ALL_SCOPES }),
+        h.viaApp,
+      );
+      const res = await client.callTool({
+        name: 'create_order',
+        arguments: { ticketId: TICKET, quantity: 1 },
+      });
+      expect(res.structuredContent?.replayed).toBe(replayed);
+      await client.close();
+    }
+  });
+
+  it('R6: both create tools tell the model that identical arguments return the existing order and how to place another', async () => {
+    const h = harness();
+    const client = await connect(
+      era,
+      await mintToken({ scope: ALL_SCOPES }),
+      h.viaApp,
+    );
+    const { tools } = await client.listTools();
+    for (const name of ['create_order', 'create_seated_order']) {
+      const description =
+        (tools.find((t) => t.name === name) as { description?: string })
+          .description ?? '';
+      expect(description, name).toContain(
+        'identical arguments return the existing order',
+      );
+      expect(description, name).toContain('new idempotencyKey');
+    }
+    await client.close();
+  });
+
+  it('R7: two users placing the same order get different idempotency keys', async () => {
+    const keys: (string | null)[] = [];
+    for (const sub of ['user-a', 'user-b']) {
+      const h = harness();
+      const client = await connect(
+        era,
+        await mintToken({ scope: ALL_SCOPES, sub }),
+        h.viaApp,
+      );
+      await client.callTool({
+        name: 'create_order',
+        arguments: { ticketId: TICKET, quantity: 2 },
+      });
+      keys.push(h.calls[0].headers.get('idempotency-key'));
+      await client.close();
+    }
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+
+  it('R1: the seating plan is part of the seated-order fingerprint, so another plan is another order', async () => {
+    const h = harness();
+    const client = await connect(
+      era,
+      await mintToken({ scope: ALL_SCOPES }),
+      h.viaApp,
+    );
+    const base = {
+      ticketId: TICKET,
+      sectionId: '99999999-9999-4999-8999-999999999999',
+      quantity: 1,
+    };
+    for (const seatingPlanId of [
+      '66666666-6666-4666-8666-666666666666',
+      '66666666-6666-4666-8666-666666666667',
+    ]) {
+      await client.callTool({
+        name: 'create_seated_order',
+        arguments: { ...base, seatingPlanId },
+      });
+    }
+    expect(h.calls[1].headers.get('idempotency-key')).not.toBe(
+      h.calls[0].headers.get('idempotency-key'),
+    );
+    await client.close();
+  });
+
+  it('R1: create_seated_order refuses ambiguous or empty selections before anything is sent', async () => {
+    const h = harness();
+    const client = await connect(
+      era,
+      await mintToken({ scope: ALL_SCOPES }),
+      h.viaApp,
+    );
+    const common = {
+      ticketId: TICKET,
+      seatingPlanId: '66666666-6666-4666-8666-666666666666',
+    };
+    const section = '99999999-9999-4999-8999-999999999999';
+    const seat = '77777777-7777-4777-8777-777777777777';
+    for (const args of [
+      common,
+      { ...common, sectionId: section },
+      { ...common, seatIds: [seat], sectionId: section, quantity: 1 },
+      { ...common, seatIds: [seat], quantity: 2 },
+    ]) {
+      const res = await client
+        .callTool({ name: 'create_seated_order', arguments: args })
+        .catch(() => ({ isError: true }));
+      expect(res.isError, JSON.stringify(args)).toBe(true);
+    }
+    expect(h.calls).toHaveLength(0);
+    await client.close();
+  });
+
+  it('R4: search_events returns the next cursor (last id) only when the page was full', async () => {
+    const t = (id: string) => ({ id, title: 'T', price: '1.00' });
+    const ids = [
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    ];
+    const h = harness(() => Response.json(ids.map(t)));
+    const client = await connect(
+      era,
+      await mintToken({ scope: ALL_SCOPES }),
+      h.viaApp,
+    );
+    const full = await client.callTool({
+      name: 'search_events',
+      arguments: { limit: 2 },
+    });
+    expect(full.structuredContent?.nextCursor).toBe(ids[1]);
+    const short = await client.callTool({
+      name: 'search_events',
+      arguments: { limit: 3 },
+    });
+    expect(short.structuredContent).not.toHaveProperty('nextCursor');
+    await client.close();
+  });
+
+  it('R9: an upstream reply missing a key field is a sanitised tool error, never a schema-violating success', async () => {
+    const errors: unknown[][] = [];
+    const h = harness(() => Response.json({ id: ORDER, leak: 'hunter2' }), {
+      logger: {
+        warn: () => undefined,
+        error: (...a: unknown[]) => errors.push(a),
+      },
+    });
+    const client = await connect(
+      era,
+      await mintToken({ scope: ALL_SCOPES }),
+      h.viaApp,
+    );
+    const res = await client.callTool({
+      name: 'get_order',
+      arguments: { orderId: ORDER },
+    });
+    expect(res.isError).toBe(true);
+    expect(res.structuredContent?.code).toBe('UPSTREAM_ERROR');
+    expect(JSON.stringify(res)).not.toContain('hunter2');
+    expect(JSON.stringify(errors)).not.toContain('hunter2');
+    expect((errors[0]?.[0] as { fields: string[] }).fields).toContain('status');
+    await client.close();
+  });
 });

@@ -4,6 +4,7 @@ import {
   Client as ClientV2,
   StreamableHTTPClientTransport as TransportV2,
 } from '@modelcontextprotocol/client';
+import type { Logger } from 'pino';
 import { createApp } from './app.ts';
 import {
   SignJWT,
@@ -176,8 +177,15 @@ export function realisticReply(call: UpstreamCall): Response {
   return Response.json({}, { status: 404 });
 }
 
+export interface HarnessOptions {
+  /** Replaces the token-exchange endpoint's reply. */
+  exchange?: () => Response | Promise<Response>;
+  logger?: Pick<Logger, 'warn' | 'error'>;
+}
+
 export function harness(
   respond: (call: UpstreamCall) => Response = realisticReply,
+  opts: HarnessOptions = {},
 ) {
   const calls: UpstreamCall[] = [];
   /** Form of every token-exchange request (C-5), in order. */
@@ -190,6 +198,7 @@ export function harness(
       exchanges.push(
         new URLSearchParams((init?.body as URLSearchParams).toString()),
       );
+      if (opts.exchange) return Promise.resolve(opts.exchange());
       return Promise.resolve(
         Response.json({
           access_token: 'api-audience-token',
@@ -210,6 +219,7 @@ export function harness(
   const app = createApp({
     config: testConfig,
     jwks: stubJwks,
+    logger: opts.logger,
     fetch: stubFetch,
   });
   const responses: Response[] = [];
