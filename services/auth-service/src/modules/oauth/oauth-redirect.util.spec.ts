@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { BadRequestException } from '@nestjs/common';
 import {
   assertValidRedirectUris,
+  redirectUriProblem,
   redirectUriMatches,
 } from './oauth-redirect.util';
 
@@ -127,5 +128,20 @@ describe('assertValidRedirectUris (the shared registration validator)', () => {
     expect(rejection(['javascript:alert(1)'])).toBeInstanceOf(
       BadRequestException,
     );
+  });
+});
+
+describe('M-7: redirectUriProblem refuses fragments and userinfo', () => {
+  it.each([
+    'https://app.example.com/cb#x',
+    'https://u:p@app.example.com/cb',
+    'https://u@app.example.com/cb',
+    'http://localhost:3000/cb#x',
+  ])('M-7: %s is refused', (uri) => {
+    expect(redirectUriProblem(uri)).not.toBeNull();
+  });
+  it('M-7: a plain https and a loopback http URI are still fine', () => {
+    expect(redirectUriProblem('https://app.example.com/cb')).toBeNull();
+    expect(redirectUriProblem('http://127.0.0.1:8080/cb')).toBeNull();
   });
 });

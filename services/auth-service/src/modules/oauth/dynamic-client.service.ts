@@ -1,4 +1,5 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { clientNameProblem } from './oauth-client-name.util';
+import { BadRequestException, Injectable, Inject } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type Redis from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.module';
@@ -42,6 +43,13 @@ export class DynamicClientService {
 
   async register(input: RegisterClientInput): Promise<DynamicOAuthClient> {
     assertValidRedirectUris(input.redirectUris);
+    const nameProblem = clientNameProblem(input.clientName);
+    if (nameProblem) {
+      throw new BadRequestException({
+        error: 'invalid_client_metadata',
+        error_description: nameProblem,
+      });
+    }
 
     const requestedScopes = input.scope
       ? input.scope.split(' ').filter(Boolean)

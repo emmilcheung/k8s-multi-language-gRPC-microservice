@@ -47,6 +47,35 @@ describe('DynamicClientService.register', () => {
     expect(redis.set).not.toHaveBeenCalled();
   });
 
+  it('M-4: DCR applies the same client_name rule as CIMD: format characters, line separators and over-long names are refused', async () => {
+    const { service, redis } = make();
+    for (const bad of [
+      'a\u200eb',
+      'a\u200bb',
+      'a\u2028b',
+      'a\ufeffb',
+      'a\nb',
+      'x'.repeat(101),
+    ]) {
+      await expect(
+        service.register({ ...base, clientName: bad }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    }
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  it('M-7: DCR refuses a redirect URI with a fragment or userinfo (RFC 6749 3.1.2)', async () => {
+    const { service } = make();
+    for (const bad of [
+      'https://app.example.com/cb#frag',
+      'https://user:pw@app.example.com/cb',
+    ]) {
+      await expect(
+        service.register({ ...base, redirectUris: [bad] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    }
+  });
+
   it('I-8/DCR: application_type defaults to web and a native registration is stored as native', async () => {
     const { service } = make();
     expect((await service.register(base)).applicationType).toBe('web');

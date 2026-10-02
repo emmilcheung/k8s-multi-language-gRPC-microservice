@@ -119,6 +119,19 @@ describe('validateClientMetadataDocument', () => {
     expect(reason(doc({ client_name: 'Evil\nApp' }))).toBe('invalid_document');
     expect(reason(doc({ client_name: 'Evil‮App' }))).toBe('invalid_document');
     expect(reason(doc({ client_name: 42 }))).toBe('invalid_document');
+    for (const bad of [
+      'a\u200eb',
+      'a\u200bb',
+      'a\u061cb',
+      'a\u2028b',
+      'a\u2029b',
+      'a\ufeffb',
+    ]) {
+      expect(
+        reason(doc({ client_name: bad })),
+        `M-4 ${JSON.stringify(bad)}`,
+      ).toBe('invalid_document');
+    }
   });
 
   it('F7: unknown scopes are dropped like DCR drops them; extra members are ignored', () => {

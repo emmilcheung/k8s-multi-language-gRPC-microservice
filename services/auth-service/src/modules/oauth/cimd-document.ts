@@ -1,5 +1,5 @@
+import { clientNameProblem } from './oauth-client-name.util';
 import { CimdFetchError } from './cimd-fetcher';
-import { CLIENT_NAME_MAX_LENGTH } from './oauth.dto';
 import { OAUTH_SCOPE_NAMES } from './oauth-scopes';
 import type { OAuthClient } from './oauth-clients.config';
 import { redirectUriProblem } from './oauth-redirect.util';
@@ -8,9 +8,7 @@ import { redirectUriProblem } from './oauth-redirect.util';
 const MAX_REDIRECT_URIS = 10;
 const SUPPORTED_GRANT_TYPES = ['authorization_code', 'refresh_token'];
 const SUPPORTED_RESPONSE_TYPES = ['code'];
-// C0/C1 controls, plus bidi overrides/isolates that let a name spoof its neighbours.
 // eslint-disable-next-line no-control-regex
-const UNSAFE_NAME_CHARS = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/;
 
 const invalid = (why: string) => new CimdFetchError('invalid_document', why);
 
@@ -82,14 +80,10 @@ export function validateClientMetadataDocument(
 
   let clientName = new URL(clientIdUrl).hostname;
   if (doc.client_name !== undefined) {
-    if (
-      typeof doc.client_name !== 'string' ||
-      doc.client_name.length > CLIENT_NAME_MAX_LENGTH ||
-      UNSAFE_NAME_CHARS.test(doc.client_name)
-    ) {
+    if (clientNameProblem(doc.client_name) !== null) {
       throw invalid('client_name not allowed');
     }
-    clientName = doc.client_name.trim() || clientName;
+    clientName = (doc.client_name as string).trim() || clientName;
   }
 
   if (doc.scope !== undefined && typeof doc.scope !== 'string') {

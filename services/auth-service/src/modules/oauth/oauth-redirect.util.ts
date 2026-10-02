@@ -56,6 +56,10 @@ export function redirectUriProblem(uri: string): string | null {
   ) {
     return `redirect_uri must use HTTPS or be localhost: ${uri}`;
   }
+  // RFC 6749 3.1.2: no fragment. Userinfo has no place in a redirect target.
+  if (parsed.hash || parsed.username || parsed.password) {
+    return `redirect_uri must not carry a fragment or credentials: ${uri}`;
+  }
   return null;
 }
 
