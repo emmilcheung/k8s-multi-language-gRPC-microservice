@@ -62,6 +62,19 @@ const jwtPayloadSchema = z.object({
   roles: z.array(z.string()).optional(),
 });
 
+const oauthSubjectSchema = z.object({
+  sub: z.string().min(1),
+  jti: z.string().min(1),
+  iss: z.string().min(1),
+  aud: z.union([z.string(), z.array(z.string())]),
+  exp: z.number().int().positive(),
+  scope: z.string(),
+  client_id: z.string().min(1),
+});
+
+/** Verified claims of an OAuth access token used as a token-exchange subject. */
+export type OAuthSubjectClaims = z.infer<typeof oauthSubjectSchema>;
+
 @Injectable()
 export class AuthService {
   private readonly rsaPrivateKey: string;
@@ -264,18 +277,83 @@ export class AuthService {
     userId: string,
     scope: string,
     clientId: string,
-    { aud, iss }: { aud: string; iss: string },
+    {
+      aud,
+      iss,
+      act,
+      iat,
+      exp,
+    }: {
+      aud: string;
+      iss: string;
+      /** RFC 8693 actor claim, set only on exchanged tokens (C-1). */
+      act?: { sub: string };
+      /**
+       * Absolute iat/exp (epoch seconds) for exchanged tokens (C-5). Set
+       * together; replaces JWT_EXPIRY so the lifetime is computed once by the
+       * caller and cannot drift past the subject token's exp.
+       */
+      iat?: number;
+      exp?: number;
+    },
   ): string {
     const tokenPayload = {
       sub: userId,
       jti: randomUUID(),
       scope,
       client_id: clientId,
+      ...(act ? { act } : {}),
+      ...(iat !== undefined ? { iat } : {}),
     };
     const token: unknown = (
       this.jwtService.sign as (p: unknown, o: unknown) => unknown
-    )(tokenPayload, { audience: aud, issuer: iss });
+    )(tokenPayload, {
+      audience: aud,
+      issuer: iss,
+      // jsonwebtoken derives exp = payload.iat + expiresIn, so with an explicit
+      // iat this yields exactly the absolute exp (no clock read at sign time).
+      ...(iat !== undefined && exp !== undefined
+        ? { expiresIn: exp - iat }
+        : {}),
+    });
     return token as string;
+  }
+
+  /**
+   * Verify an OAuth access token presented as an RFC 8693 subject (C-5):
+   * signature, exp, an `iss` that is either issuer this server can mint OAuth
+   * tokens under (the module's dual-issuer list, independent of
+   * OAUTH_ISSUER_ENABLED so tokens minted just before a flag flip still
+   * exchange), and the revocation blacklist. Unlike
+   * verifyAccessToken it keeps `iss`/`aud`, which the caller must check.
+   * Throws UnauthorizedException for any failure.
+   */
+  async verifyOAuthSubjectToken(token: string): Promise<OAuthSubjectClaims> {
+    let claims: OAuthSubjectClaims;
+    try {
+      claims = oauthSubjectSchema.parse(
+        await this.jwtService.verifyAsync<object>(token),
+      );
+    } catch {
+      throw new UnauthorizedException({
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Access token is invalid or expired',
+        },
+      });
+    }
+    const blacklisted = await this.redis.get(
+      `auth-service:blacklist:${claims.jti}`,
+    );
+    if (blacklisted) {
+      throw new UnauthorizedException({
+        error: {
+          code: 'TOKEN_REVOKED',
+          message: 'Access token has been revoked',
+        },
+      });
+    }
+    return claims;
   }
 
   getJwks(): object {

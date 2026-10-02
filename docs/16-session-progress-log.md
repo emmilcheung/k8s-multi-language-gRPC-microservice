@@ -9,6 +9,37 @@
 
 ---
 
+## Session: 2026-10-02 — feat(mcp): Wave 3 — token exchange, MCP tools, consent UI, Kong `/mcp` ⏳ LOCAL, UNPUSHED
+
+**Branch:** `feat/mcp-platform-wave3` — lanes `feat/mcp-w3-{l,h,j,k}` merged `--no-ff` (L → H → J, then K on top), then merged `--no-ff` into the integration branch `feat/mcp-platform`. Nothing is pushed.
+
+**What landed**
+
+- **WS-H (auth-service):** RFC 8693 token exchange at `POST /oauth/token` for one confidential client, `mcp-service` (`client_secret_basic`). The secret is stored as a SHA-256 hex digest (`MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH`) and compared in constant time; unset disables the grant with a warning, malformed fails startup. The exchanged token carries the API audience, `act: {sub: mcp-service}`, and never outlives the subject token (`exp = min(iat + 300, subject.exp)`). Audit event `oauth.token.exchanged`. `GET /oauth/clients` returns the registered client name.
+- **WS-J (mcp-service):** the 12 tools of contract C-7, each calling Kong's public REST with an exchanged token (no passthrough). Exchange results are cached per (token hash, scope); a derived `Idempotency-Key` makes create tools safe to retry and reports `replayed`; a missing scope returns the C-6 step-up challenge. `search_events` has no free-text query or paging because ticket-service REST offers neither (owner item below).
+- **WS-L (client):** consent page shows the registered client name and per-scope descriptions from `GET /oauth/scopes`, with a Sensitive marker; an unknown scope fails closed. Settings → Connected apps lists and revokes grants.
+- **WS-K (kong-gateway):** routes `/mcp` and `/.well-known/oauth-protected-resource/mcp` → mcp-service with no Kong jwt plugin (mcp-service verifies its own audience-bound token), identity headers cleared, per-IP limit. A second `jwt_secret` keyed on the OAuth issuer origin, and the **REST audience rule (C-10)** in `jwt-scope.lua`: an OAuth token whose `aud` is not `<issuer>/api` is refused 401, so an MCP-audience token cannot be replayed against REST. New fail-loud build input `KONG_OAUTH_ISSUER` (dev/staging/prod). `OAUTH_ISSUER_ENABLED` is now `true` in compose and `values-local.yaml`; staging/prod keep the schema default (false). New `scripts/test-jwt-scope.sh` runs the real Lua under `resty`; the Kong CI job now runs it and `test-build-lint.sh` (previously run by nothing).
+
+**Spec amendment:** C-7 — `pay_for_order_with_default` needs `payments:read` in addition to `payments:create`.
+
+**Exit gate (wave branch `530decf`): PASS WITH NOTES.** Static: auth-service 234 unit / 25 integration; mcp-service 127 tests, image non-root; client 227 unit; Kong build + validate for local, minikube, dev, staging, prod, `test-build-lint.sh` 18/18, `test-jwt-scope.sh` 15 cases; umbrella chart renders with mcp-service enabled. Live through Kong on a compose stack: discovery documents agree on issuer and resource; `/mcp` without a token → 401 with `resource_metadata`; dynamic registration + authorization-code/PKCE → `tools/list` returns 12 tools and read tools succeed via the live exchange; `create_order` twice → second call `replayed: true`, one order upstream; missing `orders:create` → 403 `insufficient_scope`; MCP-audience token on `GET /api/orders` → 401, browser token → 200, OAuth token on `/graphql` → 403, forged `X-User-*` on `/mcp` → 401; refresh after revoke → `invalid_grant`; consent and Connected apps verified in Chromium; `oauth-agent-boundaries.spec.ts` + `connected-apps.spec.ts` 14/14.
+
+**Not verified:** the consent page's unknown-scope branch live (auth-service drops unknown scopes at registration; unit tests only); `/mcp` 429 and the Redis rate-limit policy; payment tools, `create_seated_order`, `cancel_order` and the waiting-room mapping against a live stack; any cluster deploy (helm render only); the new CI step on a real runner. One Playwright flake on a cold `next dev` (consent POST hung once, not reproduced in three re-runs).
+
+**Accepted behaviour:** revoking an app blocks refresh immediately, but an MCP access token already issued stays exchangeable until it expires (≤ 15 min).
+
+**Owner items**
+
+- Hard stop #10 review of the new public Kong routes: `POST|GET|DELETE /mcp`, `GET /.well-known/oauth-protected-resource/mcp`, `GET /oauth/scopes`. Tuning points: `/mcp` is limited per source IP (600/min), which hosted MCP clients on shared egress IPs would share; no CORS/OPTIONS on `/mcp` (browser-based MCP clients would need it).
+- Deploy pipelines for dev/staging/prod must set `KONG_OAUTH_ISSUER` to the same origin as Helm `global.publicOrigin`; the audience rule applies even while `OAUTH_ISSUER_ENABLED` is false, so a mismatch 401s every OAuth REST call.
+- Add `MCP_TOKEN_EXCHANGE_CLIENT_SECRET` and `MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH` (SHA-256 hex of the secret; generator in `.env.example`) to the local `.env` and `infra/local/secrets.env`; decide whether mcp-service leaves the opt-in `mcp` compose profile.
+- ticket-service REST needs a search parameter and a returned next cursor before `search_events` can search or page.
+- `.github/workflows/ci.yml` (Kong job) was edited by this wave: a stand-in `KONG_OAUTH_ISSUER` and one test step.
+
+Ledger: `.superpowers/sdd/2026-10-02-mcp-wave3/` (`exit-gate.md`, per-lane reports and reviews).
+
+---
+
 ## Session: 2026-10-02 — feat(mcp): Wave 2 — AS metadata, order idempotency, mcp-service scaffold ⏳ LOCAL, UNPUSHED
 
 **Branch:** `feat/mcp-platform-wave2` — lanes `feat/mcp-w2-{e,f,g}` merged `--no-ff` (E → F → G), then merged `--no-ff` into the integration branch `feat/mcp-platform`. All MCP branches were rebased onto `main` `04307ee` first (integration with `--rebase-merges`). Nothing is pushed.

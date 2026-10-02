@@ -28,6 +28,16 @@ export const OAUTH_CLIENTS: OAuthClient[] = [
   },
 ];
 
+/**
+ * The confidential client allowed to use the RFC 8693 token-exchange grant
+ * (C-5). Deliberately NOT in OAUTH_CLIENTS: it has no redirect URIs and no
+ * authorization_code/refresh flow, so it must never resolve at /authorize or
+ * as a session owner. Its secret hash comes from config, never from source.
+ */
+export const MCP_SERVICE_CLIENT_ID = 'mcp-service';
+export const TOKEN_EXCHANGE_GRANT =
+  'urn:ietf:params:oauth:grant-type:token-exchange';
+
 export function findClient(clientId: string): OAuthClient | undefined {
   return OAUTH_CLIENTS.find((c) => c.clientId === clientId);
 }

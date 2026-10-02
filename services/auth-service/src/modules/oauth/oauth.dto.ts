@@ -51,7 +51,11 @@ export class AuthorizeQuery {
 export class TokenBody {
   @IsString()
   @IsNotEmpty()
-  @IsIn(['authorization_code', 'refresh_token'])
+  @IsIn([
+    'authorization_code',
+    'refresh_token',
+    'urn:ietf:params:oauth:grant-type:token-exchange',
+  ])
   grant_type!: string;
 
   // authorization_code grant
@@ -63,9 +67,14 @@ export class TokenBody {
   @IsOptional()
   redirect_uri?: string;
 
+  /**
+   * Required for the authorization_code and refresh_token grants (checked in
+   * OAuthService.token). A token-exchange caller authenticates with HTTP Basic
+   * instead, so it may omit this.
+   */
   @IsString()
-  @IsNotEmpty()
-  client_id!: string;
+  @IsOptional()
+  client_id?: string;
 
   @IsString()
   @IsOptional()
@@ -80,6 +89,25 @@ export class TokenBody {
   @IsString()
   @IsOptional()
   resource?: string;
+
+  // token-exchange grant (RFC 8693, C-5)
+  @IsString()
+  @IsOptional()
+  subject_token?: string;
+
+  @IsString()
+  @IsOptional()
+  subject_token_type?: string;
+
+  /** RFC 8693 target; equivalent to `resource` and must agree with it. */
+  @IsString()
+  @IsOptional()
+  audience?: string;
+
+  /** Requested scope for the exchange (must be a subset of the subject's). */
+  @IsString()
+  @IsOptional()
+  scope?: string;
 }
 
 /** Body for POST /oauth/revoke */
@@ -100,6 +128,21 @@ export interface TokenResponse {
   expires_in: number;
   scope: string;
   refresh_token: string;
+}
+
+/** Response shape for the token-exchange grant: no refresh token (C-5). */
+export interface TokenExchangeResponse {
+  access_token: string;
+  issued_token_type: 'urn:ietf:params:oauth:token-type:access_token';
+  token_type: 'Bearer';
+  expires_in: number;
+  scope: string;
+}
+
+/** Client credentials from an HTTP Basic header (client_secret_basic). */
+export interface ClientCredentials {
+  clientId: string;
+  clientSecret: string;
 }
 
 /** Item in GET /oauth/clients response */

@@ -27,6 +27,12 @@ export const oauthEnvFields = {
    * jwt_secret keyed on OAUTH_ISSUER and flips this in the same release.
    */
   OAUTH_ISSUER_ENABLED: boolString,
+  /**
+   * lowercase hex SHA-256 of the mcp-service client secret (C-5). Unset or empty
+   * disables the token-exchange grant (the client cannot authenticate); a set
+   * but malformed value fails startup. See refineOAuthConfig.
+   */
+  MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH: z.string().optional(),
 };
 
 export function parseResources(raw: string): string[] {
@@ -76,6 +82,7 @@ interface OAuthEnv {
   OAUTH_RESOURCES?: string;
   OAUTH_MCP_RESOURCE?: string;
   OAUTH_API_AUDIENCE?: string;
+  MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH?: string;
 }
 
 /**
@@ -90,6 +97,15 @@ export function refineOAuthConfig(
 ): void {
   const fail = (key: string, message: string) =>
     ctx.addIssue({ code: 'custom', path: [key], message });
+
+  const secretHash = config.MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH;
+  if (secretHash && !/^[0-9a-f]{64}$/.test(secretHash)) {
+    // A typo'd or plaintext value must never be silently treated as a hash.
+    fail(
+      'MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH',
+      'MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH must be the lowercase hex SHA-256 (64 chars) of the secret, never the plaintext secret',
+    );
+  }
 
   const prod = config.NODE_ENV === 'production';
   const keys = [
@@ -169,6 +185,13 @@ export function readOAuthConfig(config: Getter): OAuthResourceConfig {
     apiAudience: config.get('OAUTH_API_AUDIENCE') ?? `${DEV_ORIGIN}/api`,
     issuerEnabled: String(config.get('OAUTH_ISSUER_ENABLED')) === 'true',
   };
+}
+
+/** The mcp-service secret hash, or undefined when token exchange is disabled. */
+export function readTokenExchangeSecretHash(
+  config: Getter,
+): string | undefined {
+  return config.get('MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH') || undefined;
 }
 
 /** The one place the `iss` of an OAuth access token is chosen (D3, E-9). */

@@ -19,6 +19,8 @@
 #   *    /api/payments/*                   → payment-service (JWT required)
 #   *    /api/user-settings/*              → user-service   (JWT required)
 #   *    /api/attendance/*                 → attendance-service (JWT required)
+#   GET  /.well-known/oauth-protected-resource/mcp → mcp-service (public)
+#   POST|GET|DELETE /mcp                   → mcp-service    (no Kong JWT; mcp-service verifies the token)
 #   /*                                     → client         (catch-all, no JWT)
 #
 # Auth strategy:
@@ -36,6 +38,15 @@ consumers:
   - username: auth-service-issuer
     jwt_secrets:
       - key: auth-service
+        algorithm: RS256
+        rsa_public_key: |
+          {{RSA_PUBLIC_KEY}}
+      # Same RSA key, keyed on the OAuth issuer origin. Once auth-service sets
+      # OAUTH_ISSUER_ENABLED, OAuth-issued tokens (MCP, exchanged API tokens)
+      # carry iss=<origin> instead of `auth-service`; without this entry the jwt
+      # plugin 401s every one of them. The REST audience rule in jwt-scope.lua
+      # then decides which of these tokens a REST route accepts.
+      - key: {{OAUTH_ISSUER}}
         algorithm: RS256
         rsa_public_key: |
           {{RSA_PUBLIC_KEY}}
@@ -305,6 +316,14 @@ services:
       - name: auth-as-metadata
         paths:
           - /.well-known/oauth-authorization-server
+        methods: [GET]
+        strip_path: false
+
+      # Public: OAuth scope registry (C-7), read by the client's consent page to
+      # label scopes. Static, non-user-specific data; no jwt plugin, so no guard.
+      - name: auth-oauth-scopes
+        paths:
+          - ~/oauth/scopes$
         methods: [GET]
         strip_path: false
 
@@ -936,6 +955,62 @@ services:
               redis_port: {{RATE_LIMIT_REDIS_PORT}}
               redis_ssl: {{RATE_LIMIT_REDIS_SSL}}
               redis_ssl_verify: {{RATE_LIMIT_REDIS_SSL_VERIFY}}
+
+  # ── mcp-service (MCP resource server) ────────────────────────────────────────
+  # Hard stop #10: both routes are new public surface; owner reviews before merge.
+  # Neither has a jwt plugin: mcp-service verifies its own audience-bound token
+  # (RFC 9728) and answers 401 with the resource_metadata challenge. Kong must
+  # NOT run the jwt plugin here, or a valid MCP token (aud=<origin>/mcp) would be
+  # judged by the REST rules. The build lint therefore cannot see these routes;
+  # scripts/test-build-lint.sh asserts them instead.
+  # /mcp is stateless request/response: POST (JSON-RPC) and DELETE are served,
+  # GET answers 405 (no server-initiated SSE stream; no subscriptions capability),
+  # so the upstream uses the short MCP_READ_TIMEOUT_MS, not the SSE one.
+  - name: mcp-service
+    url: http://{{HOST_MCP}}
+    connect_timeout: {{CONNECT_TIMEOUT_MS}}
+    read_timeout: {{MCP_READ_TIMEOUT_MS}}
+    write_timeout: {{WRITE_TIMEOUT_MS}}
+    routes:
+      # Public: RFC 9728 protected-resource metadata for /mcp, discovered before any token
+      # exists. Only the path-suffixed URL is routed (the bare path would 404 upstream).
+      - name: mcp-protected-resource-metadata
+        paths:
+          - ~/\.well-known/oauth-protected-resource/mcp$
+        methods: [GET]
+        strip_path: false
+
+      # Streamable HTTP transport: POST (JSON-RPC), GET (server stream), DELETE (end session).
+      - name: mcp
+        paths:
+          - ~/mcp$
+        methods: [POST, GET, DELETE]
+        strip_path: false
+        plugins:
+          # A route-level plugin replaces the global request-transformer, so the
+          # identity headers are cleared again here (and X-User-Id-Sig, which the
+          # global one does not list). No jwt-sub.lua runs on this route, so a
+          # client-supplied X-User-* would otherwise reach mcp-service unmodified.
+          - name: request-transformer
+            config:
+              remove:
+                headers:
+                  - X-User-Id
+                  - X-User-Roles
+                  - X-User-Id-Sig
+          # Replaces the global limiter for this route; per source IP because the
+          # caller is unauthenticated at the edge.
+          - name: rate-limiting
+            config:
+              minute: {{RATE_LIMIT_MCP_PER_MINUTE}}
+              limit_by: ip
+              policy: {{RATE_LIMIT_POLICY}}
+              redis_host: {{RATE_LIMIT_REDIS_HOST}}
+              redis_port: {{RATE_LIMIT_REDIS_PORT}}
+              redis_ssl: {{RATE_LIMIT_REDIS_SSL}}
+              redis_ssl_verify: {{RATE_LIMIT_REDIS_SSL_VERIFY}}
+              fault_tolerant: true
+              hide_client_headers: false
 
   # ── client (Next.js SSR) — catch-all, must be last ────────────────────────────
   # Kong matches routes by longest-prefix first; all /api/* routes above always

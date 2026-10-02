@@ -17,7 +17,8 @@ export interface OAuthErrorBody {
 
 /**
  * RFC 6749 §5.2 / RFC 7009 §2.2.1 errors for /oauth/token and /oauth/revoke
- * (spec D8). Every 4xx becomes 400 {error, error_description}; anything else
+ * (spec D8). Every 4xx becomes 400 {error, error_description} except
+ * Basic-auth invalid_client, which stays 401 (C-5); anything else
  * is a 500 server_error that leaks nothing. The rest of auth-service keeps the
  * docs/03 {error:{code,message}} shape via GlobalExceptionFilter.
  */
@@ -34,9 +35,15 @@ export class OAuthExceptionFilter implements ExceptionFilter {
     response.setHeader('Pragma', 'no-cache');
 
     if (exception instanceof HttpException && exception.getStatus() < 500) {
-      return response
-        .status(HttpStatus.BAD_REQUEST)
-        .json(this.toOAuthError(exception.getResponse()));
+      const status: number = exception.getStatus();
+      const error = this.toOAuthError(exception.getResponse());
+      // RFC 6749 §5.2: a failed client_secret_basic authentication is 401 with
+      // a challenge. Every other 4xx (including a 401-typed invalid_grant) stays 400.
+      if (status === 401 && error.error === 'invalid_client') {
+        response.setHeader('WWW-Authenticate', 'Basic realm="oauth"');
+        return response.status(HttpStatus.UNAUTHORIZED).json(error);
+      }
+      return response.status(HttpStatus.BAD_REQUEST).json(error);
     }
 
     this.logger.error(
