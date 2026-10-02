@@ -307,12 +307,13 @@ services:
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
       X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
-      # OAuth AS metadata + resource allowlist (C-2, C-4). Dev values; WS-K flips ISSUER_ENABLED.
+      # OAuth AS metadata + resource allowlist (C-2, C-4). Dev values. ISSUER_ENABLED is true because the local
+      # Kong (values/local.yml OAUTH_ISSUER, same origin) carries a jwt_secret for that issuer.
       OAUTH_ISSUER: http://localhost:8000
       OAUTH_RESOURCES: http://localhost:8000/mcp,http://localhost:8000/api
       OAUTH_MCP_RESOURCE: http://localhost:8000/mcp
       OAUTH_API_AUDIENCE: http://localhost:8000/api
-      OAUTH_ISSUER_ENABLED: "false"
+      OAUTH_ISSUER_ENABLED: "true"
       # SHA-256 hex of MCP_TOKEN_EXCHANGE_CLIENT_SECRET (see .env.example). Empty
       # disables the RFC 8693 token-exchange grant; auth-service still boots.
       MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH: "${MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH:-}"
