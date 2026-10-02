@@ -442,6 +442,30 @@ describe('H-5: the exchanged token equals the C-1 exchanged column', () => {
       expect(res.expires_in).toBe(1);
     });
 
+    it('a clock tick between the expiry check and minting never yields a zero lifetime (no 500)', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-02T00:00:00.000Z'));
+      const t = build();
+      const subject = t.jwt.sign(
+        {
+          sub: 'user-1',
+          jti: 'j',
+          scope: 'tickets:read',
+          client_id: 'dyn-uuid',
+        },
+        { audience: MCP, issuer: 'auth-service', expiresIn: 1 },
+      );
+      const subjectExp = decode(t.jwt, subject).exp as number;
+      // The second ticks over while the user lookup is in flight.
+      t.usersRepo.findById.mockImplementation(() => {
+        vi.setSystemTime(new Date('2026-10-02T00:00:01.000Z'));
+        return Promise.resolve({ id: 'user-1', email: 'u@x.test' });
+      });
+      const res = await t.service.token(body(subject), req, BASIC_OK);
+      expect(res.expires_in).toBeGreaterThan(0);
+      expect(decode(t.jwt, res.access_token).exp).toBe(subjectExp);
+    });
+
     it('a long-lived subject yields exp === iat + 300', async () => {
       vi.useFakeTimers({ toFake: ['Date'] });
       vi.setSystemTime(new Date('2026-10-02T00:00:00.000Z'));
@@ -637,6 +661,17 @@ describe('Basic parsing and per-grant scope (R3b, R4, R6)', () => {
     const res = await supertest(nest.getHttpServer())
       .post('/oauth/token')
       .set('Authorization', rawBasic(`${MCP_CLIENT}:sec+ret`))
+      .type('form')
+      .send(exchangeForm(t));
+    expect(res.status).toBe(200);
+    await nest.close();
+  });
+
+  it('a client secret containing `:` authenticates (Basic splits on the FIRST colon only)', async () => {
+    const { nest, t } = await appFor({ hash: sha256Hex('ab:cd') });
+    const res = await supertest(nest.getHttpServer())
+      .post('/oauth/token')
+      .set('Authorization', rawBasic(`${MCP_CLIENT}:ab:cd`))
       .type('form')
       .send(exchangeForm(t));
     expect(res.status).toBe(200);

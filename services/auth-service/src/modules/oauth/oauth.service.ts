@@ -276,8 +276,7 @@ export class OAuthService implements OnModuleInit {
    * token for a short-lived API-audience token that keeps the ORIGINAL client
    * id and can only narrow scope. Client authentication happens first so an
    * unauthenticated caller learns nothing about the subject token.
-   */
-  /**
+   *
    * Known limit (accepted): revoking a connected app does not block exchange of
    * an MCP access token already issued; it stays exchangeable until it expires
    * (<= 15 min, as for any access token). Exchanged tokens live <= 5 min and
@@ -333,8 +332,12 @@ export class OAuthService implements OnModuleInit {
     if (audiences.length !== 1 || audiences[0] !== cfg.mcpResource) {
       throw invalidSubject();
     }
-    const now = Math.floor(Date.now() / 1000);
-    if (subject.exp <= now || !(await this.usersRepo.findById(subject.sub))) {
+    // One clock read: expiry check and minting share it, so a tick in between
+    // cannot leave a zero or negative lifetime.
+    const iat = Math.floor(Date.now() / 1000);
+    const exp = Math.min(iat + EXCHANGED_TOKEN_MAX_SECONDS, subject.exp);
+    const expiresIn = exp - iat;
+    if (expiresIn <= 0 || !(await this.usersRepo.findById(subject.sub))) {
       throw invalidSubject();
     }
 
@@ -353,10 +356,6 @@ export class OAuthService implements OnModuleInit {
       }
     }
     const scope = granted.join(' ');
-    // Absolute, computed once: the exchanged token never outlives the subject.
-    const iat = Math.floor(Date.now() / 1000);
-    const exp = Math.min(iat + EXCHANGED_TOKEN_MAX_SECONDS, subject.exp);
-    const expiresIn = exp - iat;
 
     const accessToken = this.authService.issueAccessTokenForOAuth(
       subject.sub,

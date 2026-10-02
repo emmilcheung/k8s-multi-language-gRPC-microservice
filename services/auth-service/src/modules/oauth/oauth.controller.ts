@@ -36,14 +36,14 @@ import {
   OAuthRegistrationExceptionFilter,
 } from './oauth-exception.filter';
 
+/** RFC 6749 §2.3.1: form-urlencoded, so `+` is a space. */
+const formDecode = (v: string) => decodeURIComponent(v.replace(/\+/g, ' '));
+
 /**
  * RFC 6749 §2.3.1 client_secret_basic. No header means no Basic credentials;
  * a Basic header that cannot be decoded is a failed authentication (401), not
  * something to ignore, so a broken client does not silently fall back.
  */
-/** RFC 6749 §2.3.1: form-urlencoded, so `+` is a space. */
-const formDecode = (v: string) => decodeURIComponent(v.replace(/\+/g, ' '));
-
 function parseBasicCredentials(
   header: string | undefined,
 ): ClientCredentials | undefined {
