@@ -491,7 +491,9 @@ export class OAuthService {
         );
         if (!scopeMeta) return; // Not an OAuth session — skip
 
-        const client = findClient(scopeMeta.clientId);
+        // Static registry first, then dynamic registrations (their id is a UUID,
+        // so the registered name is what the Connected-apps page must show).
+        const client = await this.resolveClient(scopeMeta.clientId);
         results.push({
           clientId: scopeMeta.clientId,
           clientName: client?.clientName ?? scopeMeta.clientId,
