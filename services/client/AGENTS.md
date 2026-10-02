@@ -106,6 +106,8 @@ Two categories:
 | `GET /api/auth/refresh` | Token refresh — cookie-bound |
 | `POST /api/payments/webhook` | Stripe webhook — raw body + signature verification |
 | `GET /api/oauth/consent` | OAuth redirect flow — browser navigation, not data fetch |
+| `GET /oauth/clients`, `DELETE /oauth/clients/:clientId` | OAuth grant listing and revocation (Settings → Connected apps) — auth-service REST with no GraphQL equivalent; via `serverApi` |
+| `GET /oauth/scopes` | OAuth scope registry read by the consent page — public, owned by auth-service |
 
 **Deferred** — schema gaps the venue-service migration (Stage R2) did not close. Each is migratable; none is architecturally necessary. Tracked for a follow-up SDL extension.
 
