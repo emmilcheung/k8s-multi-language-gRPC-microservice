@@ -16,6 +16,8 @@ import {
   updateBillingAddressAction,
   revokeSessionAction,
 } from "@/app/actions/settings";
+import { getConnectedApps, revokeConnectedAppAction } from "@/app/settings/connected-apps";
+import { ConnectedApps } from "@/app/settings/ConnectedApps";
 import { SettingsPaymentMethods } from "@/components/settings-payment-methods";
 import { ArrowRight, Clock, Shield, CreditCard, MapPinHouse, UserRound, X } from "lucide-react";
 
@@ -58,6 +60,15 @@ async function handleUpdateBillingAddress(formData: FormData): Promise<void> {
 async function handleRevokeSession(formData: FormData): Promise<void> {
   "use server";
   const result = await revokeSessionAction(formData);
+  if (result.error) {
+    redirect(`/settings?error=${encodeURIComponent(result.error)}`);
+  }
+}
+
+/** Wrapper for form action: delegates to revokeConnectedAppAction and redirects on error */
+async function handleRevokeConnectedApp(formData: FormData): Promise<void> {
+  "use server";
+  const result = await revokeConnectedAppAction(formData);
   if (result.error) {
     redirect(`/settings?error=${encodeURIComponent(result.error)}`);
   }
@@ -137,8 +148,10 @@ export default async function SettingsPage(props: SettingsPageProps) {
     }
   } catch { /* non-fatal */ }
 
-  const { profile, preferences, billingAddress, sessions, paymentMethods, orders } =
-    await getSettingsData();
+  const [
+    { profile, preferences, billingAddress, sessions, paymentMethods, orders },
+    connectedApps,
+  ] = await Promise.all([getSettingsData(), getConnectedApps()]);
 
   const pendingOrders = orders.filter(
     (order) => order.status === "created" || order.status === "awaiting_payment"
@@ -346,6 +359,18 @@ export default async function SettingsPage(props: SettingsPageProps) {
               ))
             )}
             </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Connected apps"
+            description="Apps and AI agents you have authorized to act on your account."
+            icon={<Shield className="size-4 text-accent" />}
+          >
+            <ConnectedApps
+              apps={connectedApps.apps}
+              error={connectedApps.error}
+              revokeAction={handleRevokeConnectedApp}
+            />
           </SectionCard>
 
           <SectionCard

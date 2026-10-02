@@ -109,6 +109,12 @@ vi.mock("@/components/ticket-form", () => ({
   TicketForm: () => <div data-testid="ticket-form" />,
 }));
 
+const getConnectedAppsMock = vi.fn();
+vi.mock("@/app/settings/connected-apps", () => ({
+  getConnectedApps: (...args: unknown[]) => getConnectedAppsMock(...args),
+  revokeConnectedAppAction: vi.fn(),
+}));
+
 vi.mock("@/components/settings-payment-methods", () => ({
   SettingsPaymentMethods: ({ initialPaymentMethods }: { initialPaymentMethods: Array<{ id: string }> }) => (
     <div data-testid="settings-payment-methods" data-count={initialPaymentMethods.length} />
@@ -380,6 +386,9 @@ describe("SettingsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+    getConnectedAppsMock.mockResolvedValue({
+      apps: [{ clientId: "uuid-1", name: "Claude Code", scopes: ["tickets:read"], lastUsedAt: "2026-10-01T10:00:00Z" }],
+    });
     getSettingsDataMock.mockResolvedValue({
       profile: { displayName: "Jamie Stone", locale: "en-US", timezone: "UTC" },
       preferences: { marketingOptIn: true, orderUpdates: true, productUpdates: false },
@@ -410,11 +419,30 @@ describe("SettingsPage", () => {
     const { default: SettingsPage } = await import("@/app/settings/page");
     render(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
-    expect(screen.getByText(/^connected apps$/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/^connected apps$/i)).not.toHaveLength(0);
     expect(screen.getAllByText(/^security & sessions$/i)).not.toHaveLength(0);
     expect(screen.getAllByText(/^payment methods$/i)).not.toHaveLength(0);
     expect(screen.queryByText(/hold timer reminders/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/show reminders the day of/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage connected apps (L-2)", () => {
+  it("L-2: lists the user's connected apps by name in the Connected apps section", async () => {
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+    getSettingsDataMock.mockResolvedValue({
+      profile: null, preferences: null, billingAddress: null,
+      sessions: [], paymentMethods: [], orders: [],
+    });
+    getConnectedAppsMock.mockResolvedValue({
+      apps: [{ clientId: "uuid-1", name: "Claude Code", scopes: ["tickets:read"], lastUsedAt: "2026-10-01T10:00:00Z" }],
+    });
+
+    const { default: SettingsPage } = await import("@/app/settings/page");
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByText("Claude Code")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^revoke$/i })).toBeInTheDocument();
   });
 });
 
