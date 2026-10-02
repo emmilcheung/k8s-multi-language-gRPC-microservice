@@ -339,9 +339,10 @@ services:
       - microservices-net
 
   # ── mcp-service: Node.js / MCP resource server ──────────────────────────────
-  # Opt-in (profile "mcp") until the Kong /mcp route lands (WS-K) and
-  # MCP_TOKEN_EXCHANGE_CLIENT_SECRET is set in the git-ignored root .env
-  # (it fails config validation at boot without it).
+  # Opt-in (profile "mcp"): it fails config validation at boot unless
+  # MCP_TOKEN_EXCHANGE_CLIENT_SECRET is set in the git-ignored root .env.
+  # The Kong /mcp route exists (services/kong-gateway); whether this service
+  # joins the default profile is the owner's call.
   mcp-service:
     profiles: ["mcp"]
     build:
