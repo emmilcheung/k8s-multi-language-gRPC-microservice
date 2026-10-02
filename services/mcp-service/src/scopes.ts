@@ -32,6 +32,7 @@ export type ToolScope = (typeof TOOL_SCOPES)[ToolName];
 export function requireScope(scope: ToolScope): ScopeChallengeHandler {
   return ({ authInfo }) => {
     if (authInfo === undefined || authInfo.scopes.includes(scope)) return;
-    return { scopes: [...authInfo.scopes, scope] };
+    // Non-empty by construction: `scope` is always last.
+    return { scopes: [...authInfo.scopes, scope] as [string, ...string[]] };
   };
 }

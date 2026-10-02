@@ -84,8 +84,7 @@ export function createTokenExchange(opts: ExchangeOptions): TokenExchange {
     // The body of a failure is never read into the error: it is upstream text.
     if (!res.ok) throw new ExchangeError(res.status);
     const body = (await res.json().catch(() => undefined)) as
-      | { access_token?: unknown; expires_in?: unknown }
-      | undefined;
+      { access_token?: unknown; expires_in?: unknown } | undefined;
     if (
       typeof body?.access_token !== 'string' ||
       typeof body.expires_in !== 'number'
