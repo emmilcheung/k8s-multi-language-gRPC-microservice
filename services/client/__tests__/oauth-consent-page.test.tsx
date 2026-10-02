@@ -209,7 +209,7 @@ describe("ConsentPage app addresses (R1)", () => {
     });
     await renderConsent();
     for (const id of ["consent-document-host", "consent-redirect-host", "consent-mismatch"]) {
-      expect(screen.getByTestId(id)).toHaveClass("break-all");
+      expect(screen.getByTestId(id)).toHaveClass("[overflow-wrap:anywhere]");
     }
   });
 
