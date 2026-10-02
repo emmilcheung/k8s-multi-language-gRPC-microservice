@@ -19,7 +19,7 @@ export class OAuthMetadataController {
     // The issuer is published as configured whatever OAUTH_ISSUER_ENABLED says:
     // that flag only picks the JWT `iss` claim (D3), while clients check this
     // value against the origin they discovered it from.
-    const { issuer } = readOAuthConfig(this.config);
+    const { issuer, cimdEnabled } = readOAuthConfig(this.config);
     return {
       issuer,
       authorization_endpoint: `${issuer}/oauth/authorize`,
@@ -37,8 +37,9 @@ export class OAuthMetadataController {
       code_challenge_methods_supported: ['S256'],
       scopes_supported: [...OAUTH_SCOPE_NAMES],
       authorization_response_iss_parameter_supported: true,
-      // Flips to true when WS-I lands client-ID metadata documents.
-      client_id_metadata_document_supported: false,
+      // True only when OAUTH_CIMD_ENABLED: advertising CIMD while the fetch is off
+      // would send clients down a path that always fails.
+      client_id_metadata_document_supported: cimdEnabled,
     };
   }
 

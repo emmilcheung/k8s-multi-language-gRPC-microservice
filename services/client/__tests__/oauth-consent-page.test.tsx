@@ -34,7 +34,12 @@ const REGISTRY = [
   { scope: "wallet:spend", label: "Spend from your wallet", sensitive: true },
 ];
 
-function stubFetch(scopes: string[], registry: unknown = REGISTRY, registryOk = true) {
+function stubFetch(
+  scopes: string[],
+  registry: unknown = REGISTRY,
+  registryOk = true,
+  extra: Record<string, unknown> = {},
+) {
   const fetchMock = vi.fn(async (url: string) => {
     if (url.endsWith("/oauth/scopes")) {
       return new Response(JSON.stringify(registry), { status: registryOk ? 200 : 503 });
@@ -46,6 +51,7 @@ function stubFetch(scopes: string[], registry: unknown = REGISTRY, registryOk = 
         clientName: "Test Agent",
         scopes,
         expiresInSeconds: 300,
+        ...extra,
       }),
       { status: 200 },
     );
@@ -128,5 +134,103 @@ describe("ConsentPage scope labels (L-1)", () => {
     await expect(
       ConsentPage({ searchParams: Promise.resolve({ request_id: "req-1" }) }),
     ).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+});
+
+describe("ConsentPage app addresses (R1)", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const addr = (over: Record<string, unknown>) => ({
+    documentHost: "app.example.com",
+    redirectTargets: [{ host: "app.example.com", loopback: false }],
+    redirectMismatch: false,
+    ...over,
+  });
+
+  it("R1: a CIMD client shows two separate lines, the identity-document host and the redirect host, and never the word Verified", async () => {
+    stubFetch(["tickets:read"], REGISTRY, true, { addresses: addr({}), isFirstParty: false });
+    await renderConsent();
+    expect(screen.getByTestId("consent-document-host")).toHaveTextContent(
+      "App identity document hosted at app.example.com",
+    );
+    expect(screen.getByTestId("consent-redirect-host")).toHaveTextContent(
+      "After you allow, you are sent to app.example.com",
+    );
+    expect(screen.queryByTestId("consent-mismatch")).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/verified/i);
+    expect(screen.getByTestId("consent-party")).toHaveTextContent("Third-party");
+  });
+
+  it("R1: a redirect host that differs from the document host shows a caution naming both hosts", async () => {
+    stubFetch(["tickets:read"], REGISTRY, true, {
+      addresses: addr({
+        documentHost: "raw.githubusercontent.com",
+        redirectTargets: [{ host: "evil.example", loopback: false }],
+        redirectMismatch: true,
+      }),
+    });
+    await renderConsent();
+    const caution = screen.getByTestId("consent-mismatch");
+    expect(caution).toHaveTextContent("raw.githubusercontent.com");
+    expect(caution).toHaveTextContent("evil.example");
+  });
+
+  it("R1: a loopback redirect reads as an app on this device, with no caution and no raw loopback host", async () => {
+    stubFetch(["tickets:read"], REGISTRY, true, {
+      addresses: addr({ redirectTargets: [{ host: "127.0.0.1", loopback: true }] }),
+    });
+    await renderConsent();
+    const el = screen.getByTestId("consent-redirect-host");
+    expect(el).toHaveTextContent("an app on this device");
+    expect(el).not.toHaveTextContent("127.0.0.1");
+    expect(screen.queryByTestId("consent-mismatch")).not.toBeInTheDocument();
+  });
+
+  it("R1: a DCR client has no document line, only where the code is sent", async () => {
+    stubFetch(["tickets:read"], REGISTRY, true, {
+      addresses: addr({
+        documentHost: undefined,
+        redirectTargets: [{ host: "cb.example.org", loopback: false }],
+      }),
+    });
+    await renderConsent();
+    expect(screen.queryByTestId("consent-document-host")).not.toBeInTheDocument();
+    expect(screen.getByTestId("consent-redirect-host")).toHaveTextContent("cb.example.org");
+  });
+
+  it("F2: the host lines and the caution wrap, so a long host cannot overflow the card", async () => {
+    stubFetch(["tickets:read"], REGISTRY, true, {
+      addresses: addr({
+        documentHost: "a".repeat(200) + ".example.com",
+        redirectTargets: [{ host: "b".repeat(200) + ".example.net", loopback: false }],
+        redirectMismatch: true,
+      }),
+    });
+    await renderConsent();
+    for (const id of ["consent-document-host", "consent-redirect-host", "consent-mismatch"]) {
+      expect(screen.getByTestId(id)).toHaveClass("[overflow-wrap:anywhere]");
+    }
+  });
+
+  it("M-10: a very long client_id wraps instead of overflowing the card", async () => {
+    stubFetch(["tickets:read"], REGISTRY, true, {
+      clientId: "https://app.example.com/" + "a".repeat(300),
+    });
+    await renderConsent();
+    expect(screen.getByTestId("consent-client-id")).toHaveClass("break-all");
+  });
+
+  it("a static client is marked first-party", async () => {
+    stubFetch(["tickets:read"], REGISTRY, true, { isFirstParty: true });
+    await renderConsent();
+    expect(screen.getByTestId("consent-party")).toHaveTextContent("First-party");
+  });
+
+  it("an older auth-service without the fields still renders, as third-party with no domain line", async () => {
+    stubFetch(["tickets:read"]);
+    await renderConsent();
+    expect(screen.queryByTestId("consent-redirect-host")).not.toBeInTheDocument();
+    expect(screen.getByTestId("consent-party")).toHaveTextContent("Third-party");
   });
 });

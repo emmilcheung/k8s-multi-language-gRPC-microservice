@@ -5,13 +5,21 @@ import { serverApi } from "@/lib/api";
 
 /**
  * Item of GET /oauth/clients (auth-service OAuthClientSession), one per session.
- * `clientName` is the registered name (static or dynamic client); `clientDomain`
- * is optional and only present once auth-service reports one.
+ * `clientName` is the registered name (static or dynamic client); `addresses`
+ * is optional and only present once auth-service reports it.
  */
+export interface ClientAddresses {
+  /** Host of the CIMD client_id URL (absent for static and DCR clients). */
+  documentHost?: string;
+  redirectTargets: { host: string; loopback: boolean }[];
+  redirectMismatch: boolean;
+}
+
 interface OAuthClientSession {
   clientId: string;
   clientName?: string;
-  clientDomain?: string;
+  addresses?: ClientAddresses;
+  isFirstParty?: boolean;
   scope: string;
   sessionId: string;
   lastRotatedAt: string;
@@ -20,7 +28,9 @@ interface OAuthClientSession {
 export interface ConnectedApp {
   clientId: string;
   name: string;
-  domain?: string;
+  addresses?: ClientAddresses;
+  /** True for apps configured by us; false for self-registered (DCR) and URL (CIMD) apps. */
+  isFirstParty: boolean;
   scopes: string[];
   lastUsedAt?: string;
 }
@@ -39,7 +49,8 @@ export async function getConnectedApps(): Promise<{ apps: ConnectedApp[]; error?
     const app = byClient.get(s.clientId) ?? {
       clientId: s.clientId,
       name: s.clientName || s.clientId,
-      domain: s.clientDomain,
+      addresses: s.addresses,
+      isFirstParty: s.isFirstParty === true,
       scopes: [],
       lastUsedAt: undefined,
     };
@@ -56,7 +67,8 @@ export async function revokeConnectedAppAction(formData: FormData): Promise<{ er
   const clientId = formData.get("clientId");
   if (typeof clientId !== "string" || !clientId) return { error: "Client ID is required" };
   try {
-    await serverApi(`/oauth/clients/${encodeURIComponent(clientId)}`, { method: "DELETE" });
+    // Query form: a URL client id contains ':' and '/', which must not sit in a path segment.
+    await serverApi(`/oauth/clients?client_id=${encodeURIComponent(clientId)}`, { method: "DELETE" });
     revalidatePath("/settings");
     return {};
   } catch (error) {

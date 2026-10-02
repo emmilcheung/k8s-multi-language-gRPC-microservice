@@ -26,4 +26,26 @@ describe('RegisterClientBody', () => {
     expect(errors).not.toHaveLength(0);
     expect(errors[0]?.property).toBe('redirect_uris');
   });
+
+  it('accepts application_type native and web, rejects anything else', async () => {
+    const make = (application_type: string) =>
+      plainToInstance(RegisterClientBody, {
+        client_name: 'App',
+        redirect_uris: ['https://app.example.com/cb'],
+        application_type,
+      });
+    expect(await validate(make('native'))).toHaveLength(0);
+    expect(await validate(make('web'))).toHaveLength(0);
+    const errors = await validate(make('mobile'));
+    expect(errors[0]?.property).toBe('application_type');
+  });
+
+  it('caps client_name, because the name is shown verbatim on the consent page', async () => {
+    const dto = plainToInstance(RegisterClientBody, {
+      client_name: 'x'.repeat(101),
+      redirect_uris: ['https://app.example.com/cb'],
+    });
+    const errors = await validate(dto);
+    expect(errors[0]?.property).toBe('client_name');
+  });
 });

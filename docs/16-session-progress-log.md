@@ -9,6 +9,41 @@
 
 ---
 
+## Session: 2026-10-02 — feat(mcp): Wave 4 — client metadata documents, end-to-end spec, MCP docs ⏳ LOCAL, UNPUSHED
+
+**Branch:** `feat/mcp-platform-wave4` — lanes `feat/mcp-w4-{i,m}` merged `--no-ff` (I, then M), then merged `--no-ff` into the integration branch `feat/mcp-platform`. Nothing is pushed.
+
+**What landed**
+
+- **WS-I (auth-service, client):** Client ID Metadata Documents. With `OAUTH_CIMD_ENABLED` on, a host may use an `https` URL as its `client_id`; auth-service fetches the JSON document behind an SSRF guard and treats it as a public, never-first-party client. The guard: strict URL shape (https, port 443, DNS name, no internal suffix, no query/fragment/userinfo), its own DNS resolution with every address checked against a block list, a connection pinned to the vetted address with TLS bound to the host name, no redirects, 200 + JSON only, 5 KB, one 3 s deadline, at most 8 fetches in flight, Redis cache (60 s – 24 h, 60 s negative). A refused document is 400 `invalid_client`; a transient failure is 503 `temporarily_unavailable` with `Retry-After`. The flag defaults to **false** and is true only in compose and `values-local.yaml`. Dynamic registration stays and now shares one validation rule with CIMD. The consent page and Settings → Connected apps show where the client's document is hosted and where the user is sent after allowing, with a caution when the two differ; the consent buttons stay disabled until the page hydrates (an early click used to be lost silently — the cause of the Wave 3 flake). Revoke gained a query form, `DELETE /oauth/clients?client_id=`, because a URL id cannot sit in a path segment.
+- **WS-M (client E2E, docs, CI):** `tests/e2e/mcp-full-flow.spec.ts` plays an MCP host through Kong: discovery, dynamic registration, PKCE with `resource`, browser login and consent, `initialize`, `tools/list` (12), a read tool, `create_order` twice (second `replayed: true`), payment, and the negative edges (no token, MCP token on REST, step-up, 405 on GET/DELETE, internal-address CIMD ids refused). `docs/ticketing/mcp.md` replaces three stale stdio-era files; `docs/06-security.md` gains the MCP threat model and `docs/03-api-design.md` the two documented exceptions (mcp-service verifies its own token; it calls Kong's public REST).
+
+**Spec deviation:** D12 said `dns.promises.lookup`; the fetcher uses `dns.promises.Resolver` (c-ares) instead, so a slow lookup cannot occupy the libuv thread pool that password hashing shares, and can be cancelled at the deadline. Still node built-ins, no dependency.
+
+**Behaviour change for integrators (dynamic registration):** redirect URIs with a fragment (even an empty `#`) or userinfo are now refused, as are non-http(s) schemes on loopback hosts; `client_name` is limited to 100 characters with no control or formatting characters (which also rejects emoji joined by a zero-width joiner).
+
+**Exit gate (wave branch `110924f`, then three post-gate fixes re-checked on `5a399c6`): PASS WITH NOTES.** Static: auth-service 464 unit / 25 integration, lint 0 errors; client 244 unit (2 skipped: `queue-gate.integration`, needs `QUEUE_REAL_TOKEN`, untouched here); mcp-service 127. The two real-socket CIMD specs ran 5 × clean (OpenSSL 3). `OAUTH_CIMD_ENABLED` is true only in compose and `values-local.yaml`; no NetworkPolicy, `package.json` or lockfile changed. Live through Kong on a compose stack: `mcp-full-flow.spec.ts` 13/13 three times without retries, `oauth-agent-boundaries` 13/13, `connected-apps` 1/1, the ticketing consent test 1/1. In a real browser: the consent page shows the redirect destination ("an app on this device" for loopback), wraps an 84-character host at 375 px, and its buttons are `disabled` in the server HTML and enabled after hydration with no console warnings; Revoke sends `DELETE /oauth/clients?client_id=` → 204 and the old refresh token then fails. Dynamic registration refuses the listed bad redirect URIs and names and accepts the good ones. CIMD: metadata advertises support; six internal or malformed URL ids are refused with 400 in ~3 ms and no outbound request; one real fetch (`example.com`, a 404) is refused, logged with host and reason only, and answered from the negative cache on repeat.
+
+**Fixed after the gate:** the consent "Application" block squeezed the new address lines beside the client-id chip and clipped the chip at 375 px (now stacked, re-checked in a browser at 375 px and desktop); a URL client id refused before any fetch left no log line (now `oauth.cimd.url_rejected` / `oauth.cimd.busy`, reason and host only).
+
+**Not verified:** a successful fetch of a valid public metadata document; the consent page for a CIMD client in a browser (document-host line and mismatch caution are unit-tested only); the 503 `temporarily_unavailable` path live; the transport spec under LibreSSL; the full umbrella `helm template` (only the auth-service chart was rendered: flag present for local, absent for staging and prod); the edited `e2e` CI job on a runner; any cluster deploy.
+
+**Owner items**
+
+- **Hard stop #10 — egress for CIMD.** Enabling `OAUTH_CIMD_ENABLED` in any cluster needs an auth-service egress NetworkPolicy (TCP 443 to the public internet excluding private ranges, plus DNS). None exists and none was written; staging and prod keep the flag off. `/oauth/authorize` is unauthenticated, so with the flag on anyone can make auth-service fetch a public URL of their choice (bounded by the Kong per-IP limit, the caches and the in-flight cap).
+- **Refresh tokens (pre-existing, now documented):** no reuse detection; rotation is read-then-write, so two concurrent refreshes can both succeed; the 24 h lifetime is sliding, so a stolen refresh token used daily works until the user revokes. Decide whether to fix (atomic rotation + family revocation on reuse, absolute lifetime) before any public exposure.
+- **Dynamic registration:** no cap or quota beyond the per-IP limit and the one-year key expiry.
+- **auth-service request log (pre-existing):** the pino-http line logs the request URL with its query string on every route, so the whole `/oauth/authorize` URL (client id, redirect URI, `state`, PKCE challenge) and the email on `GET` lookups land in the access log. No token or client secret travels in a query string on the OAuth routes. Decide whether to strip or redact the query.
+- **`/oauth/authorize` errors (pre-existing):** a 4xx is the general error envelope with the OAuth error as a string inside it, shown raw to the browser. A human-readable error page is not built.
+- **`MaxListenersExceededWarning`** (11 `finish` listeners on the response) appears in auth-service logs per request. This wave changed no auth-service source outside `modules/oauth` and no dependency, so it is not from here; not traced.
+- **Manual check not run:** a real MCP host against the stack (`claude mcp add --transport http ticketing http://localhost:8000/mcp`); the procedure is in `docs/ticketing/mcp.md`.
+- **CI:** the `e2e` job now needs the `mcp` job, starts mcp-service (`COMPOSE_PROFILES: mcp`) and generates a throwaway exchange secret on the runner. Not run on a runner: watch the 20-minute limit on the first PR, and confirm `secrets.STRIPE_SECRET_KEY` contains `test_mock`. `audit/scripts/scrub-secrets.sh` does not know `TOKEN_EXCHANGE` names.
+- **Left for WS-N (stdio retirement, needs the owner's date):** `packages/ticketing-mcp-server`, the static `ticketing-mcp` client, `.mcp.json`, and the stdio parts of `docs/diagrams/05-auth-flows.*`.
+
+Ledger: `.superpowers/sdd/2026-10-02-mcp-wave4/` (`exit-gate.md`, per-lane reports, reviews and rulings).
+
+---
+
 ## Session: 2026-10-02 — feat(mcp): Wave 3 — token exchange, MCP tools, consent UI, Kong `/mcp` ⏳ LOCAL, UNPUSHED
 
 **Branch:** `feat/mcp-platform-wave3` — lanes `feat/mcp-w3-{l,h,j,k}` merged `--no-ff` (L → H → J, then K on top), then merged `--no-ff` into the integration branch `feat/mcp-platform`. Nothing is pushed.
