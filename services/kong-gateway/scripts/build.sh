@@ -236,7 +236,7 @@ check_queue_secret_embeddable(values.get('QUEUE_HMAC_SECRET', ''), 'after expans
 
 # ── Validate: the OAuth issuer is a bare origin ───────────────────────────────
 oauth_issuer = values.get('OAUTH_ISSUER', '').rstrip('/')
-if not re.match(r'^https?://[A-Za-z0-9.-]+(:[0-9]+)?$', oauth_issuer):
+if not re.fullmatch(r'https?://[A-Za-z0-9.-]+(:[0-9]+)?', oauth_issuer):
     print('ERROR: KONG_OAUTH_ISSUER is missing or not a bare origin (scheme://host[:port], no path/query).', file=sys.stderr)
     print('  Set it to the same origin as auth-service OAUTH_ISSUER (global.publicOrigin), e.g.:', file=sys.stderr)
     print('    export KONG_OAUTH_ISSUER="https://ticketing.example.com"', file=sys.stderr)

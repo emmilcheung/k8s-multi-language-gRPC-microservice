@@ -265,7 +265,10 @@ for e in dev staging prod; do
 done
 echo "PASS: K-5: dev/staging/prod refuse to render without KONG_OAUTH_ISSUER"
 
-for bad in "https://ticketing.example.com/api" "ticketing.example.com" "https://ticketing.example.com?x=1"; do
+# A trailing newline must not slip past the origin check: it would render a raw
+# newline inside the Lua string literal for the audience.
+for bad in "https://ticketing.example.com/api" "ticketing.example.com" "https://ticketing.example.com?x=1" \
+           $'https://ticketing.example.com\n' $'https://ticketing.example.com\nx'; do
   if out="$(KONG_OAUTH_ISSUER="${bad}" "${WORK}/scripts/build.sh" prod "${WORK}/x.yml" 2>&1)"; then
     echo "FAIL: K-5: prod accepted a non-origin issuer" >&2
     exit 1
