@@ -5,6 +5,8 @@ import type { Request } from 'express';
 import { OAuthService } from './oauth.service';
 import { OAuthController } from './oauth.controller';
 import { CimdClientService } from './cimd-client.service';
+import { CimdFetchError } from './cimd-fetcher';
+import { OAuthTemporarilyUnavailableException } from './oauth-unavailable';
 import type { CimdFetchResult } from './cimd-fetcher';
 
 const URL_ID = 'https://app.example.com/oauth/client.json';
@@ -277,7 +279,7 @@ describe('CIMD at /oauth/token', () => {
     expect(fetchDoc).toHaveBeenCalledTimes(1);
 
     const gone = makeService();
-    gone.fetchDoc.mockRejectedValue(new Error('down'));
+    gone.fetchDoc.mockRejectedValue(new CimdFetchError('bad_status', '404'));
     const body = await errorOf(
       gone.service.token(
         {
@@ -440,5 +442,129 @@ describe('I-7: DELETE through the controller', () => {
       } as unknown as Request),
     ).rejects.toBeInstanceOf(HttpException);
     expect(oauthService.revokeClient).not.toHaveBeenCalled();
+  });
+});
+
+describe('M-2: transient CIMD failures are 503, terminal ones stay invalid_client', () => {
+  const rejectWith = async (
+    code: ConstructorParameters<typeof CimdFetchError>[0],
+  ) => {
+    const m = makeService();
+    m.fetchDoc.mockRejectedValue(new CimdFetchError(code));
+    return m;
+  };
+  const failure = (p: Promise<unknown>) => p.catch((e: unknown) => e);
+
+  it.each(['timeout', 'connect_failed', 'dns_unavailable'] as const)(
+    'M-2: %s at /authorize is a 503 temporarily_unavailable with Retry-After',
+    async (code) => {
+      const { service } = await rejectWith(code);
+      const e = await failure(service.authorize(authorizeQuery(), authReq));
+      expect(e).toBeInstanceOf(OAuthTemporarilyUnavailableException);
+      expect(
+        (e as OAuthTemporarilyUnavailableException).retryAfterSeconds,
+      ).toBeGreaterThan(0);
+    },
+  );
+
+  it.each([
+    'blocked_address',
+    'invalid_url',
+    'invalid_document',
+    'bad_status',
+    'redirect',
+    'bad_content_type',
+    'too_large',
+    'invalid_json',
+    'dns_failed',
+  ] as const)(
+    'M-2: %s stays a generic invalid_client (a blocked/internal address must never take the 503 path)',
+    async (code) => {
+      const { service } = await rejectWith(code);
+      const e = await failure(service.authorize(authorizeQuery(), authReq));
+      expect(e).not.toBeInstanceOf(OAuthTemporarilyUnavailableException);
+      expect((e as HttpException).getResponse()).toMatchObject({
+        error: 'invalid_client',
+      });
+    },
+  );
+
+  it('M-2: overload (busy) is a 503 and is not cached', async () => {
+    const { service, cimd } = makeService();
+    vi.spyOn(cimd, 'resolve').mockResolvedValue({ ok: false, reason: 'busy' });
+    const e = await failure(service.authorize(authorizeQuery(), authReq));
+    expect(e).toBeInstanceOf(OAuthTemporarilyUnavailableException);
+  });
+
+  it('M-2: a refresh whose document fetch times out gets a 503 so the client keeps its credentials', async () => {
+    const { service, fetchDoc, codeStore } = makeService();
+    codeStore.getSessionScope.mockResolvedValue({
+      scope: 'tickets:read',
+      clientId: URL_ID,
+    });
+    fetchDoc.mockRejectedValue(new CimdFetchError('timeout'));
+    const e = await failure(
+      service.token(
+        {
+          grant_type: 'refresh_token',
+          refresh_token: 'sid.secret',
+          client_id: URL_ID,
+        } as never,
+        tokenReq,
+      ),
+    );
+    expect(e).toBeInstanceOf(OAuthTemporarilyUnavailableException);
+  });
+
+  it('M-2: the authorization-code grant behaves the same', async () => {
+    const { service, fetchDoc } = makeService();
+    fetchDoc.mockRejectedValue(new CimdFetchError('connect_failed'));
+    const e = await failure(
+      service.token(
+        {
+          grant_type: 'authorization_code',
+          code: 'c',
+          code_verifier: 'v'.repeat(43),
+          redirect_uri: CALLBACK,
+          client_id: URL_ID,
+        } as never,
+        tokenReq,
+      ),
+    );
+    expect(e).toBeInstanceOf(OAuthTemporarilyUnavailableException);
+  });
+});
+
+describe('M-9 / M-1: a URL client_id is never a token-exchange client', () => {
+  const GRANT = 'urn:ietf:params:oauth:grant-type:token-exchange';
+  const exchange = (extra: Record<string, unknown> = {}) => ({
+    grant_type: GRANT,
+    subject_token: 'sub',
+    subject_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+    ...extra,
+  });
+
+  it('M-9: in the body, it is refused like an unknown client and nothing is fetched (no existence oracle, no fetch trigger)', async () => {
+    const { service, fetchDoc } = makeService();
+    const body = await errorOf(
+      service.token(exchange({ client_id: URL_ID }) as never, tokenReq),
+    );
+    expect(body).toEqual({
+      error: 'invalid_client',
+      error_description: 'Unknown client_id',
+    });
+    expect(fetchDoc).not.toHaveBeenCalled();
+  });
+
+  it('M-9: with Basic credentials it is the same 401 invalid_client a wrong secret gets, with no fetch', async () => {
+    const { service, fetchDoc } = makeService();
+    const body = await errorOf(
+      service.token(exchange() as never, tokenReq, {
+        clientId: URL_ID,
+        clientSecret: 's',
+      } as never),
+    );
+    expect(body).toMatchObject({ error: 'invalid_client' });
+    expect(fetchDoc).not.toHaveBeenCalled();
   });
 });

@@ -178,6 +178,44 @@ describe('CimdClientService (I-10)', () => {
     expect(store.size).toBe(8);
   });
 
+  it('M-1: once the 8 fetches have completed, a 9th is attempted (slots are released, not leaked)', async () => {
+    const { service, fetchDoc } = make();
+    const release: (() => void)[] = [];
+    fetchDoc.mockImplementation(
+      (url: string) =>
+        new Promise((resolve) =>
+          release.push(() => resolve({ body: body({ client_id: url }) })),
+        ),
+    );
+    const first = Array.from({ length: 8 }, (_, i) =>
+      service.resolve(`https://app${i}.example.com/c.json`),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    release.forEach((r) => r());
+    await Promise.all(first);
+    fetchDoc.mockClear();
+    fetchDoc.mockResolvedValue({
+      body: body({ client_id: 'https://ninth.example.com/c.json' }),
+    });
+    expect(
+      await service.resolve('https://ninth.example.com/c.json'),
+    ).toMatchObject({ ok: true });
+    expect(fetchDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it('M-1: slots are also released when fetches fail', async () => {
+    const { service, fetchDoc } = make();
+    fetchDoc.mockRejectedValue(new CimdFetchError('timeout'));
+    for (let i = 0; i < 20; i++) {
+      expect(await service.resolve(`https://f${i}.example.com/c.json`)).toEqual(
+        {
+          ok: false,
+          reason: 'timeout',
+        },
+      );
+    }
+  });
+
   it('logs failures with host and reason only, never the URL path or a body', async () => {
     const { service, fetchDoc, logger } = make();
     fetchDoc.mockRejectedValue(new CimdFetchError('bad_status', '500'));

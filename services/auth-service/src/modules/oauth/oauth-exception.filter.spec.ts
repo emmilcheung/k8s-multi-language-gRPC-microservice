@@ -1,3 +1,4 @@
+import { OAuthUnavailableFilter } from './oauth-unavailable';
 import { describe, it, expect, vi } from 'vitest';
 import {
   BadRequestException,
@@ -138,9 +139,12 @@ describe('OAuthController filter wiring (D8: RFC shape on three endpoints only)'
     expect(filtersOf('register')).toEqual([OAuthRegistrationExceptionFilter]);
   });
 
+  it('M-2: authorize keeps the docs/03 shape for everything except the retryable 503, which has its own narrow filter', () => {
+    expect(filtersOf('authorize')).toEqual([OAuthUnavailableFilter]);
+  });
+
   it('leaves the first-party JSON endpoints on the docs/03 shape', () => {
     for (const m of [
-      'authorize',
       'listClients',
       'revokeClient',
       'getConsent',

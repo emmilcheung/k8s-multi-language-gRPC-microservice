@@ -31,6 +31,7 @@ import type {
   ConsentResult,
 } from './oauth.dto';
 import { TOKEN_EXCHANGE_GRANT } from './oauth-clients.config';
+import { OAuthUnavailableFilter } from './oauth-unavailable';
 import { UserIdSignatureValidator } from '../../common/security/user-id-signature.validator';
 import {
   OAuthExceptionFilter,
@@ -78,6 +79,7 @@ export class OAuthController {
 
   // GET /oauth/authorize
   @Get('oauth/authorize')
+  @UseFilters(OAuthUnavailableFilter)
   async authorize(
     @Query() query: AuthorizeQuery,
     @Req() req: Request,

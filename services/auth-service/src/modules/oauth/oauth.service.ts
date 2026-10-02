@@ -26,6 +26,7 @@ import {
 import type { OAuthClient } from './oauth-clients.config';
 import { DynamicClientService } from './dynamic-client.service';
 import { CimdClientService } from './cimd-client.service';
+import { OAuthTemporarilyUnavailableException } from './oauth-unavailable';
 import { OAuthConsentStoreService } from './oauth-consent-store.service';
 import type { ConsentSummary } from './oauth-consent-store.service';
 import { OAUTH_SCOPE_NAMES } from './oauth-scopes';
@@ -51,6 +52,12 @@ import type {
 const ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token';
 /** C-1: an exchanged token lives at most this long (and never past its subject). */
 const EXCHANGED_TOKEN_MAX_SECONDS = 300;
+
+const TRANSIENT_CIMD_REASONS: ReadonlySet<string> = new Set([
+  'timeout',
+  'connect_failed',
+  'dns_unavailable',
+]);
 
 @Injectable()
 export class OAuthService implements OnModuleInit {
@@ -91,6 +98,26 @@ export class OAuthService implements OnModuleInit {
   }
 
   /**
+   * Client lookup for authorize/token/refresh. A transient CIMD failure is a
+   * retryable 503, not a terminal unknown client: a refreshing client must not
+   * discard its credentials because a document host blipped. Blocked addresses,
+   * bad shapes and bad documents never take this path, so it is no oracle.
+   */
+  private async resolveClientForRequest(
+    clientId: string,
+  ): Promise<OAuthClient | null> {
+    if (!isUrlClientId(clientId)) return this.resolveClient(clientId);
+    const r = await this.cimd.resolve(clientId);
+    if (r.ok) return r.client;
+    if (r.reason === 'busy') throw new OAuthTemporarilyUnavailableException(5);
+    if (TRANSIENT_CIMD_REASONS.has(r.reason)) {
+      // The failure is negatively cached for 60 s, so retrying sooner cannot help.
+      throw new OAuthTemporarilyUnavailableException(60);
+    }
+    return null;
+  }
+
+  /**
    * /authorize is reachable without a session, and a CIMD client id costs an
    * outbound fetch, so everything that can be checked without the client is
    * checked first. Failure detail stays in the logs: telling the caller why a
@@ -103,9 +130,9 @@ export class OAuthService implements OnModuleInit {
       return this.resolveClient(query.client_id);
     }
     this.assertAllowedResource(query.resource);
-    const resolved = await this.cimd.resolve(query.client_id);
-    if (resolved.ok) return resolved.client;
-    if (resolved.reason === 'disabled') return null;
+    const client = await this.resolveClientForRequest(query.client_id);
+    if (client) return client;
+    if (!this.cimd.enabled) return null;
     throw new BadRequestException({
       error: 'invalid_client',
       error_description:
@@ -459,7 +486,10 @@ export class OAuthService implements OnModuleInit {
     }
 
     if (clientId !== MCP_SERVICE_CLIENT_ID) {
-      if (!(await this.resolveClient(clientId))) {
+      // M-9: only the confidential mcp-service client may exchange, so a URL id
+      // is refused as an unknown client BEFORE any resolve: this grant can then
+      // neither trigger a fetch nor reveal whether a document exists.
+      if (isUrlClientId(clientId) || !(await this.resolveClient(clientId))) {
         throw basic
           ? failed()
           : new BadRequestException({
@@ -495,7 +525,7 @@ export class OAuthService implements OnModuleInit {
       });
     }
 
-    const client = await this.resolveClient(body.client_id);
+    const client = await this.resolveClientForRequest(body.client_id);
     if (!client) {
       throw new BadRequestException({
         error: 'invalid_client',
@@ -614,7 +644,7 @@ export class OAuthService implements OnModuleInit {
       });
     }
 
-    const client = await this.resolveClient(body.client_id);
+    const client = await this.resolveClientForRequest(body.client_id);
     if (!client) {
       throw new BadRequestException({
         error: 'invalid_client',
