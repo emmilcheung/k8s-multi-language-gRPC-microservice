@@ -63,7 +63,7 @@ Scope: an MCP host (an AI agent) acting for a signed-in user through `https://<o
 
 - **Threat:** an agent (or a retrying transport) repeats a mutating call and buys twice.
 - **Mitigation:** `create_order` and the seated variant send an `Idempotency-Key` derived from `sha256(sub, tool, canonical arguments)`, truncated to 43 base64url characters; an explicit `idempotencyKey` overrides it (`services/mcp-service/src/idempotency.ts`). order-service answers a repeat with the original order and `Idempotent-Replayed: true`; the tool surfaces `replayed`. Asserted by the E2E spec (second identical call returns the same order id and `replayed: true`).
-- **Residual:** the key is deterministic, so two deliberate identical purchases by the same user collapse into one unless the caller passes a distinct `idempotencyKey`. Payment tools carry no derived key (`tools.ts`, `pay_for_order*`); a repeated payment call relies on payment-service's own duplicate handling, which this guide did not re-verify.
+- **Residual:** the key is deterministic, so two deliberate identical purchases by the same user collapse into one unless the caller passes a distinct `idempotencyKey`. Payment tools carry no derived key (`tools.ts`, `pay_for_order*`); a repeated payment call relies on payment-service's own duplicate handling, not verified for this model.
 
 ### Scope escalation and step-up
 
