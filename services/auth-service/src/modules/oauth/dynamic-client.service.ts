@@ -1,7 +1,11 @@
-import { Injectable, Inject, BadRequestException } from '@nestjs/common';
+import { clientNameProblem } from './oauth-client-name.util';
+import { BadRequestException, Injectable, Inject } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type Redis from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.module';
+import { OAUTH_SCOPE_NAMES } from './oauth-scopes';
+import { assertValidRedirectUris } from './oauth-redirect.util';
+import type { OAuthApplicationType } from './oauth-clients.config';
 
 const DYNAMIC_CLIENT_TTL_SECONDS = 31536000; // 1 year
 const DYNAMIC_CLIENT_KEY_PREFIX = 'auth-service:oauth:dynamic-client';
@@ -16,6 +20,8 @@ export interface DynamicOAuthClient {
   accessTokenLifetimeSeconds: number; // default: 900
   refreshTokenLifetimeSeconds: number; // default: 86400
   isFirstParty: false;
+  /** RFC 7591 application_type; records stored before WS-I read as 'web'. */
+  applicationType?: OAuthApplicationType;
   registeredAt: string; // ISO timestamp
 }
 
@@ -24,19 +30,8 @@ export interface RegisterClientInput {
   redirectUris: string[];
   scope?: string; // space-delimited; defaults to all allowed scopes
   grantTypes?: string[]; // defaults to ['authorization_code']
+  applicationType?: OAuthApplicationType; // defaults to 'web'
 }
-
-const ALL_ALLOWED_SCOPES = [
-  'tickets:read',
-  'orders:read',
-  'orders:create',
-  'orders:cancel',
-  'payments:read',
-  'payments:create',
-  'venues:read',
-  'seating:read',
-  'seating:hold',
-];
 
 @Injectable()
 export class DynamicClientService {
@@ -46,38 +41,23 @@ export class DynamicClientService {
     return `${DYNAMIC_CLIENT_KEY_PREFIX}:${clientId}`;
   }
 
-  private validateRedirectUris(redirectUris: string[]): void {
-    for (const uri of redirectUris) {
-      try {
-        const parsed = new URL(uri);
-        const isLocalhost =
-          parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
-        if (parsed.protocol !== 'https:' && !isLocalhost) {
-          throw new BadRequestException({
-            error: 'invalid_redirect_uri',
-            error_description: `redirect_uri must use HTTPS or be localhost: ${uri}`,
-          });
-        }
-      } catch (e) {
-        if (e instanceof BadRequestException) throw e;
-        throw new BadRequestException({
-          error: 'invalid_redirect_uri',
-          error_description: `Invalid URI: ${uri}`,
-        });
-      }
-    }
-  }
-
   async register(input: RegisterClientInput): Promise<DynamicOAuthClient> {
-    this.validateRedirectUris(input.redirectUris);
+    assertValidRedirectUris(input.redirectUris);
+    const nameProblem = clientNameProblem(input.clientName);
+    if (nameProblem) {
+      throw new BadRequestException({
+        error: 'invalid_client_metadata',
+        error_description: nameProblem,
+      });
+    }
 
     const requestedScopes = input.scope
       ? input.scope.split(' ').filter(Boolean)
-      : [...ALL_ALLOWED_SCOPES];
+      : [...OAUTH_SCOPE_NAMES];
 
     // Only allow scopes from the known set
     const allowedScopes = requestedScopes.filter((s) =>
-      ALL_ALLOWED_SCOPES.includes(s),
+      (OAUTH_SCOPE_NAMES as readonly string[]).includes(s),
     );
 
     const client: DynamicOAuthClient = {
@@ -90,6 +70,7 @@ export class DynamicClientService {
       accessTokenLifetimeSeconds: 900,
       refreshTokenLifetimeSeconds: 86400,
       isFirstParty: false,
+      applicationType: input.applicationType ?? 'web',
       registeredAt: new Date().toISOString(),
     };
 

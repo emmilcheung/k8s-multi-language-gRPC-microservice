@@ -1,3 +1,4 @@
+import type { ClientAddresses } from './oauth-clients.config';
 import {
   IsString,
   IsNotEmpty,
@@ -7,7 +8,11 @@ import {
   ArrayNotEmpty,
   IsUrl,
   IsBoolean,
+  MaxLength,
 } from 'class-validator';
+
+/** Longest client_name accepted from DCR and CIMD; it is rendered on the consent page. */
+export const CLIENT_NAME_MAX_LENGTH = 100;
 
 /** Query params for GET /oauth/authorize */
 export class AuthorizeQuery {
@@ -149,6 +154,10 @@ export interface ClientCredentials {
 export interface OAuthClientSession {
   clientId: string;
   clientName: string;
+  /** client_id host (CIMD only) and registered redirect hosts; see describeClientAddresses. */
+  addresses?: ClientAddresses;
+  /** True for static-config clients; false for DCR and CIMD apps. */
+  isFirstParty: boolean;
   scope: string;
   sessionId: string;
   lastRotatedAt: string;
@@ -156,8 +165,10 @@ export interface OAuthClientSession {
 
 /** Body for POST /oauth/clients/register — RFC 7591 dynamic client registration */
 export class RegisterClientBody {
+  /** Shown verbatim on the consent page, so it is capped (CLIENT_NAME_MAX_LENGTH). */
   @IsString()
   @IsNotEmpty()
+  @MaxLength(CLIENT_NAME_MAX_LENGTH)
   client_name!: string;
 
   @IsArray()
@@ -173,6 +184,11 @@ export class RegisterClientBody {
   @IsOptional()
   @IsString({ each: true })
   grant_types?: string[];
+
+  /** RFC 7591 application_type; defaults to 'web'. */
+  @IsOptional()
+  @IsIn(['native', 'web'])
+  application_type?: 'native' | 'web';
 }
 
 /** Response shape for POST /oauth/clients/register */
@@ -183,6 +199,7 @@ export interface RegisterClientResponse {
   grant_types: string[];
   scope: string;
   token_endpoint_auth_method: 'none'; // public client
+  application_type: 'native' | 'web';
   pkce_required: true;
 }
 
@@ -197,6 +214,8 @@ export interface ConsentDetails {
   requestId: string;
   clientId: string;
   clientName: string;
+  addresses?: ClientAddresses;
+  isFirstParty: boolean;
   scopes: string[];
   expiresInSeconds: number;
 }

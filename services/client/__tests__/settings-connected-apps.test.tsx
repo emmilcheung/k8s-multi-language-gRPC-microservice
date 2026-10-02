@@ -82,15 +82,27 @@ describe("getConnectedApps (L-2)", () => {
 describe("revokeConnectedAppAction (L-2)", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("L-2: DELETEs /oauth/clients/:clientId with the id URL-encoded", async () => {
+  it("I-7: DELETEs /oauth/clients?client_id= with the id URL-encoded, so a URL id never sits in a path segment", async () => {
     serverApiMock.mockResolvedValueOnce(undefined);
     const form = new FormData();
-    form.set("clientId", "a/b c");
+    form.set("clientId", "https://app.example.com/oauth/client.json");
 
     const result = await revokeConnectedAppAction(form);
 
     expect(result).toEqual({});
-    expect(serverApiMock).toHaveBeenCalledWith("/oauth/clients/a%2Fb%20c", { method: "DELETE" });
+    expect(serverApiMock).toHaveBeenCalledWith(
+      "/oauth/clients?client_id=https%3A%2F%2Fapp.example.com%2Foauth%2Fclient.json",
+      { method: "DELETE" },
+    );
+    expect(String(serverApiMock.mock.calls[0][0])).not.toMatch(/\/oauth\/clients\/./);
+  });
+
+  it("I-7: an opaque id is sent the same way", async () => {
+    serverApiMock.mockResolvedValueOnce(undefined);
+    const form = new FormData();
+    form.set("clientId", UUID);
+    await revokeConnectedAppAction(form);
+    expect(serverApiMock).toHaveBeenCalledWith(`/oauth/clients?client_id=${UUID}`, { method: "DELETE" });
   });
 
   it("L-2: refuses to call upstream without a client id", async () => {
@@ -113,6 +125,7 @@ describe("ConnectedApps section (L-2)", () => {
   const app: ConnectedApp = {
     clientId: UUID,
     name: "Claude Code",
+    isFirstParty: false,
     scopes: ["tickets:read", "orders:create"],
     lastUsedAt: "2026-10-01T10:00:00.000Z",
   };
@@ -128,9 +141,14 @@ describe("ConnectedApps section (L-2)", () => {
   });
 
   it("L-2: shows the domain when the listing provides one", () => {
-    render(<ConnectedApps apps={[{ ...app, domain: "claude.ai" }]} revokeAction={vi.fn()} />);
+    render(
+      <ConnectedApps
+        apps={[{ ...app, addresses: { redirectTargets: [{ host: "claude.ai", loopback: false }], redirectMismatch: false } }]}
+        revokeAction={vi.fn()}
+      />,
+    );
 
-    expect(screen.getByText("claude.ai")).toBeInTheDocument();
+    expect(screen.getByTestId("app-redirect-hosts")).toHaveTextContent("claude.ai");
   });
 
   it("L-2: each row has a Revoke form carrying its client id", () => {
@@ -160,5 +178,69 @@ describe("ConnectedApps section (L-2)", () => {
 
     await waitFor(() => expect(button).toBeDisabled());
     expect(revoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Connected apps domain and party marker (I-7 / ruling 7)", () => {
+  const base: ConnectedApp = { clientId: "c", name: "Agent", isFirstParty: false, scopes: [] };
+
+  const withAddr = (documentHost: string | undefined, hosts: [string, boolean][]) => ({
+    ...base,
+    addresses: {
+      documentHost,
+      redirectTargets: hosts.map(([host, loopback]) => ({ host, loopback })),
+      redirectMismatch: false,
+    },
+  });
+
+  it("R1: a CIMD app shows its identity-document host and its registered redirect hosts as separate lines", () => {
+    render(<ConnectedApps apps={[withAddr("app.example.com", [["app.example.com", false]])]} revokeAction={vi.fn()} />);
+    expect(screen.getByTestId("app-document-host")).toHaveTextContent("App identity document hosted at app.example.com");
+    expect(screen.getByTestId("app-redirect-hosts")).toHaveTextContent("Redirects to app.example.com");
+  });
+
+  it("R1: a DCR app has no document line, only where it redirects", () => {
+    render(<ConnectedApps apps={[withAddr(undefined, [["cb.example.org", false]])]} revokeAction={vi.fn()} />);
+    expect(screen.queryByTestId("app-document-host")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-redirect-hosts")).toHaveTextContent("cb.example.org");
+  });
+
+  it("R1: a loopback redirect reads as an app on this device", () => {
+    render(<ConnectedApps apps={[withAddr(undefined, [["localhost", true]])]} revokeAction={vi.fn()} />);
+    expect(screen.getByTestId("app-redirect-hosts")).toHaveTextContent("an app on this device");
+    expect(screen.getByTestId("app-redirect-hosts")).not.toHaveTextContent("localhost");
+  });
+
+  it("M-10: at most 3 redirect hosts are listed, the rest collapse to +N more", () => {
+    const hosts: [string, boolean][] = ["a", "b", "c", "d", "e"].map((h) => [`${h}.example.com`, false]);
+    render(<ConnectedApps apps={[withAddr(undefined, hosts)]} revokeAction={vi.fn()} />);
+    const el = screen.getByTestId("app-redirect-hosts");
+    expect(el).toHaveTextContent("a.example.com");
+    expect(el).toHaveTextContent("c.example.com");
+    expect(el).not.toHaveTextContent("d.example.com");
+    expect(el).toHaveTextContent("+2 more");
+  });
+
+  it("marks a static app first-party and a DCR/CIMD app third-party", () => {
+    const { rerender } = render(<ConnectedApps apps={[{ ...base, isFirstParty: true }]} revokeAction={vi.fn()} />);
+    expect(screen.getByTestId("party-badge")).toHaveTextContent("First-party");
+    rerender(<ConnectedApps apps={[base]} revokeAction={vi.fn()} />);
+    expect(screen.getByTestId("party-badge")).toHaveTextContent("Third-party");
+  });
+
+  it("getConnectedApps maps the addresses and the party flag from the listing", async () => {
+    serverApiMock.mockResolvedValueOnce([
+      {
+        clientId: "https://app.example.com/c.json",
+        clientName: "Ex",
+        addresses: { documentHost: "app.example.com", redirectTargets: [], redirectMismatch: false },
+        isFirstParty: false,
+        scope: "tickets:read",
+        sessionId: "s",
+        lastRotatedAt: "2026-10-01T10:00:00.000Z",
+      },
+    ]);
+    const { apps } = await getConnectedApps();
+    expect(apps[0]).toMatchObject({ addresses: { documentHost: "app.example.com" }, isFirstParty: false });
   });
 });

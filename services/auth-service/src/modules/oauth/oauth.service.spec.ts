@@ -47,6 +47,10 @@ function makeService() {
     dynamicClientService as never,
     consentStore as never,
     { info: vi.fn(), warn: vi.fn() } as never,
+    {
+      resolve: vi.fn().mockResolvedValue({ ok: false, reason: 'disabled' }),
+      peek: vi.fn().mockResolvedValue(null),
+    } as never,
   );
   return {
     service,
@@ -149,6 +153,12 @@ describe('OAuthService listClients (L-2, auth half)', () => {
       {
         clientId: uuid,
         clientName: 'Claude Desktop',
+        addresses: {
+          documentHost: undefined,
+          redirectTargets: [{ host: '127.0.0.1', loopback: true }],
+          redirectMismatch: false,
+        },
+        isFirstParty: false,
         scope: 'tickets:read',
         sessionId: 's1',
         lastRotatedAt: '2026-10-02T00:00:00.000Z',
