@@ -115,7 +115,9 @@ func (r *ReservationRepo) ReleaseReservation(ctx context.Context, reservationID,
 	}
 
 	switch res.Status {
-	case repository.ReservationStatusReleased:
+	case repository.ReservationStatusReleased, repository.ReservationStatusExpired:
+		// EXPIRED: the expiry sweep already restored the seats. Re-running the seat
+		// UPDATE would free seats that may since belong to another reservation.
 		return repository.ErrReservationAlreadyDone
 	case repository.ReservationStatusSold:
 		return repository.ErrReservationConflict
@@ -127,7 +129,19 @@ func (r *ReservationRepo) ReleaseReservation(ctx context.Context, reservationID,
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// Release seats.
+	// Claim the reservation first: the status guard takes the row lock, so a
+	// concurrent expiry sweep or finalize either finished before us (0 rows) or
+	// waits for us.
+	tag, err := tx.Exec(ctx, `
+		UPDATE seat_reservations SET status = 'RELEASED', updated_at = now()
+		WHERE id = $1 AND status = 'RESERVED'`, reservationID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return currentStateErr(ctx, tx, reservationID, repository.ReservationStatusReleased)
+	}
+
 	seatIDs := make([]string, len(res.Items))
 	for i, item := range res.Items {
 		seatIDs[i] = item.SeatID
@@ -141,14 +155,6 @@ func (r *ReservationRepo) ReleaseReservation(ctx context.Context, reservationID,
 		if _, err := tx.Exec(ctx, seatQ, seatIDs); err != nil {
 			return err
 		}
-	}
-
-	// Update reservation status.
-	const resQ = `
-		UPDATE seat_reservations SET status = 'RELEASED', updated_at = now()
-		WHERE id = $1`
-	if _, err := tx.Exec(ctx, resQ, reservationID); err != nil {
-		return err
 	}
 
 	return tx.Commit(ctx)
@@ -166,7 +172,7 @@ func (r *ReservationRepo) FinalizeReservation(ctx context.Context, reservationID
 	switch res.Status {
 	case repository.ReservationStatusSold:
 		return repository.ErrReservationAlreadyDone
-	case repository.ReservationStatusReleased:
+	case repository.ReservationStatusReleased, repository.ReservationStatusExpired:
 		return repository.ErrReservationConflict
 	}
 
@@ -176,7 +182,19 @@ func (r *ReservationRepo) FinalizeReservation(ctx context.Context, reservationID
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// Sell seats.
+	// Claim the reservation first (see ReleaseReservation): never sell seats for a
+	// reservation the expiry sweep or a release already transitioned.
+	tag, err := tx.Exec(ctx, `
+		UPDATE seat_reservations
+		SET status = 'SOLD', order_id = $1, updated_at = now()
+		WHERE id = $2 AND status = 'RESERVED'`, orderID, reservationID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return currentStateErr(ctx, tx, reservationID, repository.ReservationStatusSold)
+	}
+
 	seatIDs := make([]string, len(res.Items))
 	for i, item := range res.Items {
 		seatIDs[i] = item.SeatID
@@ -191,16 +209,107 @@ func (r *ReservationRepo) FinalizeReservation(ctx context.Context, reservationID
 		}
 	}
 
-	// Finalize reservation.
-	const resQ = `
-		UPDATE seat_reservations
-		SET status = 'SOLD', order_id = $1, updated_at = now()
-		WHERE id = $2`
-	if _, err := tx.Exec(ctx, resQ, orderID, reservationID); err != nil {
+	return tx.Commit(ctx)
+}
+
+// currentStateErr maps the reservation's current status to the error Release /
+// Finalize would have returned had they seen it up front. It is used when the
+// guarded UPDATE matched no row because another transaction won the race.
+// want is the status the caller was trying to reach (already there = idempotent).
+func currentStateErr(ctx context.Context, tx pgx.Tx, id string, want repository.ReservationStatus) error {
+	var cur repository.ReservationStatus
+	if err := tx.QueryRow(ctx, `SELECT status FROM seat_reservations WHERE id = $1`, id).Scan(&cur); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return repository.ErrReservationNotFound
+		}
 		return err
 	}
+	if cur == want {
+		return repository.ErrReservationAlreadyDone
+	}
+	if want == repository.ReservationStatusReleased && cur == repository.ReservationStatusExpired {
+		return repository.ErrReservationAlreadyDone
+	}
+	return repository.ErrReservationConflict
+}
 
-	return tx.Commit(ctx)
+// expirySweepBatch bounds how many reservations one sweep tick expires.
+const expirySweepBatch = 200
+
+// SweepExpiredReservations expires RESERVED reservations whose expires_at has
+// passed: marks them EXPIRED and restores their still-RESERVED seats to
+// AVAILABLE, in one transaction. Rows with NULL expires_at are never touched.
+//
+// Only one pod sweeps per tick (pg_try_advisory_xact_lock, a different key from
+// the hold sweeper); a non-leader returns (0, nil). The status = 'RESERVED'
+// guard plus SKIP LOCKED means a reservation being finalized/released
+// concurrently is never expired, so its seats are never freed under it.
+// Returns the number of reservations expired.
+func (r *ReservationRepo) SweepExpiredReservations(ctx context.Context) (int64, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	var gotLock bool
+	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtext($1))`, "venue-reservation-sweeper").Scan(&gotLock); err != nil {
+		return 0, err
+	}
+	if !gotLock {
+		return 0, nil
+	}
+
+	const expireQ = `
+		UPDATE seat_reservations
+		SET status = 'EXPIRED', updated_at = now()
+		WHERE status = 'RESERVED'
+		  AND id IN (
+		      SELECT id FROM seat_reservations
+		      WHERE status = 'RESERVED' AND expires_at IS NOT NULL AND expires_at < now()
+		      ORDER BY expires_at
+		      LIMIT $1
+		      FOR UPDATE SKIP LOCKED)
+		RETURNING id`
+	rows, err := tx.Query(ctx, expireQ, expirySweepBatch)
+	if err != nil {
+		return 0, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	// held_by = reservation id (set by AtomicReserveAndCreate) ensures a seat is
+	// only freed for the reservation that actually owns it.
+	const seatQ = `
+		UPDATE seats s
+		SET status = 'AVAILABLE', held_by = NULL, held_until = NULL,
+		    version = s.version + 1, updated_at = now()
+		FROM seat_reservation_items i
+		WHERE i.seat_id = s.id
+		  AND i.reservation_id = ANY($1)
+		  AND s.status = 'RESERVED'
+		  AND s.held_by = i.reservation_id`
+	if _, err := tx.Exec(ctx, seatQ, ids); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return int64(len(ids)), nil
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
