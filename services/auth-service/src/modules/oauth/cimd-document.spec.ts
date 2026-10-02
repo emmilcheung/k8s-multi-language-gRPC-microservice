@@ -154,3 +154,19 @@ describe('validateClientMetadataDocument', () => {
     );
   });
 });
+
+describe('F4: emoji and the joiner rule', () => {
+  const ok = (name: string) =>
+    validateClientMetadataDocument(URL_ID, doc({ client_name: name }))
+      .clientName;
+
+  it('F4: a plain emoji in a name is accepted', () => {
+    expect(ok('Ticket Bot \u{1F3AB}')).toBe('Ticket Bot \u{1F3AB}');
+  });
+
+  it('F4: an emoji ZWJ sequence is rejected on purpose, because U+200D is an invisible format character and invisible joiners are what the rule stops', () => {
+    expect(() =>
+      ok('Family \u{1F468}\u200D\u{1F469}\u200D\u{1F467}'),
+    ).toThrow();
+  });
+});

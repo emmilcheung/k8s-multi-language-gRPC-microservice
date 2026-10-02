@@ -137,8 +137,15 @@ describe('M-7: redirectUriProblem refuses fragments and userinfo', () => {
     'https://u:p@app.example.com/cb',
     'https://u@app.example.com/cb',
     'http://localhost:3000/cb#x',
+    'https://app.example.com/cb#',
+    'https://:@app.example.com/cb',
+    'https://@app.example.com/cb',
   ])('M-7: %s is refused', (uri) => {
     expect(redirectUriProblem(uri)).not.toBeNull();
+  });
+  it('F1: the check reads the raw string, so an empty fragment or empty userinfo (which URL parsing hides) is refused too', () => {
+    expect(redirectUriProblem('https://a.example/cb#')).not.toBeNull();
+    expect(redirectUriProblem('https://:@a.example/cb')).not.toBeNull();
   });
   it('M-7: a plain https and a loopback http URI are still fine', () => {
     expect(redirectUriProblem('https://app.example.com/cb')).toBeNull();

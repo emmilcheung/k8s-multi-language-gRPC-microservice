@@ -490,7 +490,7 @@ export class OAuthService implements OnModuleInit {
     }
 
     if (clientId !== MCP_SERVICE_CLIENT_ID) {
-      // M-9: only the confidential mcp-service client may exchange, so a URL id
+      // Only the confidential mcp-service client may exchange, so a URL id
       // is refused as an unknown client BEFORE any resolve: this grant can then
       // neither trigger a fetch nor reveal whether a document exists.
       if (isUrlClientId(clientId) || !(await this.resolveClient(clientId))) {

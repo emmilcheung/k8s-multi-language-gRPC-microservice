@@ -41,7 +41,7 @@ export function redirectUriMatches(
 
 /**
  * Why `uri` may not be registered as a redirect URI, or null when it is fine.
- * The single registration-time rule shared by DCR and CIMD (F7): https, or http
+ * The single registration-time rule shared by DCR and CIMD: https, or http
  * on localhost / 127.0.0.1 only, so an authorization code never crosses the
  * network in clear. Matching at /authorize time stays in redirectUriMatches.
  */
@@ -57,7 +57,12 @@ export function redirectUriProblem(uri: string): string | null {
     return `redirect_uri must use HTTPS or be localhost: ${uri}`;
   }
   // RFC 6749 3.1.2: no fragment. Userinfo has no place in a redirect target.
-  if (parsed.hash || parsed.username || parsed.password) {
+  // The raw string is checked because URL parsing drops an EMPTY fragment ('#')
+  // and empty userinfo ('@', ':@'), which would otherwise slip through.
+  const authority = uri
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+    .split(/[/?#]/)[0];
+  if (uri.includes('#') || authority.includes('@')) {
     return `redirect_uri must not carry a fragment or credentials: ${uri}`;
   }
   return null;

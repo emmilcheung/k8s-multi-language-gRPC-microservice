@@ -8,7 +8,6 @@ import { redirectUriProblem } from './oauth-redirect.util';
 const MAX_REDIRECT_URIS = 10;
 const SUPPORTED_GRANT_TYPES = ['authorization_code', 'refresh_token'];
 const SUPPORTED_RESPONSE_TYPES = ['code'];
-// eslint-disable-next-line no-control-regex
 
 const invalid = (why: string) => new CimdFetchError('invalid_document', why);
 

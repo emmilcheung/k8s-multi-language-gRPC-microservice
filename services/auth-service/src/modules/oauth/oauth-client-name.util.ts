@@ -1,6 +1,9 @@
 import { CLIENT_NAME_MAX_LENGTH } from './oauth.dto';
 
 // Control, format (bidi marks, zero-width, BOM), line and paragraph separators.
+// This also rejects emoji ZWJ sequences (family, profession emoji): U+200D is a
+// format character, and an invisible joiner is exactly what this rule exists to
+// stop. Plain emoji are fine.
 const UNSAFE_NAME_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
 /**
