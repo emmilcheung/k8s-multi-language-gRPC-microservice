@@ -51,6 +51,15 @@ type CacheRecord =
   | { v: 1; ok: true; client: OAuthClient }
   | { v: 1; ok: false; reason: CimdErrorCode };
 
+/** The host of a client id that parses as a URL (cut to the DNS maximum), else nothing. */
+function hostField(clientId: string): { host?: string } {
+  try {
+    return { host: new URL(clientId).hostname.slice(0, 253) };
+  } catch {
+    return {};
+  }
+}
+
 @Injectable()
 export class CimdClientService {
   private readonly inflight = new Map<string, Promise<CimdResolution>>();
@@ -117,7 +126,13 @@ export class CimdClientService {
     try {
       parseClientIdUrl(clientId);
     } catch (e) {
-      return { ok: false, reason: (e as CimdFetchError).code };
+      const reason = (e as CimdFetchError).code;
+      // Reason code and host only: never the path, query or raw input.
+      this.logger.warn(
+        { event: 'oauth.cimd.url_rejected', reason, ...hostField(clientId) },
+        'CIMD client_id refused before any fetch',
+      );
+      return { ok: false, reason };
     }
     const key = this.cacheKey(clientId);
     const shared = this.inflight.get(key);
@@ -133,6 +148,10 @@ export class CimdClientService {
 
     if (this.active >= MAX_CONCURRENT_FETCHES) {
       // Overload is not a verdict on the document: do not cache it.
+      this.logger.warn(
+        { event: 'oauth.cimd.busy', host: new URL(clientId).hostname },
+        'CIMD fetch refused: in-flight cap reached',
+      );
       return { ok: false, reason: 'busy' };
     }
     this.active++;

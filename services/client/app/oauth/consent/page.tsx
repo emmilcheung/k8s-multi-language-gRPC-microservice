@@ -158,8 +158,8 @@ export default async function ConsentPage({
           <Separator />
 
           {/* App identity */}
-          <div className="px-6 py-4 flex items-center justify-between">
-            <div className="flex flex-col gap-0.5">
+          <div className="px-6 py-4 flex flex-col gap-3">
+            <div className="flex flex-col gap-0.5 min-w-0">
               <span className="text-xs text-mute">Application</span>
               <span className="text-sm font-medium text-ink">{consent.clientName}</span>
               {consent.addresses?.documentHost && (
@@ -201,7 +201,7 @@ export default async function ConsentPage({
             </div>
             <Badge
               variant="outline"
-              className="text-xs font-mono text-mute break-all"
+              className="h-auto w-fit max-w-full justify-start whitespace-normal text-left text-xs font-mono text-mute break-all"
               data-testid="consent-client-id"
             >
               {consent.clientId}
