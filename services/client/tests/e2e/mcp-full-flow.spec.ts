@@ -10,11 +10,19 @@
  * exchanged tokens. A break in any seam (metadata origins, audience, exchange
  * client secret, Kong routes, idempotency) shows up only here.
  *
- * Payment: backend payment-service runs with STRIPE_SECRET_KEY=test_mock in
- * compose and CI (a deterministic mock, no network). The saved card is
- * registered through Settings with the same window.Stripe mock ticketing.spec.ts
- * uses; if that backend is unavailable the payment step is skipped by name,
- * with the reason, exactly as the settings specs do.
+ * Stack requirements (this spec FAILS, it does not skip, without them): compose
+ * profile `mcp` (mcp-service) plus MCP_TOKEN_EXCHANGE_CLIENT_SECRET and its
+ * _HASH in the root .env; Kong rendered for local (the /mcp routes and the
+ * audience rule). The CI `e2e` job provides these.
+ *
+ * Payment: the spec cannot observe payment-service's STRIPE_SECRET_KEY, which
+ * is a backend setting. It relies on `test_mock` (a deterministic mock where
+ * charge() completes immediately and no network is used) and asserts the exact
+ * mock outcome, so a non-mock backend fails loudly here instead of passing.
+ * The saved card is registered through Settings with the same window.Stripe
+ * mock ticketing.spec.ts uses; only when that registration backend answers
+ * 5xx/404 (the same condition as ticketing.spec.ts) is the payment step
+ * skipped, by name with the reason, which shows in the run summary.
  */
 import { test, expect } from "@playwright/test";
 import { createHash, randomBytes } from "node:crypto";
@@ -29,6 +37,8 @@ import {
 import { KONG_URL, obtainOAuthAccessToken, signupViaApi } from "./_helpers/oauth";
 
 const MCP_URL = `${KONG_URL}/mcp`;
+// Protocol versions mcp-service is tested against (services/mcp-service/src/protocol-eras.spec.ts:33,39).
+const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2026-07-28"];
 const HOST_REDIRECT = "http://127.0.0.1:19877/callback";
 const HOST_SCOPES = [
   "tickets:read",
@@ -99,7 +109,7 @@ function claims(jwt: string): Record<string, unknown> {
 
 /** Shared by the serial steps below; a step failing skips the rest. */
 const state = {
-  protocolVersion: "2025-06-18",
+  protocolVersion: SUPPORTED_PROTOCOL_VERSIONS[0],
   authServer: "",
   registrationEndpoint: "",
   authorizationEndpoint: "",
@@ -113,6 +123,22 @@ const state = {
   accessToken: "",
   orderId: "",
 };
+
+test.beforeAll(async () => {
+  // Fail with the root cause, not eleven confusing failures, when the stack lacks mcp-service.
+  let status: number | string;
+  try {
+    status = (await fetch(MCP_URL, { method: "POST" })).status;
+  } catch (err) {
+    status = err instanceof Error ? err.message : "unreachable";
+  }
+  if (status === 404 || status === 502 || status === 503 || status === 504 || typeof status === "string") {
+    throw new Error(
+      `mcp-service is not running (compose profile \`mcp\`): POST ${MCP_URL} answered ${status}. ` +
+        "Start the stack with `docker compose --profile mcp up -d` and MCP_TOKEN_EXCHANGE_CLIENT_SECRET[_HASH] set.",
+    );
+  }
+});
 
 test.describe("MCP host without a token", () => {
   test("M-1 edge: /mcp without a token is 401 and points at the protected-resource metadata", async () => {
@@ -239,10 +265,15 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     await expect(page.getByText("E2E MCP Host").first()).toBeVisible();
     await expect(page.getByText("Sensitive", { exact: true }).first()).toBeVisible();
 
-    // The consent button only works once React has hydrated; a click before that is silently lost.
-    await page.waitForLoadState("networkidle");
-    await page.getByRole("button", { name: /allow access/i }).click();
-    await expect.poll(() => redirect?.searchParams.get("code") ?? "", { timeout: 20_000 }).not.toBe("");
+    // Root cause of the lost click: app/oauth/consent/ConsentActions.tsx is a client component whose
+    // buttons are enabled in the server HTML but have no handler until React hydrates, so an early
+    // click does nothing. Retry the click until the redirect arrives; correct both before and after
+    // the product fix that disables the buttons until mounted.
+    const allow = page.getByRole("button", { name: /allow access/i });
+    await expect(async () => {
+      if (!redirect) await allow.click({ timeout: 2000 });
+      await expect.poll(() => redirect?.searchParams.get("code") ?? "", { timeout: 3000 }).not.toBe("");
+    }).toPass({ timeout: 30_000 });
     expect(redirect!.searchParams.get("state")).toBe("m1-state");
     // RFC 9207: the response names its issuer so a host can detect mix-up.
     expect(redirect!.searchParams.get("iss")).toBe(state.authServer);
@@ -285,7 +316,8 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     expect(init.status).toBe(200);
     expect(init.body?.result?.serverInfo?.name).toBeTruthy();
     state.protocolVersion = init.body?.result?.protocolVersion;
-    expect(typeof state.protocolVersion).toBe("string");
+    test.info().annotations.push({ type: "mcp-protocol-version", description: String(state.protocolVersion) });
+    expect(SUPPORTED_PROTOCOL_VERSIONS).toContain(state.protocolVersion);
 
     const list = await rpc(state.accessToken, "tools/list", {}, state.protocolVersion);
     expect(list.status).toBe(200);
@@ -331,7 +363,19 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     expect(res.body?.result?.isError).toBeFalsy();
     const payment = res.body?.result?.structuredContent?.payment;
     expect(payment.orderId).toBe(state.orderId);
-    expect(payment.status).not.toMatch(/fail|declin/i);
+    // payment-service mock mode: charge() completes immediately (observed status "completed").
+    expect(payment.status).toBe("completed");
+    // The order moves to COMPLETE asynchronously (payment event over Kafka, OrderService.java:524),
+    // so poll the read tool rather than asserting once.
+    await expect
+      .poll(
+        async () => {
+          const o = await callTool(state.accessToken, "get_order", { orderId: state.orderId });
+          return o.body?.result?.structuredContent?.status;
+        },
+        { timeout: 30_000 },
+      )
+      .toBe("complete");
 
     // The same payment is readable through the payments:read tool.
     const read = await callTool(state.accessToken, "get_payment", { paymentId: payment.id });
@@ -344,7 +388,12 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
       headers: { Authorization: `Bearer ${state.accessToken}` },
     });
     expect(res.status).toBe(401);
-    expect(await res.json()).toMatchObject({ error: "invalid_token" });
+    // The audience rule specifically, not some other 401 (jwt-scope.lua).
+    expect(await res.json()).toMatchObject({
+      error: "invalid_token",
+      error_description: "token audience not accepted",
+    });
+    expect(res.headers.get("www-authenticate") ?? "").toContain("token audience not accepted");
   });
 
   test("M-1 edge (C-6): a token without orders:create gets a step-up 403 naming the scope", async () => {

@@ -1219,10 +1219,13 @@ jobs:
     name: Playwright E2E (full stack)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    needs: [changes, attendance, auth, client, expiration, kong, order, payment, proto, ticket, user, venue]
+    needs: [changes, attendance, auth, client, expiration, kong, mcp, order, payment, proto, ticket, user, venue]
     env:
       E2E_INFRA_SERVICES: postgres-auth postgres-orders postgres-payments postgres-attendance mongodb redis kafka schema-registry
-      E2E_APP_SERVICES: auth-service ticket-service venue-service order-service payment-service expiration-service user-service attendance-service
+      E2E_APP_SERVICES: auth-service ticket-service venue-service order-service payment-service expiration-service user-service attendance-service mcp-service
+      # mcp-service is profile-gated in docker-compose.yml; the mcp-full-flow spec needs it.
+      # The profile also makes `docker compose build` build its image.
+      COMPOSE_PROFILES: mcp
     # Only run when:
     #   - The event is a pull_request (not a push to main)
     #   - Not a docs-only change (skip-ci == false)
@@ -1241,14 +1244,21 @@ jobs:
       # auth-service reads RSA_PRIVATE_KEY; payment-service reads STRIPE_SECRET_KEY.
       # RSA_PRIVATE_KEY and KONG_RSA_PUBLIC_KEY are stored as single-line \n-escaped
       # PEM strings; printf '%b' expands \n → real newlines for Docker Compose.
+      # mcp-service authenticates its RFC 8693 token exchange with an ephemeral secret generated
+      # on the runner (auth-service stores only the lowercase hex sha256). Not a GitHub secret.
       - name: Write root .env
         run: |
+          mcp_exchange_secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$mcp_exchange_secret"
+          mcp_exchange_hash="$(printf %s "$mcp_exchange_secret" | sha256sum | cut -d' ' -f1)"
           {
             printf 'RSA_PRIVATE_KEY="%b"\n' "$RSA_PRIVATE_KEY"
             printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY"
             printf 'KONG_RSA_PUBLIC_KEY="%b"\n' "$KONG_RSA_PUBLIC_KEY"
             printf 'X_USER_ID_SIGNING_KEY=%s\n' "$X_USER_ID_SIGNING_KEY"
             printf 'QR_SIGNING_KEY=%s\n' "${QR_SIGNING_KEY:-ci_qr_signing_key_32_bytes_minimum_length_value}"
+            printf 'MCP_TOKEN_EXCHANGE_CLIENT_SECRET=%s\n' "$mcp_exchange_secret"
+            printf 'MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH=%s\n' "$mcp_exchange_hash"
           } > .env
         env:
           RSA_PRIVATE_KEY: ${{ secrets.RSA_PRIVATE_KEY }}
@@ -1470,7 +1480,7 @@ jobs:
       - name: Enforce secret-free compose logs
         if: always()
         run: |
-          SECRET_PATTERN='STRIPE_SECRET|DATABASE_URL|SIGNING_KEY|REFRESH_TOKEN|JWT_SECRET|RSA_PRIVATE_KEY'
+          SECRET_PATTERN='STRIPE_SECRET|DATABASE_URL|SIGNING_KEY|REFRESH_TOKEN|JWT_SECRET|RSA_PRIVATE_KEY|TOKEN_EXCHANGE'
           if grep -qiE "$SECRET_PATTERN" /tmp/compose-logs.raw.txt; then
             echo "FAIL: secret-like pattern detected in compose logs"
             exit 1
