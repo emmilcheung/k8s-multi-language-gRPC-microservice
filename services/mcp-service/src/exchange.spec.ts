@@ -39,6 +39,34 @@ function setup(expiresIn = 300) {
 }
 
 describe('token exchange client (C-5)', () => {
+  it('R10: client id and secret are form-urlencoded before Basic encoding, so auth-service (RFC 6749 2.3.1) recovers them', async () => {
+    const secret = 'a+b/c=d%e:f g';
+    const calls: Headers[] = [];
+    const exchange = createTokenExchange({
+      url: URL_,
+      clientId: 'mcp service',
+      clientSecret: secret,
+      resource: 'http://localhost:8000/api',
+      fetch: (_url, init) => {
+        calls.push(new Headers(init?.headers));
+        return Promise.resolve(
+          Response.json({ access_token: 't', expires_in: 300 }),
+        );
+      },
+    });
+    await exchange('mcp-jwt', undefined, 'orders:read');
+    // Decode the way auth-service does: base64, split on the FIRST colon,
+    // `+` to space, then percent-decode.
+    const raw = Buffer.from(
+      (calls[0].get('authorization') ?? '').replace(/^Basic /, ''),
+      'base64',
+    ).toString();
+    const i = raw.indexOf(':');
+    const decode = (v: string) => decodeURIComponent(v.replace(/\+/g, ' '));
+    expect(decode(raw.slice(0, i))).toBe('mcp service');
+    expect(decode(raw.slice(i + 1))).toBe(secret);
+  });
+
   it('J-5: sends the C-5 request shape (Basic client auth, token-exchange grant, API resource, narrow scope)', async () => {
     const { exchange, calls, nowSeconds } = setup();
     await exchange('mcp-jwt', nowSeconds() + 900, 'orders:create');

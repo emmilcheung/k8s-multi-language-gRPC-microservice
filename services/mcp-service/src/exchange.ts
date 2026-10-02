@@ -46,9 +46,11 @@ export function createTokenExchange(opts: ExchangeOptions): TokenExchange {
   const doFetch = opts.fetch ?? fetch;
   const now = opts.now ?? Date.now;
   const maxEntries = opts.maxEntries ?? DEFAULT_MAX_ENTRIES;
-  const basic = Buffer.from(`${opts.clientId}:${opts.clientSecret}`).toString(
-    'base64',
-  );
+  // RFC 6749 2.3.1: id and secret are form-urlencoded, each on its own, before
+  // Basic encoding; auth-service decodes them, so a secret holding `+` or `:` survives.
+  const basic = Buffer.from(
+    `${encodeURIComponent(opts.clientId)}:${encodeURIComponent(opts.clientSecret)}`,
+  ).toString('base64');
   // Map iteration order is insertion order: re-inserting on hit makes it LRU.
   const cache = new Map<string, { token: string; validUntil: number }>();
 
