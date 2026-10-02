@@ -62,6 +62,19 @@ const jwtPayloadSchema = z.object({
   roles: z.array(z.string()).optional(),
 });
 
+const oauthSubjectSchema = z.object({
+  sub: z.string().min(1),
+  jti: z.string().min(1),
+  iss: z.string().min(1),
+  aud: z.union([z.string(), z.array(z.string())]),
+  exp: z.number().int().positive(),
+  scope: z.string(),
+  client_id: z.string().min(1),
+});
+
+/** Verified claims of an OAuth access token used as a token-exchange subject. */
+export type OAuthSubjectClaims = z.infer<typeof oauthSubjectSchema>;
+
 @Injectable()
 export class AuthService {
   private readonly rsaPrivateKey: string;
@@ -264,18 +277,80 @@ export class AuthService {
     userId: string,
     scope: string,
     clientId: string,
-    { aud, iss }: { aud: string; iss: string },
+    {
+      aud,
+      iss,
+      act,
+      expiresInSeconds,
+    }: {
+      aud: string;
+      iss: string;
+      /** RFC 8693 actor claim, set only on exchanged tokens (C-1). */
+      act?: { sub: string };
+      /** Overrides JWT_EXPIRY; exchanged tokens are shorter-lived (C-5). */
+      expiresInSeconds?: number;
+    },
   ): string {
     const tokenPayload = {
       sub: userId,
       jti: randomUUID(),
       scope,
       client_id: clientId,
+      ...(act ? { act } : {}),
     };
     const token: unknown = (
       this.jwtService.sign as (p: unknown, o: unknown) => unknown
-    )(tokenPayload, { audience: aud, issuer: iss });
+    )(tokenPayload, {
+      audience: aud,
+      issuer: iss,
+      ...(expiresInSeconds !== undefined
+        ? { expiresIn: expiresInSeconds }
+        : {}),
+    });
     return token as string;
+  }
+
+  /**
+   * Verify an OAuth access token presented as an RFC 8693 subject (C-5):
+   * signature, exp, an `iss` equal to exactly what this server issues under the
+   * current OAUTH_ISSUER_ENABLED state, and the revocation blacklist. Unlike
+   * verifyAccessToken it keeps `iss`/`aud`, which the caller must check.
+   * Throws UnauthorizedException for any failure.
+   */
+  async verifyOAuthSubjectToken(
+    token: string,
+    issuer: string,
+  ): Promise<OAuthSubjectClaims> {
+    let claims: OAuthSubjectClaims;
+    try {
+      claims = oauthSubjectSchema.parse(
+        await (
+          this.jwtService.verifyAsync as (
+            value: string,
+            options: unknown,
+          ) => Promise<unknown>
+        )(token, { issuer }),
+      );
+    } catch {
+      throw new UnauthorizedException({
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Access token is invalid or expired',
+        },
+      });
+    }
+    const blacklisted = await this.redis.get(
+      `auth-service:blacklist:${claims.jti}`,
+    );
+    if (blacklisted) {
+      throw new UnauthorizedException({
+        error: {
+          code: 'TOKEN_REVOKED',
+          message: 'Access token has been revoked',
+        },
+      });
+    }
+    return claims;
   }
 
   getJwks(): object {

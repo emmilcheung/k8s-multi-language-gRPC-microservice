@@ -46,6 +46,7 @@ function makeService() {
     config as never,
     dynamicClientService as never,
     consentStore as never,
+    { info: vi.fn(), warn: vi.fn() } as never,
   );
   return {
     service,

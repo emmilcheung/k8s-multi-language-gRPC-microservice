@@ -1,11 +1,14 @@
 import {
   Injectable,
+  OnModuleInit,
   BadRequestException,
   UnauthorizedException,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
+import * as argon2 from 'argon2';
 import type { Request } from 'express';
 import { AuthService } from '../auth/auth.service';
 import { RefreshTokenService } from '../auth/refresh-token.service';
@@ -15,6 +18,8 @@ import {
   findClient,
   validateScopes,
   dynamicToStaticShape,
+  MCP_SERVICE_CLIENT_ID,
+  TOKEN_EXCHANGE_GRANT,
 } from './oauth-clients.config';
 import type { OAuthClient } from './oauth-clients.config';
 import { DynamicClientService } from './dynamic-client.service';
@@ -23,19 +28,29 @@ import type { ConsentSummary } from './oauth-consent-store.service';
 import { OAUTH_SCOPE_NAMES } from './oauth-scopes';
 import { verifyPkceChallenge } from './pkce.util';
 import { redirectUriMatches } from './oauth-redirect.util';
-import { readOAuthConfig, resolveOAuthTokenIssuer } from './oauth-config';
+import {
+  readOAuthConfig,
+  readTokenExchangeSecretHash,
+  resolveOAuthTokenIssuer,
+} from './oauth-config';
 import type {
   AuthorizeQuery,
   TokenBody,
   RevokeBody,
   TokenResponse,
+  TokenExchangeResponse,
+  ClientCredentials,
   OAuthClientSession,
   RegisterClientBody,
   RegisterClientResponse,
 } from './oauth.dto';
 
+const ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token';
+/** C-1: an exchanged token lives at most this long (and never past its subject). */
+const EXCHANGED_TOKEN_MAX_SECONDS = 300;
+
 @Injectable()
-export class OAuthService {
+export class OAuthService implements OnModuleInit {
   constructor(
     private readonly authService: AuthService,
     private readonly refreshTokenService: RefreshTokenService,
@@ -44,7 +59,16 @@ export class OAuthService {
     private readonly config: ConfigService,
     private readonly dynamicClientService: DynamicClientService,
     private readonly consentStore: OAuthConsentStoreService,
+    @InjectPinoLogger(OAuthService.name) private readonly logger: PinoLogger,
   ) {}
+
+  onModuleInit(): void {
+    if (!readTokenExchangeSecretHash(this.config)) {
+      this.logger.warn(
+        'MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH is not set: the token-exchange grant is disabled (mcp-service cannot authenticate)',
+      );
+    }
+  }
 
   /** Resolve a client by ID — checks static registry first, then dynamic Redis store. */
   async resolveClient(clientId: string): Promise<OAuthClient | null> {
@@ -217,22 +241,204 @@ export class OAuthService {
    * POST /oauth/token
    * Handles authorization_code and refresh_token grant types.
    */
-  async token(body: TokenBody, req: Request): Promise<TokenResponse> {
-    if (body.grant_type === 'authorization_code') {
-      return this.exchangeAuthorizationCode(body, req);
+  async token(
+    body: TokenBody,
+    req: Request,
+    basic?: ClientCredentials,
+  ): Promise<TokenResponse | TokenExchangeResponse> {
+    if (body.grant_type === TOKEN_EXCHANGE_GRANT) {
+      return this.tokenExchange(body, basic);
     }
-    if (body.grant_type === 'refresh_token') {
-      return this.refreshTokenGrant(body, req);
+    if (
+      body.grant_type !== 'authorization_code' &&
+      body.grant_type !== 'refresh_token'
+    ) {
+      throw new BadRequestException({
+        error: 'unsupported_grant_type',
+        error_description:
+          'Supported grant types: authorization_code, refresh_token, urn:ietf:params:oauth:grant-type:token-exchange',
+      });
     }
-    throw new BadRequestException({
-      error: 'unsupported_grant_type',
-      error_description:
-        'Supported grant types: authorization_code, refresh_token',
-    });
+    if (!body.client_id) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        error_description: 'client_id is required',
+      });
+    }
+    const withClient = body as TokenBody & { client_id: string };
+    return body.grant_type === 'authorization_code'
+      ? this.exchangeAuthorizationCode(withClient, req)
+      : this.refreshTokenGrant(withClient, req);
+  }
+
+  /**
+   * RFC 8693 token exchange (C-5). mcp-service trades the user's MCP-audience
+   * token for a short-lived API-audience token that keeps the ORIGINAL client
+   * id and can only narrow scope. Client authentication happens first so an
+   * unauthenticated caller learns nothing about the subject token.
+   */
+  private async tokenExchange(
+    body: TokenBody,
+    basic: ClientCredentials | undefined,
+  ): Promise<TokenExchangeResponse> {
+    await this.authenticateExchangeClient(body, basic);
+
+    if (!body.subject_token || body.subject_token_type !== ACCESS_TOKEN_TYPE) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        error_description: `subject_token and subject_token_type=${ACCESS_TOKEN_TYPE} are required`,
+      });
+    }
+
+    const cfg = readOAuthConfig(this.config);
+    if (
+      body.resource !== undefined &&
+      body.audience !== undefined &&
+      body.resource !== body.audience
+    ) {
+      throw new BadRequestException({
+        error: 'invalid_target',
+        error_description: 'resource and audience disagree',
+      });
+    }
+    const target = body.resource ?? body.audience ?? cfg.apiAudience;
+    if (target !== cfg.apiAudience) {
+      throw new BadRequestException({
+        error: 'invalid_target',
+        error_description: 'the only exchange target is the API audience',
+      });
+    }
+
+    const invalidSubject = () =>
+      new BadRequestException({
+        error: 'invalid_grant',
+        error_description: 'subject_token is invalid or not exchangeable',
+      });
+    let subject;
+    try {
+      subject = await this.authService.verifyOAuthSubjectToken(
+        body.subject_token,
+        resolveOAuthTokenIssuer(cfg),
+      );
+    } catch {
+      throw invalidSubject();
+    }
+    const audiences = Array.isArray(subject.aud) ? subject.aud : [subject.aud];
+    if (audiences.length !== 1 || audiences[0] !== cfg.mcpResource) {
+      throw invalidSubject();
+    }
+    const now = Math.floor(Date.now() / 1000);
+    if (subject.exp <= now || !(await this.usersRepo.findById(subject.sub))) {
+      throw invalidSubject();
+    }
+
+    const subjectScopes = subject.scope.split(' ').filter(Boolean);
+    let granted = subjectScopes;
+    if (body.scope !== undefined) {
+      granted = [...new Set(body.scope.split(' ').filter(Boolean))];
+      if (
+        granted.length === 0 ||
+        !granted.every((s) => subjectScopes.includes(s))
+      ) {
+        throw new BadRequestException({
+          error: 'invalid_scope',
+          error_description: 'requested scope exceeds the subject token scope',
+        });
+      }
+    }
+    const scope = granted.join(' ');
+    const expiresIn = Math.min(EXCHANGED_TOKEN_MAX_SECONDS, subject.exp - now);
+
+    const accessToken = this.authService.issueAccessTokenForOAuth(
+      subject.sub,
+      scope,
+      subject.client_id,
+      {
+        aud: cfg.apiAudience,
+        iss: resolveOAuthTokenIssuer(cfg),
+        act: { sub: MCP_SERVICE_CLIENT_ID },
+        expiresInSeconds: expiresIn,
+      },
+    );
+
+    // Audit: identifiers and scope only, never a token or the client secret.
+    this.logger.info(
+      {
+        event: 'oauth.token.exchanged',
+        clientId: MCP_SERVICE_CLIENT_ID,
+        originalClientId: subject.client_id,
+        userId: subject.sub,
+        scope,
+      },
+      'OAuth audit event',
+    );
+
+    return {
+      access_token: accessToken,
+      issued_token_type: ACCESS_TOKEN_TYPE,
+      token_type: 'Bearer',
+      expires_in: expiresIn,
+      scope,
+    };
+  }
+
+  /**
+   * Only the confidential mcp-service client may exchange, and only with its
+   * client_secret_basic secret. Basic-auth failures are 401 (RFC 6749 §5.2);
+   * argon2.verify compares in constant time. With no configured hash nobody can
+   * authenticate, which is how the grant is disabled.
+   */
+  private async authenticateExchangeClient(
+    body: TokenBody,
+    basic: ClientCredentials | undefined,
+  ): Promise<void> {
+    const clientId = basic?.clientId ?? body.client_id;
+    const failed = () =>
+      new UnauthorizedException({
+        error: 'invalid_client',
+        error_description: 'Client authentication failed',
+      });
+    if (!clientId) throw failed();
+    if (
+      basic &&
+      body.client_id !== undefined &&
+      body.client_id !== basic.clientId
+    ) {
+      throw new BadRequestException({
+        error: 'invalid_request',
+        error_description: 'client_id does not match the Authorization header',
+      });
+    }
+
+    if (clientId !== MCP_SERVICE_CLIENT_ID) {
+      if (!(await this.resolveClient(clientId))) {
+        throw basic
+          ? failed()
+          : new BadRequestException({
+              error: 'invalid_client',
+              error_description: 'Unknown client_id',
+            });
+      }
+      throw new BadRequestException({
+        error: 'unauthorized_client',
+        error_description: 'This client may not use the token-exchange grant',
+      });
+    }
+
+    const hash = readTokenExchangeSecretHash(this.config);
+    let authenticated = false;
+    if (hash && basic) {
+      try {
+        authenticated = await argon2.verify(hash, basic.clientSecret);
+      } catch {
+        authenticated = false;
+      }
+    }
+    if (!authenticated) throw failed();
   }
 
   private async exchangeAuthorizationCode(
-    body: TokenBody,
+    body: TokenBody & { client_id: string },
     req: Request,
   ): Promise<TokenResponse> {
     if (!body.code || !body.code_verifier || !body.redirect_uri) {
@@ -351,7 +557,7 @@ export class OAuthService {
   }
 
   private async refreshTokenGrant(
-    body: TokenBody,
+    body: TokenBody & { client_id: string },
     req: Request,
   ): Promise<TokenResponse> {
     if (!body.refresh_token) {

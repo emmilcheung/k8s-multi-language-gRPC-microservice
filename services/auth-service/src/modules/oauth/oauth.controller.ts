@@ -24,6 +24,7 @@ import {
   ConsentBody,
 } from './oauth.dto';
 import type {
+  ClientCredentials,
   RegisterClientResponse,
   ConsentDetails,
   ConsentResult,
@@ -33,6 +34,35 @@ import {
   OAuthExceptionFilter,
   OAuthRegistrationExceptionFilter,
 } from './oauth-exception.filter';
+
+/**
+ * RFC 6749 §2.3.1 client_secret_basic. No header means no Basic credentials;
+ * a Basic header that cannot be decoded is a failed authentication (401), not
+ * something to ignore, so a broken client does not silently fall back.
+ */
+function parseBasicCredentials(
+  header: string | undefined,
+): ClientCredentials | undefined {
+  if (!header || !/^basic\s/i.test(header)) return undefined;
+  const invalid = () =>
+    new UnauthorizedException({
+      error: 'invalid_client',
+      error_description: 'Malformed Authorization header',
+    });
+  const encoded = header.slice(6).trim();
+  if (!/^[A-Za-z0-9+/]+=*$/.test(encoded)) throw invalid();
+  const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+  const sep = decoded.indexOf(':');
+  if (sep < 1) throw invalid();
+  try {
+    return {
+      clientId: decodeURIComponent(decoded.slice(0, sep)),
+      clientSecret: decodeURIComponent(decoded.slice(sep + 1)),
+    };
+  } catch {
+    throw invalid();
+  }
+}
 
 @Controller()
 export class OAuthController {
@@ -57,7 +87,11 @@ export class OAuthController {
   @HttpCode(HttpStatus.OK)
   @UseFilters(OAuthExceptionFilter)
   async token(@Body() body: TokenBody, @Req() req: Request) {
-    return this.oauthService.token(body, req);
+    return this.oauthService.token(
+      body,
+      req,
+      parseBasicCredentials(req.headers.authorization),
+    );
   }
 
   // POST /oauth/revoke
