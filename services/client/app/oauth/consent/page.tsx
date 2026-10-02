@@ -163,13 +163,13 @@ export default async function ConsentPage({
               <span className="text-xs text-mute">Application</span>
               <span className="text-sm font-medium text-ink">{consent.clientName}</span>
               {consent.addresses?.documentHost && (
-                <span className="break-all text-xs text-mute" data-testid="consent-document-host">
+                <span className="[overflow-wrap:anywhere] text-xs text-mute" data-testid="consent-document-host">
                   App identity document hosted at{" "}
                   <span className="font-mono text-ink">{consent.addresses.documentHost}</span>
                 </span>
               )}
               {consent.addresses && consent.addresses.redirectTargets.length > 0 && (
-                <span className="break-all text-xs text-mute" data-testid="consent-redirect-host">
+                <span className="[overflow-wrap:anywhere] text-xs text-mute" data-testid="consent-redirect-host">
                   After you allow, you are sent to{" "}
                   {consent.addresses.redirectTargets.map((t) => (t.loopback ? "an app on this device" : t.host)).map(
                     (label, i) => (
@@ -183,7 +183,7 @@ export default async function ConsentPage({
               )}
               {consent.addresses?.redirectMismatch && (
                 <span
-                  className="break-all text-xs text-amber-700 dark:text-amber-400"
+                  className="[overflow-wrap:anywhere] text-xs text-amber-700 dark:text-amber-400"
                   role="note"
                   data-testid="consent-mismatch"
                 >
