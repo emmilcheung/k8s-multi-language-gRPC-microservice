@@ -24,6 +24,8 @@
 -- outside a transaction) and let this migration's IF NOT EXISTS make it a no-op:
 --   CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_orders_reservation_id
 --     ON orders (reservation_id) WHERE reservation_id IS NOT NULL;
+-- A failed CONCURRENTLY build leaves an INVALID index that IF NOT EXISTS would silently
+-- skip: check pg_index.indisvalid for uq_orders_reservation_id and DROP INDEX it before rerunning.
 
 ALTER TABLE orders
     ADD COLUMN request_fingerprint VARCHAR(64) NULL;
