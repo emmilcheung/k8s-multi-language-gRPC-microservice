@@ -95,7 +95,7 @@ Then, inside Claude Code, run `/mcp`, pick `ticketing` and choose Authenticate. 
 
 Other hosts need only the URL `http://localhost:8000/mcp`: discovery, registration and PKCE follow from the 401 challenge.
 
-**Consent.** A host that registers itself (dynamic client registration, which is how Claude Code connects) or identifies itself by a metadata-document URL always sees the consent screen. Consent is skipped only for a client whose entry sets `isFirstParty: true` (`oauth.service.ts:263-265`); dynamic and CIMD clients are hard-coded `false`, and the only static client (`ticketing-mcp`, `oauth-clients.config.ts:28-37`) does not set it, so no client skips consent today. The Allow and Deny buttons stay disabled until the page has hydrated, so a click is never silently lost.
+**Consent.** A host that registers itself (dynamic client registration) or identifies itself by a metadata-document URL always sees the consent screen. Consent is skipped only for a client whose entry sets `isFirstParty: true` (`oauth.service.ts:263-265`); dynamic and CIMD clients are hard-coded `false`, and the only static client (`ticketing-mcp`, `oauth-clients.config.ts:28-37`) does not set it, so no client skips consent today. The Allow and Deny buttons stay disabled until the page has hydrated, so a click is never silently lost.
 
 **Revoke.** In the web app under **Settings -> Connected apps** (`services/client/app/settings/connected-apps.ts:64-71`). It calls `DELETE /oauth/clients?client_id=<id>` (`oauth.controller.ts:130-148`; the older `/oauth/clients/:clientId` form stays for opaque ids; 204 on success, signed-in user only). Revocation deletes, for that user and that client, the session-scope marker and the refresh sessions (`oauth.service.ts:808-825`), so the host cannot obtain new access tokens. It leaves the client registration in place, and there is no consent history to remove (the consent store only holds a pending consent for 10 minutes). A token already issued stays valid until it expires: access tokens live 15 minutes, exchanged API tokens at most 5.
 
@@ -162,9 +162,9 @@ In Kubernetes the Helm value `global.publicOrigin` derives the auth-service set;
 
 The payment step needs a saved card, registered through Settings with the same Stripe mock `ticketing.spec.ts` uses. It asserts payment status `completed` and then polls `get_order` until the order is `complete`. It relies on payment-service running in `STRIPE_SECRET_KEY=test_mock` mode, which the spec cannot observe (it is a backend setting); a non-mock backend fails the status assertion rather than passing. It is skipped, with the reason in the run summary, only when card registration answers 5xx or 404, as in `ticketing.spec.ts`.
 
-### Manual run with a real host (M-2) — owner step, not yet performed
+### Manual run with a real host (M-2)
 
-This needs an interactive terminal and a browser, so it is written down and has not been run. Procedure:
+Run once on 2026-10-02 against a compose stack (result below the procedure). Procedure:
 
 1. Start the stack with the `mcp` profile and a valid `.env` (above). Run `claude --version` and note it.
 2. `claude mcp add --transport http ticketing http://localhost:8000/mcp`
@@ -173,6 +173,14 @@ This needs an interactive terminal and a browser, so it is written down and has 
 5. Ask the host: "List the available events", then "Create an order for the first available ticket", then repeat the same request (expect the same order, not a second one).
 6. Open **Settings -> Connected apps**, confirm the host is listed, revoke it, and confirm the next `/mcp` call prompts for authentication again once the token expires.
 7. **Record:** the Claude Code version; the MCP protocol version negotiated at `initialize` (visible in `claude --debug` output, or run the scripted spec, which records it); which tools were callable; any step where the host asked for re-authentication.
+
+**Result, 2026-10-02 (Claude Code 2.1.285, compose stack with the `mcp` profile, `OAUTH_CIMD_ENABLED=true`):**
+
+- The host found the server from the 401 challenge and, because the metadata advertises `client_id_metadata_document_supported`, identified itself with the URL client id `https://claude.ai/oauth/claude-code-client-metadata` instead of registering dynamically. Auth-service fetched that document (`oauth.cimd.fetched`, host `claude.ai`). With the flag off, the host has to fall back to dynamic registration; that path was not run with a real host.
+- Consent page: "Claude Code", "App identity document hosted at `claude.ai`", "an app on this device", seven permissions with three **Sensitive** badges. After Allow Access the host reported "Authentication successful. Connected to ticketing."
+- Twelve tools were visible. `search_events` listed the seeded events; `create_order` returned a new order with `replayed: false`; the same call again returned the same order id with `replayed: true`; `list_my_orders` showed one order. Payment tools were not called (no saved card).
+- Revoke under Settings -> Connected apps (`DELETE /oauth/clients?client_id=` -> 204) removed the app from the list. Earlier in the same run, revoking the host's entry under Security & sessions also removed it from Connected apps; the host's access token kept working until it expired (15 minutes), then the next tool call failed with "needs you to sign in again" and `/mcp` offered Authenticate. A second sign-in (through the sign-in page, then consent) reconnected it.
+- Not recorded: the negotiated MCP protocol version (it is not in the host's debug log or the service logs; the scripted spec asserts its shape). Not run: the wait for token expiry after the Connected-apps revoke, the step-up path with a real host, and payment.
 
 ---
 
