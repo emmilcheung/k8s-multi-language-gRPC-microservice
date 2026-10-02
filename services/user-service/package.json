@@ -17,8 +17,8 @@
       "fast-uri": "3.1.2",
       "undici": "6.24.0",
       "ws": "8.21.0",
-      "multer": "2.3.0",
-      "@grpc/grpc-js": "1.14.4"
+      "multer": "2.4.0",
+      "@grpc/grpc-js": "1.14.5"
     }
   },
   "engines": {
