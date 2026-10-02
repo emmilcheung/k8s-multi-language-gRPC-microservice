@@ -153,8 +153,11 @@ describe('OAuthService listClients (L-2, auth half)', () => {
       {
         clientId: uuid,
         clientName: 'Claude Desktop',
-        clientDomain: '127.0.0.1:5000',
-        domainSource: 'redirect_uri',
+        addresses: {
+          documentHost: undefined,
+          redirectTargets: [{ host: '127.0.0.1', loopback: true }],
+          redirectMismatch: false,
+        },
         isFirstParty: false,
         scope: 'tickets:read',
         sessionId: 's1',

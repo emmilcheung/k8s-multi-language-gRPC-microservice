@@ -18,7 +18,7 @@ import {
   findClient,
   validateScopes,
   dynamicToStaticShape,
-  describeClientDomain,
+  describeClientAddresses,
   isUrlClientId,
   MCP_SERVICE_CLIENT_ID,
   TOKEN_EXCHANGE_GRANT,
@@ -267,7 +267,11 @@ export class OAuthService implements OnModuleInit {
       const requestId = await this.consentStore.storePendingConsent({
         clientId: client.clientId,
         clientName: client.clientName,
-        ...describeClientDomain(client.clientId, client, query.redirect_uri),
+        addresses: describeClientAddresses(
+          client.clientId,
+          client,
+          query.redirect_uri,
+        ),
         isFirstParty: client.source === undefined,
         userId,
         scope: grantedScopes.join(' '),
@@ -781,12 +785,12 @@ export class OAuthService implements OnModuleInit {
         const client = isUrlClientId(id)
           ? await this.cimd.peek(id)
           : await this.resolveClient(id);
-        const domain = describeClientDomain(id, client);
+        const addresses = describeClientAddresses(id, client);
         results.push({
           clientId: scopeMeta.clientId,
           clientName:
-            client?.clientName ?? domain.clientDomain ?? scopeMeta.clientId,
-          ...domain,
+            client?.clientName ?? addresses.documentHost ?? scopeMeta.clientId,
+          addresses,
           isFirstParty: client !== null && client.source === undefined,
           scope: scopeMeta.scope,
           sessionId: session.sessionId,
@@ -845,8 +849,7 @@ export class OAuthService implements OnModuleInit {
       requestId: record.requestId,
       clientId: record.clientId,
       clientName: record.clientName,
-      clientDomain: record.clientDomain,
-      domainSource: record.domainSource,
+      addresses: record.addresses,
       isFirstParty: record.isFirstParty ?? false,
       scopes: record.scope.split(' ').filter(Boolean),
       expiresInSeconds: 600,

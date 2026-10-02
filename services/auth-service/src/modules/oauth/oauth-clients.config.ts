@@ -85,45 +85,64 @@ export function isUrlClientId(clientId: string): boolean {
   return /^https?:\/\//i.test(clientId);
 }
 
-export type OAuthDomainSource = 'client_id' | 'redirect_uri';
-
-export interface ClientDomain {
-  clientDomain?: string;
-  domainSource?: OAuthDomainSource;
+export interface RedirectTarget {
+  host: string;
+  /** localhost / 127.0.0.1 / [::1]: the code goes to an app on this device. */
+  loopback: boolean;
 }
 
-function hostOf(uri: string, withPort: boolean): string | undefined {
+/**
+ * What a user can check before trusting an app, as two separate facts: where
+ * the app's identity document is hosted (CIMD client_id host) and where the
+ * authorization code is sent (redirect host). `redirectMismatch` is true when a
+ * non-loopback redirect host is not EXACTLY the client_id host. That is a
+ * visible caution, not a verdict: no registrable-domain logic, no deny list.
+ */
+export interface ClientAddresses {
+  documentHost?: string;
+  redirectTargets: RedirectTarget[];
+  redirectMismatch: boolean;
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+function hostnameOf(uri: string): string | undefined {
   try {
-    const u = new URL(uri);
-    return (withPort ? u.host : u.hostname) || undefined;
+    return new URL(uri).hostname || undefined;
   } catch {
     return undefined;
   }
 }
 
 /**
- * The domain a user can check before trusting an app. A CIMD client is
- * identified by the host of its client_id URL (what we fetched and verified). A
- * static or dynamic client chooses its own display name, so what we can state is
- * where the authorization code goes: the host of the redirect URI (the one in
- * this request when known, otherwise every registered one).
+ * Computed server-side at authorize time so consent cannot be shown a host the
+ * server did not derive. `redirectUri` is the one in this request when known;
+ * otherwise (Connected apps) every registered URI, deduplicated, loopback
+ * entries collapsed into one.
  */
-export function describeClientDomain(
+export function describeClientAddresses(
   clientId: string,
   client: Pick<OAuthClient, 'redirectUris'> | null,
   redirectUri?: string,
-): ClientDomain {
-  if (isUrlClientId(clientId)) {
-    const host = hostOf(clientId, false);
-    return host ? { clientDomain: host, domainSource: 'client_id' } : {};
-  }
+): ClientAddresses {
+  const documentHost = isUrlClientId(clientId)
+    ? hostnameOf(clientId)
+    : undefined;
   const uris = redirectUri ? [redirectUri] : (client?.redirectUris ?? []);
-  const hosts = [
-    ...new Set(
-      uris.map((u) => hostOf(u, true)).filter((h): h is string => !!h),
-    ),
-  ];
-  return hosts.length > 0
-    ? { clientDomain: hosts.join(', '), domainSource: 'redirect_uri' }
-    : {};
+  const redirectTargets: RedirectTarget[] = [];
+  for (const uri of uris) {
+    const host = hostnameOf(uri);
+    if (!host) continue;
+    const loopback = LOOPBACK_HOSTS.has(host);
+    if (
+      redirectTargets.some((t) => (loopback ? t.loopback : t.host === host))
+    ) {
+      continue;
+    }
+    redirectTargets.push({ host, loopback });
+  }
+  const redirectMismatch =
+    documentHost !== undefined &&
+    redirectTargets.some((t) => !t.loopback && t.host !== documentHost);
+  return { documentHost, redirectTargets, redirectMismatch };
 }

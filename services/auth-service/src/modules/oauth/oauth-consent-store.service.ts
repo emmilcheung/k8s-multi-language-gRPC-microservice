@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type Redis from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.module';
-import type { OAuthDomainSource } from './oauth-clients.config';
+import type { ClientAddresses } from './oauth-clients.config';
 
 const CONSENT_KEY_PREFIX = 'auth-service:oauth:pending-consent';
 const CONSENT_TTL_SECONDS = 600; // 10 minutes
@@ -11,9 +11,8 @@ export interface PendingConsent {
   requestId: string;
   clientId: string;
   clientName: string;
-  /** See describeClientDomain: stored at authorize time, so consent shows what was verified. */
-  clientDomain?: string;
-  domainSource?: OAuthDomainSource;
+  /** See describeClientAddresses: stored at authorize time, so consent shows what the server derived. */
+  addresses?: ClientAddresses;
   isFirstParty?: boolean;
   userId: string;
   scope: string; // space-delimited granted scopes
@@ -29,8 +28,7 @@ export interface ConsentSummary {
   requestId: string;
   clientId: string;
   clientName: string;
-  clientDomain?: string;
-  domainSource?: OAuthDomainSource;
+  addresses?: ClientAddresses;
   isFirstParty: boolean;
   scopes: string[]; // split for the UI
   expiresInSeconds: number;

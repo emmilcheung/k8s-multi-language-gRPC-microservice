@@ -138,8 +138,11 @@ describe('CIMD at /oauth/authorize', () => {
       expect.objectContaining({
         clientId: URL_ID,
         clientName: 'Example Agent',
-        clientDomain: 'app.example.com',
-        domainSource: 'client_id',
+        addresses: {
+          documentHost: 'app.example.com',
+          redirectTargets: [{ host: 'app.example.com', loopback: false }],
+          redirectMismatch: false,
+        },
         isFirstParty: false,
         redirectUri: CALLBACK,
       }),
@@ -152,10 +155,33 @@ describe('CIMD at /oauth/authorize', () => {
     consentStore.getConsent.mockClear();
     const summary = await service.getConsentRequest('req-1', 'user-1');
     expect(summary).toMatchObject({
-      clientDomain: 'app.example.com',
-      domainSource: 'client_id',
+      addresses: { documentHost: 'app.example.com', redirectMismatch: false },
       isFirstParty: false,
     });
+  });
+
+  it('R1: the redirect host is derived at authorize time and a differing host is flagged, naming both', async () => {
+    const m = makeService();
+    m.fetchDoc.mockResolvedValue({
+      body: JSON.stringify({
+        client_id: URL_ID,
+        client_name: 'Example Agent',
+        redirect_uris: ['https://evil.example/cb'],
+      }),
+    });
+    await m.service.authorize(
+      authorizeQuery({ redirect_uri: 'https://evil.example/cb' }),
+      authReq,
+    );
+    expect(m.consentStore.storePendingConsent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        addresses: {
+          documentHost: 'app.example.com',
+          redirectTargets: [{ host: 'evil.example', loopback: false }],
+          redirectMismatch: true,
+        },
+      }),
+    );
   });
 
   it('I-5: a DCR client is labelled with the host of the redirect URI the code is sent to, not a name it chose', async () => {
@@ -179,8 +205,11 @@ describe('CIMD at /oauth/authorize', () => {
     );
     expect(consentStore.storePendingConsent).toHaveBeenCalledWith(
       expect.objectContaining({
-        clientDomain: 'cb.evil.example',
-        domainSource: 'redirect_uri',
+        addresses: {
+          documentHost: undefined,
+          redirectTargets: [{ host: 'cb.evil.example', loopback: false }],
+          redirectMismatch: false,
+        },
         isFirstParty: false,
       }),
     );
@@ -316,8 +345,11 @@ describe('I-7: listing and revoking a CIMD grant', () => {
     expect(item).toMatchObject({
       clientId: URL_ID,
       clientName: 'Example Agent',
-      clientDomain: 'app.example.com',
-      domainSource: 'client_id',
+      addresses: {
+        documentHost: 'app.example.com',
+        redirectTargets: [{ host: 'app.example.com', loopback: false }],
+        redirectMismatch: false,
+      },
       isFirstParty: false,
     });
     expect(fetchDoc).not.toHaveBeenCalled();
@@ -336,7 +368,7 @@ describe('I-7: listing and revoking a CIMD grant', () => {
     expect(item).toMatchObject({
       clientId: URL_ID,
       clientName: 'app.example.com',
-      clientDomain: 'app.example.com',
+      addresses: { documentHost: 'app.example.com', redirectTargets: [] },
     });
     expect(fetchDoc).not.toHaveBeenCalled();
   });
@@ -366,13 +398,13 @@ describe('I-7: listing and revoking a CIMD grant', () => {
     const byId = Object.fromEntries(items.map((i) => [i.clientId, i]));
     expect(byId['ticketing-mcp']).toMatchObject({
       isFirstParty: true,
-      domainSource: 'redirect_uri',
-      clientDomain: '127.0.0.1:19836',
+      addresses: { redirectTargets: [{ host: '127.0.0.1', loopback: true }] },
     });
     expect(byId['dyn-1']).toMatchObject({
       isFirstParty: false,
-      domainSource: 'redirect_uri',
-      clientDomain: 'cb.example.org',
+      addresses: {
+        redirectTargets: [{ host: 'cb.example.org', loopback: false }],
+      },
     });
   });
 

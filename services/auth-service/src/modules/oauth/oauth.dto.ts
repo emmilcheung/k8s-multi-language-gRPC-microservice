@@ -1,3 +1,4 @@
+import type { ClientAddresses } from './oauth-clients.config';
 import {
   IsString,
   IsNotEmpty,
@@ -153,9 +154,8 @@ export interface ClientCredentials {
 export interface OAuthClientSession {
   clientId: string;
   clientName: string;
-  /** Host the user can verify: the client_id host (CIMD) or the redirect URI host. */
-  clientDomain?: string;
-  domainSource?: 'client_id' | 'redirect_uri';
+  /** client_id host (CIMD only) and registered redirect hosts; see describeClientAddresses. */
+  addresses?: ClientAddresses;
   /** True for static-config clients; false for DCR and CIMD apps. */
   isFirstParty: boolean;
   scope: string;
@@ -214,8 +214,7 @@ export interface ConsentDetails {
   requestId: string;
   clientId: string;
   clientName: string;
-  clientDomain?: string;
-  domainSource?: 'client_id' | 'redirect_uri';
+  addresses?: ClientAddresses;
   isFirstParty: boolean;
   scopes: string[];
   expiresInSeconds: number;
