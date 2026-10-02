@@ -199,6 +199,20 @@ describe("ConsentPage app addresses (R1)", () => {
     expect(screen.getByTestId("consent-redirect-host")).toHaveTextContent("cb.example.org");
   });
 
+  it("F2: the host lines and the caution wrap, so a long host cannot overflow the card", async () => {
+    stubFetch(["tickets:read"], REGISTRY, true, {
+      addresses: addr({
+        documentHost: "a".repeat(200) + ".example.com",
+        redirectTargets: [{ host: "b".repeat(200) + ".example.net", loopback: false }],
+        redirectMismatch: true,
+      }),
+    });
+    await renderConsent();
+    for (const id of ["consent-document-host", "consent-redirect-host", "consent-mismatch"]) {
+      expect(screen.getByTestId(id)).toHaveClass("break-all");
+    }
+  });
+
   it("M-10: a very long client_id wraps instead of overflowing the card", async () => {
     stubFetch(["tickets:read"], REGISTRY, true, {
       clientId: "https://app.example.com/" + "a".repeat(300),

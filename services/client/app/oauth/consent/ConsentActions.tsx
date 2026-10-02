@@ -11,8 +11,8 @@ interface ConsentActionsProps {
 const noopSubscribe = () => () => {};
 
 export function ConsentActions({ requestId }: ConsentActionsProps) {
-  // R4: false on the server and during hydration, true afterwards, so a click
-  // cannot land before the handlers are attached.
+  // False on the server and during hydration, true afterwards: a click before
+  // hydration is silently lost, so the buttons stay disabled until then.
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
   const [pending, setPending] = useState<"approve" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
