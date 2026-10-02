@@ -181,6 +181,17 @@ expiration-service:
       cpu: 200m
       memory: 128Mi
 
+# ── mcp-service (MCP resource server) ─────────────────────────────────────────
+# Off until the Kong /mcp route lands and its secret exists: without
+# MCP_RESOURCE/OAUTH_ISSUER/PUBLIC_WEB_URL (per-environment overlays) and
+# mcp-service-secrets the pod refuses to boot by design.
+mcp-service:
+  enabled: false
+  image:
+    repository: mcp-service
+    tag: "SET_BY_CI"  # overridden to git SHA at deploy time; never use latest in any env (I-04)
+  secretRef: mcp-service-secrets
+
 # ── apollo-router (GraphQL Federation gateway) ────────────────────────────────
 apollo-router:
   replicaCount: 2
