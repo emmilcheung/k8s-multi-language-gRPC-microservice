@@ -320,7 +320,7 @@ Engineering standards live in [`AGENTS.md`](AGENTS.md), which indexes the standa
 
 ### Agent-driven MCP Operations
 
-`mcp-service` is an OAuth 2.1 resource server that exposes twelve ticketing tools to MCP hosts such as Claude Code over Streamable HTTP at `http://localhost:8000/mcp` (through Kong). Hosts discover the authorization server from the 401 challenge, register dynamically, and the user grants scopes on a consent screen; the host's token is audience-bound to `/mcp` and exchanged per call for a short-lived API token.
+`mcp-service` is an OAuth 2.1 resource server that exposes twelve ticketing tools to MCP hosts such as Claude Code over Streamable HTTP at `http://localhost:8000/mcp` (through Kong). Hosts discover the authorization server from the 401 challenge, register dynamically (or, with `OAUTH_CIMD_ENABLED`, which is on only in local compose and values-local, identify themselves by a client metadata document URL), and the user grants scopes on a consent screen; the host's token is audience-bound to `/mcp` and exchanged per call for a short-lived API token.
 
 ```bash
 docker compose --profile mcp up -d --build      # needs the exchange secrets in .env, see the guide

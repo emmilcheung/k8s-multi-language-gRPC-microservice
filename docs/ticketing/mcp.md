@@ -2,7 +2,7 @@
 
 Lets an MCP host (Claude Code, or any client that speaks MCP Streamable HTTP and OAuth 2.1) work with the ticketing platform as the signed-in user: search events, place and cancel orders, pay. The host never holds the user's password; it holds a short-lived, audience-bound OAuth token that the user granted on a consent screen and can revoke.
 
-This guide replaces the old stdio-based `mcp-setup.md`, `mcp-structure.md` and `oauth-mcp-status.md`. The stdio package (`packages/ticketing-mcp-server`) still exists and is deprecated; its retirement is planned (see [Planned](#planned-not-in-this-commit)).
+This guide replaces the old stdio-based `mcp-setup.md`, `mcp-structure.md` and `oauth-mcp-status.md`. The stdio package (`packages/ticketing-mcp-server`) still exists and is deprecated; its retirement is planned (see [Planned](#planned-not-in-this-commit)). Client ID Metadata Documents are built; see [Client ID Metadata Documents](#client-id-metadata-documents-cimd).
 
 Security analysis lives in [`docs/06-security.md`](../06-security.md#mcp-surface-threat-model). This file is the operator and developer guide.
 
@@ -15,7 +15,8 @@ MCP host (Claude Code)
    |  1. POST /mcp  (no token)  ->  401 + WWW-Authenticate: resource_metadata=...
    |  2. GET /.well-known/oauth-protected-resource/mcp   -> names the authorization server
    |  3. GET /.well-known/oauth-authorization-server     -> endpoints, S256, registration
-   |  4. POST /oauth/clients/register                    -> client_id (RFC 7591)
+   |  4. POST /oauth/clients/register                    -> client_id (RFC 7591), or skip it:
+   |     a host may use an https URL it hosts as client_id (CIMD, only if enabled)
    |  5. browser: /oauth/authorize (PKCE S256, resource=<origin>/mcp) -> sign in -> consent -> code
    |  6. POST /oauth/token (code + verifier + resource)  -> access token, aud=<origin>/mcp
    v
@@ -33,7 +34,7 @@ Three points that explain most of the design:
 
 - **Two audiences.** The token the host holds is for `<origin>/mcp` and is useless against the REST API: Kong's `jwt-scope.lua` refuses an OAuth token whose `aud` is not `<origin>/api` (401 `token audience not accepted`). mcp-service never forwards the host's token; it exchanges it for an API-audience token per call.
 - **mcp-service goes through Kong.** It calls the public REST API, not internal gRPC, so scope checks, the waiting room and rate limits apply to agent traffic exactly as to a browser.
-- **Stateless.** `POST /mcp` carries one JSON-RPC request and gets one response. `GET /mcp` and `DELETE /mcp` both answer `405` with JSON-RPC error `-32000 Method not allowed.` once the caller is authenticated (observed live through Kong; the SDK handler in `services/mcp-service/src/app.ts:149` serves the route), and `401` without a token. There is no server-initiated stream and no session to delete.
+- **Stateless.** `POST /mcp` carries one JSON-RPC request and gets one response. `GET /mcp` and `DELETE /mcp` both answer `405` with JSON-RPC error `-32000 Method not allowed.` once the caller is authenticated, and `401` without a token. That is the behaviour of the MCP SDK's transport in stateless mode at the pinned versions (`@modelcontextprotocol/server` 2.2.0 and `@modelcontextprotocol/node` 2.1.0, `services/mcp-service/package.json:21-22`), not a rule this service codes itself; the route handler is `services/mcp-service/src/app.ts:149`. The E2E spec asserts both 405s, so an SDK upgrade that changes this fails loudly. There is no server-initiated stream and no session to delete.
 
 ### Where the code is
 
@@ -44,7 +45,7 @@ Three points that explain most of the design:
 | Token exchange client (cache, timeout) | `services/mcp-service/src/exchange.ts` |
 | Tool registry, scope map, error mapping | `services/mcp-service/src/tools.ts`, `scopes.ts`, `upstream.ts` |
 | Derived idempotency keys | `services/mcp-service/src/idempotency.ts` |
-| Authorization server (authorize, token, exchange, consent, DCR) | `services/auth-service/src/modules/oauth/` |
+| Authorization server (authorize, token, exchange, consent, DCR, CIMD) | `services/auth-service/src/modules/oauth/` (CIMD: `cimd-fetcher.ts`, `cimd-client.service.ts`, `cimd-document.ts`) |
 | Edge routes for `/mcp`, audience rule | `services/kong-gateway/config/kong.base.yml`, `plugins/jwt-scope.lua` |
 | Consent page, Settings, Connected apps | `services/client/app/oauth/consent/`, `services/client/app/settings/` |
 | Scripted end-to-end proof | `services/client/tests/e2e/mcp-full-flow.spec.ts` |
@@ -70,7 +71,7 @@ Twelve tools. The scope column is what the token must carry; it comes from the r
 | `pay_for_order` | `payments:create` | Charge a saved payment method by id (from `list_payment_methods`). Raw card data is never accepted. |
 | `pay_for_order_with_default` | `payments:create` + `payments:read` | Pay with the saved default method. |
 
-The authorization server advertises nine scopes (`scopes_supported`, `oauth-metadata.controller.ts:38`; registry in `oauth-scopes.ts`): the seven above, `tickets:read`, `seating:read`, `orders:read`, `orders:create`, `orders:cancel`, `payments:read`, `payments:create`, plus `venues:read` and `seating:hold`, which stay registered (and are in the dynamic-registration allow list, `dynamic-client.service.ts:29-39`) but are used by no tool. A client may be granted them; nothing happens with them. The consent screen lists them with human labels from `GET /oauth/scopes` and marks the ones that act on the user's behalf as **Sensitive**.
+The authorization server advertises nine scopes (`scopes_supported`, `oauth-metadata.controller.ts:38`; registry in `oauth-scopes.ts`): the seven above, `tickets:read`, `seating:read`, `orders:read`, `orders:create`, `orders:cancel`, `payments:read`, `payments:create`, plus `venues:read` and `seating:hold`, which stay registered (and are in the dynamic-registration allow list, `dynamic-client.service.ts:55-61`) but are used by no tool. A client may be granted them; nothing happens with them. The consent screen lists them with human labels from `GET /oauth/scopes` and marks the ones that act on the user's behalf as **Sensitive**.
 
 ### Behaviours worth knowing
 
@@ -94,9 +95,25 @@ Then, inside Claude Code, run `/mcp`, pick `ticketing` and choose Authenticate. 
 
 Other hosts need only the URL `http://localhost:8000/mcp`: discovery, registration and PKCE follow from the 401 challenge.
 
-**Consent.** A host that registers itself (dynamic client registration, which is how Claude Code connects) always sees the consent screen. Consent is skipped only for a client whose entry in the static registry sets `isFirstParty: true` (`oauth.service.ts:201-203`); dynamic clients are hard-coded `false`, and at this commit the only static client (`ticketing-mcp`, `oauth-clients.config.ts:19-28`) does not set it, so no client skips consent today.
+**Consent.** A host that registers itself (dynamic client registration, which is how Claude Code connects) or identifies itself by a metadata-document URL always sees the consent screen. Consent is skipped only for a client whose entry sets `isFirstParty: true` (`oauth.service.ts:263-265`); dynamic and CIMD clients are hard-coded `false`, and the only static client (`ticketing-mcp`, `oauth-clients.config.ts:28-37`) does not set it, so no client skips consent today. The Allow and Deny buttons stay disabled until the page has hydrated, so a click is never silently lost.
 
-**Revoke.** In the web app under **Settings -> Connected apps** (it calls `DELETE /oauth/clients/:clientId`, `services/client/app/settings/connected-apps.ts:59`; 204 on success, signed-in user only). That deletes the user's refresh sessions and grants for the client (`oauth.service.ts:728-745`), so the host cannot obtain new access tokens. A token already issued stays valid until it expires: access tokens live 15 minutes, exchanged API tokens at most 5. Refresh tokens live 24 hours (86400 s, both the static and dynamic client entries). See the threat model for the accepted window.
+**Revoke.** In the web app under **Settings -> Connected apps** (`services/client/app/settings/connected-apps.ts:64-71`). It calls `DELETE /oauth/clients?client_id=<id>` (`oauth.controller.ts:130-148`; the older `/oauth/clients/:clientId` form stays for opaque ids; 204 on success, signed-in user only). Revocation deletes, for that user and that client, the session-scope marker and the refresh sessions (`oauth.service.ts:808-825`), so the host cannot obtain new access tokens. It leaves the client registration in place, and there is no consent history to remove (the consent store only holds a pending consent for 10 minutes). A token already issued stays valid until it expires: access tokens live 15 minutes, exchanged API tokens at most 5.
+
+**Refresh tokens are sliding.** A refresh rotates the token and re-stores two records: the session record (TTL `REFRESH_TOKEN_TTL_SECONDS`, compose default 604800 s) and the OAuth session-scope marker (86400 s for the static, dynamic and CIMD clients) (`refresh-token.service.ts:181-187`, `oauth.service.ts:732-739`). A refresh token left unused for 24 hours stops working; one used at least once every 24 hours keeps working indefinitely until you revoke the app. Rotation has no reuse detection and is not atomic, so two simultaneous refreshes with one token can both succeed. These are accepted residuals, listed in the threat model.
+
+### Client ID Metadata Documents (CIMD)
+
+Instead of registering, a host can use an `https` URL it controls as its `client_id`; the URL serves a small JSON document describing the client. Auth-service fetches and validates it when the host starts authorization.
+
+- **Flag.** `OAUTH_CIMD_ENABLED`, default `false` (`oauth-config.ts:36`, `services/auth-service/.env.example:55`). It is `true` in `docker-compose.yml:319` and `infra/helm/values-local.yaml:49` only. With it off a URL `client_id` is an unknown client, nothing is fetched, and the authorization-server metadata does not advertise support. With it on, the metadata carries `client_id_metadata_document_supported: true` (`oauth-metadata.controller.ts:42`).
+- **The URL.** `https`, at most 512 characters, a DNS host name (no IP literal, no single-label host, no internal suffix such as `.internal`, `.local`, `.svc`), port 443 only, a non-root path without dot segments, no query, fragment or userinfo (`cimd-fetcher.ts:188-234`).
+- **The document.** HTTP 200, a JSON content type, at most 5 KB, no redirects, fetched within 3 s. It must be a JSON object whose `client_id` equals the URL exactly, with 1 to 10 `redirect_uris` (each `https`, or `http` on `localhost` / `127.0.0.1`, no fragment, no userinfo), a valid `client_name` (at most 100 characters, no control or formatting characters), and `token_endpoint_auth_method` absent or `none` (`cimd-document.ts:27-118`). The resulting client is public, never first-party, with 15 minute access and 24 hour refresh lifetimes.
+- **Cache.** The document is cached in Redis for its `Cache-Control: max-age`, at least 60 s and at most 24 h (default 5 minutes; `no-store` and `no-cache` get 60 s); a failed validation is cached for 60 s (`cimd-client.service.ts:21-26,38-46`). A changed or removed document therefore takes effect only after its cache entry expires, up to 24 hours, and there is no purge.
+- **Errors.** A document or URL that is refused gives 400 `invalid_client` with a generic message. A temporary failure (timeout, connection failure, DNS unavailable, or too many fetches in flight) gives 503 `temporarily_unavailable` with `Retry-After` (60 s, or 5 s when busy), so a client that is refreshing retries instead of giving up (`oauth-unavailable.ts`, `oauth.service.ts:56-60`).
+- **What the user sees.** The consent page shows the document host ("App identity document hosted at ..."), where the user is sent after allowing ("After you allow, you are sent to ...", reading "an app on this device" for a loopback redirect), and an amber caution when the two hosts differ (`services/client/app/oauth/consent/page.tsx:165-195`). Settings -> Connected apps lists the client by its URL.
+- **Dynamic registration stays.** It is unchanged for integrators except for the shared validation (redirect URIs: `https`, or `http` on loopback hosts only, no fragment, no userinfo; `client_name` at most 100 characters without control or formatting characters; `application_type` `native` or `web`), and it is marked deprecated in code (`oauth.service.ts:913`). Claude Code still registers this way.
+- **Running it in a cluster needs an owner-approved egress rule.** CIMD makes auth-service open outbound HTTPS to hosts chosen by callers. The auth-service chart's NetworkPolicy allows egress to DNS, PostgreSQL, Redis and Kafka only (`infra/helm/charts/auth-service/templates/networkpolicy.yaml`), and no CIMD egress policy exists. Before enabling the flag outside local, someone must write and owner-review a rule for TCP 443 to the public internet excluding private ranges, plus DNS. Until then staging and prod keep the flag off. The fetcher also refuses private and special-purpose addresses itself (see the threat model), but that is defence in depth, not a substitute for the network rule.
+- **What has not been verified.** The fetch of a real public document on a running stack: the E2E spec deliberately contacts no external host. It asserts the metadata flag on the compose stack and that URL client ids naming `169.254.169.254` and a `.internal` host are refused with 400 `invalid_client`, not a 5xx.
 
 ---
 
@@ -141,7 +158,7 @@ In Kubernetes the Helm value `global.publicOrigin` derives the auth-service set;
 
 ### Scripted (no Claude Code needed)
 
-`services/client/tests/e2e/mcp-full-flow.spec.ts` plays the host's part against a live stack through Kong, with the login and consent in a real browser page: discovery, dynamic registration, authorization code + PKCE with `resource`, `initialize`, `tools/list` (12), `search_events`, `create_order` twice (second `replayed: true`), `pay_for_order_with_default`, plus three negative edges (no token -> 401 with `resource_metadata`; MCP-audience token on REST -> 401 `token audience not accepted`; token without `orders:create` -> step-up 403). The spec records the protocol version negotiated at `initialize` as a Playwright annotation named `mcp-protocol-version` (visible in the HTML report and the test's annotations) and asserts it is one of the versions mcp-service is tested against, `2025-11-25` or `2026-07-28` (`services/mcp-service/src/protocol-eras.spec.ts:33,39`); the spec itself offers `2025-11-25`. Run it like the other specs: stack up with `--profile mcp` and the two exchange variables, `pnpm dev --port 4000` in `services/client`, then `npx playwright test mcp-full-flow.spec.ts`. Without mcp-service the spec fails immediately naming the missing profile. CI's `e2e` job starts mcp-service with an ephemeral exchange secret, so the spec runs there with the rest of the suite.
+`services/client/tests/e2e/mcp-full-flow.spec.ts` plays the host's part against a live stack through Kong, with the login and consent in a real browser page: discovery, dynamic registration, authorization code + PKCE with `resource`, `initialize`, `tools/list` (12), `search_events`, `create_order` twice (second `replayed: true`), `pay_for_order_with_default`, plus three negative edges (no token -> 401 with `resource_metadata`; MCP-audience token on REST -> 401 `token audience not accepted`; token without `orders:create` -> step-up 403). It also asserts that authenticated `GET /mcp` and `DELETE /mcp` are 405, that the metadata advertises CIMD on the compose stack, and that two URL client ids naming internal addresses are refused as `invalid_client`. The spec records the protocol version negotiated at `initialize` as a Playwright annotation named `mcp-protocol-version` (visible in the HTML report and the test's annotations) and asserts only that it is a `YYYY-MM-DD` string; the spec itself offers `2025-11-25`. Run it like the other specs: stack up with `--profile mcp` and the two exchange variables, `pnpm dev --port 4000` in `services/client`, then `npx playwright test mcp-full-flow.spec.ts`. Without mcp-service the spec fails immediately naming the missing profile. CI's `e2e` job starts mcp-service with an ephemeral exchange secret, so the spec runs there with the rest of the suite.
 
 The payment step needs a saved card, registered through Settings with the same Stripe mock `ticketing.spec.ts` uses. It asserts payment status `completed` and then polls `get_order` until the order is `complete`. It relies on payment-service running in `STRIPE_SECRET_KEY=test_mock` mode, which the spec cannot observe (it is a backend setting); a non-mock backend fails the status assertion rather than passing. It is skipped, with the reason in the run summary, only when card registration answers 5xx or 404, as in `ticketing.spec.ts`.
 
@@ -171,8 +188,9 @@ This needs an interactive terminal and a browser, so it is written down and has 
 | mcp-service exits at startup | A required setting is missing (`MCP_RESOURCE`, `OAUTH_ISSUER`, `AUTH_JWKS_URL`, `TOKEN_EXCHANGE_URL`, `KONG_INTERNAL_URL`, `PUBLIC_WEB_URL`, `TOKEN_EXCHANGE_CLIENT_SECRET`). It validates config before serving. |
 | `429` from `/mcp` | Per-IP limit (`RATE_LIMIT_MCP_PER_MINUTE`). Everyone behind one NAT shares it. |
 | `WAITING_ROOM_ACTIVE` from `create_order` | The event is queued; open the URL in the result in a browser. |
-| `GET /mcp` or `DELETE /mcp` returns 405 | By design; the server is stateless request/response. |
-| Consent page loads but Allow does nothing | The page is not hydrated yet; wait for the page to settle and click again. |
+| `GET /mcp` or `DELETE /mcp` returns 405 | By design; the SDK transport is stateless request/response. |
+| `503 temporarily_unavailable` from `/oauth/authorize` for a URL client id | The metadata document could not be fetched in time (or too many fetches were in flight). Retry after the `Retry-After` delay. |
+| `400 invalid_client` for a URL client id | CIMD is off, or the URL or document was refused (not https, internal host, redirect, over 5 KB, `client_id` mismatch). Auth-service logs the host and reason, never the body. |
 
 ---
 
@@ -180,7 +198,7 @@ This needs an interactive terminal and a browser, so it is written down and has 
 
 These are tracked in the MCP platform upgrade and are **not** implemented here; nothing above depends on them.
 
-- **Client ID Metadata Documents (CIMD)** in the authorization server, behind `OAUTH_CIMD_ENABLED` (WS-I). Until it lands, hosts register with dynamic client registration.
+- **A cluster egress policy for CIMD** (see above) and the decision to turn the flag on outside local.
 - **Retiring the stdio package and making `aud` mandatory** on OAuth tokens at the edge (WS-N). Until then the `.mcp.json` stdio entry and `packages/ticketing-mcp-server` remain; do not use them for new work. Tokens without an `aud` claim are tolerated by the REST audience rule.
 
 ## History
