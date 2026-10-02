@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { TOOL_SCOPES } from './scopes.ts';
-import { ERAS, connect, harness, mintToken, testConfig } from './testkit.ts';
+import {
+  DEFAULT_PAYMENT_METHOD,
+  ERAS,
+  connect,
+  harness,
+  mintToken,
+  realisticReply,
+  testConfig,
+} from './testkit.ts';
 
 const TICKET = '11111111-1111-4111-8111-111111111111';
 const ORDER = '22222222-2222-4222-8222-222222222222';
@@ -308,16 +316,22 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
   });
 
   it('pay_for_order_with_default charges the default method and fails clearly when there is none', async () => {
-    const pmDefault = '44444444-4444-4444-8444-444444444444';
+    const pmDefault = DEFAULT_PAYMENT_METHOD;
+    const method = (id: string, isDefault: boolean) => ({
+      id,
+      brand: 'visa',
+      last4: '4242',
+      isDefault,
+    });
     const h = harness((c) =>
       c.method === 'GET'
         ? Response.json({
             paymentMethods: [
-              { id: 'other', isDefault: false },
-              { id: pmDefault, isDefault: true },
+              method('55555555-0000-4000-8000-000000000000', false),
+              method(pmDefault, true),
             ],
           })
-        : Response.json({ id: 'pay-1', status: 'succeeded' }),
+        : realisticReply(c),
     );
     const client = await connect(
       era,

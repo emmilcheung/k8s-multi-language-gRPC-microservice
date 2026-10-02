@@ -7,13 +7,16 @@ const DEFAULT_MAX_ENTRIES = 1000;
 export class ExchangeError extends Error {
   /** HTTP status of the failed exchange; `undefined` for a network failure. */
   readonly status: number | undefined;
-  constructor(status?: number) {
+  /** RFC 6749 `error` code of a rejection (e.g. `invalid_grant`); never free text. */
+  readonly oauthError: string | undefined;
+  constructor(status?: number, oauthError?: string) {
     super(
       status === undefined
         ? 'token exchange unreachable'
         : `token exchange rejected (${status})`,
     );
     this.status = status;
+    this.oauthError = oauthError;
   }
 }
 
@@ -26,6 +29,8 @@ interface ExchangeOptions {
   fetch?: typeof fetch;
   now?: () => number;
   maxEntries?: number;
+  /** Per-request timeout; the exchange sits on every tool call's path. */
+  timeoutMs?: number;
 }
 
 export type TokenExchange = (
@@ -80,13 +85,23 @@ export function createTokenExchange(opts: ExchangeOptions): TokenExchange {
           resource: opts.resource,
           scope,
         }),
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(opts.timeoutMs ?? 5000),
       });
     } catch {
       throw new ExchangeError();
     }
-    // The body of a failure is never read into the error: it is upstream text.
-    if (!res.ok) throw new ExchangeError(res.status);
+    // Only the RFC 6749 `error` code is taken from a failure body, and only if
+    // it has the code's shape: the rest is upstream text and is never kept.
+    if (!res.ok) {
+      const failure = (await res.json().catch(() => undefined)) as
+        { error?: unknown } | undefined;
+      const code =
+        typeof failure?.error === 'string' &&
+        /^[a-z_]{1,40}$/.test(failure.error)
+          ? failure.error
+          : undefined;
+      throw new ExchangeError(res.status, code);
+    }
     const body = (await res.json().catch(() => undefined)) as
       { access_token?: unknown; expires_in?: unknown } | undefined;
     if (

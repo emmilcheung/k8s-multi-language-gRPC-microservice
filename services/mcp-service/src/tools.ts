@@ -3,6 +3,7 @@ import type {
   McpServer,
   ServerContext,
 } from '@modelcontextprotocol/server';
+import type { Logger } from 'pino';
 import { z } from 'zod';
 import { deriveIdempotencyKey } from './idempotency.ts';
 import {
@@ -15,17 +16,20 @@ import {
   ToolFailure,
   type Upstream,
   type UpstreamRequest,
+  type UpstreamResponse,
 } from './upstream.ts';
 
 interface ToolDeps {
   upstream: Upstream;
+  logger?: Pick<Logger, 'error'>;
   /** Public web origin, for the C-9 browser handoff. */
   publicWebUrl: string;
 }
 
-type Call = (req: UpstreamRequest) => Promise<unknown>;
 interface Env {
-  call: Call;
+  call: (req: UpstreamRequest) => Promise<unknown>;
+  /** Like `call`, plus whether order-service answered with an idempotent replay. */
+  send: (req: UpstreamRequest) => Promise<UpstreamResponse>;
   sub: string;
 }
 
@@ -37,6 +41,11 @@ const idempotencyKey = z
   .describe(
     'Optional. Identical arguments are already retry-safe: the same call twice returns the first order. Pass a fresh key to deliberately place another identical order.',
   );
+
+/** Upstream list endpoints answer with a bare array; MCP structuredContent must be an object. */
+const asItems = (data: unknown): { items: unknown[] } => ({
+  items: Array.isArray(data) ? data : [],
+});
 
 /** Success payloads are JSON objects (MCP structuredContent); wrap anything else. */
 const asObject = (data: unknown): Record<string, unknown> =>
@@ -61,15 +70,69 @@ const fail = (
   structuredContent: { code, ...extra },
 });
 
-// Upstream response shapes belong to other services; only fields the tools
-// themselves rely on are declared, the rest passes through.
-const anyObject = z.looseObject({});
+// Output schemas, from the upstream services' real responses: the fields a
+// caller relies on are typed (a response missing one becomes a tool error, see
+// registerTools), everything else passes through. Sources:
+//   order-service dto/OrderResponse.java, payment-service payments.controller.ts,
+//   ticket-service handler/ticket_handler.go (ticketResponse),
+//   venue-service hold/manager.go (AvailabilitySnapshot).
+const orderShape = z.looseObject({
+  id: z.string(),
+  status: z.string(),
+  quantity: z.number(),
+  total: z.string().nullish(),
+  expiresAt: z.string().nullish(),
+  orderType: z.string().nullish(),
+  planId: z.string().nullish(),
+  ticket: z.looseObject({ id: z.string(), title: z.string() }).nullish(),
+  seats: z.array(z.looseObject({})).nullish(),
+});
+const ticketShape = z.looseObject({
+  id: z.string(),
+  title: z.string(),
+  price: z.string(),
+  seatingPlanId: z.string().nullish(),
+  quota: z.number().nullish(),
+  reserved: z.number().nullish(),
+  sold: z.number().nullish(),
+  event: z.looseObject({}).nullish(),
+});
+const paymentShape = z.looseObject({
+  id: z.string(),
+  orderId: z.string(),
+  status: z.string(),
+});
+const paymentMethodShape = z.looseObject({
+  id: z.string(),
+  brand: z.string(),
+  last4: z.string(),
+  isDefault: z.boolean(),
+});
+
+const orderOutput = orderShape;
+const createdOrderOutput = orderShape.extend({ replayed: z.boolean() });
+const ticketListOutput = z.looseObject({
+  items: z.array(ticketShape),
+  nextCursor: z.string().optional(),
+});
+const orderListOutput = z.looseObject({ items: z.array(orderShape) });
+const paymentOutput = z.looseObject({ payment: paymentShape });
+const methodsOutput = z.looseObject({
+  paymentMethods: z.array(paymentMethodShape),
+});
+const availabilityOutput = z.looseObject({
+  planId: z.string(),
+  seatMap: z.record(z.string(), z.unknown()),
+  counts: z.record(z.string(), z.number()),
+});
+
+const seg = encodeURIComponent;
 
 interface ToolDef<I extends z.ZodObject> {
   name: ToolName;
   description: string;
   input: I;
-  output?: z.ZodObject;
+  output: z.ZodObject;
   annotations: Record<string, boolean>;
   /** Ticket id for the C-9 handoff when the tool can hit the waiting room. */
   ticketId?: (args: z.infer<I>) => string;
@@ -84,6 +147,12 @@ const creates = {
 };
 const destructive = { destructiveHint: true, idempotentHint: true };
 
+/** Order plus whether this was an idempotent replay of an earlier identical call. */
+const created = (res: UpstreamResponse): Record<string, unknown> => ({
+  ...asObject(res.data),
+  replayed: res.replayed,
+});
+
 const get = (env: Env, path: string) => env.call({ method: 'GET', path });
 
 function defineTool<I extends z.ZodObject>(def: ToolDef<I>): ToolDef<I> {
@@ -94,33 +163,36 @@ const TOOLS = [
   defineTool({
     name: 'search_events',
     description:
-      'Search events and tickets by title, availability, or pagination cursor.',
+      'List events and tickets page by page. There is no server-side title search: scan the returned titles yourself. Set available=false to include sold-out events. To get the next page pass the nextCursor from the previous result as `after` (it is the id of the last item; it is omitted when the page was not full, i.e. there are no more).',
     input: z.object({
-      query: z.string().optional().describe('Search term for event title'),
       available: z
         .boolean()
         .default(true)
         .describe('Only events with available tickets'),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(100)
-        .default(20)
-        .describe('Max results'),
+      limit: z.number().int().min(1).max(100).default(20).describe('Page size'),
       after: z
         .string()
+        .max(200)
         .optional()
-        .describe('Pagination cursor from a previous response'),
+        .describe('nextCursor from the previous page'),
     }),
+    output: ticketListOutput,
     annotations: readOnly,
-    async run({ query, available, limit, after }, env) {
+    async run({ available, limit, after }, env) {
       const params = new URLSearchParams();
-      if (query) params.set('search', query);
       if (available) params.set('available', 'true');
       params.set('limit', String(limit));
       if (after) params.set('after', after);
-      return asObject(await get(env, `/api/tickets?${params.toString()}`));
+      const { items } = asItems(
+        await get(env, `/api/tickets?${params.toString()}`),
+      );
+      const last = items.at(-1) as { id?: unknown } | undefined;
+      return {
+        items,
+        ...(items.length >= limit && typeof last?.id === 'string'
+          ? { nextCursor: last.id }
+          : {}),
+      };
     },
   }),
   defineTool({
@@ -128,9 +200,10 @@ const TOOLS = [
     description:
       'Get full details for one event/ticket, including seating plan info.',
     input: z.object({ eventId: uuid('The ticket/event UUID') }),
+    output: ticketShape,
     annotations: readOnly,
     async run({ eventId }, env) {
-      return asObject(await get(env, `/api/tickets/${eventId}`));
+      return asObject(await get(env, `/api/tickets/${seg(eventId)}`));
     },
   }),
   defineTool({
@@ -140,10 +213,11 @@ const TOOLS = [
     input: z.object({
       seatingPlanId: uuid('The seating plan ID (found in event details)'),
     }),
+    output: availabilityOutput,
     annotations: readOnly,
     async run({ seatingPlanId }, env) {
       return asObject(
-        await get(env, `/api/seating-plans/${seatingPlanId}/availability`),
+        await get(env, `/api/seating-plans/${seg(seatingPlanId)}/availability`),
       );
     },
   }),
@@ -151,34 +225,37 @@ const TOOLS = [
     name: 'list_my_orders',
     description: "List the signed-in user's orders.",
     input: z.object({}),
+    output: orderListOutput,
     annotations: readOnly,
     async run(_args, env) {
-      return asObject(await get(env, '/api/orders'));
+      return asItems(await get(env, '/api/orders'));
     },
   }),
   defineTool({
     name: 'get_order',
     description: 'Get one order by ID.',
     input: z.object({ orderId: uuid('The order UUID') }),
+    output: orderOutput,
     annotations: readOnly,
     async run({ orderId }, env) {
-      return asObject(await get(env, `/api/orders/${orderId}`));
+      return asObject(await get(env, `/api/orders/${seg(orderId)}`));
     },
   }),
   defineTool({
     name: 'create_order',
     description:
-      'Buy general-admission tickets. Reserves quota immediately; payment is a separate step. Safe to retry with the same arguments.',
+      'Buy general-admission tickets. Reserves quota immediately; payment is a separate step. Safe to retry: identical arguments return the existing order (replayed: true) instead of creating another. To deliberately place another identical order, pass a new idempotencyKey.',
     input: z.object({
       ticketId: uuid('The ticket/event ID'),
       quantity: z.number().int().min(1).max(10).describe('Number of tickets'),
       idempotencyKey,
     }),
+    output: createdOrderOutput,
     annotations: creates,
     ticketId: (a) => a.ticketId,
     async run({ idempotencyKey: key, ...body }, env) {
-      return asObject(
-        await env.call({
+      return created(
+        await env.send({
           method: 'POST',
           path: '/api/orders',
           body,
@@ -191,34 +268,58 @@ const TOOLS = [
   defineTool({
     name: 'create_seated_order',
     description:
-      'Reserve specific seats (seatIds) or auto-assign seats from a section (sectionId + quantity) for a seated event. Payment is a separate step. Safe to retry with the same arguments.',
-    input: z.object({
-      ticketId: uuid('The ticket/event ID'),
-      seatIds: z
-        .array(uuid('Seat ID'))
-        .optional()
-        .describe('Specific seats (manual selection)'),
-      sectionId: uuid('Section ID for auto-assign').optional(),
-      quantity: z
-        .number()
-        .int()
-        .min(1)
-        .max(10)
-        .optional()
-        .describe('Seats for auto-assign'),
-      idempotencyKey,
-    }),
+      'Reserve specific seats (seatIds) or auto-assign seats from a section (sectionId + quantity) for a seated event. seatingPlanId comes from get_event. Payment is a separate step. Safe to retry: identical arguments return the existing order (replayed: true) instead of creating another. To deliberately place another identical order, pass a new idempotencyKey.',
+    input: z
+      .object({
+        ticketId: uuid('The ticket/event ID'),
+        seatingPlanId: uuid('Seating plan ID from get_event (seatingPlanId)'),
+        seatIds: z
+          .array(uuid('Seat ID'))
+          .min(1)
+          .max(50)
+          .optional()
+          .describe('Specific seats (manual selection)'),
+        sectionId: uuid('Section ID for auto-assign').optional(),
+        quantity: z
+          .number()
+          .int()
+          .min(1)
+          .max(10)
+          .optional()
+          .describe('Seats for auto-assign (with sectionId)'),
+        idempotencyKey,
+      })
+      .refine(
+        (a) =>
+          a.seatIds
+            ? a.sectionId === undefined && a.quantity === undefined
+            : a.sectionId !== undefined && a.quantity !== undefined,
+        {
+          message:
+            'Pass either seatIds (specific seats) or sectionId with quantity (auto-assign), not both.',
+        },
+      ),
+    output: createdOrderOutput,
     annotations: creates,
     ticketId: (a) => a.ticketId,
     async run(
-      { idempotencyKey: key, ticketId, seatIds, sectionId, quantity },
+      {
+        idempotencyKey: key,
+        ticketId,
+        seatingPlanId,
+        seatIds,
+        sectionId,
+        quantity,
+      },
       env,
     ) {
-      const body = seatIds?.length
-        ? { ticketId, seatIds }
-        : { ticketId, sectionId, quantity };
-      return asObject(
-        await env.call({
+      // order-service CreateOrderRequest.validate(): planId is needed for both
+      // seated flows; manual seats must come with quantity == seatIds.length.
+      const body = seatIds
+        ? { ticketId, planId: seatingPlanId, seatIds, quantity: seatIds.length }
+        : { ticketId, planId: seatingPlanId, sectionId, quantity };
+      return created(
+        await env.send({
           method: 'POST',
           path: '/api/orders/seated',
           body,
@@ -236,7 +337,7 @@ const TOOLS = [
     output: z.object({ orderId: z.string(), cancelled: z.boolean() }),
     annotations: { destructiveHint: true, idempotentHint: true },
     async run({ orderId }, env) {
-      await env.call({ method: 'DELETE', path: `/api/orders/${orderId}` });
+      await env.call({ method: 'DELETE', path: `/api/orders/${seg(orderId)}` });
       return { orderId, cancelled: true };
     },
   }),
@@ -244,9 +345,10 @@ const TOOLS = [
     name: 'get_payment',
     description: 'Get one payment by ID.',
     input: z.object({ paymentId: uuid('The payment UUID') }),
+    output: paymentOutput,
     annotations: readOnly,
     async run({ paymentId }, env) {
-      return asObject(await get(env, `/api/payments/${paymentId}`));
+      return asObject(await get(env, `/api/payments/${seg(paymentId)}`));
     },
   }),
   defineTool({
@@ -254,7 +356,7 @@ const TOOLS = [
     description:
       'List the saved payment methods (brand, last 4, expiry, default flag). Use before paying.',
     input: z.object({}),
-    output: z.looseObject({ paymentMethods: z.array(anyObject).optional() }),
+    output: methodsOutput,
     annotations: readOnly,
     async run(_args, env) {
       return asObject(await get(env, '/api/payments/methods'));
@@ -268,6 +370,7 @@ const TOOLS = [
       orderId: uuid('The order UUID to pay for'),
       savedPaymentMethodId: uuid('ID from list_payment_methods'),
     }),
+    output: paymentOutput,
     annotations: destructive,
     async run(body, env) {
       return asObject(
@@ -280,6 +383,7 @@ const TOOLS = [
     description:
       'Pay for an order with the default saved payment method in one step. Fails if no default is set. Charges real money.',
     input: z.object({ orderId: uuid('The order UUID to pay for') }),
+    output: paymentOutput,
     annotations: destructive,
     async run({ orderId }, env) {
       const methods = asObject(await get(env, '/api/payments/methods'));
@@ -317,7 +421,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       {
         description: def.description,
         inputSchema: def.input,
-        outputSchema: def.output ?? anyObject,
+        outputSchema: def.output,
         annotations: def.annotations,
         // C-6: the only source of step-up 403s; handlers never throw OAuthError.
         scopeChallenge: requireScope(...scopes),
@@ -328,12 +432,28 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         const sub =
           typeof auth.extra?.sub === 'string' ? auth.extra.sub : auth.clientId;
         try {
+          const send = (req: UpstreamRequest) =>
+            deps.upstream.request(auth, name, req);
           const data = await (
             def.run as (a: unknown, e: Env) => Promise<Record<string, unknown>>
           )(args, {
-            call: (req) => deps.upstream.request(auth, name, req),
+            call: async (req) => (await send(req)).data,
+            send,
             sub,
           });
+          // A reply missing a key field is an upstream fault, not a success:
+          // report the paths (never values) to operators, a fixed text to the model.
+          const checked = def.output.safeParse(data);
+          if (!checked.success) {
+            deps.logger?.error(
+              {
+                tool: name,
+                fields: checked.error.issues.map((i) => i.path.join('.')),
+              },
+              'upstream response does not match the tool output schema',
+            );
+            throw new ToolFailure('UPSTREAM_ERROR');
+          }
           return succeed(data);
         } catch (err) {
           if (!(err instanceof ToolFailure)) throw err;

@@ -1,10 +1,12 @@
 import { McpServer } from '@modelcontextprotocol/server';
+import type { Logger } from 'pino';
 import { registerTools } from './tools.ts';
 import type { Upstream } from './upstream.ts';
 
 interface ServerDeps {
   upstream: Upstream;
   publicWebUrl: string;
+  logger?: Pick<Logger, 'error'>;
 }
 
 /** Builds a fresh server per request (stateless). */

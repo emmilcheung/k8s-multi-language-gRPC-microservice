@@ -91,7 +91,12 @@ export function createApp({
     logger,
   });
   const mcp = createMcpHandler(
-    () => createMcpServer({ upstream, publicWebUrl: config.PUBLIC_WEB_URL }),
+    () =>
+      createMcpServer({
+        upstream,
+        publicWebUrl: config.PUBLIC_WEB_URL,
+        logger,
+      }),
     {
       onerror: (err) => logger?.error({ err }, 'mcp handler error'),
     },

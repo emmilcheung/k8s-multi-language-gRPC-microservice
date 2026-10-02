@@ -52,12 +52,18 @@ export interface UpstreamRequest {
   idempotencyKey?: string;
 }
 
+export interface UpstreamResponse {
+  data: unknown;
+  /** order-service answered an already-seen Idempotency-Key (`Idempotent-Replayed: true`, C-8). */
+  replayed: boolean;
+}
+
 export interface Upstream {
   request(
     auth: AuthInfo,
     tool: ToolName,
     req: UpstreamRequest,
-  ): Promise<unknown>;
+  ): Promise<UpstreamResponse>;
 }
 
 interface UpstreamOptions {
@@ -65,7 +71,9 @@ interface UpstreamOptions {
   baseUrl: string;
   exchange: TokenExchange;
   fetch?: typeof fetch;
-  logger?: Pick<Logger, 'warn'>;
+  logger?: Pick<Logger, 'warn' | 'error'>;
+  /** Per-request timeout for Kong calls. */
+  timeoutMs?: number;
 }
 
 const IDEMPOTENCY_CODES = new Set<FailureCode>([
@@ -122,12 +130,24 @@ export function createUpstream(opts: UpstreamOptions): Upstream {
         );
       } catch (err) {
         const status = err instanceof ExchangeError ? err.status : undefined;
-        opts.logger?.warn({ tool, status }, 'token exchange failed');
-        throw new ToolFailure(
-          status !== undefined && status >= 400 && status < 500
-            ? 'UNAUTHORIZED'
-            : 'UPSTREAM_ERROR',
+        const oauthError =
+          err instanceof ExchangeError ? err.oauthError : undefined;
+        // Only `invalid_grant` says the subject token is bad (re-authorize).
+        // invalid_client / unauthorized_client / invalid_target / invalid_scope
+        // and 5xx or network failures are our misconfiguration or an outage:
+        // looping the user through consent would not fix them (C-5).
+        if (oauthError === 'invalid_grant') {
+          opts.logger?.warn(
+            { tool, status, oauthError },
+            'token exchange refused the subject token',
+          );
+          throw new ToolFailure('UNAUTHORIZED');
+        }
+        opts.logger?.error(
+          { tool, status, oauthError },
+          'token exchange failed',
         );
+        throw new ToolFailure('UPSTREAM_ERROR');
       }
 
       const headers: Record<string, string> = {
@@ -142,7 +162,7 @@ export function createUpstream(opts: UpstreamOptions): Upstream {
           method: req.method,
           headers,
           body: req.body === undefined ? undefined : JSON.stringify(req.body),
-          signal: AbortSignal.timeout(10_000),
+          signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
         });
       } catch {
         opts.logger?.warn({ tool }, 'upstream unreachable');
@@ -154,10 +174,11 @@ export function createUpstream(opts: UpstreamOptions): Upstream {
         opts.logger?.warn({ tool, status: res.status, code }, 'upstream error');
         throw new ToolFailure(code);
       }
+      const replayed = res.headers.get('idempotent-replayed') === 'true';
       const text = await res.text();
-      if (!text) return {};
+      if (!text) return { data: {}, replayed };
       try {
-        return JSON.parse(text) as unknown;
+        return { data: JSON.parse(text) as unknown, replayed };
       } catch {
         throw new ToolFailure('UPSTREAM_ERROR');
       }
