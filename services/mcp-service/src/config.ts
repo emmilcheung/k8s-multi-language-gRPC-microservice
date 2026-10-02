@@ -6,6 +6,13 @@ const schema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.string().min(1).default('info'),
   // Public resource identifier of this server; the required `aud` of every token.
+  // The token-exchange audience is derived from it as `new URL(v).origin + '/api'`
+  // and must equal auth-service's OAUTH_API_AUDIENCE (helm: publicOrigin without a
+  // trailing slash + '/api'). They differ if this value has an explicit default
+  // port (`:443`, which URL.origin drops), an upper-case host (lower-cased) or a
+  // path prefix other than the MCP route (dropped). The mismatch cannot be
+  // detected at startup; auth-service would answer `invalid_target`, which the
+  // tools report as an operator error. Pinned in upstream-contract.spec.ts.
   MCP_RESOURCE: url,
   // Authorization Server issuer; the required `iss` of every token.
   OAUTH_ISSUER: url,

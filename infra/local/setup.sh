@@ -85,6 +85,10 @@ X_USER_ID_SIGNING_KEY="$(_read_secret X_USER_ID_SIGNING_KEY)"
 # Optional (mcp-service token exchange): SHA-256 hex of its client secret.
 # Empty = the exchange grant stays disabled; auth-service still boots.
 MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH="$(_read_secret MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH || true)"
+# Optional: mcp-service is opt-in, so this is not in the required list below.
+# `|| true`: an older secrets.env has no such line, grep then exits 1 and
+# `set -e` + pipefail would abort the whole script before the skip warning.
+MCP_TOKEN_EXCHANGE_CLIENT_SECRET="$(_read_secret MCP_TOKEN_EXCHANGE_CLIENT_SECRET || true)"
 
 # Validate required secrets are present and non-empty
 for var in RSA_PRIVATE_KEY STRIPE_SECRET_KEY QR_SIGNING_KEY KONG_RSA_PUBLIC_KEY X_USER_ID_SIGNING_KEY; do
@@ -260,6 +264,14 @@ apply_secret payment-service-secrets \
   --from-literal=STRIPE_WEBHOOK_SECRET="whsec_test_placeholder" \
   --from-literal=KAFKA_BROKERS="${KAFKA_HOST}:9092" \
   --from-literal=X_USER_ID_SIGNING_KEY="${X_USER_ID_SIGNING_KEY}"
+
+# mcp-service-secrets (chart secretRef; the key is the env var the service reads)
+if [[ -n "${MCP_TOKEN_EXCHANGE_CLIENT_SECRET}" ]]; then
+  apply_secret mcp-service-secrets \
+    --from-literal=TOKEN_EXCHANGE_CLIENT_SECRET="${MCP_TOKEN_EXCHANGE_CLIENT_SECRET}"
+else
+  warn "MCP_TOKEN_EXCHANGE_CLIENT_SECRET is empty or absent in secrets.env: skipping 'mcp-service-secrets' (mcp-service will not start until it is set)."
+fi
 
 # expiration-service-secrets
 apply_secret expiration-service-secrets \

@@ -9,11 +9,13 @@ import {
 import type { JWTVerifyGetKey } from 'jose';
 import type { Logger } from 'pino';
 import type { Config } from './config.ts';
+import { createTokenExchange } from './exchange.ts';
 import { createMcpServer } from './server.ts';
+import { createUpstream } from './upstream.ts';
 import { createVerifier } from './verifier.ts';
 
 /** C-3: every scope a client may request. The registry lives in auth-service. */
-const SCOPES_SUPPORTED = [
+export const SCOPES_SUPPORTED = [
   'tickets:read',
   'seating:read',
   'orders:read',
@@ -35,6 +37,8 @@ interface AppOptions {
   config: Config;
   jwks: JWTVerifyGetKey;
   logger?: Pick<Logger, 'warn' | 'error'>;
+  /** Outbound HTTP (token exchange + Kong); injectable so tests stay in-process. */
+  fetch?: typeof fetch;
 }
 
 export type FetchApp = (request: Request) => Promise<Response>;
@@ -42,7 +46,12 @@ export type FetchApp = (request: Request) => Promise<Response>;
 const json = (body: unknown, status = 200): Response =>
   Response.json(body, { status });
 
-export function createApp({ config, jwks, logger }: AppOptions): FetchApp {
+export function createApp({
+  config,
+  jwks,
+  logger,
+  fetch: outboundFetch,
+}: AppOptions): FetchApp {
   const resource = new URL(config.MCP_RESOURCE);
   const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(resource);
   const issuer = config.OAUTH_ISSUER.replace(/\/$/, '');
@@ -68,9 +77,30 @@ export function createApp({ config, jwks, logger }: AppOptions): FetchApp {
     resource: config.MCP_RESOURCE,
     jwks,
   });
-  const mcp = createMcpHandler(() => createMcpServer(), {
-    onerror: (err) => logger?.error({ err }, 'mcp handler error'),
+  const upstream = createUpstream({
+    baseUrl: config.KONG_INTERNAL_URL,
+    exchange: createTokenExchange({
+      url: config.TOKEN_EXCHANGE_URL,
+      clientId: config.TOKEN_EXCHANGE_CLIENT_ID,
+      clientSecret: config.TOKEN_EXCHANGE_CLIENT_SECRET,
+      // C-5: the API audience is `<origin>/api`, as auth-service derives it.
+      resource: `${resource.origin}/api`,
+      fetch: outboundFetch,
+    }),
+    fetch: outboundFetch,
+    logger,
   });
+  const mcp = createMcpHandler(
+    () =>
+      createMcpServer({
+        upstream,
+        publicWebUrl: config.PUBLIC_WEB_URL,
+        logger,
+      }),
+    {
+      onerror: (err) => logger?.error({ err }, 'mcp handler error'),
+    },
+  );
 
   async function protectedResourceMetadata(
     request: Request,

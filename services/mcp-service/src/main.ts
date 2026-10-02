@@ -1,9 +1,9 @@
 import { createServer } from 'node:http';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { createRemoteJWKSet } from 'jose';
-import pino from 'pino';
 import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
+import { createLogger } from './logging.ts';
 
 function boot(): void {
   let config;
@@ -14,17 +14,7 @@ function boot(): void {
     process.exit(1);
   }
 
-  const logger = pino({
-    level: config.LOG_LEVEL,
-    name: 'mcp-service',
-    // Never log credentials, even if a request or config object is logged later.
-    redact: [
-      'req.headers.authorization',
-      'headers.authorization',
-      'TOKEN_EXCHANGE_CLIENT_SECRET',
-      'config.TOKEN_EXCHANGE_CLIENT_SECRET',
-    ],
-  });
+  const logger = createLogger(config.LOG_LEVEL);
   const app = createApp({
     config,
     jwks: createRemoteJWKSet(new URL(config.AUTH_JWKS_URL)),

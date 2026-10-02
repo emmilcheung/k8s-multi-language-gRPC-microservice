@@ -6,6 +6,7 @@ import {
 } from '@modelcontextprotocol/client';
 import { describe, expect, it } from 'vitest';
 import { createApp } from './app.ts';
+import { TOOL_SCOPES } from './scopes.ts';
 import { mintToken, stubJwks, testConfig } from './testkit.ts';
 
 const app = createApp({ config: testConfig, jwks: stubJwks });
@@ -31,7 +32,7 @@ describe('one endpoint serves both protocol eras', () => {
     expect(client.getProtocolEra()).toBe('modern');
     expect(client.getNegotiatedProtocolVersion()).toBe('2026-07-28');
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['ping']);
+    expect(tools.map((t) => t.name)).toEqual(Object.keys(TOOL_SCOPES));
     await client.close();
   });
 
@@ -45,7 +46,7 @@ describe('one endpoint serves both protocol eras', () => {
       }),
     );
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['ping']);
+    expect(tools.map((t) => t.name)).toEqual(Object.keys(TOOL_SCOPES));
     await client.close();
   });
 });
