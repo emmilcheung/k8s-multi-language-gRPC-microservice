@@ -102,7 +102,7 @@ environment whose Kong was rendered with the matching `KONG_OAUTH_ISSUER` (compo
 | `/api/users/signup`, `/signin`, `/signout` | POST | Public |
 | `/api/users/currentuser` | GET | JWT required |
 | `/.well-known/jwks.json` | GET | Public |
-| `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp` | GET | Public (to mcp-service) |
+| `/.well-known/oauth-protected-resource/mcp` | GET | Public (to mcp-service) |
 | `/mcp` | POST, GET, DELETE | No Kong JWT; mcp-service verifies the `<origin>/mcp` token. Inbound `X-User-*` cleared, rate-limited per IP |
 | `/api/tickets` | GET | Public |
 | `/api/tickets/:id` | GET | Public |

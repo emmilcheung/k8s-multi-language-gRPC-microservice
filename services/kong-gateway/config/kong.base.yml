@@ -19,7 +19,7 @@
 #   *    /api/payments/*                   → payment-service (JWT required)
 #   *    /api/user-settings/*              → user-service   (JWT required)
 #   *    /api/attendance/*                 → attendance-service (JWT required)
-#   GET  /.well-known/oauth-protected-resource[/mcp] → mcp-service (public)
+#   GET  /.well-known/oauth-protected-resource/mcp → mcp-service (public)
 #   POST|GET|DELETE /mcp                   → mcp-service    (no Kong JWT; mcp-service verifies the token)
 #   /*                                     → client         (catch-all, no JWT)
 #
@@ -969,10 +969,11 @@ services:
     read_timeout: {{SSE_READ_TIMEOUT_MS}}
     write_timeout: {{WRITE_TIMEOUT_MS}}
     routes:
-      # Public: RFC 9728 protected-resource metadata, discovered before any token exists.
+      # Public: RFC 9728 protected-resource metadata for /mcp, discovered before any token
+      # exists. Only the path-suffixed URL is routed (the bare path would 404 upstream).
       - name: mcp-protected-resource-metadata
         paths:
-          - ~/\.well-known/oauth-protected-resource(/mcp)?$
+          - ~/\.well-known/oauth-protected-resource/mcp$
         methods: [GET]
         strip_path: false
 
