@@ -320,53 +320,14 @@ Engineering standards live in [`AGENTS.md`](AGENTS.md), which indexes the standa
 
 ### Agent-driven MCP Operations
 
-This workspace includes a local ticketing MCP server in `packages/ticketing-mcp-server` plus a project MCP config in `.mcp.json`.
+`mcp-service` is an OAuth 2.1 resource server that exposes twelve ticketing tools to MCP hosts such as Claude Code over Streamable HTTP at `http://localhost:8000/mcp` (through Kong). Hosts discover the authorization server from the 401 challenge, register dynamically, and the user grants scopes on a consent screen; the host's token is audience-bound to `/mcp` and exchanged per call for a short-lived API token.
 
-This MCP setup allows Claude Code and other MCP-compatible agents to call ticketing workflows directly over stdio, using OAuth2 Authorization Code + PKCE for secure authentication and forwarding requests through Kong at `http://localhost:8000`.
-
-See `packages/ticketing-mcp-server/README.md` for package structure, install steps, demo screenshots, and local test guidance.
-
-The server runs locally, authenticates with OAuth2 Authorization Code + PKCE, and exposes ticketing tools to MCP-compatible agents such as Claude Code over stdio. Requests are forwarded through Kong at `http://localhost:8000` using the authenticated user's tokens.
-
-Key points:
-- MCP server package: `packages/ticketing-mcp-server`
-- Agent-side config: `.mcp.json` (project scope)
-- Claude Code discovers the config automatically when the workspace is opened.
-- Auth tokens are stored securely in `~/.config/ticketing-mcp/tokens.json`.
-- Tools include event search, seat availability, order creation/cancellation, payment processing, and session revocation.
-
-Install and run the MCP server locally:
 ```bash
-cd packages/ticketing-mcp-server
-pnpm install
-pnpm build
-export TICKETING_API_URL=http://localhost:8000
-pnpm dev
+docker compose --profile mcp up -d --build      # needs the exchange secrets in .env, see the guide
+claude mcp add --transport http ticketing http://localhost:8000/mcp
 ```
 
-Test the MCP workflow:
-```bash
-# terminal 1
-cd packages/ticketing-mcp-server
-pnpm install
-pnpm build
-export TICKETING_API_URL=http://localhost:8000
-pnpm dev
-
-# terminal 2
-cd services/auth-service
-pnpm test
-pnpm test:integration
-```
-
-Agent prompt guidance:
-- Use exact working directories and explicit commands.
-- Be specific: `run unit tests`, `build the MCP server`, `invoke search_events`, `create_order`.
-- Example: `change directory into packages/ticketing-mcp-server and start the MCP server`
-- Example: `change directory into services/auth-service and run pnpm test and pnpm test:integration`
-- Example: `once the MCP server is running, use the agent to call search_events and list_my_orders`
-
-The MCP tools map directly to ticketing functionality such as `search_events`, `get_event`, `view_seat_availability`, `list_my_orders`, `get_order`, `create_order`, `create_seated_order`, `cancel_order`, `get_payment`, and `pay_for_order`.
+Full guide (architecture, tools and scopes, setup, troubleshooting, manual verification): [`docs/ticketing/mcp.md`](docs/ticketing/mcp.md). Threat model: [`docs/06-security.md`](docs/06-security.md).
 
 ### 7.1 Local Development (Docker Compose)
 
