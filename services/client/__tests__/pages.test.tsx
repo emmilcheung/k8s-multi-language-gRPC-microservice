@@ -442,7 +442,7 @@ describe("SettingsPage connected apps (L-2)", () => {
     render(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^revoke$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revoke access for Claude Code" })).toBeInTheDocument();
   });
 });
 

@@ -65,12 +65,21 @@ export default async function ConsentPage({
     if (!res.ok || !scopesRes.ok) throw new Error(`${res.status}/${scopesRes.status}`);
     consent = (await res.json()) as ConsentDetails;
     registry = (await scopesRes.json()) as ScopeInfo[];
-  } catch {
+  } catch (err) {
+    // Status codes / error message only: never log the cookie or request headers.
+    console.error(
+      "[consent] failed to load consent details or scope registry:",
+      err instanceof Error ? err.message : String(err),
+    );
     notFound();
   }
 
   const scopeInfo = new Map(registry.map((s) => [s.scope, s]));
-  const hasSensitive = consent.scopes.some((s) => scopeInfo.get(s)?.sensitive);
+  // Fail closed: a scope the registry cannot describe is treated as sensitive.
+  const hasSensitive = consent.scopes.some((s) => {
+    const info = scopeInfo.get(s);
+    return !info || info.sensitive;
+  });
 
   return (
     <div className="min-h-[70vh] flex flex-col justify-center items-center py-12 px-4">
@@ -109,9 +118,12 @@ export default async function ConsentPage({
                     <Shield className="size-4 text-accent mt-0.5 shrink-0" />
                     <div className="flex flex-col gap-0.5 min-w-0">
                       <span className="text-sm font-medium text-ink">
-                        {meta?.label ?? scope}
+                        {meta ? meta.label : "Unrecognised permission"}
                       </span>
-                      {meta?.sensitive && (
+                      {!meta && (
+                        <span className="text-xs font-mono text-mute break-all">{scope}</span>
+                      )}
+                      {(!meta || meta.sensitive) && (
                         <Badge variant="destructive" className="w-fit">
                           Sensitive
                         </Badge>

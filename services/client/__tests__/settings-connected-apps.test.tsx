@@ -4,7 +4,7 @@
 // client, not a single session.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, fireEvent, waitFor } from "@testing-library/react";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -136,7 +136,7 @@ describe("ConnectedApps section (L-2)", () => {
   it("L-2: each row has a Revoke form carrying its client id", () => {
     const { container } = render(<ConnectedApps apps={[app]} revokeAction={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: /revoke/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revoke access for Claude Code" })).toBeInTheDocument();
     const hidden = container.querySelector("input[name='clientId']") as HTMLInputElement;
     expect(hidden.value).toBe(UUID);
   });
@@ -148,5 +148,17 @@ describe("ConnectedApps section (L-2)", () => {
     rerender(<ConnectedApps apps={[]} error="Could not load" revokeAction={vi.fn()} />);
     expect(screen.getByText(/could not load/i)).toBeInTheDocument();
     expect(screen.queryByText(/no connected apps/i)).not.toBeInTheDocument();
+  });
+
+  it("R3: Revoke is disabled while its request is in flight (no double DELETE)", async () => {
+    const revoke = vi.fn(() => new Promise<void>(() => {}));
+    render(<ConnectedApps apps={[app]} revokeAction={revoke} />);
+
+    const button = screen.getByRole("button", { name: "Revoke access for Claude Code" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+
+    await waitFor(() => expect(button).toBeDisabled());
+    expect(revoke).toHaveBeenCalledTimes(1);
   });
 });

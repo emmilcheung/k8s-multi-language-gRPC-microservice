@@ -96,6 +96,31 @@ describe("ConsentPage scope labels (L-1)", () => {
     expect(screen.getByText(/on your behalf such as/i)).toBeInTheDocument();
   });
 
+  it("R1: a requested scope missing from the registry fails closed (flagged sensitive, warned, raw id visible)", async () => {
+    stubFetch(["tickets:read", "mystery:scope"]);
+    await renderConsent();
+
+    const item = screen.getByText("mystery:scope").closest("li") as HTMLElement;
+    expect(within(item).getByText(/unrecognised permission/i)).toBeInTheDocument();
+    expect(within(item).getByText(/sensitive/i)).toBeInTheDocument();
+    expect(screen.getByText(/on your behalf such as/i)).toBeInTheDocument();
+  });
+
+  it("R4: logs why the registry fetch failed, without leaking the cookie", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    stubFetch(["orders:create"], [], false);
+    const { default: ConsentPage } = await import("@/app/oauth/consent/page");
+
+    await expect(
+      ConsentPage({ searchParams: Promise.resolve({ request_id: "req-1" }) }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
+
+    const logged = errorSpy.mock.calls.flat().join(" ");
+    expect(logged).toMatch(/503/);
+    expect(logged).not.toContain("access-token");
+    errorSpy.mockRestore();
+  });
+
   it("L-1: does not render consent when the registry cannot be loaded (never show unlabeled grants)", async () => {
     stubFetch(["orders:create"], [], false);
     const { default: ConsentPage } = await import("@/app/oauth/consent/page");

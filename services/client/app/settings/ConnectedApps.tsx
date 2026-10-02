@@ -1,6 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button-variants";
-import { cn } from "@/lib/utils";
+import { RevokeButton } from "./RevokeButton";
 import type { ConnectedApp } from "./connected-apps";
 
 function formatLastUsed(value?: string): string {
@@ -54,12 +53,7 @@ export function ConnectedApps({
           </div>
           <form action={revokeAction}>
             <input type="hidden" name="clientId" value={app.clientId} />
-            <button
-              type="submit"
-              className={cn(buttonVariants({ variant: "destructive", size: "sm" }))}
-            >
-              Revoke
-            </button>
+            <RevokeButton appName={app.name} />
           </form>
         </div>
       ))}
