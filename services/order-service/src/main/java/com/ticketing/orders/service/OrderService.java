@@ -168,19 +168,26 @@ public class OrderService {
 
         // Step 1: reserve quota outside the DB transaction (network I/O must not hold a
         // connection).  This is the authoritative availability check — no Redisson lock needed.
-        ReserveQuotaResponse reserveResponse = ticketServiceClient.reserveQuota(
-                ticketId.toString(), resId, userId, quantity, reservationExpiresAt);
+        ReserveQuotaResponse reserveResponse;
+        try {
+            reserveResponse = ticketServiceClient.reserveQuota(
+                    ticketId.toString(), resId, userId, quantity, reservationExpiresAt);
+        } catch (ReservationReleasedException e) {
+            // Same handling as the seated path: a random (unkeyed) id can never hit this.
+            throw new IdempotencyKeyExhaustedException();
+        }
 
         // Step 2: create order + outbox in a single DB transaction.
         try {
             return new CreateOrderResult(orderTransactionService.createOrderTransactional(
                     userId, ticketId, reserveResponse, resId, quantity, fingerprint), false);
         } catch (Exception e) {
-            // C-8: a same-key request that committed first owns this reservation. Releasing it
-            // would strand the winner's order, so return the winner and do NOT compensate.
-            Optional<OrderResponse> winner = findWinner(idempotencyKey, userId, resId, fingerprint);
-            if (winner.isPresent()) {
-                return new CreateOrderResult(winner.get(), true);
+            if (idempotencyKey != null) {
+                Optional<CreateOrderResult> winner = keyedWinner(userId, resId, fingerprint);
+                if (winner.isPresent()) {
+                    return winner.get();
+                }
+                throw e; // keyed requests never compensate, see keyedWinner
             }
             // Compensation: release the reservation so inventory is returned immediately.
             log.error("Order TX failed after successful ReserveQuota — compensating reservationId={} ticketId={}",
@@ -274,9 +281,12 @@ public class OrderService {
                         resId, quantity, reserveResponse.getSeatsList(),
                         OrderType.MANUAL_SEATED, null, fp), false);
             } catch (Exception e) {
-                Optional<OrderResponse> winner = findWinner(idempotencyKey, userId, resId, fp);
-                if (winner.isPresent()) {
-                    return new CreateOrderResult(winner.get(), true);
+                if (idempotencyKey != null) {
+                    Optional<CreateOrderResult> winner = keyedWinner(userId, resId, fp);
+                    if (winner.isPresent()) {
+                        return winner.get();
+                    }
+                    throw e; // keyed requests never compensate, see keyedWinner
                 }
                 log.error("Seated order TX failed after ReserveHeldSeats — compensating "
                         + "reservationId={} ticketId={}", resId, ticketId, e);
@@ -304,9 +314,12 @@ public class OrderService {
                     resId, quantity, assignResponse.getSeatsList(),
                     OrderType.AUTO_ASSIGN_SEATED, UUID.fromString(sectionId), fp), false);
         } catch (Exception e) {
-            Optional<OrderResponse> winner = findWinner(idempotencyKey, userId, resId, fp);
-            if (winner.isPresent()) {
-                return new CreateOrderResult(winner.get(), true);
+            if (idempotencyKey != null) {
+                Optional<CreateOrderResult> winner = keyedWinner(userId, resId, fp);
+                if (winner.isPresent()) {
+                    return winner.get();
+                }
+                throw e; // keyed requests never compensate, see keyedWinner
             }
             log.error("Seated order TX failed after AutoAssignAndReserve — compensating "
                     + "reservationId={} ticketId={}", resId, ticketId, e);
@@ -331,10 +344,31 @@ public class OrderService {
         });
     }
 
-    /** After a failed create TX: the same-key winner, if this request carried a key and lost the race. */
-    private Optional<OrderResponse> findWinner(
-            String idempotencyKey, UUID userId, UUID reservationId, String fingerprint) {
-        return idempotencyKey == null ? Optional.empty() : findReplay(userId, reservationId, fingerprint);
+    /**
+     * A keyed create failed after a successful reserve. The reservation is shared by every
+     * request with this key (same derived id), so releasing it could strand a sibling's
+     * committed order (oversell): a keyed request NEVER compensates. Instead return the
+     * winning order if there is one; the caller rethrows the original failure otherwise.
+     *
+     * <p>Cost: a failed keyed order holds its quota until the reservation expires. The expiry
+     * is order.expiration.minutes + 1 (default 16 min, set in this class); ticket-service
+     * reclaims it on its next reconciler sweep (5 min interval), so up to ~21 min. For
+     * venue-service the same expiresAt is stored on the seat reservation, but no
+     * reservation-expiry sweeper exists there, so held seats free via the hold sweeper/order expiry.
+     */
+    private Optional<CreateOrderResult> keyedWinner(UUID userId, UUID reservationId, String fingerprint) {
+        try {
+            Optional<OrderResponse> winner = findReplay(userId, reservationId, fingerprint);
+            if (winner.isPresent()) {
+                return Optional.of(new CreateOrderResult(winner.get(), true));
+            }
+        } catch (IdempotencyKeyReusedException reused) {
+            throw reused;
+        } catch (RuntimeException lookupFailure) {
+            log.warn("Winner lookup failed after keyed create failure — surfacing original error "
+                    + "reservationId={} lookupError={}", reservationId, lookupFailure.toString());
+        }
+        return Optional.empty();
     }
 
     // ── Read ──────────────────────────────────────────────────────────────────
