@@ -185,9 +185,24 @@ if grep -q -- '- name: jwt$' <<<"${MCP_BLOCK}"; then
   echo "FAIL: K-5: the /mcp route has a jwt plugin; mcp-service verifies its own audience-bound token" >&2
   exit 1
 fi
+# The identity headers must be whole list items of the request-transformer's
+# remove.headers on this route. A substring match is not enough: "X-User-Id" is
+# a prefix of "X-User-Id-Sig", and a comment could mention any of them.
+RT_BLOCK="$(python3 - <<'PYEOF' "${MCP_BLOCK}"
+import re, sys
+block = sys.argv[1]
+m = re.search(r'^( *)- name: request-transformer\n(.*?)(?=^\1- name: |\Z)', block, re.M | re.S)
+if m:
+    print('\n'.join(l for l in m.group(2).split('\n') if not l.lstrip().startswith('#')))
+PYEOF
+)"
+if [[ -z "${RT_BLOCK}" ]]; then
+  echo "FAIL: K-4: the /mcp route has no request-transformer plugin" >&2
+  exit 1
+fi
 for h in X-User-Id X-User-Roles X-User-Id-Sig; do
-  if ! grep -q "${h}" <<<"${MCP_BLOCK}"; then
-    echo "FAIL: K-4: the /mcp route does not clear inbound ${h}" >&2
+  if ! grep -qE -- "^ +- ${h}\$" <<<"${RT_BLOCK}"; then
+    echo "FAIL: K-4: the /mcp request-transformer does not remove inbound ${h}" >&2
     exit 1
   fi
 done
