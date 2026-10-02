@@ -67,7 +67,7 @@ Twelve tools. The scope column is what the token must carry; it comes from the r
 | `cancel_order` | `orders:cancel` | Cancel an order. |
 | `get_payment` | `payments:read` | One payment. |
 | `list_payment_methods` | `payments:read` | Saved payment methods. |
-| `pay_for_order` | `payments:create` | Pay with an explicit payment-method token. |
+| `pay_for_order` | `payments:create` | Charge a saved payment method by id (from `list_payment_methods`). Raw card data is never accepted. |
 | `pay_for_order_with_default` | `payments:create` + `payments:read` | Pay with the saved default method. |
 
 The authorization server advertises seven scopes: `tickets:read`, `seating:read`, `orders:read`, `orders:create`, `orders:cancel`, `payments:read`, `payments:create`. The consent screen lists them with human labels from `GET /oauth/scopes` and marks the ones that act on the user's behalf as **Sensitive**.
@@ -76,6 +76,7 @@ The authorization server advertises seven scopes: `tickets:read`, `seating:read`
 
 - **Step-up.** A token missing a tool's scope gets `403` with `WWW-Authenticate: Bearer error="insufficient_scope", scope="<held + required>", resource_metadata=...`. A host that supports scope step-up re-runs the consent flow with the union, so the user is never asked for scopes they already granted. The first 401 challenge asks only for the read scopes (`tickets:read seating:read orders:read payments:read`), so write access is requested at the moment it is needed.
 - **Idempotent orders.** `create_order` derives an `Idempotency-Key` from `sha256(sub, tool, canonical arguments)`; an identical retry returns the same order with `replayed: true` instead of buying twice. Passing an explicit `idempotencyKey` overrides the derived one. `mcp-full-flow.spec.ts` asserts this against the real stack.
+- **Annotations.** Tools that cancel or charge carry the MCP `destructiveHint`, so a host can choose to ask the user before calling them; that confirmation is the host's decision, not the server's.
 - **Waiting room.** If the event is behind the queue, the tool fails with `WAITING_ROOM_ACTIVE` and returns the browser URL to join the queue; an agent cannot jump it.
 - **Errors are sanitised.** Tool failures return a short code and message, never an upstream stack, token or header. Upstream calls time out after 10 s.
 
