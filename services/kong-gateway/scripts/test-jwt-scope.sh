@@ -62,19 +62,28 @@ local cases = {
     '{"client_id":"c","scope":"orders:read","note":"x\\"aud\\":\\"' .. API .. '\\"","aud":"' .. MCP .. '"}', 401 },
   { "right aud, missing scope -> scope still enforced", '{"client_id":"c","scope":"tickets:read","aud":"' .. API .. '"}', 403 },
   { "wrong aud, right scope -> audience wins", '{"client_id":"c","scope":"orders:read","aud":"' .. MCP .. '"}', 401 },
+  { "wrong aud AND unsatisfied scope -> audience judged first", '{"client_id":"c","scope":"tickets:read","aud":"' .. MCP .. '"}', 401 },
   { "oauth, no aud, no scope -> fail closed", '{"client_id":"c"}', 403 },
 }
 
 local failed = 0
 for _, c in ipairs(cases) do
-  local exit_status
+  local exit_status, exit_calls = nil, 0
+  -- Like real Kong, the first exit decides the response; a second call means
+  -- the snippet kept running after exiting (a dropped `return`).
   _G.kong = {
     ctx = { shared = { authenticated_jwt_token = "h." .. b64url(c[2]) .. ".s" } },
-    response = { exit = function(status) exit_status = status end },
+    response = { exit = function(status)
+      exit_calls = exit_calls + 1
+      if exit_status == nil then exit_status = status end
+    end },
   }
   local chunk = assert(loadfile(arg[1]))
   chunk()
-  if exit_status == c[3] then
+  if exit_calls > 1 then
+    failed = failed + 1
+    print("FAIL: " .. c[1] .. " -> exit called " .. exit_calls .. " times")
+  elseif exit_status == c[3] then
     print("PASS: " .. c[1] .. " -> " .. tostring(exit_status or "pass"))
   else
     failed = failed + 1
@@ -93,7 +102,7 @@ else
 fi
 echo "${out}" | grep -E '^(PASS|FAIL):' || true
 total="$(grep -cE '^(PASS|FAIL):' <<<"${out}" || true)"
-if [[ "${rc}" -ne 0 || "${total}" -lt 14 ]]; then
+if [[ "${rc}" -ne 0 || "${total}" -lt 15 ]]; then
   echo "FAIL: jwt-scope behavioural test (resty exit ${rc}, ${total} cases reported)" >&2
   exit 1
 fi
