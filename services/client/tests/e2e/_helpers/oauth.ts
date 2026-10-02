@@ -22,7 +22,7 @@ export async function signupViaApi(): Promise<{ accessToken: string; refreshToke
   return { accessToken: cookieValue(res, "token"), refreshToken: cookieValue(res, "refreshToken") };
 }
 
-export function authorizeUrl(scope: string, codeChallenge: string): string {
+export function authorizeUrl(scope: string, codeChallenge: string, resource?: string): string {
   const q = new URLSearchParams({
     response_type: "code",
     client_id: MCP_CLIENT_ID,
@@ -32,6 +32,7 @@ export function authorizeUrl(scope: string, codeChallenge: string): string {
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
   });
+  if (resource) q.set("resource", resource);
   return `${KONG_URL}/oauth/authorize?${q.toString()}`;
 }
 
@@ -42,11 +43,12 @@ export function authorizeUrl(scope: string, codeChallenge: string): string {
 export async function obtainOAuthAccessToken(
   sessionAccessToken: string,
   scope = "tickets:read orders:read",
+  resource?: string,
 ): Promise<{ accessToken: string; refreshToken: string }> {
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
 
-  const authorize = await fetch(authorizeUrl(scope, challenge), {
+  const authorize = await fetch(authorizeUrl(scope, challenge, resource), {
     redirect: "manual",
     headers: { Cookie: `token=${sessionAccessToken}` },
   });
@@ -74,6 +76,7 @@ export async function obtainOAuthAccessToken(
       code_verifier: verifier,
       client_id: MCP_CLIENT_ID,
       redirect_uri: MCP_REDIRECT_URI,
+      ...(resource ? { resource } : {}),
     }),
   });
   if (token.status !== 200) throw new Error(`token exchange failed: ${token.status} ${await token.text()}`);
