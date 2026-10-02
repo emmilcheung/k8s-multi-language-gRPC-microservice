@@ -963,10 +963,13 @@ services:
   # NOT run the jwt plugin here, or a valid MCP token (aud=<origin>/mcp) would be
   # judged by the REST rules. The build lint therefore cannot see these routes;
   # scripts/test-build-lint.sh asserts them instead.
+  # /mcp is stateless request/response: POST (JSON-RPC) and DELETE are served,
+  # GET answers 405 (no server-initiated SSE stream; no subscriptions capability),
+  # so the upstream uses the short MCP_READ_TIMEOUT_MS, not the SSE one.
   - name: mcp-service
     url: http://{{HOST_MCP}}
     connect_timeout: {{CONNECT_TIMEOUT_MS}}
-    read_timeout: {{SSE_READ_TIMEOUT_MS}}
+    read_timeout: {{MCP_READ_TIMEOUT_MS}}
     write_timeout: {{WRITE_TIMEOUT_MS}}
     routes:
       # Public: RFC 9728 protected-resource metadata for /mcp, discovered before any token

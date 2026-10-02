@@ -29,6 +29,8 @@ CLIENT_WRITE_TIMEOUT_MS: 30000
 GRAPHQL_READ_TIMEOUT_MS: 30000
 # SSE streams must stay open for minutes; needs a dedicated long timeout.
 SSE_READ_TIMEOUT_MS: 300000
+# mcp-service is stateless request/response (no streams): worst case is the 5 s token exchange plus upstream calls at 10 s each.
+MCP_READ_TIMEOUT_MS: 30000
 
 # ── JWT ────────────────────────────────────────────────────────────────────────
 JWT_COOKIE_NAME: token
