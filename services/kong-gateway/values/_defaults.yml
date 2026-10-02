@@ -17,6 +17,7 @@ HOST_ATTENDANCE: attendance-service:3007
 HOST_CLIENT: client:4000
 HOST_VENUE: venue-service:3003
 HOST_APOLLO_ROUTER: apollo-router:4001
+HOST_MCP: mcp-service:3000
 
 # ── Timeouts (milliseconds) ────────────────────────────────────────────────────
 CONNECT_TIMEOUT_MS: 5000
@@ -28,6 +29,8 @@ CLIENT_WRITE_TIMEOUT_MS: 30000
 GRAPHQL_READ_TIMEOUT_MS: 30000
 # SSE streams must stay open for minutes; needs a dedicated long timeout.
 SSE_READ_TIMEOUT_MS: 300000
+# mcp-service is stateless request/response (no streams): worst case is the 5 s token exchange plus upstream calls at 10 s each.
+MCP_READ_TIMEOUT_MS: 30000
 
 # ── JWT ────────────────────────────────────────────────────────────────────────
 JWT_COOKIE_NAME: token
@@ -52,6 +55,8 @@ RATE_LIMIT_POLICY: local
 RATE_LIMIT_AUTHENTICATED_PER_MINUTE: 1000
 RATE_LIMIT_AUTH_ENDPOINTS_PER_MINUTE: 60
 RATE_LIMIT_ATTENDANCE_SCAN_PER_MINUTE: 60
+# /mcp, per source IP. MCP hosts chat (initialize, tools/list, one POST per tool call).
+RATE_LIMIT_MCP_PER_MINUTE: 600
 RATE_LIMIT_REDIS_HOST: "127.0.0.1"
 RATE_LIMIT_REDIS_PORT: 6379
 # TLS to Redis. Off by default because every environment on the `local` policy

@@ -932,6 +932,18 @@ jobs:
           # hash). build.sh refuses to render without it, so CI supplies a syntactic
           # stand-in — this job only parses the config, it never connects.
           KONG_RATE_LIMIT_REDIS_HOST: redis.ci.invalid
+          # dev/staging/prod have no committed OAuth issuer origin (build.sh
+          # refuses to render the MCP routes without one); syntactic stand-in.
+          KONG_OAUTH_ISSUER: https://ticketing.ci.invalid
+
+      # Self-contained: both scripts generate their own throwaway key and
+      # placeholders, so no repo secrets are needed. The jwt-scope test runs
+      # the real Lua under resty in the kong image (docker is on the runner).
+      - name: Kong build-lint and jwt-scope behavioural tests
+        run: |
+          set -euo pipefail
+          bash scripts/test-build-lint.sh
+          bash scripts/test-jwt-scope.sh
 
   # ── ticket-service (Go 1.25 / Echo v4 / confluent-kafka-go CGO) ────────────
   ticket:

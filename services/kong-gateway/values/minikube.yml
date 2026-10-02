@@ -16,6 +16,9 @@ HOST_ATTENDANCE: ticketing-attendance-service.ticketing.svc.cluster.local:3007
 HOST_CLIENT: ticketing-client.ticketing.svc.cluster.local:4000
 HOST_VENUE: ticketing-venue-service.ticketing.svc.cluster.local:3003
 HOST_APOLLO_ROUTER: ticketing-apollo-router.ticketing.svc.cluster.local:4001
+HOST_MCP: ticketing-mcp-service.ticketing.svc.cluster.local:3000
+# Dev origin; build.sh lets KONG_OAUTH_ISSUER override it. Matches the auth-service dev OAUTH_ISSUER.
+OAUTH_ISSUER: http://localhost:8000
 
 RATE_LIMIT_ANONYMOUS_PER_MINUTE: 300
 RATE_LIMIT_POLICY: local
