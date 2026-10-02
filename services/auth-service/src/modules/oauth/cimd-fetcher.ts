@@ -306,23 +306,25 @@ const defaultResolve: CimdResolver = createDnsResolver();
  * name the caller asked for. A fresh agent (`agent: false`) means no keep-alive
  * pool shared with other traffic and no proxy settings; no compression is
  * requested so a small body cannot inflate past the cap.
- * `ca` exists for tests that run a local TLS server.
+ * `ca` and `port` exist for tests that run a local TLS server; production
+ * wiring passes nothing. Certificate verification cannot be disabled here.
  */
 export function createHttpsTransport(
-  tlsOptions: { ca?: string | Buffer } = {},
+  options: { ca?: string | Buffer; port?: number } = {},
 ): CimdTransport {
   return ({ address, family, hostname, path, signal }) =>
     new Promise((resolve, reject) => {
       const req = https.request({
         host: address,
         family,
-        port: 443,
+        // Only the factory sets the port; the URL's port is already pinned to 443.
+        port: options.port ?? 443,
         method: 'GET',
         path,
         servername: hostname,
         agent: false,
         rejectUnauthorized: true,
-        ca: tlsOptions.ca,
+        ca: options.ca,
         headers: {
           Host: hostname,
           'User-Agent': USER_AGENT,
