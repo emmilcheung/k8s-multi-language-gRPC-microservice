@@ -234,3 +234,73 @@ describe('CimdClientService (I-10)', () => {
     expect(fetchDoc).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('G2: refused URL client ids leave a structured warn', () => {
+  const warns = (logger: { warn: ReturnType<typeof vi.fn> }) =>
+    logger.warn.mock.calls.map((c) => c[0] as Record<string, unknown>);
+
+  it.each([
+    ['https://169.254.169.254/x.json', 'invalid_url', '169.254.169.254'],
+    [
+      'https://db.internal/secret/path.json?token=abc',
+      'invalid_url',
+      'db.internal',
+    ],
+  ])(
+    'G2: %s logs exactly one url_rejected with the reason and host only',
+    async (id, reason, host) => {
+      const { service, logger, fetchDoc } = make();
+      await service.resolve(id);
+      expect(fetchDoc).not.toHaveBeenCalled();
+      const w = warns(logger);
+      expect(w).toHaveLength(1);
+      expect(w[0]).toEqual({ event: 'oauth.cimd.url_rejected', reason, host });
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toMatch(
+        /secret|token|path\.json/,
+      );
+    },
+  );
+
+  it('G2: an unparseable string logs the reason without a host and without the raw input', async () => {
+    const { service, logger } = make();
+    await service.resolve('https://exa mple.com/not a url "quoted"');
+    const w = warns(logger);
+    expect(w).toHaveLength(1);
+    expect(w[0]).toEqual({
+      event: 'oauth.cimd.url_rejected',
+      reason: 'invalid_url',
+    });
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('quoted');
+  });
+
+  it('G2: a very long host is cut to 253 characters', async () => {
+    const { service, logger } = make();
+    await service.resolve(`https://${'a'.repeat(300)}.internal/x.json`);
+    expect((warns(logger)[0].host as string).length).toBeLessThanOrEqual(253);
+  });
+
+  it('G2: the ninth concurrent fetch logs oauth.cimd.busy with the host only', async () => {
+    const { service, logger, fetchDoc } = make();
+    const release: (() => void)[] = [];
+    fetchDoc.mockImplementation(
+      () => new Promise((r) => release.push(() => r({ body: body() }))),
+    );
+    const pending = Array.from({ length: 8 }, (_, i) =>
+      service.resolve(`https://app${i}.example.com/c.json`),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    logger.warn.mockClear();
+    await service.resolve('https://ninth.example.com/c.json');
+    expect(warns(logger)).toEqual([
+      { event: 'oauth.cimd.busy', host: 'ninth.example.com' },
+    ]);
+    release.forEach((r) => r());
+    await Promise.all(pending);
+  });
+
+  it('G2: with the flag off nothing is logged', async () => {
+    const { service, logger } = make({ enabled: false });
+    await service.resolve('https://169.254.169.254/x.json');
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+});
