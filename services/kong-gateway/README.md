@@ -115,4 +115,8 @@ environment whose Kong was rendered with the matching `KONG_OAUTH_ISSUER` (compo
 
 `plugins/jwt-scope.lua` refuses (401 `token audience not accepted`) an OAuth token (one with `client_id`) whose `aud` does not contain `<KONG_OAUTH_ISSUER>/api`, so an MCP-audience token cannot be replayed on REST routes. Tokens without `aud` are tolerated until WS-N; browser tokens (no `client_id`) are unaffected.
 
+This rule compares against `<KONG_OAUTH_ISSUER>/api` in every environment, including those where `OAUTH_ISSUER_ENABLED` is still false. `KONG_OAUTH_ISSUER` must therefore equal the origin auth-service derives `OAUTH_API_AUDIENCE` from (Helm `global.publicOrigin`). A mismatch 401s every OAuth REST call, including the existing first-party OAuth client.
+
+`scripts/test-jwt-scope.sh` runs the real `jwt-scope.lua` under `resty` in a throwaway `kong:3.7-ubuntu` container and exercises the rule. It fails when docker is absent unless `KONG_TEST_SKIP_DOCKER=1` is set.
+
 `scripts/test-build-lint.sh` asserts the routes that have no jwt plugin (and so escape the guard lint): `/mcp` and the protected-resource route.
