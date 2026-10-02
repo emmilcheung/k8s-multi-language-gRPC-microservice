@@ -40,8 +40,20 @@ export function ConnectedApps({
           className="flex flex-col gap-3 rounded border border-line p-3 sm:flex-row sm:items-center sm:justify-between"
         >
           <div className="min-w-0 space-y-1">
-            <p className="text-sm font-semibold">{app.name}</p>
-            {app.domain && <p className="text-xs text-mute">{app.domain}</p>}
+            <p className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+              {app.name}
+              <Badge variant="outline" data-testid="party-badge">
+                {app.isFirstParty ? "First-party" : "Third-party"}
+              </Badge>
+            </p>
+            {app.domain && (
+              <p className="text-xs text-mute">
+                <span>{app.domain}</span>{" "}
+                <span data-testid="domain-source">
+                  {app.domainSource === "client_id" ? "(app address)" : "(redirects to)"}
+                </span>
+              </p>
+            )}
             <div className="flex flex-wrap gap-1.5">
               {app.scopes.map((scope) => (
                 <Badge key={scope} variant="outline" className="font-mono">

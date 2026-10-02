@@ -34,7 +34,12 @@ const REGISTRY = [
   { scope: "wallet:spend", label: "Spend from your wallet", sensitive: true },
 ];
 
-function stubFetch(scopes: string[], registry: unknown = REGISTRY, registryOk = true) {
+function stubFetch(
+  scopes: string[],
+  registry: unknown = REGISTRY,
+  registryOk = true,
+  extra: Record<string, unknown> = {},
+) {
   const fetchMock = vi.fn(async (url: string) => {
     if (url.endsWith("/oauth/scopes")) {
       return new Response(JSON.stringify(registry), { status: registryOk ? 200 : 503 });
@@ -46,6 +51,7 @@ function stubFetch(scopes: string[], registry: unknown = REGISTRY, registryOk = 
         clientName: "Test Agent",
         scopes,
         expiresInSeconds: 300,
+        ...extra,
       }),
       { status: 200 },
     );
@@ -128,5 +134,49 @@ describe("ConsentPage scope labels (L-1)", () => {
     await expect(
       ConsentPage({ searchParams: Promise.resolve({ request_id: "req-1" }) }),
     ).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+});
+
+describe("ConsentPage app domain (I-5 / ruling 7)", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("I-5: a CIMD client shows the host of its client_id as a verified address", async () => {
+    stubFetch(["tickets:read"], REGISTRY, true, {
+      clientDomain: "app.example.com",
+      domainSource: "client_id",
+      isFirstParty: false,
+    });
+    await renderConsent();
+    const el = screen.getByTestId("consent-domain");
+    expect(el).toHaveTextContent("Verified address");
+    expect(el).toHaveTextContent("app.example.com");
+    expect(screen.getByTestId("consent-party")).toHaveTextContent("Third-party");
+  });
+
+  it("a DCR client shows the redirect host, labelled so it is not mistaken for the app's identity", async () => {
+    stubFetch(["tickets:read"], REGISTRY, true, {
+      clientDomain: "cb.example.org",
+      domainSource: "redirect_uri",
+      isFirstParty: false,
+    });
+    await renderConsent();
+    const el = screen.getByTestId("consent-domain");
+    expect(el).toHaveTextContent("Sends you back to");
+    expect(el).toHaveTextContent("cb.example.org");
+    expect(el).not.toHaveTextContent("Verified");
+  });
+
+  it("a static client is marked first-party", async () => {
+    stubFetch(["tickets:read"], REGISTRY, true, { isFirstParty: true });
+    await renderConsent();
+    expect(screen.getByTestId("consent-party")).toHaveTextContent("First-party");
+  });
+
+  it("an older auth-service without the fields still renders, as third-party with no domain line", async () => {
+    stubFetch(["tickets:read"]);
+    await renderConsent();
+    expect(screen.queryByTestId("consent-domain")).not.toBeInTheDocument();
+    expect(screen.getByTestId("consent-party")).toHaveTextContent("Third-party");
   });
 });

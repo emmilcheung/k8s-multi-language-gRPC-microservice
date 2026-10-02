@@ -15,6 +15,9 @@ interface ConsentDetails {
   requestId: string;
   clientId: string;
   clientName: string;
+  clientDomain?: string;
+  domainSource?: "client_id" | "redirect_uri";
+  isFirstParty?: boolean;
   scopes: string[];
   expiresInSeconds: number;
 }
@@ -156,6 +159,17 @@ export default async function ConsentPage({
             <div className="flex flex-col gap-0.5">
               <span className="text-xs text-mute">Application</span>
               <span className="text-sm font-medium text-ink">{consent.clientName}</span>
+              {consent.clientDomain && (
+                <span className="text-xs text-mute" data-testid="consent-domain">
+                  {consent.domainSource === "client_id"
+                    ? "Verified address: "
+                    : "Sends you back to: "}
+                  <span className="font-mono text-ink">{consent.clientDomain}</span>
+                </span>
+              )}
+              <Badge variant="outline" className="w-fit text-xs" data-testid="consent-party">
+                {consent.isFirstParty ? "First-party app" : "Third-party app"}
+              </Badge>
             </div>
             <Badge variant="outline" className="text-xs font-mono text-mute">
               {consent.clientId}
