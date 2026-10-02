@@ -827,7 +827,12 @@ export class OAuthService implements OnModuleInit {
     return { redirectUrl: redirectUrl.toString() };
   }
 
-  /** POST /oauth/clients/register — RFC 7591 dynamic client registration (public client) */
+  /**
+   * POST /oauth/clients/register — RFC 7591 dynamic client registration (public client).
+   * @deprecated DCR is the last of three registration paths (pre-registered,
+   * Client ID Metadata Document, DCR). It stays for hosts that have no CIMD
+   * support; new integrations should publish a metadata document instead.
+   */
   async registerClient(
     body: RegisterClientBody,
   ): Promise<RegisterClientResponse> {
@@ -835,32 +840,12 @@ export class OAuthService implements OnModuleInit {
       ? body.scope.split(' ').filter(Boolean)
       : [...OAUTH_SCOPE_NAMES];
 
-    // Validate redirect_uris: must be HTTPS or localhost
-    for (const uri of body.redirect_uris) {
-      try {
-        const parsed = new URL(uri);
-        const isLocalhost =
-          parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
-        if (parsed.protocol !== 'https:' && !isLocalhost) {
-          throw new BadRequestException({
-            error: 'invalid_redirect_uri',
-            error_description: `redirect_uri must use HTTPS or be localhost: ${uri}`,
-          });
-        }
-      } catch (e) {
-        if (e instanceof BadRequestException) throw e;
-        throw new BadRequestException({
-          error: 'invalid_redirect_uri',
-          error_description: `Invalid URI: ${uri}`,
-        });
-      }
-    }
-
     const client = await this.dynamicClientService.register({
       clientName: body.client_name,
       redirectUris: body.redirect_uris,
       scope: requestedScopes.join(' '),
       grantTypes: body.grant_types ?? ['authorization_code'],
+      applicationType: body.application_type,
     });
 
     return {
@@ -870,6 +855,7 @@ export class OAuthService implements OnModuleInit {
       grant_types: client.grantTypes,
       scope: client.allowedScopes.join(' '),
       token_endpoint_auth_method: 'none',
+      application_type: client.applicationType ?? 'web',
       pkce_required: true,
     };
   }

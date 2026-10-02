@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { redirectUriMatches } from './oauth-redirect.util';
+import { BadRequestException } from '@nestjs/common';
+import {
+  assertValidRedirectUris,
+  redirectUriMatches,
+} from './oauth-redirect.util';
 
 describe('redirectUriMatches', () => {
   const registered = ['http://127.0.0.1:19836/callback'];
@@ -85,5 +89,43 @@ describe('redirectUriMatches', () => {
     expect(
       redirectUriMatches(['http://[::1]/cb'], 'http://[::1%eth0]:1234/cb'),
     ).toBe(false);
+  });
+});
+
+// F7: DCR and CIMD must share ONE redirect validator, otherwise a rule fixed in
+// one registration path silently stays open in the other.
+describe('assertValidRedirectUris (the shared registration validator)', () => {
+  const rejection = (uris: string[]): unknown => {
+    try {
+      assertValidRedirectUris(uris);
+    } catch (e) {
+      return e;
+    }
+    return undefined;
+  };
+
+  it('accepts https and http loopback (localhost, 127.0.0.1)', () => {
+    expect(() =>
+      assertValidRedirectUris([
+        'https://app.example.com/cb',
+        'http://localhost:3000/cb',
+        'http://127.0.0.1:19836/callback',
+      ]),
+    ).not.toThrow();
+  });
+
+  it('rejects plain http to a non-loopback host, because the code would cross the network in clear', () => {
+    const e = rejection(['http://app.example.com/cb']);
+    expect(e).toBeInstanceOf(BadRequestException);
+    expect((e as BadRequestException).getResponse()).toMatchObject({
+      error: 'invalid_redirect_uri',
+    });
+  });
+
+  it('rejects a string that is not a URL and a javascript: URI', () => {
+    expect(rejection(['not a url'])).toBeInstanceOf(BadRequestException);
+    expect(rejection(['javascript:alert(1)'])).toBeInstanceOf(
+      BadRequestException,
+    );
   });
 });

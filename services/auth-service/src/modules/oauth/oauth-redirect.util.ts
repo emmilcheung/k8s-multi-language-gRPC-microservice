@@ -1,3 +1,5 @@
+import { BadRequestException } from '@nestjs/common';
+
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '[::1]', 'localhost']);
 
 function parse(uri: string): URL | null {
@@ -35,4 +37,37 @@ export function redirectUriMatches(
       reg.search === req.search
     );
   });
+}
+
+/**
+ * Why `uri` may not be registered as a redirect URI, or null when it is fine.
+ * The single registration-time rule shared by DCR and CIMD (F7): https, or http
+ * on localhost / 127.0.0.1 only, so an authorization code never crosses the
+ * network in clear. Matching at /authorize time stays in redirectUriMatches.
+ */
+export function redirectUriProblem(uri: string): string | null {
+  const parsed = parse(uri);
+  if (!parsed) return `Invalid URI: ${uri}`;
+  const isLocalhost =
+    parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+  if (
+    parsed.protocol !== 'https:' &&
+    !(parsed.protocol === 'http:' && isLocalhost)
+  ) {
+    return `redirect_uri must use HTTPS or be localhost: ${uri}`;
+  }
+  return null;
+}
+
+/** RFC 7591 §3.2.2 error for the first redirect URI that fails the shared rule. */
+export function assertValidRedirectUris(uris: readonly string[]): void {
+  for (const uri of uris) {
+    const problem = redirectUriProblem(uri);
+    if (problem) {
+      throw new BadRequestException({
+        error: 'invalid_redirect_uri',
+        error_description: problem,
+      });
+    }
+  }
 }

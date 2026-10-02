@@ -3,6 +3,12 @@ import type { OAuthScope } from './oauth-scopes';
 
 export type { OAuthScope };
 
+/** RFC 7591 application_type (D12 / WS-I). */
+export type OAuthApplicationType = 'native' | 'web';
+
+/** How a client became known: static config, dynamic registration, or a CIMD URL. */
+export type OAuthClientSource = 'static' | 'dynamic' | 'cimd';
+
 export interface OAuthClient {
   clientId: string;
   clientName: string;
@@ -13,6 +19,9 @@ export interface OAuthClient {
   accessTokenLifetimeSeconds: number;
   refreshTokenLifetimeSeconds: number;
   isFirstParty?: boolean;
+  /** Absent means a static config entry. */
+  source?: OAuthClientSource;
+  applicationType?: OAuthApplicationType;
 }
 
 export const OAUTH_CLIENTS: OAuthClient[] = [
@@ -66,5 +75,7 @@ export function dynamicToStaticShape(
     accessTokenLifetimeSeconds: dynamic.accessTokenLifetimeSeconds,
     refreshTokenLifetimeSeconds: dynamic.refreshTokenLifetimeSeconds,
     isFirstParty: false,
+    source: 'dynamic',
+    applicationType: dynamic.applicationType ?? 'web',
   };
 }
