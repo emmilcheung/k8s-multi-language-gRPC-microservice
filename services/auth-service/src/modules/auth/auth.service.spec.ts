@@ -551,10 +551,10 @@ describe('AuthService', () => {
     });
   });
 
-  describe('verifySessionAccessToken (F11b)', () => {
+  describe('verifySessionAccessToken', () => {
     // /oauth/authorize treats its cookie as proof of a signed-in user. An
     // OAuth access token must not count: a tickets:read agent could otherwise
-    // authorize itself for every scope (spec F11 chain).
+    // authorize itself for every scope.
     const base = { sub: 'uuid-1', email: 'user@example.com', jti: 'jti-1' };
 
     it('rejects an OAuth access token', async () => {
@@ -584,7 +584,7 @@ describe('AuthService', () => {
     });
   });
 
-  it('stamps client_id on every OAuth access token (C-1 invariant: Kong guards and F11b rely on it)', () => {
+  it('stamps client_id on every OAuth access token (Kong guards and the session verifier rely on it)', () => {
     const { service, jwtService } = makeAuthService();
     service.issueAccessTokenForOAuth('uuid-1', 'orders:read', 'ticketing-mcp', {
       aud: 'http://localhost:8000/api',
@@ -600,7 +600,7 @@ describe('AuthService', () => {
     );
   });
 
-  describe('token claims (C-1)', () => {
+  describe('token claims', () => {
     // makeJwtService spreads its overrides, which drops prototype methods, so
     // bind the real ones explicitly.
     const realJwt = () => {
@@ -621,7 +621,7 @@ describe('AuthService', () => {
     const claimsOf = (jwt: JwtService, token: string) =>
       jwt.decode<unknown>(token) as Record<string, unknown>;
 
-    it('E-3: an OAuth token carries the requested aud and the chosen iss, and no email or roles (MCP tokens are audience-bound and PII-free)', () => {
+    it('an OAuth token carries the requested aud and the chosen iss, and no email or roles (MCP tokens are audience-bound and PII-free)', () => {
       const jwt = realJwt();
       const { service } = makeAuthService({ jwtService: jwt });
       const token = service.issueAccessTokenForOAuth(
@@ -643,7 +643,7 @@ describe('AuthService', () => {
       expect(claims.jti).toEqual(expect.any(String));
     });
 
-    it('E-3: a browser token still has iss auth-service and no aud, so Kong and REST see no change', async () => {
+    it('a browser token still has iss auth-service and no aud, so Kong and REST see no change', async () => {
       const jwt = realJwt();
       const { service } = makeAuthService({
         jwtService: jwt,
@@ -656,7 +656,7 @@ describe('AuthService', () => {
       expect(claims).not.toHaveProperty('client_id');
     });
   });
-  describe('OAUTH_ISSUER verification (D3)', () => {
+  describe('OAUTH_ISSUER verification', () => {
     const OAUTH_ISS = 'https://ticketing.example.com';
     // Real JwtService built from the module's own options, so the accepted
     // issuers are the ones production uses.
@@ -764,7 +764,7 @@ describe('AuthService', () => {
       });
     });
 
-    it('F11b still holds with the new issuer: an OAuth token is rejected as a session whichever issuer it carries', async () => {
+    it('still holds with the new issuer: an OAuth token is rejected as a session whichever issuer it carries', async () => {
       const { jwt, bound } = realJwt();
       const { service } = makeAuthService({ jwtService: bound });
       const oauthToken = sign(jwt, OAUTH_ISS, {

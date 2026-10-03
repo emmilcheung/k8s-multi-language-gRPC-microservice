@@ -1,5 +1,5 @@
 /**
- * mcp-full-flow.spec.ts (M-1): plays an MCP host's part end to end, without
+ * mcp-full-flow.spec.ts: plays an MCP host's part end to end, without
  * Claude Code, against the real stack (Kong → auth-service / mcp-service →
  * Kong → order and payment services).
  *
@@ -142,7 +142,7 @@ test.beforeAll(async () => {
 });
 
 test.describe("MCP host without a token", () => {
-  test("M-1 edge: /mcp without a token is 401 and points at the protected-resource metadata", async () => {
+  test("edge: /mcp without a token is 401 and points at the protected-resource metadata", async () => {
     const res = await rpc(undefined, "tools/list");
     expect(res.status).toBe(401);
     const challenge = res.headers.get("www-authenticate") ?? "";
@@ -154,7 +154,7 @@ test.describe("MCP host without a token", () => {
 });
 
 test.describe.serial("MCP host: discover, register, authorize, call tools", () => {
-  test("M-1: discovery walks protected-resource metadata to authorization-server metadata", async () => {
+  test("discovery walks protected-resource metadata to authorization-server metadata", async () => {
     const prm = await fetch(`${KONG_URL}/.well-known/oauth-protected-resource/mcp`);
     expect(prm.status).toBe(200);
     const prmBody = (await prm.json()) as { resource: string; authorization_servers: string[] };
@@ -178,7 +178,7 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     expect(meta.client_id_metadata_document_supported).toBe(true);
   });
 
-  test("M-1 edge (CIMD): a URL client_id naming an internal address is refused as an invalid client, not a 5xx", async () => {
+  test("edge (CIMD): a URL client_id naming an internal address is refused as an invalid client, not a 5xx", async () => {
     // No public document and no real external host is used. These hosts are block-listed
     // (link-local metadata address, internal suffix) so the fetcher refuses before any connection.
     for (const clientId of ["https://169.254.169.254/x.json", "https://foo.internal/x.json"]) {
@@ -199,7 +199,7 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     }
   });
 
-  test("M-1: dynamic client registration returns a client id for our loopback redirect", async () => {
+  test("dynamic client registration returns a client id for our loopback redirect", async () => {
     const res = await fetch(state.registrationEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -217,7 +217,7 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     state.clientId = body.client_id;
   });
 
-  test("M-1: seed a seller's event and the buyer's saved card", async ({ page }) => {
+  test("seed a seller's event and the buyer's saved card", async ({ page }) => {
     test.setTimeout(120_000);
 
     await signup(page, uniqueEmail("mcp-seller"));
@@ -250,7 +250,7 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     await signout(page);
   });
 
-  test("M-1: authorization code + PKCE with resource=<origin>/mcp, login and consent in a real browser", async ({
+  test("authorization code + PKCE with resource=<origin>/mcp, login and consent in a real browser", async ({
     page,
   }) => {
     test.setTimeout(120_000);
@@ -322,7 +322,7 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     expect(String(c.scope).split(" ").sort()).toEqual([...HOST_SCOPES].sort());
   });
 
-  test("M-1: initialize negotiates a protocol version and tools/list returns the twelve tools", async () => {
+  test("initialize negotiates a protocol version and tools/list returns the twelve tools", async () => {
     const init = await rpc(
       state.accessToken,
       "initialize",
@@ -346,7 +346,7 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     expect(names).toEqual(TOOL_NAMES);
   });
 
-  test("M-1: search_events finds the seeded event through the exchanged token", async () => {
+  test("search_events finds the seeded event through the exchanged token", async () => {
     const res = await callTool(state.accessToken, "search_events", { available: true, limit: 100 });
     expect(res.status).toBe(200);
     expect(res.body?.result?.isError).toBeFalsy();
@@ -354,7 +354,7 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     expect(items.map((t) => t.id)).toContain(state.ticketId);
   });
 
-  test("M-1: create_order twice with identical arguments yields one order (replayed: true)", async () => {
+  test("create_order twice with identical arguments yields one order (replayed: true)", async () => {
     const args = { ticketId: state.ticketId, quantity: 1 };
     const first = await callTool(state.accessToken, "create_order", args);
     expect(first.status).toBe(200);
@@ -375,7 +375,7 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     expect(orders).toHaveLength(1);
   });
 
-  test("M-1: pay_for_order_with_default charges the saved default method", async () => {
+  test("pay_for_order_with_default charges the saved default method", async () => {
     test.skip(!state.paymentMethodSaved, state.paymentSkipReason || "no saved payment method");
     const res = await callTool(state.accessToken, "pay_for_order_with_default", {
       orderId: state.orderId,
@@ -404,7 +404,7 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     expect(read.body?.result?.structuredContent?.payment?.orderId).toBe(state.orderId);
   });
 
-  test("M-1 edge: GET and DELETE on /mcp are 405 (stateless transport), not a session", async () => {
+  test("edge: GET and DELETE on /mcp are 405 (stateless transport), not a session", async () => {
     for (const method of ["GET", "DELETE"]) {
       const res = await fetch(MCP_URL, {
         method,
@@ -414,7 +414,7 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     }
   });
 
-  test("M-1 edge (C-10): the MCP-audience token is refused on the REST API", async () => {
+  test("edge: the MCP-audience token is refused on the REST API", async () => {
     const res = await fetch(`${KONG_URL}/api/orders`, {
       headers: { Authorization: `Bearer ${state.accessToken}` },
     });
@@ -427,7 +427,7 @@ test.describe.serial("MCP host: discover, register, authorize, call tools", () =
     expect(res.headers.get("www-authenticate") ?? "").toContain("token audience not accepted");
   });
 
-  test("M-1 edge (C-6): a token without orders:create gets a step-up 403 naming the scope", async () => {
+  test("edge: a token without orders:create gets a step-up 403 naming the scope", async () => {
     const session = await signupViaApi();
     const readOnly = await obtainOAuthAccessToken(session.accessToken, "tickets:read", MCP_URL);
 

@@ -1,6 +1,6 @@
 package integration_test
 
-// grpc_reservation_integration_test.go — CP-04
+// grpc_reservation_integration_test.go
 //
 // Integration tests for the three new gRPC RPCs:
 //   - ReserveQuota

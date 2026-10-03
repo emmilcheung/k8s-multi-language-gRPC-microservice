@@ -45,7 +45,7 @@ RUN chmod +x /docker-entrypoint-kong-gw.sh
 RUN mkdir -p /etc/kong && chown kong:kong /etc/kong
 
 # queue-gate.lua verifies waiting-room passes with resty.openssl.hmac. Kong's
-# untrusted Lua sandbox blocks require() by default (F12); allow exactly this
+# untrusted Lua sandbox blocks require() by default; allow exactly this
 # module. Helm sets the same value in infra/helm/values.yaml kong.env.
 ENV KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES=resty.openssl.hmac
 

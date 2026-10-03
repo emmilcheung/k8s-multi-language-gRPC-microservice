@@ -6,9 +6,9 @@ function makeController(env: Record<string, unknown> = {}) {
   return new OAuthMetadataController(config as never);
 }
 
-// C-4, verbatim from the spec; client_id_metadata_document_supported follows
+// Authorization-server metadata, verbatim from the spec; client_id_metadata_document_supported follows
 // OAUTH_CIMD_ENABLED (off by default). Clients validate this document, so drift breaks discovery.
-const C4 = {
+const METADATA = {
   issuer: 'http://localhost:8000',
   authorization_endpoint: 'http://localhost:8000/oauth/authorize',
   token_endpoint: 'http://localhost:8000/oauth/token',
@@ -39,11 +39,11 @@ const C4 = {
 };
 
 describe('OAuthMetadataController', () => {
-  it('E-6: the metadata JSON equals C-4 exactly', () => {
-    expect(makeController().metadata()).toStrictEqual(C4);
+  it('the metadata JSON equals the specified document exactly', () => {
+    expect(makeController().metadata()).toStrictEqual(METADATA);
   });
 
-  it('I-8: client_id_metadata_document_supported follows OAUTH_CIMD_ENABLED, so clients are never told CIMD works when the fetch is off', () => {
+  it('client_id_metadata_document_supported follows OAUTH_CIMD_ENABLED, so clients are never told CIMD works when the fetch is off', () => {
     expect(
       makeController({ OAUTH_CIMD_ENABLED: true }).metadata()
         .client_id_metadata_document_supported,
@@ -57,7 +57,7 @@ describe('OAuthMetadataController', () => {
     ).toBe(false);
   });
 
-  it('E-6: every endpoint is derived from OAUTH_ISSUER, ignoring a trailing slash', () => {
+  it('every endpoint is derived from OAUTH_ISSUER, ignoring a trailing slash', () => {
     const m = makeController({
       OAUTH_ISSUER: 'https://auth.example.com/',
     }).metadata();
@@ -66,7 +66,7 @@ describe('OAuthMetadataController', () => {
     expect(m.jwks_uri).toBe('https://auth.example.com/.well-known/jwks.json');
   });
 
-  it('E-9: the metadata issuer does not change with OAUTH_ISSUER_ENABLED (clients validate it against the discovery origin, not token iss)', () => {
+  it('the metadata issuer does not change with OAUTH_ISSUER_ENABLED (clients validate it against the discovery origin, not token iss)', () => {
     expect(
       makeController({ OAUTH_ISSUER_ENABLED: true }).metadata().issuer,
     ).toBe(makeController({ OAUTH_ISSUER_ENABLED: false }).metadata().issuer);
@@ -79,6 +79,6 @@ describe('OAuthMetadataController', () => {
       label: expect.any(String),
       sensitive: true,
     });
-    expect(scopes.map((s) => s.scope)).toEqual(C4.scopes_supported);
+    expect(scopes.map((s) => s.scope)).toEqual(METADATA.scopes_supported);
   });
 });

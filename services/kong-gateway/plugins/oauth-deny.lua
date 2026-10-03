@@ -1,16 +1,16 @@
 -- oauth-deny.lua
--- Refuses OAuth access tokens on a route that has no OAuth scope (D9, C-10).
+-- Refuses OAuth access tokens on a route that has no OAuth scope.
 --
 -- Runs as the FIRST post-function access entry, after the jwt plugin has
 -- verified the token, and reads that verified token from
 -- kong.ctx.shared.authenticated_jwt_token, so header and cookie are covered.
--- A token with a `client_id` claim was minted for an OAuth client (C-1
+-- A token with a `client_id` claim was minted for an OAuth client (
 -- invariant) and gets 403 insufficient_scope. Browser session tokens and the
 -- anonymous GraphQL token carry no `client_id` and pass.
 --
 -- build.sh requires every jwt route to carry exactly one of this file or
 -- jwt-scope.lua. To let agents use a route, switch it to a scope check and add
--- the scope to the MCP scope map (spec C-7).
+-- the scope to the MCP scope map.
 
 local token_str = kong.ctx.shared.authenticated_jwt_token
 if type(token_str) ~= "string" then

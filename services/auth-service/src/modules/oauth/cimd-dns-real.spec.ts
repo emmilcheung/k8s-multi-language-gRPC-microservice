@@ -48,8 +48,8 @@ function realResolverFactory(port: number) {
 
 const URL_ID = 'https://app.example.com/oauth/client.json';
 
-describe('F3: the default resolver with real c-ares and real sockets', () => {
-  it('F3: a DNS server that never answers ends at the deadline, cancel() really settles the c-ares query, and the failure is transient', async () => {
+describe('the default resolver with real c-ares and real sockets', () => {
+  it('a DNS server that never answers ends at the deadline, cancel() really settles the c-ares query, and the failure is transient', async () => {
     const port = await startBlackhole();
     const { create, state } = realResolverFactory(port);
     const started = Date.now();
@@ -71,7 +71,7 @@ describe('F3: the default resolver with real c-ares and real sockets', () => {
     expect(state.pending).toBe(0);
   });
 
-  it('F3: through the service the slot is free afterwards and the reason is one of the transient ones (503 path)', async () => {
+  it('through the service the slot is free afterwards and the reason is one of the transient ones (503 path)', async () => {
     const port = await startBlackhole();
     const { create, state } = realResolverFactory(port);
     const store = new Map<string, string>();
@@ -100,7 +100,7 @@ describe('F3: the default resolver with real c-ares and real sockets', () => {
     expect((service as unknown as { active: number }).active).toBe(0);
   });
 
-  it('F3: with a server that answers but never in time, a lookup error that is not NXDOMAIN/NODATA stays dns_unavailable (transient)', async () => {
+  it('with a server that answers but never in time, a lookup error that is not NXDOMAIN/NODATA stays dns_unavailable (transient)', async () => {
     const port = await startBlackhole();
     const { create } = realResolverFactory(port);
     // No deadline pressure here: c-ares itself gives up (timeout 1 s x 2 is

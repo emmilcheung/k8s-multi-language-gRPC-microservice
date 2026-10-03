@@ -1,5 +1,5 @@
 /**
- * Single registry of OAuth scopes (C-7, concept lock CL-SCOPES). Owner: auth-service.
+ * Single registry of OAuth scopes . Owner: auth-service.
  * The consent UI reads it through `scopes_supported` and GET /oauth/scopes.
  * The scope -> tool map lives in mcp-service and is pinned by a contract test.
  * `venues:read` and `seating:hold` stay registered even though no tool uses them.

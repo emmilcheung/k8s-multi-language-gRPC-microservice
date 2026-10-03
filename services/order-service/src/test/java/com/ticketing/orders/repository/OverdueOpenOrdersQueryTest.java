@@ -34,7 +34,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * SR-16: the query behind OrderExpirySweepJob, against a real PostgreSQL.
+ * the query behind OrderExpirySweepJob, against a real PostgreSQL.
  *
  * <p>The sweep is the only thing that expires an order whose asynq job was lost in a
  * Redis failover. If this query misses an open status the order holds its seats

@@ -38,8 +38,8 @@ const initialize = (
     }),
   );
 
-describe('bearer challenge (C-6)', () => {
-  it('G-1: no token gets 401 with resource_metadata and the initial read scopes, so a client can discover the AS and ask for the right scopes', async () => {
+describe('bearer challenge', () => {
+  it('no token gets 401 with resource_metadata and the initial read scopes, so a client can discover the AS and ask for the right scopes', async () => {
     const res = await initialize();
     expect(res.status).toBe(401);
     const header = res.headers.get('www-authenticate') ?? '';
@@ -54,7 +54,7 @@ describe('bearer challenge (C-6)', () => {
 });
 
 describe('token verification', () => {
-  it('G-2: a token minted for another audience is rejected (token passthrough / confused deputy)', async () => {
+  it('a token minted for another audience is rejected (token passthrough / confused deputy)', async () => {
     const res = await initialize(
       await mintToken({ aud: 'http://localhost:8000/api' }),
     );
@@ -64,23 +64,23 @@ describe('token verification', () => {
     );
   });
 
-  it('G-3: a wrong issuer is rejected, so the browser token issuer cannot be replayed', async () => {
+  it('a wrong issuer is rejected, so the browser token issuer cannot be replayed', async () => {
     const res = await initialize(await mintToken({ iss: 'auth-service' }));
     expect(res.status).toBe(401);
   });
 
-  it('G-3: a token signed by a different key with the published kid is rejected, so signatures are really verified', async () => {
+  it('a token signed by a different key with the published kid is rejected, so signatures are really verified', async () => {
     const res = await initialize(await mintToken({ wrongKey: true }));
     expect(res.status).toBe(401);
     expect(res.headers.get('www-authenticate')).toContain('invalid_token');
   });
 
-  it('G-3: an alg none token is rejected', async () => {
+  it('an alg none token is rejected', async () => {
     const res = await initialize(mintUnsecuredToken());
     expect(res.status).toBe(401);
   });
 
-  it('G-3: an HS256 token is rejected even when the key resolver would supply an HMAC key (pins the RS256 allowlist)', async () => {
+  it('an HS256 token is rejected even when the key resolver would supply an HMAC key (pins the RS256 allowlist)', async () => {
     const permissive = createApp({
       config: testConfig,
       jwks: permissiveHmacJwks,
@@ -94,7 +94,7 @@ describe('token verification', () => {
     expect(res.status).toBe(401);
   });
 
-  it('rejects a token with no client_id (C-1 invariant: every OAuth token carries it)', async () => {
+  it('rejects a token with no client_id (every OAuth token carries it)', async () => {
     const res = await initialize(await mintToken({ clientId: null }));
     expect(res.status).toBe(401);
   });
@@ -145,8 +145,8 @@ describe('JWKS outage', () => {
   });
 });
 
-describe('protected resource metadata (C-3)', () => {
-  it('G-4: the PRM body equals contract C-3 exactly', async () => {
+describe('protected resource metadata', () => {
+  it('the PRM body equals the specified document exactly', async () => {
     const res = await app(
       new Request(
         'http://localhost:8000/.well-known/oauth-protected-resource/mcp',

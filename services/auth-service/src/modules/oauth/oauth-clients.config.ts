@@ -3,7 +3,7 @@ import type { OAuthScope } from './oauth-scopes';
 
 export type { OAuthScope };
 
-/** RFC 7591 application_type (D12 / WS-I). */
+/** RFC 7591 application_type. */
 export type OAuthApplicationType = 'native' | 'web';
 
 /** How a client became known: static config, dynamic registration, or a CIMD URL. */
@@ -39,7 +39,7 @@ export const OAUTH_CLIENTS: OAuthClient[] = [
 
 /**
  * The confidential client allowed to use the RFC 8693 token-exchange grant
- * (C-5). Deliberately NOT in OAUTH_CLIENTS: it has no redirect URIs and no
+ *. Deliberately NOT in OAUTH_CLIENTS: it has no redirect URIs and no
  * authorization_code/refresh flow, so it must never resolve at /authorize or
  * as a session owner. Its secret hash comes from config, never from source.
  */

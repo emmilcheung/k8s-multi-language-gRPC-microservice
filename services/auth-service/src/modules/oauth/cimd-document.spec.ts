@@ -24,7 +24,7 @@ function reason(body: string): string {
 }
 
 describe('validateClientMetadataDocument', () => {
-  it('I-4: a document whose client_id differs from the URL is rejected (otherwise any host could claim another app identity)', () => {
+  it('a document whose client_id differs from the URL is rejected (otherwise any host could claim another app identity)', () => {
     expect(
       reason(doc({ client_id: 'https://evil.example.com/oauth/client.json' })),
     ).toBe('invalid_document');
@@ -35,7 +35,7 @@ describe('validateClientMetadataDocument', () => {
     expect(reason(doc({ client_id: undefined }))).toBe('invalid_document');
   });
 
-  it('I-5: a valid document becomes a third-party public client of source cimd', () => {
+  it('a valid document becomes a third-party public client of source cimd', () => {
     const c = validateClientMetadataDocument(URL_ID, doc());
     expect(c).toMatchObject({
       clientId: URL_ID,
@@ -56,7 +56,7 @@ describe('validateClientMetadataDocument', () => {
     expect(reason('"x"')).toBe('invalid_document');
   });
 
-  it('F7: redirect_uris go through the same validator DCR uses (non-empty, https or loopback only)', () => {
+  it('redirect_uris go through the same validator DCR uses (non-empty, https or loopback only)', () => {
     expect(reason(doc({ redirect_uris: [] }))).toBe('invalid_document');
     expect(reason(doc({ redirect_uris: 'https://a.example.com/cb' }))).toBe(
       'invalid_document',
@@ -129,12 +129,12 @@ describe('validateClientMetadataDocument', () => {
     ]) {
       expect(
         reason(doc({ client_name: bad })),
-        `M-4 ${JSON.stringify(bad)}`,
+        `client_name ${JSON.stringify(bad)}`,
       ).toBe('invalid_document');
     }
   });
 
-  it('F7: unknown scopes are dropped like DCR drops them; extra members are ignored', () => {
+  it('unknown scopes are dropped like DCR drops them; extra members are ignored', () => {
     const c = validateClientMetadataDocument(
       URL_ID,
       doc({ scope: 'tickets:read root:everything', logo_uri: 'x', foo: 1 }),
@@ -155,16 +155,16 @@ describe('validateClientMetadataDocument', () => {
   });
 });
 
-describe('F4: emoji and the joiner rule', () => {
+describe('emoji and the joiner rule', () => {
   const ok = (name: string) =>
     validateClientMetadataDocument(URL_ID, doc({ client_name: name }))
       .clientName;
 
-  it('F4: a plain emoji in a name is accepted', () => {
+  it('a plain emoji in a name is accepted', () => {
     expect(ok('Ticket Bot \u{1F3AB}')).toBe('Ticket Bot \u{1F3AB}');
   });
 
-  it('F4: an emoji ZWJ sequence is rejected on purpose, because U+200D is an invisible format character and invisible joiners are what the rule stops', () => {
+  it('an emoji ZWJ sequence is rejected on purpose, because U+200D is an invisible format character and invisible joiners are what the rule stops', () => {
     expect(() =>
       ok('Family \u{1F468}\u200D\u{1F469}\u200D\u{1F467}'),
     ).toThrow();

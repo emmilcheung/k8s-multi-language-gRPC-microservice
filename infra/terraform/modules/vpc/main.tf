@@ -37,7 +37,7 @@ module "vpc" {
   private_subnet_tags = {
     "kubernetes.io/role/internal-elb" = 1
 
-    # E2 / SR-09. Karpenter's EC2NodeClass finds the subnets it may launch into
+    # Karpenter's EC2NodeClass finds the subnets it may launch into
     # by this tag. Without it Karpenter discovers nothing and provisions
     # nothing, which looks exactly like "the cluster is full" — pods sit
     # Pending with no error anywhere.

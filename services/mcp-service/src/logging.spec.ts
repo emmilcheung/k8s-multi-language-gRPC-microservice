@@ -14,7 +14,7 @@ function capture(): { lines: () => string; stream: Writable } {
 }
 
 describe('log redaction', () => {
-  it('J-7: bearer and exchanged tokens are redacted wherever a logged object carries a `token` field', () => {
+  it('bearer and exchanged tokens are redacted wherever a logged object carries a `token` field', () => {
     const { lines, stream } = capture();
     const log = createLogger('info', stream);
     log.info({ authInfo: { token: 'MCP-JWT-VALUE' } }, 'a');
@@ -24,7 +24,7 @@ describe('log redaction', () => {
     expect(lines()).toContain('[Redacted]');
   });
 
-  it('J-7: authorization headers and the client secret stay redacted', () => {
+  it('authorization headers and the client secret stay redacted', () => {
     const { lines, stream } = capture();
     const log = createLogger('info', stream);
     log.info({ req: { headers: { authorization: 'Bearer SECRET-HDR' } } }, 'a');

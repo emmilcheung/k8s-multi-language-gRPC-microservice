@@ -25,7 +25,7 @@ interface ConsentDetails {
   expiresInSeconds: number;
 }
 
-/** One entry of the auth-service scope registry (GET /oauth/scopes, spec C-7). */
+/** One entry of the auth-service scope registry (GET /oauth/scopes). */
 interface ScopeInfo {
   scope: string;
   label: string;

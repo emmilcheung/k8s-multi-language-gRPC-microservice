@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/require-await -- async fakes stand in for network seams */
-// R3: the real transport over real sockets. A local https server on 127.0.0.1
+// the real transport over real sockets. A local https server on 127.0.0.1
 // with a throwaway self-signed cert (generated here with the openssl CLI into a
 // temp dir; nothing is committed) stands in for the client's host. The hostname
 // app.example.com does not resolve anywhere, so any test that passes proves the
@@ -55,7 +55,7 @@ function makeCert(name: string): { key: string; cert: string } {
     );
   } catch (e) {
     throw new Error(
-      `R3 needs the openssl CLI on PATH to generate a throwaway test certificate: ${String(e)}`,
+      `needs the openssl CLI on PATH to generate a throwaway test certificate: ${String(e)}`,
     );
   }
   return {
@@ -137,8 +137,8 @@ async function code(p: Promise<unknown>): Promise<string> {
   return 'resolved';
 }
 
-describe('R3: createHttpsTransport over real sockets', () => {
-  it('R3: connects to the pinned IP (the hostname does not resolve) while SNI and Host carry the hostname; a 200 JSON body round-trips', async () => {
+describe('createHttpsTransport over real sockets', () => {
+  it('connects to the pinned IP (the hostname does not resolve) while SNI and Host carry the hostname; a 200 JSON body round-trips', async () => {
     const srv = await serve(good, json('{"client_id":"x"}'));
     try {
       const out = await fetchClientMetadataDocument(URL_OK, {
@@ -155,7 +155,7 @@ describe('R3: createHttpsTransport over real sockets', () => {
     }
   });
 
-  it('R3: a certificate for a different name is rejected (TLS verification is on)', async () => {
+  it('a certificate for a different name is rejected (TLS verification is on)', async () => {
     const srv = await serve(other, json('{}'));
     try {
       const real = createHttpsTransport({ ca: other.cert, port: srv.port });
@@ -173,7 +173,7 @@ describe('R3: createHttpsTransport over real sockets', () => {
     }
   });
 
-  it('R3: rejectUnauthorized cannot be switched off through the factory options', async () => {
+  it('rejectUnauthorized cannot be switched off through the factory options', async () => {
     const srv = await serve(other, json('{}'));
     try {
       const t = toLocal(srv.port, {
@@ -193,7 +193,7 @@ describe('R3: createHttpsTransport over real sockets', () => {
     }
   });
 
-  it('R3: asks for identity encoding only', async () => {
+  it('asks for identity encoding only', async () => {
     const srv = await serve(good, json('{}'));
     try {
       await fetchClientMetadataDocument(URL_OK, {
@@ -206,7 +206,7 @@ describe('R3: createHttpsTransport over real sockets', () => {
     }
   });
 
-  it('R3: a real oversize body is cut at the 5 KB cap', async () => {
+  it('a real oversize body is cut at the 5 KB cap', async () => {
     const srv = await serve(good, (_q, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.write('x'.repeat(CIMD_MAX_BODY_BYTES + 100));
@@ -226,7 +226,7 @@ describe('R3: createHttpsTransport over real sockets', () => {
     }
   });
 
-  it('R3: a slow-drip body (chunk every ~30 ms) is cut by the one deadline', async () => {
+  it('a slow-drip body (chunk every ~30 ms) is cut by the one deadline', async () => {
     let timer: NodeJS.Timeout;
     const srv = await serve(good, (_q, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -250,7 +250,7 @@ describe('R3: createHttpsTransport over real sockets', () => {
     }
   });
 
-  it('R3: a 3xx is reported and never followed', async () => {
+  it('a 3xx is reported and never followed', async () => {
     let followed = false;
     const srv = await serve(good, (req, res) => {
       if (req.url === '/elsewhere') followed = true;
@@ -272,7 +272,7 @@ describe('R3: createHttpsTransport over real sockets', () => {
     }
   });
 
-  it('R3: the port is settable only through the factory, never from the URL (a :8443 URL is refused before any socket)', async () => {
+  it('the port is settable only through the factory, never from the URL (a :8443 URL is refused before any socket)', async () => {
     expect(
       await code(
         fetchClientMetadataDocument(`https://${HOST}:8443/c.json`, {

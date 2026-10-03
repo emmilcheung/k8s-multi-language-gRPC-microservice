@@ -44,7 +44,7 @@ func existing(st repository.ReservationStatus) *repository.TicketReservation {
 	return &repository.TicketReservation{ID: "r1", TicketID: "t1", UserID: "u1", Quantity: 2, Status: st}
 }
 
-// C-8: an Idempotency-Key retry may reuse only a live reservation. Accepting a dead one
+// an Idempotency-Key retry may reuse only a live reservation. Accepting a dead one
 // would let order-service create an order on inventory that is no longer held (oversell).
 func TestReserveQuota_DuplicateReserved_IsIdempotentSuccess(t *testing.T) {
 	resp, err := reserve(t, &dupRepo{createErr: errors.New("E11000 duplicate key"), existing: existing(repository.ReservationStatusReserved)})

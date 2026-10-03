@@ -126,7 +126,7 @@ describe('OAuthRegistrationExceptionFilter', () => {
   });
 });
 
-describe('OAuthController filter wiring (D8: RFC shape on three endpoints only)', () => {
+describe('OAuthController filter wiring (RFC shape on three endpoints only)', () => {
   const filtersOf = (method: keyof OAuthController): unknown =>
     Reflect.getMetadata(
       EXCEPTION_FILTERS_METADATA,
@@ -139,7 +139,7 @@ describe('OAuthController filter wiring (D8: RFC shape on three endpoints only)'
     expect(filtersOf('register')).toEqual([OAuthRegistrationExceptionFilter]);
   });
 
-  it('M-2: authorize keeps the docs/03 shape for everything except the retryable 503, which has its own narrow filter', () => {
+  it('authorize keeps the docs/03 shape for everything except the retryable 503, which has its own narrow filter', () => {
     expect(filtersOf('authorize')).toEqual([OAuthUnavailableFilter]);
   });
 

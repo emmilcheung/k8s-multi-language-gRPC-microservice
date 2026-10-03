@@ -23,7 +23,7 @@ output "oidc_provider_arn" {
   value = module.eks.oidc_provider_arn
 }
 
-# ── E2 / SR-09 · Karpenter ────────────────────────────────────────────────────
+# Karpenter ────────────────────────────────────────────────────
 
 output "karpenter_node_iam_role_name" {
   description = "IAM role assumed by Karpenter-launched nodes."

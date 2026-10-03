@@ -57,7 +57,7 @@ type releaseRequest struct {
 //	Response: { "held": ["..."], "expiresAt": "..." }
 //
 // The userId is derived from the Kong-injected X-User-Id header.
-// Any client-supplied userId in the body is rejected per design decision D-08.
+// Any client-supplied userId in the body is rejected by design.
 // X-User-Id-Sig must be valid; missing or invalid signatures result in 401.
 func (h *SeatHoldHandler) HoldSeats(c echo.Context) error {
 	userID := c.Request().Header.Get("X-User-Id")

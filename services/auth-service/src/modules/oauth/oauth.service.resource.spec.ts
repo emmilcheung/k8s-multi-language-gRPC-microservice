@@ -111,7 +111,7 @@ const authorizeQuery = (extra: Record<string, unknown> = {}) =>
 const errorOf = async (p: Promise<unknown>) =>
   ((await p.catch((e: unknown) => e)) as HttpException).getResponse();
 
-describe('F10: resource is an accepted parameter', () => {
+describe('resource is an accepted parameter', () => {
   it('lets AuthorizeQuery and TokenBody carry resource (the global ValidationPipe forbids unknown fields, which rejected every MCP client)', async () => {
     const q = plainToInstance(AuthorizeQuery, {
       response_type: 'code',
@@ -135,7 +135,7 @@ describe('F10: resource is an accepted parameter', () => {
   });
 });
 
-describe('E-1: unknown resource', () => {
+describe('unknown resource', () => {
   it('authorize answers 400 invalid_target for a resource outside OAUTH_RESOURCES', async () => {
     const { service, codeStore } = makeService();
     const body = await errorOf(
@@ -168,7 +168,7 @@ describe('E-1: unknown resource', () => {
   });
 });
 
-describe('E-2 / E-3: resource binds code and token audience', () => {
+describe('resource binds code and token audience', () => {
   const codeRecord = (resource?: string) => ({
     code: 'c',
     clientId: 'ticketing-mcp',
@@ -199,7 +199,7 @@ describe('E-2 / E-3: resource binds code and token audience', () => {
     );
   });
 
-  it('E-2: token rejects a resource that differs from the authorize one (RFC 8707 §2)', async () => {
+  it('token rejects a resource that differs from the authorize one (RFC 8707 §2)', async () => {
     const { service, codeStore, authService } = makeService();
     codeStore.consumeCode.mockResolvedValue(codeRecord(MCP));
     const body = await errorOf(
@@ -209,7 +209,7 @@ describe('E-2 / E-3: resource binds code and token audience', () => {
     expect(authService.issueAccessTokenForOAuth).not.toHaveBeenCalled();
   });
 
-  it('E-2: token rejects a resource when authorize sent none (it would default to the API audience)', async () => {
+  it('token rejects a resource when authorize sent none (it would default to the API audience)', async () => {
     const { service, codeStore } = makeService();
     codeStore.consumeCode.mockResolvedValue(codeRecord());
     const body = await errorOf(
@@ -218,7 +218,7 @@ describe('E-2 / E-3: resource binds code and token audience', () => {
     expect(body).toMatchObject({ error: 'invalid_target' });
   });
 
-  it('E-3: aud is the authorized resource; iss is OAUTH_ISSUER only when the flag is on', async () => {
+  it('aud is the authorized resource; iss is OAUTH_ISSUER only when the flag is on', async () => {
     const { service, codeStore, authService } = makeService({
       OAUTH_ISSUER_ENABLED: true,
     });
@@ -232,7 +232,7 @@ describe('E-2 / E-3: resource binds code and token audience', () => {
     );
   });
 
-  it('with no resource at all the audience is OAUTH_API_AUDIENCE, so the trial client keeps working (C-2)', async () => {
+  it('with no resource at all the audience is OAUTH_API_AUDIENCE, so the trial client keeps working', async () => {
     const { service, codeStore, authService } = makeService();
     codeStore.consumeCode.mockResolvedValue(codeRecord());
     await service.token(tokenBody(), tokenReq);
@@ -244,7 +244,7 @@ describe('E-2 / E-3: resource binds code and token audience', () => {
     );
   });
 
-  it('E-9: with the flag off the OAuth token keeps iss auth-service so Kong and REST still accept it', async () => {
+  it('with the flag off the OAuth token keeps iss auth-service so Kong and REST still accept it', async () => {
     const { service, codeStore, authService } = makeService({
       OAUTH_ISSUER_ENABLED: false,
     });
@@ -421,7 +421,7 @@ describe('E-2 / E-3: resource binds code and token audience', () => {
   });
 });
 
-describe('E-4: RFC 9207 iss on every authorize redirect', () => {
+describe('RFC 9207 iss on every authorize redirect', () => {
   it('the code redirect carries iss (mix-up defence) alongside code and state', async () => {
     const { service } = makeService({}, { firstParty: true });
     const { redirectUrl } = await service.authorize(authorizeQuery(), authReq);
@@ -468,7 +468,7 @@ describe('E-4: RFC 9207 iss on every authorize redirect', () => {
   });
 });
 
-describe('E-5: loopback redirect port matching in authorize', () => {
+describe('loopback redirect port matching in authorize', () => {
   it('accepts a random loopback port and redirects to the port actually requested', async () => {
     const { service, codeStore } = makeService({}, { firstParty: true });
     const { redirectUrl } = await service.authorize(

@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Postgres backstop for order expiry (SR-16).
+ * Postgres backstop for order expiry.
  *
  * Normally an order expires when expiration-service's asynq job fires and publishes
  * {@code expiration.order.expiration_complete}. Asynq keeps its jobs in Redis, and

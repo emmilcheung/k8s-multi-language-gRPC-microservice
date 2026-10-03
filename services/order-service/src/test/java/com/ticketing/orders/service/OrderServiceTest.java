@@ -57,7 +57,7 @@ import static org.mockito.Mockito.when;
 /**
  * Unit tests for {@link OrderService} and {@link OrderTransactionService}.
  *
- * CP-05 rewrite: Redisson distributed lock removed. Order creation now uses
+ * Redisson distributed lock removed. Order creation now uses
  * ReserveQuota gRPC call (GA reservation path). Tests verify:
  * - reserveQuota is called and order is saved on success
  * - compensation (releaseReservation) is called when the DB transaction fails
@@ -716,7 +716,7 @@ class OrderServiceTest {
         assertThat(totalComputed).isEqualByComparingTo(new BigDecimal(response.getTotal()));
     }
 
-    // ── WS-F pre-check: retry after a compensated seated reserve ───────────────
+    // ── Pre-check: retry after a compensated seated reserve ───────────────
 
     @Test
     void F_pre_seated_retry_on_released_reservation_is_409_exhausted_and_creates_nothing() {
@@ -743,7 +743,7 @@ class OrderServiceTest {
         verify(venueServiceClient, never()).releaseSeatReservation(any(), anyString());
     }
 
-    // ── WS-F fix round: a keyed request never compensates ──────────────────────
+    // ── A keyed request never compensates ──────────────────────
 
     private static final String KEY = "retry-key-0001";
 

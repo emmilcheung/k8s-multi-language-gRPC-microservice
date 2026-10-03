@@ -1,7 +1,7 @@
 image:
   repository: queue-service
   # Set per deploy (--set image.tag=<git sha>), like every chart under infra/helm.
-  # Never `latest` (repo rule I-04): with IfNotPresent, nodes keep whatever
+  # Never `latest`: with IfNotPresent, nodes keep whatever
   # `latest` they cached first, so replicas silently run different builds.
   tag: SET_BY_CI
   pullPolicy: IfNotPresent

@@ -33,7 +33,7 @@ HELM_RELEASE  := ticketing
 
 # Tag used for locally built service images. values-local.yaml ships the
 # placeholder `SET_BY_CI`, which nothing substitutes outside CI, so the local
-# deploy must pass the tag explicitly. Not `latest` — repo rule I-04.
+# deploy must pass the tag explicitly. Never `latest`.
 IMAGE_TAG     ?= local
 
 # Read a value from infra/local/secrets.env without sourcing the file
@@ -462,7 +462,7 @@ _minikube-start:
 		echo "Starting minikube (5 CPU, 7851 MB RAM)..."; \
 		minikube start --cpus=5 --memory=7851 --disk-size=50g --driver=docker; \
 	fi
-	@echo "Enabling metrics-server (E1/SR-09 — HPAs have no signal without it)..."
+	@echo "Enabling metrics-server (HPAs have no signal without it)..."
 	@minikube addons enable metrics-server
 
 _namespace:

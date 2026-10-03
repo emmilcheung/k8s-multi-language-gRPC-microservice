@@ -15,7 +15,7 @@ COPY services/order-service/pom.xml .
 # Download dependencies offline (layer cache friendly)
 RUN mvn dependency:go-offline -q
 
-# Download OpenTelemetry Java agent — zero-code auto-instrumentation (O-01).
+# Download OpenTelemetry Java agent — zero-code auto-instrumentation.
 # Pinned to v2.26.1. curl -fL follows GitHub's CDN redirect and fails loudly
 # on non-2xx responses, unlike Docker ADD which silently writes empty files.
 # CVE-2026-54704: JDBC auto-instrumentation could leak double-quoted passwords

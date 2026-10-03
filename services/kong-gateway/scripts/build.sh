@@ -311,12 +311,12 @@ rsa_block = '\n'.join(RSA_INDENT + line for line in rsa_lines)
 with open(base_template_path) as f:
     content = f.read()
 
-# ── Lint: every jwt route declares its OAuth policy (D9) ─────────────────────
+# ── Lint: every jwt route declares its OAuth policy ─────────────────────
 # A route that verifies JWTs must say whether OAuth access tokens may use it:
 # {{SCOPE_CHECK_LUA:<scope>}} admits tokens that hold <scope>, {{OAUTH_DENY_LUA}}
 # refuses them. Exactly one, as the FIRST post-function access entry: the guards read the
 # token the jwt plugin verified, which a pre-function cannot see. A route that
-# forgets fails the build instead of silently admitting agents (F11).
+# forgets fails the build instead of silently admitting agents.
 OAUTH_GUARD_RE = re.compile(r'\{\{(?:SCOPE_CHECK_LUA:[^}]+|OAUTH_DENY_LUA)\}\}')
 bad_routes = []
 for block in re.split(r'\n(?=      - name: )', content):

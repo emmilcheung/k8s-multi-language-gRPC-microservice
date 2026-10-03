@@ -56,8 +56,8 @@ async function reason(p: Promise<unknown>): Promise<string> {
   return 'resolved';
 }
 
-describe('I-1: SSRF address guard', () => {
-  it('I-1: https://169.254.169.254/... (cloud metadata) is rejected before any DNS or connection', async () => {
+describe('SSRF address guard', () => {
+  it('https://169.254.169.254/... (cloud metadata) is rejected before any DNS or connection', async () => {
     const resolve = vi.fn(publicResolver);
     const { transport } = fakeTransport();
     const code = await reason(
@@ -71,7 +71,7 @@ describe('I-1: SSRF address guard', () => {
     expect(transport).not.toHaveBeenCalled();
   });
 
-  it('I-1: https://10.0.0.1/... (RFC 1918 literal) is rejected before any DNS or connection', async () => {
+  it('https://10.0.0.1/... (RFC 1918 literal) is rejected before any DNS or connection', async () => {
     const resolve = vi.fn(publicResolver);
     const { transport } = fakeTransport();
     expect(
@@ -86,7 +86,7 @@ describe('I-1: SSRF address guard', () => {
     expect(transport).not.toHaveBeenCalled();
   });
 
-  it('I-1: a hostname that resolves to 127.0.0.1 is rejected and never connected to', async () => {
+  it('a hostname that resolves to 127.0.0.1 is rejected and never connected to', async () => {
     const { transport } = fakeTransport();
     const code = await reason(
       fetchClientMetadataDocument(URL_OK, {
@@ -132,7 +132,7 @@ describe('I-1: SSRF address guard', () => {
     '::ffff:10.0.0.1',
     '::127.0.0.1',
     '2002:7f00:1::1',
-  ])('I-1: %s is blocked', (ip) => {
+  ])('%s is blocked', (ip) => {
     expect(isBlockedAddress(ip)).toBe(true);
   });
 
@@ -144,12 +144,12 @@ describe('I-1: SSRF address guard', () => {
     '198.20.0.1',
     '2606:4700:4700::1111',
     '::ffff:8.8.8.8',
-  ])('I-1: %s (public) is allowed', (ip) => {
+  ])('%s (public) is allowed', (ip) => {
     expect(isBlockedAddress(ip)).toBe(false);
   });
 });
 
-describe('I-9: rejected before any connection is attempted', () => {
+describe('rejected before any connection is attempted', () => {
   const cases: [string, string][] = [
     ['an IP-literal host (v4)', 'https://93.184.216.34/c.json'],
     ['an IP-literal host (v6)', 'https://[2606:4700::1111]/c.json'],
@@ -170,7 +170,7 @@ describe('I-9: rejected before any connection is attempted', () => {
     ['an over-long URL', `https://app.example.com/${'a'.repeat(600)}`],
     ['whitespace', 'https://app.example.com/a b.json'],
   ];
-  it.each(cases)('I-9: %s', async (_name, url) => {
+  it.each(cases)('%s', async (_name, url) => {
     const resolve = vi.fn(publicResolver);
     const { transport } = fakeTransport();
     const code = await reason(
@@ -181,7 +181,7 @@ describe('I-9: rejected before any connection is attempted', () => {
     expect(transport).not.toHaveBeenCalled();
   });
 
-  it('I-9: an answer with one public and one private address is rejected (any blocked address fails the lot)', async () => {
+  it('an answer with one public and one private address is rejected (any blocked address fails the lot)', async () => {
     const { transport } = fakeTransport();
     const code = await reason(
       fetchClientMetadataDocument(URL_OK, {
@@ -196,7 +196,7 @@ describe('I-9: rejected before any connection is attempted', () => {
     expect(transport).not.toHaveBeenCalled();
   });
 
-  it('I-9: an IPv4-mapped IPv6 answer for a private IPv4 is rejected', async () => {
+  it('an IPv4-mapped IPv6 answer for a private IPv4 is rejected', async () => {
     const { transport } = fakeTransport();
     const code = await reason(
       fetchClientMetadataDocument(URL_OK, {
@@ -208,7 +208,7 @@ describe('I-9: rejected before any connection is attempted', () => {
     expect(transport).not.toHaveBeenCalled();
   });
 
-  it('I-9: an empty DNS answer and a resolver error are both rejected', async () => {
+  it('an empty DNS answer and a resolver error are both rejected', async () => {
     const { transport } = fakeTransport();
     expect(
       await reason(
@@ -231,7 +231,7 @@ describe('I-9: rejected before any connection is attempted', () => {
     expect(transport).not.toHaveBeenCalled();
   });
 
-  it('I-9: parseClientIdUrl accepts the canonical form (explicit :443 allowed)', () => {
+  it('parseClientIdUrl accepts the canonical form (explicit :443 allowed)', () => {
     expect(parseClientIdUrl(URL_OK).hostname).toBe('app.example.com');
     expect(
       parseClientIdUrl('https://app.example.com:443/c.json').hostname,
@@ -240,7 +240,7 @@ describe('I-9: rejected before any connection is attempted', () => {
 });
 
 describe('connection pinning', () => {
-  it('I-1: the transport is called with the vetted IP and the original hostname for SNI/Host, never the hostname as the address', async () => {
+  it('the transport is called with the vetted IP and the original hostname for SNI/Host, never the hostname as the address', async () => {
     const resolve = vi.fn(publicResolver);
     const { transport } = fakeTransport();
     await fetchClientMetadataDocument(URL_OK, { resolve, transport });
@@ -256,9 +256,9 @@ describe('connection pinning', () => {
   });
 });
 
-describe('I-2: redirects', () => {
+describe('redirects', () => {
   it.each([301, 302, 303, 307, 308])(
-    'I-2: a %i response is rejected and not followed',
+    'a %i response is rejected and not followed',
     async (status) => {
       const { transport, close } = fakeTransport({
         status,
@@ -277,8 +277,8 @@ describe('I-2: redirects', () => {
   );
 });
 
-describe('I-3: size cap', () => {
-  it('I-3: a body over 5 KB is rejected on bytes received, whatever Content-Length says', async () => {
+describe('size cap', () => {
+  it('a body over 5 KB is rejected on bytes received, whatever Content-Length says', async () => {
     const { transport, close } = fakeTransport({
       headers: { 'content-type': 'application/json', 'content-length': '10' },
       chunks: ['{"a":"', 'x'.repeat(3000), 'x'.repeat(3000), '"}'],
@@ -293,7 +293,7 @@ describe('I-3: size cap', () => {
     expect(close).toHaveBeenCalled();
   });
 
-  it('I-3: a body of exactly 5 KB is accepted', async () => {
+  it('a body of exactly 5 KB is accepted', async () => {
     const { transport } = fakeTransport({ chunks: ['x'.repeat(5120)] });
     const res = await fetchClientMetadataDocument(URL_OK, {
       resolve: publicResolver,
@@ -303,8 +303,8 @@ describe('I-3: size cap', () => {
   });
 });
 
-describe('I-11: response validation closes the socket', () => {
-  it('I-11: a non-JSON content type is rejected and the stream is closed', async () => {
+describe('response validation closes the socket', () => {
+  it('a non-JSON content type is rejected and the stream is closed', async () => {
     const { transport, close } = fakeTransport({
       headers: { 'content-type': 'text/html' },
     });
@@ -319,7 +319,7 @@ describe('I-11: response validation closes the socket', () => {
     expect(close).toHaveBeenCalled();
   });
 
-  it('I-11: application/json with a charset and a +json suffix type are accepted', async () => {
+  it('application/json with a charset and a +json suffix type are accepted', async () => {
     for (const ct of [
       'application/json; charset=utf-8',
       'application/client-metadata+json',
@@ -334,7 +334,7 @@ describe('I-11: response validation closes the socket', () => {
     }
   });
 
-  it('I-11: a missing content type is rejected', async () => {
+  it('a missing content type is rejected', async () => {
     const { transport } = fakeTransport({ headers: {} });
     expect(
       await reason(
@@ -347,7 +347,7 @@ describe('I-11: response validation closes the socket', () => {
   });
 
   it.each([204, 404, 500])(
-    'I-11: status %i is rejected and the stream is closed',
+    'status %i is rejected and the stream is closed',
     async (status) => {
       const { transport, close } = fakeTransport({ status });
       expect(
@@ -362,7 +362,7 @@ describe('I-11: response validation closes the socket', () => {
     },
   );
 
-  it('I-11: a body that never finishes hits the single 3 s deadline (shortened here) and the stream is closed', async () => {
+  it('a body that never finishes hits the single 3 s deadline (shortened here) and the stream is closed', async () => {
     const { transport, close } = fakeTransport({ hang: true });
     const started = Date.now();
     const code = await reason(
@@ -377,7 +377,7 @@ describe('I-11: response validation closes the socket', () => {
     expect(close).toHaveBeenCalled();
   });
 
-  it('I-11: the deadline also covers DNS, and a transport that connects after it is closed', async () => {
+  it('the deadline also covers DNS, and a transport that connects after it is closed', async () => {
     const { transport, close } = fakeTransport();
     const code = await reason(
       fetchClientMetadataDocument(URL_OK, {
@@ -396,7 +396,7 @@ describe('I-11: response validation closes the socket', () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  it('I-11: a transport that answers after the deadline is closed, not leaked', async () => {
+  it('a transport that answers after the deadline is closed, not leaked', async () => {
     const close = vi.fn();
     const transport: CimdTransport = () =>
       new Promise((resolve) =>
@@ -425,7 +425,7 @@ describe('I-11: response validation closes the socket', () => {
     expect(close).toHaveBeenCalled();
   });
 
-  it('I-11: a transport error (connect / TLS failure) is reported as connect_failed', async () => {
+  it('a transport error (connect / TLS failure) is reported as connect_failed', async () => {
     const transport: CimdTransport = async () => {
       throw new Error('CERT_HAS_EXPIRED');
     };
@@ -440,7 +440,7 @@ describe('I-11: response validation closes the socket', () => {
   });
 });
 
-describe('R2: DNS runs on c-ares (dns.promises.Resolver), not the libuv threadpool', () => {
+describe('DNS runs on c-ares (dns.promises.Resolver), not the libuv threadpool', () => {
   function fakeDns(opts: {
     v4?: string[] | Error;
     v6?: string[] | Error;
@@ -469,7 +469,7 @@ describe('R2: DNS runs on c-ares (dns.promises.Resolver), not the libuv threadpo
     Object.assign(new Error(code), { code }) as Error;
   const ctl = () => new AbortController().signal;
 
-  it('R2: queries A and AAAA and returns IPv4 first', async () => {
+  it('queries A and AAAA and returns IPv4 first', async () => {
     const { dns } = fakeDns({ v4: ['93.184.216.34'], v6: ['2606:4700::1111'] });
     const out = await createDnsResolver({ create: () => dns })(
       'a.example',
@@ -481,7 +481,7 @@ describe('R2: DNS runs on c-ares (dns.promises.Resolver), not the libuv threadpo
     ]);
   });
 
-  it('R2: ENODATA on one family is tolerated when the other answers', async () => {
+  it('ENODATA on one family is tolerated when the other answers', async () => {
     const { dns } = fakeDns({
       v4: codeErr('ENODATA'),
       v6: ['2606:4700::1111'],
@@ -493,7 +493,7 @@ describe('R2: DNS runs on c-ares (dns.promises.Resolver), not the libuv threadpo
     expect(out).toEqual([{ address: '2606:4700::1111', family: 6 }]);
   });
 
-  it('R2: ENOTFOUND/ENODATA on both is a terminal dns_failed', async () => {
+  it('ENOTFOUND/ENODATA on both is a terminal dns_failed', async () => {
     const { dns } = fakeDns({
       v4: codeErr('ENOTFOUND'),
       v6: codeErr('ENODATA'),
@@ -505,7 +505,7 @@ describe('R2: DNS runs on c-ares (dns.promises.Resolver), not the libuv threadpo
     expect(e).toMatchObject({ code: 'dns_failed' });
   });
 
-  it('R2: a timeout or server failure is dns_unavailable (transient), never dns_failed', async () => {
+  it('a timeout or server failure is dns_unavailable (transient), never dns_failed', async () => {
     for (const c of ['ETIMEOUT', 'ESERVFAIL', 'ECONNREFUSED']) {
       const { dns } = fakeDns({ v4: codeErr(c), v6: codeErr('ENODATA') });
       const e = await createDnsResolver({ create: () => dns })(
@@ -516,7 +516,7 @@ describe('R2: DNS runs on c-ares (dns.promises.Resolver), not the libuv threadpo
     }
   });
 
-  it('R2: a blocked address in EITHER family rejects the whole answer, with no connection', async () => {
+  it('a blocked address in EITHER family rejects the whole answer, with no connection', async () => {
     const { dns } = fakeDns({ v4: ['93.184.216.34'], v6: ['fd00::1'] });
     const { transport } = fakeTransport();
     const code = await reason(
@@ -529,7 +529,7 @@ describe('R2: DNS runs on c-ares (dns.promises.Resolver), not the libuv threadpo
     expect(transport).not.toHaveBeenCalled();
   });
 
-  it('R2: the connection goes to the first IPv4 address even when the resolver listed IPv6 first', async () => {
+  it('the connection goes to the first IPv4 address even when the resolver listed IPv6 first', async () => {
     const { transport } = fakeTransport();
     await fetchClientMetadataDocument(URL_OK, {
       resolve: async () => [
@@ -544,7 +544,7 @@ describe('R2: DNS runs on c-ares (dns.promises.Resolver), not the libuv threadpo
     });
   });
 
-  it('R2: the deadline cancels the c-ares query and the fetch only returns once the lookup has settled', async () => {
+  it('the deadline cancels the c-ares query and the fetch only returns once the lookup has settled', async () => {
     const { dns, cancel } = fakeDns({ hang: true });
     const { transport } = fakeTransport();
     const started = Date.now();
@@ -561,13 +561,13 @@ describe('R2: DNS runs on c-ares (dns.promises.Resolver), not the libuv threadpo
     expect(transport).not.toHaveBeenCalled();
   });
 
-  it('R2: the resolver is cancelled in finally on success too, so nothing lingers', async () => {
+  it('the resolver is cancelled in finally on success too, so nothing lingers', async () => {
     const { dns, cancel } = fakeDns({ v4: ['93.184.216.34'] });
     await createDnsResolver({ create: () => dns })('a.example', ctl());
     expect(cancel).toHaveBeenCalled();
   });
 
-  it('R2: c-ares timeout and tries are set so one lookup cannot outlive the deadline', () => {
+  it('c-ares timeout and tries are set so one lookup cannot outlive the deadline', () => {
     let seen: { timeout?: number; tries?: number } | undefined;
     const { dns } = fakeDns({ v4: ['93.184.216.34'] });
     void createDnsResolver({
@@ -580,9 +580,9 @@ describe('R2: DNS runs on c-ares (dns.promises.Resolver), not the libuv threadpo
   });
 });
 
-describe('M-5: wider block list and early reject of internal-looking names', () => {
+describe('wider block list and early reject of internal-looking names', () => {
   it.each(['fec0::1', '100::1', '192.88.99.1', '2001:2::1', '2001:10::1'])(
-    'M-5: %s is blocked',
+    '%s is blocked',
     (ip) => expect(isBlockedAddress(ip)).toBe(true),
   );
 
@@ -594,7 +594,7 @@ describe('M-5: wider block list and early reject of internal-looking names', () 
     'https://x.svc.cluster.local/a.json',
     'https://nas.lan/a.json',
     'https://x.home.arpa/a.json',
-  ])('M-5: %s is rejected before any DNS', async (u) => {
+  ])('%s is rejected before any DNS', async (u) => {
     const resolve = vi.fn(publicResolver);
     const code = await reason(
       fetchClientMetadataDocument(u, {
@@ -607,8 +607,8 @@ describe('M-5: wider block list and early reject of internal-looking names', () 
   });
 });
 
-describe('M-1 (fetcher level): the one deadline also cuts a slow drip', () => {
-  it('M-1: a body that drips a chunk every 30 ms is cut by the single deadline, not reset per chunk', async () => {
+describe('the one deadline also cuts a slow drip', () => {
+  it('a body that drips a chunk every 30 ms is cut by the single deadline, not reset per chunk', async () => {
     const close = vi.fn();
     const transport: CimdTransport = async () => ({
       status: 200,

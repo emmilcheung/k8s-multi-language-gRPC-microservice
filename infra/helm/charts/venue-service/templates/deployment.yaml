@@ -102,7 +102,7 @@ spec:
             {{- toYaml .Values.startupProbe | nindent 12 }}
           {{- end }}
           {{- if .Values.lifecycle.preStopSleepSeconds }}
-          # E5 / SR-27. kubelet runs preStop and the endpoint removal
+          # kubelet runs preStop and the endpoint removal
           # concurrently, and only sends SIGTERM once preStop returns. Sleeping
           # here keeps the pod serving while the removal reaches every
           # kube-proxy and Kong, so no client is handed a stream on a pod that

@@ -23,7 +23,7 @@ import { parseRsaPrivateKey } from './rsa-key.util';
 
 export interface JwtPayload {
   sub: string;
-  /** Absent on OAuth2 access tokens (C-1). */
+  /** Absent on OAuth2 access tokens. */
   email?: string;
   jti: string;
   iat?: number;
@@ -279,9 +279,9 @@ export class AuthService {
   }
 
   /**
-   * Issue an access token for an OAuth2 client with specific scopes (C-1).
+   * Issue an access token for an OAuth2 client with specific scopes.
    * Adds `scope` and `client_id`, and binds the token to `aud` (RFC 8707) and
-   * `iss` (D3). No `email` or `roles`: a delegated token carries only what the
+   * `iss`. No `email` or `roles`: a delegated token carries only what the
    * resource server needs. Used by the OAuth2 token endpoint only.
    */
   issueAccessTokenForOAuth(
@@ -297,10 +297,10 @@ export class AuthService {
     }: {
       aud: string;
       iss: string;
-      /** RFC 8693 actor claim, set only on exchanged tokens (C-1). */
+      /** RFC 8693 actor claim, set only on exchanged tokens. */
       act?: { sub: string };
       /**
-       * Absolute iat/exp (epoch seconds) for exchanged tokens (C-5). Set
+       * Absolute iat/exp (epoch seconds) for exchanged tokens. Set
        * together; replaces JWT_EXPIRY so the lifetime is computed once by the
        * caller and cannot drift past the subject token's exp.
        */
@@ -331,7 +331,7 @@ export class AuthService {
   }
 
   /**
-   * Verify an OAuth access token presented as an RFC 8693 subject (C-5):
+   * Verify an OAuth access token presented as an RFC 8693 subject:
    * signature, exp, an `iss` that is either issuer this server can mint OAuth
    * tokens under (the module's dual-issuer list, independent of
    * OAUTH_ISSUER_ENABLED so tokens minted just before a flag flip still
@@ -420,7 +420,7 @@ export class AuthService {
    * Verify an access token's signature and check whether its JTI has been
    * blacklisted (e.g. due to an explicit signout).
    *
-   * Used by the currentUser endpoint for defense-in-depth verification (S-03):
+   * Used by the currentUser endpoint for defense-in-depth verification:
    * in addition to trusting the X-User-Id header injected by Kong, we locally
    * verify the JWT so that direct (non-Kong) pod access is also rejected for
    * unauthenticated callers.
@@ -472,8 +472,8 @@ export class AuthService {
 
   /**
    * Verify a token that must represent a signed-in browser session. OAuth
-   * access tokens (they carry client_id, C-1) are rejected: a delegated grant
-   * is never a session (F11b).
+   * access tokens (they carry client_id) are rejected: a delegated grant
+   * is never a session.
    */
   async verifySessionAccessToken(token: string): Promise<JwtPayload> {
     const payload = await this.verifyAccessToken(token);
@@ -489,7 +489,7 @@ export class AuthService {
   }
 
   /**
-   * Blacklist a JWT access token by its JTI until it expires (S-04).
+   * Blacklist a JWT access token by its JTI until it expires.
    * Decodes the token without verification (Kong already validated it upstream).
    * Stores the JTI in Redis with TTL = remaining token lifetime so the key
    * is automatically cleaned up once the token can no longer be used.
@@ -527,7 +527,7 @@ export class AuthService {
   }
 
   private issueToken(payload: Omit<JwtPayload, 'jti' | 'iat' | 'exp'>): string {
-    // Embed a unique JTI so the token can be individually revoked on signout (S-04).
+    // Embed a unique JTI so the token can be individually revoked on signout.
     const tokenPayload = { ...payload, jti: randomUUID() };
     // JwtService.sign return type is `any` in @nestjs/jwt typings.
     // We call it via an intermediate `unknown` cast to satisfy strict-any rules.

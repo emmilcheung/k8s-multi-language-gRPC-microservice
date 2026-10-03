@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createUpstream, ToolFailure } from './upstream.ts';
 
 describe('upstream client', () => {
-  it('R5: a hung Kong call times out into UPSTREAM_ERROR instead of hanging the tool call', async () => {
+  it('a hung Kong call times out into UPSTREAM_ERROR instead of hanging the tool call', async () => {
     const upstream = createUpstream({
       baseUrl: 'http://kong:8000',
       exchange: () => Promise.resolve('api-token'),
@@ -24,7 +24,7 @@ describe('upstream client', () => {
     expect((failure as ToolFailure).code).toBe('UPSTREAM_ERROR');
   });
 
-  it('R12: headers arrive but the body stalls: the read is bounded by the timeout and fails sanitised', async () => {
+  it('headers arrive but the body stalls: the read is bounded by the timeout and fails sanitised', async () => {
     const upstream = createUpstream({
       baseUrl: 'http://kong:8000',
       exchange: () => Promise.resolve('api-token'),

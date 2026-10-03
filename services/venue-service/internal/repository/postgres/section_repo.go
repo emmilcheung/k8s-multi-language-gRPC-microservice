@@ -96,9 +96,9 @@ func bulkInsertSeats(ctx context.Context, db querier, sectionID, planID, section
 func (r *SectionRepo) ProvisionFromVenue(ctx context.Context, planID, venueID string) (int, error) {
 	// One transaction for the whole clone. pg_advisory_xact_lock serialises concurrent
 	// callers for the same plan (the COUNT guard below is otherwise a check-then-act
-	// race, SR-35), and committing only at the end makes the clone atomic so a mid-loop
+	// race), and committing only at the end makes the clone atomic so a mid-loop
 	// failure cannot leave a half-built plan that the COUNT guard then treats as
-	// complete forever (SR-39). Doing the inserts on this same tx — rather than on the
+	// complete forever. Doing the inserts on this same tx — rather than on the
 	// pool — keeps each caller to ONE pooled connection, which is what stops the pool
 	// from deadlocking under concurrent provisioning.
 	tx, err := r.pool.Begin(ctx)

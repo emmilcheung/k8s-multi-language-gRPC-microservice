@@ -9,13 +9,13 @@ import {
 describe('redirectUriMatches', () => {
   const registered = ['http://127.0.0.1:19836/callback'];
 
-  it('E-5: accepts a random loopback port (RFC 8252 §7.3: native apps bind an ephemeral port per run)', () => {
+  it('accepts a random loopback port (RFC 8252 §7.3: native apps bind an ephemeral port per run)', () => {
     expect(
       redirectUriMatches(registered, 'http://127.0.0.1:54321/callback'),
     ).toBe(true);
   });
 
-  it('E-5: accepts a random port for registered [::1] and localhost URIs, and no port at all', () => {
+  it('accepts a random port for registered [::1] and localhost URIs, and no port at all', () => {
     expect(
       redirectUriMatches(['http://[::1]/cb'], 'http://[::1]:40000/cb'),
     ).toBe(true);
@@ -27,7 +27,7 @@ describe('redirectUriMatches', () => {
     );
   });
 
-  it('E-5: rejects a port change on a non-loopback URI (only loopback may vary, otherwise a code could be sent to another service on the host)', () => {
+  it('rejects a port change on a non-loopback URI (only loopback may vary, otherwise a code could be sent to another service on the host)', () => {
     expect(
       redirectUriMatches(
         ['https://app.example.com/cb'],
@@ -42,7 +42,7 @@ describe('redirectUriMatches', () => {
     ).toBe(false);
   });
 
-  it('E-5: a loopback registration still pins scheme, host, path and query', () => {
+  it('a loopback registration still pins scheme, host, path and query', () => {
     for (const bad of [
       'https://127.0.0.1:54321/callback',
       'http://localhost:54321/callback',
@@ -93,7 +93,7 @@ describe('redirectUriMatches', () => {
   });
 });
 
-// F7: DCR and CIMD must share ONE redirect validator, otherwise a rule fixed in
+// DCR and CIMD must share ONE redirect validator, otherwise a rule fixed in
 // one registration path silently stays open in the other.
 describe('assertValidRedirectUris (the shared registration validator)', () => {
   const rejection = (uris: string[]): unknown => {
@@ -131,7 +131,7 @@ describe('assertValidRedirectUris (the shared registration validator)', () => {
   });
 });
 
-describe('M-7: redirectUriProblem refuses fragments and userinfo', () => {
+describe('redirectUriProblem refuses fragments and userinfo', () => {
   it.each([
     'https://app.example.com/cb#x',
     'https://u:p@app.example.com/cb',
@@ -140,14 +140,14 @@ describe('M-7: redirectUriProblem refuses fragments and userinfo', () => {
     'https://app.example.com/cb#',
     'https://:@app.example.com/cb',
     'https://@app.example.com/cb',
-  ])('M-7: %s is refused', (uri) => {
+  ])('%s is refused', (uri) => {
     expect(redirectUriProblem(uri)).not.toBeNull();
   });
-  it('F1: the check reads the raw string, so an empty fragment or empty userinfo (which URL parsing hides) is refused too', () => {
+  it('the check reads the raw string, so an empty fragment or empty userinfo (which URL parsing hides) is refused too', () => {
     expect(redirectUriProblem('https://a.example/cb#')).not.toBeNull();
     expect(redirectUriProblem('https://:@a.example/cb')).not.toBeNull();
   });
-  it('M-7: a plain https and a loopback http URI are still fine', () => {
+  it('a plain https and a loopback http URI are still fine', () => {
     expect(redirectUriProblem('https://app.example.com/cb')).toBeNull();
     expect(redirectUriProblem('http://127.0.0.1:8080/cb')).toBeNull();
   });

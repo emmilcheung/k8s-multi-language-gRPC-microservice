@@ -30,10 +30,10 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Encapsulates the transactional boundary for seated order creation (CP-12).
+ * Encapsulates the transactional boundary for seated order creation.
  *
  * <p>Extracted from {@link OrderService} to avoid the Spring AOP self-invocation
- * proxy bypass (audit finding C-01) — same pattern as {@link OrderTransactionService}
+ * proxy bypass — same pattern as {@link OrderTransactionService}
  * for the GA path.
  *
  * <p>Within a single {@code @Transactional} boundary this service:

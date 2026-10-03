@@ -34,24 +34,24 @@ global:
       kind: ClusterSecretStore
     remoteKeyPrefix: ticketing-prod
 
-# ── E3 / SR-12 · zone spread ──────────────────────────────────────────────────
+# zone spread ──────────────────────────────────────────────────
 # Every request-serving chart below turns on topologySpreadConstraints and lifts
 # minReplicas to 3, one per AZ. The template pins maxSkew 1 with
 # whenUnsatisfiable: DoNotSchedule on topology.kubernetes.io/zone, so a zone
 # losing capacity blocks the pod rather than quietly packing two into one zone —
 # which is the whole point, since an unnoticed 3-in-1-zone layout is exactly the
-# outage E3 exists to prevent.
+# outage the zone spread exists to prevent.
 #
 # DoNotSchedule has a cost, and it is not yet paid for: with no cluster
 # autoscaler, a zone that cannot fit the pod leaves it Pending instead of
 # scheduling it elsewhere, so HPA scale-out can stall at the zone boundary.
-# E2 (Karpenter) is what makes that self-correcting and E1 (metrics-server) is
+# Karpenter is what makes that self-correcting and metrics-server is
 # what gives the HPA a signal at all. Both are still open. Read this block as
 # correct-but-not-complete until they land.
 #
 # expiration-service is deliberately left at its own minReplicas: it is a
 # background worker, not a request path, and every replica runs the same jobs
-# (see SR-19). Spreading it is right; multiplying it is not.
+# Spreading it is right; multiplying it is not.
 
 apollo-router:
   networkPolicy:
@@ -143,7 +143,7 @@ user-service:
 kafka:
   enabled: false
 
-# ── Kafka topics as code (SR-02 / plan D4) ───────────────────────────────────
+# ── Kafka topics as code ───────────────────────────────────
 # MSK runs auto.create.topics.enable=false, so nothing creates these topics
 # unless this Job does. RF 3 across the three broker AZs with
 # min.insync.replicas=2 is the standard durable pairing: acks=all then survives

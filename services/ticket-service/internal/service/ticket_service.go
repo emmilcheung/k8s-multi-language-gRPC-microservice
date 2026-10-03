@@ -127,7 +127,7 @@ func buildOutboxPayload(ticket *repository.Ticket) repository.TicketOutboxPayloa
 
 // CreateTicket creates a new ticket and publishes a ticket.created event.
 // The DB write is the source of truth; Kafka publish is fire-and-forget in a goroutine.
-// If the publish fails, the error is logged at ERROR level (R-05: observable, not silent)
+// If the publish fails, the error is logged at ERROR level (observable, not silent)
 // but the gRPC call still returns success — ticket is already durably saved.
 // Event validation: if Event is provided, StartsAt must not be zero.
 func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInput) (*repository.Ticket, error) {

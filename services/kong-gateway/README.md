@@ -113,7 +113,7 @@ environment whose Kong was rendered with the matching `KONG_OAUTH_ISSUER` (compo
 
 ## REST audience rule
 
-`plugins/jwt-scope.lua` refuses (401 `token audience not accepted`) an OAuth token (one with `client_id`) whose `aud` does not contain `<KONG_OAUTH_ISSUER>/api`, so an MCP-audience token cannot be replayed on REST routes. Tokens without `aud` are tolerated until WS-N; browser tokens (no `client_id`) are unaffected.
+`plugins/jwt-scope.lua` refuses (401 `token audience not accepted`) an OAuth token (one with `client_id`) whose `aud` does not contain `<KONG_OAUTH_ISSUER>/api`, so an MCP-audience token cannot be replayed on REST routes. Tokens without `aud` are tolerated for now (`aud` becomes mandatory later); browser tokens (no `client_id`) are unaffected.
 
 This rule compares against `<KONG_OAUTH_ISSUER>/api` in every environment, including those where `OAUTH_ISSUER_ENABLED` is still false. `KONG_OAUTH_ISSUER` must therefore equal the origin auth-service derives `OAUTH_API_AUDIENCE` from (Helm `global.publicOrigin`). A mismatch 401s every OAuth REST call, including the existing first-party OAuth client.
 

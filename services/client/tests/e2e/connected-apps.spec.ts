@@ -1,7 +1,7 @@
 /**
  * connected-apps.spec.ts: an MCP host connects through the real consent page,
  * the grant shows up under Settings → Connected apps, and revoking it kills
- * the host's refresh token. Spec: F8, C-7 (consent labels from the registry).
+ * the host's refresh token. Consent labels come from the registry.
  */
 import { test, expect } from "@playwright/test";
 import { createHash, randomBytes } from "node:crypto";

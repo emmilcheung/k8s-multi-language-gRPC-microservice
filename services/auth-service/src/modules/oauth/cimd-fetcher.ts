@@ -3,7 +3,7 @@ import https from 'node:https';
 import net from 'node:net';
 
 /**
- * SSRF-safe fetcher for OAuth Client ID Metadata Documents (CIMD, WS-I, D12).
+ * SSRF-safe fetcher for OAuth Client ID Metadata Documents (CIMD).
  *
  * auth-service holds the token signing key and here opens outbound HTTPS to a
  * URL chosen by an unauthenticated caller, so every step is defensive:

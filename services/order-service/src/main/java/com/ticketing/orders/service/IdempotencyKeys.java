@@ -17,7 +17,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * Derivations for the {@code Idempotency-Key} header (contract C-8).
+ * Derivations for the {@code Idempotency-Key} header.
  *
  * <p>The namespace is fixed forever: changing it would re-derive every reservationId and
  * silently break replays of in-flight keys. It is not a secret.

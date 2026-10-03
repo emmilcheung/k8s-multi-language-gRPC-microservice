@@ -1,5 +1,5 @@
 {{- if .Values.networkPolicy.enabled }}
-# NetworkPolicy for payment-service (I-01)
+# NetworkPolicy for payment-service
 # Ingress: Kong (HTTP:3002)
 # Egress:  Kafka (9092), PostgreSQL (5432), Redis (6379), order-service (8082),
 #          Stripe API (HTTPS:443), DNS (53)

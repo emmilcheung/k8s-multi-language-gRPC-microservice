@@ -108,7 +108,7 @@ export async function signup(
     return { error: "Email and password are required." };
   }
 
-  // Basic email format validation (S-14)
+  // Basic email format validation
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { error: "Please enter a valid email address." };
   }
@@ -150,7 +150,7 @@ export async function signin(
     return { error: "Email and password are required." };
   }
 
-  // Basic email format validation (S-14)
+  // Basic email format validation
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { error: "Please enter a valid email address." };
   }

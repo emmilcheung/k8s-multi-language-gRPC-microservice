@@ -103,8 +103,8 @@ func (c *Consumer) Start(ctx context.Context, handler OrderCreatedHandler) {
 }
 
 // processMessage deserialises and handles a single Kafka message with up to maxRetries attempts.
-// Uses exponential back-off with full jitter (R-10 fix — was quadratic 100ms*attempt^2).
-// After all retries are exhausted, the message is published to the DLQ (R-04).
+// Uses exponential back-off with full jitter (was quadratic 100ms*attempt^2).
+// After all retries are exhausted, the message is published to the DLQ.
 func (c *Consumer) processMessage(ctx context.Context, msg *confluent.Message, handler OrderCreatedHandler) error {
 	processCtx, span := startKafkaConsumerSpan(ctx, TopicOrderCreated, msg.Headers)
 	defer span.End()
@@ -124,7 +124,7 @@ func (c *Consumer) processMessage(ctx context.Context, msg *confluent.Message, h
 	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
-			// R-10: exponential back-off with full jitter (was quadratic attempt*attempt*100ms)
+			// exponential back-off with full jitter (was quadratic attempt*attempt*100ms)
 			delay := exponentialBackoffWithJitter(attempt, baseRetryDelay, maxRetryDelay)
 			c.log.Warn("order created handler failed, retrying",
 				zap.String("orderId", data.OrderID),
@@ -146,7 +146,7 @@ func (c *Consumer) processMessage(ctx context.Context, msg *confluent.Message, h
 		return nil // success
 	}
 
-	// All retries exhausted — route to DLQ so the message is never silently lost (R-04).
+	// All retries exhausted — route to DLQ so the message is never silently lost.
 	if c.producer != nil {
 		recordSpanError(span, lastErr)
 		if dlqErr := c.producer.PublishToDLQ(processCtx, TopicOrderCreated, msg.Key, msg.Value, msg.Headers, lastErr); dlqErr != nil {

@@ -13,7 +13,7 @@ import { UserIdSignatureValidator } from '../../common/security/user-id-signatur
 import { OAuthController } from './oauth.controller';
 import { OAuthService } from './oauth.service';
 
-// RFC 8693 token exchange (C-5). Throwaway key and secret: generated per run,
+// RFC 8693 token exchange. Throwaway key and secret: generated per run,
 // never a real credential.
 const MCP = 'https://ticketing.example.com/mcp';
 const API = 'https://ticketing.example.com/api';
@@ -151,8 +151,8 @@ const errOf = async (p: Promise<unknown>) => {
 const decode = (jwt: JwtService, token: string) =>
   jwt.decode<Record<string, unknown>>(token);
 
-describe('H-1: only the mcp-service client may exchange', () => {
-  it('H-1: a public static client is unauthorized_client and nothing is minted', async () => {
+describe('only the mcp-service client may exchange', () => {
+  it('a public static client is unauthorized_client and nothing is minted', async () => {
     const t = build();
     const subject = t.mcpToken();
     const spy = vi.spyOn(t.authService, 'issueAccessTokenForOAuth');
@@ -163,7 +163,7 @@ describe('H-1: only the mcp-service client may exchange', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it('H-1: a dynamic client cannot exchange even with a Basic secret that is correct for mcp-service', async () => {
+  it('a dynamic client cannot exchange even with a Basic secret that is correct for mcp-service', async () => {
     const t = build();
     const err = await errOf(
       t.service.token(body(t.mcpToken()), req, {
@@ -174,7 +174,7 @@ describe('H-1: only the mcp-service client may exchange', () => {
     expect(err.body).toMatchObject({ error: 'unauthorized_client' });
   });
 
-  it('H-1: an unknown client id is invalid_client', async () => {
+  it('an unknown client id is invalid_client', async () => {
     const t = build();
     (
       t.service as unknown as {
@@ -191,8 +191,8 @@ describe('H-1: only the mcp-service client may exchange', () => {
   });
 });
 
-describe('H-2: the subject must be an MCP-audience token this server issued', () => {
-  it('H-2: a subject with the API aud is invalid_grant (an exchanged token cannot be re-exchanged)', async () => {
+describe('the subject must be an MCP-audience token this server issued', () => {
+  it('a subject with the API aud is invalid_grant (an exchanged token cannot be re-exchanged)', async () => {
     const t = build();
     const err = await errOf(
       t.service.token(body(t.mcpToken({ aud: API })), req, BASIC_OK),
@@ -200,14 +200,14 @@ describe('H-2: the subject must be an MCP-audience token this server issued', ()
     expect(err.body).toMatchObject({ error: 'invalid_grant' });
   });
 
-  it('H-2: a browser token (no aud, no client_id) is invalid_grant', async () => {
+  it('a browser token (no aud, no client_id) is invalid_grant', async () => {
     const t = build();
     const browser = t.jwt.sign({ sub: 'user-1', jti: 'j', email: 'u@x.test' });
     const err = await errOf(t.service.token(body(browser), req, BASIC_OK));
     expect(err.body).toMatchObject({ error: 'invalid_grant' });
   });
 
-  it('H-2: a token signed by another key is invalid_grant', async () => {
+  it('a token signed by another key is invalid_grant', async () => {
     const t = build();
     const other = generateKeyPairSync('rsa', {
       modulusLength: 2048,
@@ -222,7 +222,7 @@ describe('H-2: the subject must be an MCP-audience token this server issued', ()
     expect(err.body).toMatchObject({ error: 'invalid_grant' });
   });
 
-  it('H-2: an expired subject is invalid_grant', async () => {
+  it('an expired subject is invalid_grant', async () => {
     const t = build();
     const expired = t.jwt.sign(
       { sub: 'user-1', jti: 'j', scope: 'tickets:read', client_id: 'dyn-uuid' },
@@ -238,7 +238,7 @@ describe('H-2: the subject must be an MCP-audience token this server issued', ()
     [true, 'auth-service'],
     [true, ISSUER],
   ])(
-    'H-2 (R2): flag=%s, subject iss=%s -> exchanged (a token minted just before a flag flip must still work)',
+    'flag=%s, subject iss=%s -> exchanged (a token minted just before a flag flip must still work)',
     async (flag, subjectIss) => {
       const t = build({ flag });
       const res = await t.service.token(
@@ -254,7 +254,7 @@ describe('H-2: the subject must be an MCP-audience token this server issued', ()
   );
 
   it.each([false, true])(
-    'H-2 (R2): flag=%s: a third issuer is invalid_grant',
+    'flag=%s: a third issuer is invalid_grant',
     async (flag) => {
       const t = build({ flag });
       const err = await errOf(
@@ -268,13 +268,13 @@ describe('H-2: the subject must be an MCP-audience token this server issued', ()
     },
   );
 
-  it('H-2 (R3a): a subject whose jti was revoked (signout/blacklist) is invalid_grant', async () => {
+  it('a subject whose jti was revoked (signout/blacklist) is invalid_grant', async () => {
     const t = build({ blacklisted: true });
     const err = await errOf(t.service.token(body(t.mcpToken()), req, BASIC_OK));
     expect(err.body).toMatchObject({ error: 'invalid_grant' });
   });
 
-  it('H-2: a wrong subject_token_type is invalid_request', async () => {
+  it('a wrong subject_token_type is invalid_request', async () => {
     const t = build();
     const err = await errOf(
       t.service.token(
@@ -289,11 +289,11 @@ describe('H-2: the subject must be an MCP-audience token this server issued', ()
   });
 });
 
-describe('H-3: the only exchange target is OAUTH_API_AUDIENCE', () => {
+describe('the only exchange target is OAUTH_API_AUDIENCE', () => {
   it.each([
     ['another origin', 'https://evil.example/api'],
     ['the MCP resource itself', MCP],
-  ])('H-3: %s is invalid_target', async (_n, resource) => {
+  ])('%s is invalid_target', async (_n, resource) => {
     const t = build();
     const err = await errOf(
       t.service.token(body(t.mcpToken(), { resource }), req, BASIC_OK),
@@ -301,7 +301,7 @@ describe('H-3: the only exchange target is OAUTH_API_AUDIENCE', () => {
     expect(err.body).toMatchObject({ error: 'invalid_target' });
   });
 
-  it('H-3: audience (RFC 8693) is accepted as the target, and a conflict with resource is invalid_target', async () => {
+  it('audience (RFC 8693) is accepted as the target, and a conflict with resource is invalid_target', async () => {
     const t = build();
     await expect(
       t.service.token(
@@ -316,7 +316,7 @@ describe('H-3: the only exchange target is OAUTH_API_AUDIENCE', () => {
     expect(err.body).toMatchObject({ error: 'invalid_target' });
   });
 
-  it('H-3: no target defaults to OAUTH_API_AUDIENCE (C-2)', async () => {
+  it('no target defaults to OAUTH_API_AUDIENCE', async () => {
     const t = build();
     const res = await t.service.token(
       body(t.mcpToken(), { resource: undefined }),
@@ -327,8 +327,8 @@ describe('H-3: the only exchange target is OAUTH_API_AUDIENCE', () => {
   });
 });
 
-describe('H-4: scope can only narrow', () => {
-  it('H-4: a requested scope outside the subject scope is invalid_scope', async () => {
+describe('scope can only narrow', () => {
+  it('a requested scope outside the subject scope is invalid_scope', async () => {
     const t = build();
     const err = await errOf(
       t.service.token(
@@ -342,7 +342,7 @@ describe('H-4: scope can only narrow', () => {
     expect(err.body).toMatchObject({ error: 'invalid_scope' });
   });
 
-  it('H-4: a subset is granted exactly, and no scope means the full subject scope', async () => {
+  it('a subset is granted exactly, and no scope means the full subject scope', async () => {
     const t = build();
     const subset = await t.service.token(
       body(t.mcpToken(), { scope: 'orders:create' }),
@@ -356,12 +356,12 @@ describe('H-4: scope can only narrow', () => {
   });
 });
 
-describe('H-5: the exchanged token equals the C-1 exchanged column', () => {
+describe('the exchanged token equals the exchanged-token shape', () => {
   it.each([
     [false, 'auth-service'],
     [true, ISSUER],
   ])(
-    'H-5: flag=%s: iss follows the issuer flag, aud is the API, client_id is the ORIGINAL client, act names mcp-service, no email/roles, no refresh token',
+    'flag=%s: iss follows the issuer flag, aud is the API, client_id is the ORIGINAL client, act names mcp-service, no email/roles, no refresh token',
     async (flag, iss) => {
       const t = build({ flag });
       const res = await t.service.token(
@@ -403,7 +403,7 @@ describe('H-5: the exchanged token equals the C-1 exchanged column', () => {
     },
   );
 
-  it('H-5: exp never outlives the subject (a 60 s subject yields <= 60 s)', async () => {
+  it('exp never outlives the subject (a 60 s subject yields <= 60 s)', async () => {
     const t = build();
     const short = t.jwt.sign(
       { sub: 'user-1', jti: 'j', scope: 'tickets:read', client_id: 'dyn-uuid' },
@@ -417,13 +417,13 @@ describe('H-5: the exchanged token equals the C-1 exchanged column', () => {
     expect(res.expires_in).toBeLessThanOrEqual(60);
   });
 
-  it('H-5: the 300 s cap applies when the subject lives longer (900 s)', async () => {
+  it('the 300 s cap applies when the subject lives longer (900 s)', async () => {
     const t = build();
     const res = await t.service.token(body(t.mcpToken()), req, BASIC_OK);
     expect(res.expires_in).toBe(300);
   });
 
-  describe('H-5 (R5): exp is absolute, min(now+300, subject.exp), computed once', () => {
+  describe('exp is absolute, min(now+300, subject.exp), computed once', () => {
     afterEach(() => vi.useRealTimers());
 
     it('a subject with 1 s left yields exp === subject exp and a matching expires_in', async () => {
@@ -480,7 +480,7 @@ describe('H-5: the exchanged token equals the C-1 exchanged column', () => {
     });
   });
 
-  it('H-5: a subject whose user no longer exists is invalid_grant', async () => {
+  it('a subject whose user no longer exists is invalid_grant', async () => {
     const t = build();
     t.usersRepo.findById.mockResolvedValue(null);
     const err = await errOf(t.service.token(body(t.mcpToken()), req, BASIC_OK));
@@ -488,7 +488,7 @@ describe('H-5: the exchanged token equals the C-1 exchanged column', () => {
   });
 });
 
-describe('client authentication (C-5: confidential client, constant-time compare)', () => {
+describe('client authentication (confidential client, constant-time compare)', () => {
   it('a wrong secret is a 401 invalid_client and nothing is minted', async () => {
     const t = build();
     const err = await errOf(
@@ -530,7 +530,7 @@ describe('client authentication (C-5: confidential client, constant-time compare
   });
 });
 
-describe('H-6: over HTTP a failed client_secret_basic is 401 + WWW-Authenticate', () => {
+describe('over HTTP a failed client_secret_basic is 401 + WWW-Authenticate', () => {
   async function app(opts: Opts = {}) {
     const t = build(opts);
     const mod = await Test.createTestingModule({
@@ -561,7 +561,7 @@ describe('H-6: over HTTP a failed client_secret_basic is 401 + WWW-Authenticate'
     resource: API,
   });
 
-  it('H-6: a wrong secret -> 401, WWW-Authenticate: Basic realm="oauth", RFC error body, no-store', async () => {
+  it('a wrong secret -> 401, WWW-Authenticate: Basic realm="oauth", RFC error body, no-store', async () => {
     const { nest, t } = await app();
     const res = await supertest(nest.getHttpServer())
       .post('/oauth/token')
@@ -575,7 +575,7 @@ describe('H-6: over HTTP a failed client_secret_basic is 401 + WWW-Authenticate'
     await nest.close();
   });
 
-  it('H-6: a malformed Basic header is also 401 + challenge', async () => {
+  it('a malformed Basic header is also 401 + challenge', async () => {
     const { nest, t } = await app();
     const res = await supertest(nest.getHttpServer())
       .post('/oauth/token')
@@ -629,7 +629,7 @@ describe('H-6: over HTTP a failed client_secret_basic is 401 + WWW-Authenticate'
   });
 });
 
-describe('Basic parsing and per-grant scope (R3b, R4, R6)', () => {
+describe('Basic parsing and per-grant scope', () => {
   async function appFor(opts: Opts = {}) {
     const t = build(opts);
     const mod = await Test.createTestingModule({
@@ -660,7 +660,7 @@ describe('Basic parsing and per-grant scope (R3b, R4, R6)', () => {
     resource: API,
   });
 
-  it('R6: `+` in Basic credentials decodes to a space (RFC 6749 2.3.1 form-urlencoding)', async () => {
+  it('`+` in Basic credentials decodes to a space (RFC 6749 2.3.1 form-urlencoding)', async () => {
     const { nest, t } = await appFor({ hash: sha256Hex('sec ret') });
     const res = await supertest(nest.getHttpServer())
       .post('/oauth/token')
@@ -682,7 +682,7 @@ describe('Basic parsing and per-grant scope (R3b, R4, R6)', () => {
     await nest.close();
   });
 
-  it('R6: a malformed percent-escape in Basic credentials is 401 invalid_client with the challenge', async () => {
+  it('a malformed percent-escape in Basic credentials is 401 invalid_client with the challenge', async () => {
     const { nest, t } = await appFor();
     const res = await supertest(nest.getHttpServer())
       .post('/oauth/token')
@@ -694,7 +694,7 @@ describe('Basic parsing and per-grant scope (R3b, R4, R6)', () => {
     await nest.close();
   });
 
-  it('R4: a malformed Basic header on a refresh request is ignored exactly as before (400 invalid_grant, no challenge)', async () => {
+  it('a malformed Basic header on a refresh request is ignored exactly as before (400 invalid_grant, no challenge)', async () => {
     const { nest } = await appFor();
     const res = await supertest(nest.getHttpServer())
       .post('/oauth/token')
@@ -717,22 +717,19 @@ describe('Basic parsing and per-grant scope (R3b, R4, R6)', () => {
       { code: 'c', code_verifier: 'v', redirect_uri: 'http://127.0.0.1:1/cb' },
     ],
     ['refresh_token', { refresh_token: 'a.b' }],
-  ])(
-    'R3b: %s without client_id is 400 invalid_request',
-    async (grant, extra) => {
-      const { nest } = await appFor();
-      const res = await supertest(nest.getHttpServer())
-        .post('/oauth/token')
-        .type('form')
-        .send({ grant_type: grant, ...extra });
-      expect(res.status).toBe(400);
-      expect(res.body).toMatchObject({ error: 'invalid_request' });
-      await nest.close();
-    },
-  );
+  ])('%s without client_id is 400 invalid_request', async (grant, extra) => {
+    const { nest } = await appFor();
+    const res = await supertest(nest.getHttpServer())
+      .post('/oauth/token')
+      .type('form')
+      .send({ grant_type: grant, ...extra });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: 'invalid_request' });
+    await nest.close();
+  });
 });
 
-describe('H-7: logs never carry token material', () => {
+describe('logs never carry token material', () => {
   const dump = (t: ReturnType<typeof build>) =>
     JSON.stringify([
       t.logger.info.mock.calls,
@@ -740,7 +737,7 @@ describe('H-7: logs never carry token material', () => {
       t.logger.error.mock.calls,
     ]);
 
-  it('H-7: a successful exchange logs oauth.token.exchanged with client ids and scope, and neither the subject token, the issued token nor the secret', async () => {
+  it('a successful exchange logs oauth.token.exchanged with client ids and scope, and neither the subject token, the issued token nor the secret', async () => {
     const t = build();
     const subject = t.mcpToken();
     const res = await t.service.token(
@@ -765,7 +762,7 @@ describe('H-7: logs never carry token material', () => {
     expect(logs).not.toContain(SECRET);
   });
 
-  it('H-7: rejected exchanges log no subject_token value either', async () => {
+  it('rejected exchanges log no subject_token value either', async () => {
     const t = build();
     const bad = t.mcpToken({ aud: API });
     await t.service.token(body(bad), req, BASIC_OK).catch(() => undefined);

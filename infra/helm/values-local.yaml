@@ -40,11 +40,11 @@ auth-service:
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
     OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     OTEL_SERVICE_NAME: auth-service
-    # Flipped with WS-K: services/kong-gateway/values/minikube.yml carries a
+    # Flipped with the Kong OAuth issuer: services/kong-gateway/values/minikube.yml carries a
     # jwt_secret for this origin (global.publicOrigin). Staging/prod keep the schema
     # default (false) until their origin and KONG_OAUTH_ISSUER are set together.
     OAUTH_ISSUER_ENABLED: "true"
-    # CIMD (WS-I) needs outbound HTTPS from auth-service. Local only: staging/prod keep the
+    # CIMD needs outbound HTTPS from auth-service. Local only: staging/prod keep the
     # schema default (false) until the owner approves the egress NetworkPolicy opening.
     OAUTH_CIMD_ENABLED: "true"
   resources:

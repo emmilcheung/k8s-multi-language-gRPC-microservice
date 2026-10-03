@@ -52,7 +52,7 @@ const isTokenDefect = (err: unknown): err is Error =>
 const CLOCK_TOLERANCE_SECONDS = 10;
 
 /**
- * Verifies MCP access tokens per contract C-1: RS256 only, exact `iss`, exact
+ * Verifies MCP access tokens RS256 only, exact `iss`, exact
  * `aud` = this resource, unexpired. The audience check is what stops a token
  * minted for another resource (e.g. the REST API) being replayed here.
  */

@@ -131,7 +131,7 @@ const errorOf = async (p: Promise<unknown>) =>
   ((await p.catch((e: unknown) => e)) as HttpException).getResponse();
 
 describe('CIMD at /oauth/authorize', () => {
-  it('I-5: a valid document authorizes: the user is sent to consent, which records the verified host of the client_id URL', async () => {
+  it('a valid document authorizes: the user is sent to consent, which records the verified host of the client_id URL', async () => {
     const { service, consentStore } = makeService();
     const { redirectUrl } = await service.authorize(authorizeQuery(), authReq);
 
@@ -151,7 +151,7 @@ describe('CIMD at /oauth/authorize', () => {
     );
   });
 
-  it('I-5: the consent summary the UI reads carries the domain, its source and the first-party marker', async () => {
+  it('the consent summary the UI reads carries the domain, its source and the first-party marker', async () => {
     const { service, consentStore } = makeService();
     await service.authorize(authorizeQuery(), authReq);
     consentStore.getConsent.mockClear();
@@ -162,7 +162,7 @@ describe('CIMD at /oauth/authorize', () => {
     });
   });
 
-  it('R1: the redirect host is derived at authorize time and a differing host is flagged, naming both', async () => {
+  it('the redirect host is derived at authorize time and a differing host is flagged, naming both', async () => {
     const m = makeService();
     m.fetchDoc.mockResolvedValue({
       body: JSON.stringify({
@@ -186,7 +186,7 @@ describe('CIMD at /oauth/authorize', () => {
     );
   });
 
-  it('I-5: a DCR client is labelled with the host of the redirect URI the code is sent to, not a name it chose', async () => {
+  it('a DCR client is labelled with the host of the redirect URI the code is sent to, not a name it chose', async () => {
     const { service, consentStore, dynamicClientService } = makeService();
     dynamicClientService.findClient.mockResolvedValue({
       clientId: 'dyn-1',
@@ -217,7 +217,7 @@ describe('CIMD at /oauth/authorize', () => {
     );
   });
 
-  it('I-6: an http URL and a root-path URL are refused as unknown clients without any fetch', async () => {
+  it('an http URL and a root-path URL are refused as unknown clients without any fetch', async () => {
     for (const bad of [
       'http://app.example.com/oauth/client.json',
       'https://app.example.com/',
@@ -234,7 +234,7 @@ describe('CIMD at /oauth/authorize', () => {
     }
   });
 
-  it('I-8: with the flag off a URL client_id gets the normal unknown-client error and nothing is fetched', async () => {
+  it('with the flag off a URL client_id gets the normal unknown-client error and nothing is fetched', async () => {
     const { service, fetchDoc } = makeService({ cimd: false });
     const body = await errorOf(service.authorize(authorizeQuery(), authReq));
     expect(body).toEqual({
@@ -244,7 +244,7 @@ describe('CIMD at /oauth/authorize', () => {
     expect(fetchDoc).not.toHaveBeenCalled();
   });
 
-  it('I-4: a document that names a different client_id is refused, and the caller is not told why (no SSRF oracle)', async () => {
+  it('a document that names a different client_id is refused, and the caller is not told why (no SSRF oracle)', async () => {
     const { service, fetchDoc } = makeService();
     fetchDoc.mockResolvedValue({
       body: docBody({ client_id: 'https://evil.example.com/x.json' }),
@@ -281,7 +281,7 @@ describe('CIMD at /oauth/authorize', () => {
     expect(fetchDoc).not.toHaveBeenCalled();
   });
 
-  it('I-10: two authorizations for one client fetch once', async () => {
+  it('two authorizations for one client fetch once', async () => {
     const { service, fetchDoc } = makeService();
     await service.authorize(authorizeQuery(), authReq);
     await service.authorize(authorizeQuery(), authReq);
@@ -325,13 +325,13 @@ describe('CIMD at /oauth/token', () => {
   });
 });
 
-describe('I-7: listing and revoking a CIMD grant', () => {
+describe('listing and revoking a CIMD grant', () => {
   const session = {
     sessionId: 'sid-1',
     lastRotatedAt: '2026-10-02T10:00:00.000Z',
   };
 
-  it('I-7: the listing shows the URL id, the cached name and the verified host, without fetching', async () => {
+  it('the listing shows the URL id, the cached name and the verified host, without fetching', async () => {
     const { service, cimd, fetchDoc, refreshTokenService, codeStore } =
       makeService();
     await cimd.resolve(URL_ID); // warm the cache like a prior authorize would
@@ -357,7 +357,7 @@ describe('I-7: listing and revoking a CIMD grant', () => {
     expect(fetchDoc).not.toHaveBeenCalled();
   });
 
-  it('I-7: a CIMD grant is still listed (named by its host) when its document has left the cache or the flag is off', async () => {
+  it('a CIMD grant is still listed (named by its host) when its document has left the cache or the flag is off', async () => {
     const { service, fetchDoc, refreshTokenService, codeStore } = makeService({
       cimd: false,
     });
@@ -375,7 +375,7 @@ describe('I-7: listing and revoking a CIMD grant', () => {
     expect(fetchDoc).not.toHaveBeenCalled();
   });
 
-  it('I-7: a static client is listed as first-party with its redirect host, a DCR client as third-party', async () => {
+  it('a static client is listed as first-party with its redirect host, a DCR client as third-party', async () => {
     const { service, refreshTokenService, codeStore, dynamicClientService } =
       makeService();
     refreshTokenService.listSessions.mockResolvedValue([
@@ -410,7 +410,7 @@ describe('I-7: listing and revoking a CIMD grant', () => {
     });
   });
 
-  it('I-7: revokeClient removes the sessions of a URL client id and leaves other clients alone', async () => {
+  it('revokeClient removes the sessions of a URL client id and leaves other clients alone', async () => {
     const { service, refreshTokenService, codeStore, authService } =
       makeService();
     refreshTokenService.listSessions.mockResolvedValue([
@@ -435,7 +435,7 @@ describe('I-7: listing and revoking a CIMD grant', () => {
   });
 });
 
-describe('I-7: DELETE through the controller', () => {
+describe('DELETE through the controller', () => {
   function makeController() {
     const oauthService = { revokeClient: vi.fn().mockResolvedValue(undefined) };
     const validator = { isValidSignature: vi.fn().mockReturnValue(true) };
@@ -449,13 +449,13 @@ describe('I-7: DELETE through the controller', () => {
     return { controller, oauthService, req };
   }
 
-  it('I-7: DELETE /oauth/clients?client_id=<url> revokes a URL id (no encoded slash in a path segment to survive proxies)', async () => {
+  it('DELETE /oauth/clients?client_id=<url> revokes a URL id (no encoded slash in a path segment to survive proxies)', async () => {
     const { controller, oauthService, req } = makeController();
     await controller.revokeClientByQuery(URL_ID, req);
     expect(oauthService.revokeClient).toHaveBeenCalledWith('user-1', URL_ID);
   });
 
-  it('I-7: the original DELETE /oauth/clients/:clientId path form still works for opaque ids', async () => {
+  it('the original DELETE /oauth/clients/:clientId path form still works for opaque ids', async () => {
     const { controller, oauthService, req } = makeController();
     await controller.revokeClient('ticketing-mcp', req);
     expect(oauthService.revokeClient).toHaveBeenCalledWith(
@@ -464,7 +464,7 @@ describe('I-7: DELETE through the controller', () => {
     );
   });
 
-  it('I-7: a missing, empty, repeated or oversized client_id is a 400, never a revoke-everything', async () => {
+  it('a missing, empty, repeated or oversized client_id is a 400, never a revoke-everything', async () => {
     const { controller, oauthService, req } = makeController();
     for (const bad of [undefined, '', ['a', 'b'], 'x'.repeat(3000)]) {
       await expect(
@@ -474,7 +474,7 @@ describe('I-7: DELETE through the controller', () => {
     expect(oauthService.revokeClient).not.toHaveBeenCalled();
   });
 
-  it('I-7: the signed X-User-Id is still required on the query form', async () => {
+  it('the signed X-User-Id is still required on the query form', async () => {
     const { controller, oauthService } = makeController();
     await expect(
       controller.revokeClientByQuery(URL_ID, {
@@ -485,7 +485,7 @@ describe('I-7: DELETE through the controller', () => {
   });
 });
 
-describe('M-2: transient CIMD failures are 503, terminal ones stay invalid_client', () => {
+describe('transient CIMD failures are 503, terminal ones stay invalid_client', () => {
   const rejectWith = async (
     code: ConstructorParameters<typeof CimdFetchError>[0],
   ) => {
@@ -496,7 +496,7 @@ describe('M-2: transient CIMD failures are 503, terminal ones stay invalid_clien
   const failure = (p: Promise<unknown>) => p.catch((e: unknown) => e);
 
   it.each(['timeout', 'connect_failed', 'dns_unavailable'] as const)(
-    'M-2: %s at /authorize is a 503 temporarily_unavailable with Retry-After',
+    '%s at /authorize is a 503 temporarily_unavailable with Retry-After',
     async (code) => {
       const { service } = await rejectWith(code);
       const e = await failure(service.authorize(authorizeQuery(), authReq));
@@ -518,7 +518,7 @@ describe('M-2: transient CIMD failures are 503, terminal ones stay invalid_clien
     'invalid_json',
     'dns_failed',
   ] as const)(
-    'M-2: %s stays a generic invalid_client (a blocked/internal address must never take the 503 path)',
+    '%s stays a generic invalid_client (a blocked/internal address must never take the 503 path)',
     async (code) => {
       const { service } = await rejectWith(code);
       const e = await failure(service.authorize(authorizeQuery(), authReq));
@@ -529,14 +529,14 @@ describe('M-2: transient CIMD failures are 503, terminal ones stay invalid_clien
     },
   );
 
-  it('M-2: overload (busy) is a 503 and is not cached', async () => {
+  it('overload (busy) is a 503 and is not cached', async () => {
     const { service, cimd } = makeService();
     vi.spyOn(cimd, 'resolve').mockResolvedValue({ ok: false, reason: 'busy' });
     const e = await failure(service.authorize(authorizeQuery(), authReq));
     expect(e).toBeInstanceOf(OAuthTemporarilyUnavailableException);
   });
 
-  it('M-2: a refresh whose document fetch times out gets a 503 so the client keeps its credentials', async () => {
+  it('a refresh whose document fetch times out gets a 503 so the client keeps its credentials', async () => {
     const { service, fetchDoc, codeStore } = makeService();
     codeStore.getSessionScope.mockResolvedValue({
       scope: 'tickets:read',
@@ -556,7 +556,7 @@ describe('M-2: transient CIMD failures are 503, terminal ones stay invalid_clien
     expect(e).toBeInstanceOf(OAuthTemporarilyUnavailableException);
   });
 
-  it('M-2: the authorization-code grant behaves the same', async () => {
+  it('the authorization-code grant behaves the same', async () => {
     const { service, fetchDoc } = makeService();
     fetchDoc.mockRejectedValue(new CimdFetchError('connect_failed'));
     const e = await failure(
@@ -575,7 +575,7 @@ describe('M-2: transient CIMD failures are 503, terminal ones stay invalid_clien
   });
 });
 
-describe('M-9 / M-1: a URL client_id is never a token-exchange client', () => {
+describe('a URL client_id is never a token-exchange client', () => {
   const GRANT = 'urn:ietf:params:oauth:grant-type:token-exchange';
   const exchange = (extra: Record<string, unknown> = {}) => ({
     grant_type: GRANT,
@@ -584,7 +584,7 @@ describe('M-9 / M-1: a URL client_id is never a token-exchange client', () => {
     ...extra,
   });
 
-  it('M-9: in the body, it is refused like an unknown client and nothing is fetched (no existence oracle, no fetch trigger)', async () => {
+  it('in the body, it is refused like an unknown client and nothing is fetched (no existence oracle, no fetch trigger)', async () => {
     const { service, fetchDoc } = makeService();
     const body = await errorOf(
       service.token(exchange({ client_id: URL_ID }) as never, tokenReq),
@@ -596,7 +596,7 @@ describe('M-9 / M-1: a URL client_id is never a token-exchange client', () => {
     expect(fetchDoc).not.toHaveBeenCalled();
   });
 
-  it('M-9: with Basic credentials it is the same 401 invalid_client a wrong secret gets, with no fetch', async () => {
+  it('with Basic credentials it is the same 401 invalid_client a wrong secret gets, with no fetch', async () => {
     const { service, fetchDoc } = makeService();
     const body = await errorOf(
       service.token(exchange() as never, tokenReq, {

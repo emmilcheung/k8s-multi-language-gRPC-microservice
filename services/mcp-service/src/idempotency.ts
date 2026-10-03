@@ -23,7 +23,7 @@ export function canonicalJson(value: unknown): string {
 export const IDEMPOTENCY_WINDOW_MS = 15 * 60 * 1000;
 
 /**
- * C-8 tool side: sha256(sub + tool + canonical args + time window) as base64url
+ * Tool side: sha256(sub + tool + canonical args + time window) as base64url
  * (43 chars, so inside the order-service `^[A-Za-z0-9_-]{8,128}$` rule).
  * Deterministic within one window, so an agent retry of the same call replays the
  * first order instead of making a new one. A retry that straddles a window boundary

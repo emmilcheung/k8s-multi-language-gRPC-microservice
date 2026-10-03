@@ -18,12 +18,12 @@ const withoutResource = (): Record<string, string> =>
   );
 
 describe('config', () => {
-  it('G-5: loadConfig names every missing required variable, never echoing values', () => {
+  it('loadConfig names every missing required variable, never echoing values', () => {
     expect(() => loadConfig(withoutResource())).toThrow(/MCP_RESOURCE/);
     expect(() => loadConfig({})).toThrow(/OAUTH_ISSUER/);
   });
 
-  it('defaults the exchange client id to mcp-service (C-5 client)', () => {
+  it('defaults the exchange client id to mcp-service (the exchange client)', () => {
     expect(loadConfig(valid).TOKEN_EXCHANGE_CLIENT_ID).toBe('mcp-service');
   });
 
@@ -44,7 +44,7 @@ describe('config', () => {
     );
   });
 
-  it('G-5: the process exits non-zero at boot when MCP_RESOURCE is missing', () => {
+  it('the process exits non-zero at boot when MCP_RESOURCE is missing', () => {
     const res = spawnSync(process.execPath, ['src/main.ts'], {
       env: { ...withoutResource(), PATH: process.env.PATH },
       encoding: 'utf8',

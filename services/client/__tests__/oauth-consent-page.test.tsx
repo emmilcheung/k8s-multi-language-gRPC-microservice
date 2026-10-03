@@ -1,5 +1,5 @@
 // L-1: the consent page labels come from the auth-service scope registry
-// (GET /oauth/scopes, spec C-7), not from a hard-coded copy that drifts, and
+// (GET /oauth/scopes), not from a hard-coded copy that drifts, and
 // sensitive scopes are called out so users notice what they hand over.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -102,7 +102,7 @@ describe("ConsentPage scope labels (L-1)", () => {
     expect(screen.getByText(/on your behalf such as/i)).toBeInTheDocument();
   });
 
-  it("R1: a requested scope missing from the registry fails closed (flagged sensitive, warned, raw id visible)", async () => {
+  it("a requested scope missing from the registry fails closed (flagged sensitive, warned, raw id visible)", async () => {
     stubFetch(["tickets:read", "mystery:scope"]);
     await renderConsent();
 
@@ -112,7 +112,7 @@ describe("ConsentPage scope labels (L-1)", () => {
     expect(screen.getByText(/on your behalf such as/i)).toBeInTheDocument();
   });
 
-  it("R4: logs why the registry fetch failed, without leaking the cookie", async () => {
+  it("logs why the registry fetch failed, without leaking the cookie", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     stubFetch(["orders:create"], [], false);
     const { default: ConsentPage } = await import("@/app/oauth/consent/page");
@@ -137,7 +137,7 @@ describe("ConsentPage scope labels (L-1)", () => {
   });
 });
 
-describe("ConsentPage app addresses (R1)", () => {
+describe("ConsentPage app addresses", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => vi.unstubAllGlobals());
 
@@ -148,7 +148,7 @@ describe("ConsentPage app addresses (R1)", () => {
     ...over,
   });
 
-  it("R1: a CIMD client shows two separate lines, the identity-document host and the redirect host, and never the word Verified", async () => {
+  it("a CIMD client shows two separate lines, the identity-document host and the redirect host, and never the word Verified", async () => {
     stubFetch(["tickets:read"], REGISTRY, true, { addresses: addr({}), isFirstParty: false });
     await renderConsent();
     expect(screen.getByTestId("consent-document-host")).toHaveTextContent(
@@ -162,7 +162,7 @@ describe("ConsentPage app addresses (R1)", () => {
     expect(screen.getByTestId("consent-party")).toHaveTextContent("Third-party");
   });
 
-  it("R1: a redirect host that differs from the document host shows a caution naming both hosts", async () => {
+  it("a redirect host that differs from the document host shows a caution naming both hosts", async () => {
     stubFetch(["tickets:read"], REGISTRY, true, {
       addresses: addr({
         documentHost: "raw.githubusercontent.com",
@@ -176,7 +176,7 @@ describe("ConsentPage app addresses (R1)", () => {
     expect(caution).toHaveTextContent("evil.example");
   });
 
-  it("R1: a loopback redirect reads as an app on this device, with no caution and no raw loopback host", async () => {
+  it("a loopback redirect reads as an app on this device, with no caution and no raw loopback host", async () => {
     stubFetch(["tickets:read"], REGISTRY, true, {
       addresses: addr({ redirectTargets: [{ host: "127.0.0.1", loopback: true }] }),
     });
@@ -187,7 +187,7 @@ describe("ConsentPage app addresses (R1)", () => {
     expect(screen.queryByTestId("consent-mismatch")).not.toBeInTheDocument();
   });
 
-  it("R1: a DCR client has no document line, only where the code is sent", async () => {
+  it("a DCR client has no document line, only where the code is sent", async () => {
     stubFetch(["tickets:read"], REGISTRY, true, {
       addresses: addr({
         documentHost: undefined,
@@ -199,7 +199,7 @@ describe("ConsentPage app addresses (R1)", () => {
     expect(screen.getByTestId("consent-redirect-host")).toHaveTextContent("cb.example.org");
   });
 
-  it("F2: the host lines and the caution wrap, so a long host cannot overflow the card", async () => {
+  it("the host lines and the caution wrap, so a long host cannot overflow the card", async () => {
     stubFetch(["tickets:read"], REGISTRY, true, {
       addresses: addr({
         documentHost: "a".repeat(200) + ".example.com",
@@ -213,7 +213,7 @@ describe("ConsentPage app addresses (R1)", () => {
     }
   });
 
-  it("M-10: a very long client_id wraps instead of overflowing the card", async () => {
+  it("a very long client_id wraps instead of overflowing the card", async () => {
     stubFetch(["tickets:read"], REGISTRY, true, {
       clientId: "https://app.example.com/" + "a".repeat(300),
     });

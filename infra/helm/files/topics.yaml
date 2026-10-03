@@ -1,4 +1,4 @@
-# Kafka topics as code — SR-02 / plan D4.
+# Kafka topics as code.
 #
 # MSK runs with `auto.create.topics.enable=false` and `num.partitions=1`, and
 # order-service's KafkaAdmin is deliberately `autoCreate=false` so an unreachable

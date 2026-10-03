@@ -320,7 +320,7 @@ func (r *queryResolver) TicketsConnection(ctx context.Context, filter *TicketFil
 		for i, item := range pageItems {
 			edges[i] = &TicketEdge{Node: item.gql, Cursor: item.cursor}
 		}
-		// C-1: hasNextPage = !exhausted (exhausted means the index returned fewer
+		// hasNextPage = !exhausted (exhausted means the index returned fewer
 		// raw hits than the page size, so nothing more to fetch). If maxRefill was
 		// hit before filling the page, exhausted is still false — correctly signals
 		// more results exist. When the page is empty but !exhausted, use afterCursor

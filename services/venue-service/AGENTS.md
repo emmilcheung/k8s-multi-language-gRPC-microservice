@@ -84,8 +84,7 @@ See [`docs/plan/venue-seating-plan-design.md`](../../docs/plan/venue-seating-pla
 
 - Proto source of truth: [`/proto/venue/v1/`](../../proto/venue/v1/).
 - Generated stubs in [`/libs/grpc-stubs/go/venue/v1/`](../../libs/grpc-stubs/go/venue/v1/) — do NOT hand-edit.
-- CP-07: all RPCs return `UNIMPLEMENTED` except `GetSeatingPlan` (basic scaffold).
-- Full implementation arrives in CP-09 (holds), CP-10 (reservation lifecycle), CP-11 (auto-assign).
+- The seated reservation lifecycle RPCs and `AutoAssignAndReserve` are implemented in `internal/grpc/server.go`.
 
 ---
 

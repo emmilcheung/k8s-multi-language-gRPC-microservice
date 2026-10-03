@@ -4,8 +4,8 @@ import { describeClientAddresses } from './oauth-clients.config';
 const URL_ID = 'https://app.example.com/oauth/client.json';
 const client = (redirectUris: string[]) => ({ redirectUris });
 
-describe('R1: where the app lives vs where the code is sent', () => {
-  it('R1: a CIMD client reports the client_id host AND the redirect host of this request, with no mismatch when they are equal', () => {
+describe('where the app lives vs where the code is sent', () => {
+  it('a CIMD client reports the client_id host AND the redirect host of this request, with no mismatch when they are equal', () => {
     expect(
       describeClientAddresses(
         URL_ID,
@@ -19,7 +19,7 @@ describe('R1: where the app lives vs where the code is sent', () => {
     });
   });
 
-  it('R1: a redirect host that is not EXACTLY the client_id host is a mismatch (a shared-hosting document pointing elsewhere)', () => {
+  it('a redirect host that is not EXACTLY the client_id host is a mismatch (a shared-hosting document pointing elsewhere)', () => {
     const r = describeClientAddresses(
       'https://raw.githubusercontent.com/attacker/x/main/c.json',
       client(['https://evil.example/cb']),
@@ -32,7 +32,7 @@ describe('R1: where the app lives vs where the code is sent', () => {
     });
   });
 
-  it('R1: no registrable-domain logic: a sibling subdomain is still a mismatch', () => {
+  it('no registrable-domain logic: a sibling subdomain is still a mismatch', () => {
     expect(
       describeClientAddresses(
         URL_ID,
@@ -47,7 +47,7 @@ describe('R1: where the app lives vs where the code is sent', () => {
     'http://127.0.0.1:19836/callback',
     'http://[::1]:5000/cb',
   ])(
-    'R1: loopback redirect %s is "an app on this device", never a mismatch',
+    'loopback redirect %s is "an app on this device", never a mismatch',
     (uri) => {
       const r = describeClientAddresses(URL_ID, client([uri]), uri);
       expect(r.redirectTargets).toHaveLength(1);
@@ -56,7 +56,7 @@ describe('R1: where the app lives vs where the code is sent', () => {
     },
   );
 
-  it('R1: a DCR/static client has no document host and is never flagged', () => {
+  it('a DCR/static client has no document host and is never flagged', () => {
     const r = describeClientAddresses(
       'a-uuid',
       client(['https://cb.example.org/cb']),
@@ -69,7 +69,7 @@ describe('R1: where the app lives vs where the code is sent', () => {
     });
   });
 
-  it('R1: with no request URI (Connected apps) it lists every registered host once, loopback entries collapsed', () => {
+  it('with no request URI (Connected apps) it lists every registered host once, loopback entries collapsed', () => {
     const r = describeClientAddresses(
       URL_ID,
       client([
@@ -88,7 +88,7 @@ describe('R1: where the app lives vs where the code is sent', () => {
     expect(r.redirectMismatch).toBe(true);
   });
 
-  it('R1: a CIMD grant whose document left the cache still names the client_id host and flags nothing it cannot know', () => {
+  it('a CIMD grant whose document left the cache still names the client_id host and flags nothing it cannot know', () => {
     expect(describeClientAddresses(URL_ID, null)).toEqual({
       documentHost: 'app.example.com',
       redirectTargets: [],

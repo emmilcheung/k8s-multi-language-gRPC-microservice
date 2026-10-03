@@ -7,12 +7,12 @@ import java.util.UUID;
 /**
  * CloudEvents-envelope-compatible POJO published to {@code orders.order.completed}.
  *
- * CP-05: this event is emitted by order-service when a payment is captured
+ * this event is emitted by order-service when a payment is captured
  * (triggered by PaymentEventConsumer).  ticket-service consumes it to call
  * FinalizeReservation(reservationId, orderId), which transitions the reservation
  * from RESERVED to SOLD and decrements the per-user reserved count.
  *
- * CP-12: added {@code seatIds} (null for GA orders) so venue-service consumer can
+ * added {@code seatIds} (null for GA orders) so venue-service consumer can
  * finalize individual seat reservations when payment is captured.
  */
 public class OrderCompletedEvent {

@@ -29,7 +29,7 @@ import java.util.UUID;
  *
  * Routes:
  *   POST   /api/orders            — create GA order
- *   POST   /api/orders/seated     — create seated order (CP-12)
+ *   POST   /api/orders/seated     — create seated order
  *   GET    /api/orders            — list user's orders
  *   GET    /api/orders/{id}       — get single order
  *   DELETE /api/orders/{id}       — cancel order
@@ -62,7 +62,7 @@ public class OrderController {
     }
 
     /**
-     * CP-12: creates a seated order — supports both MANUAL_SEATED (seatIds provided)
+     * creates a seated order — supports both MANUAL_SEATED (seatIds provided)
      * and AUTO_ASSIGN_SEATED (sectionId + planId + quantity provided) sub-flows.
      */
     @PostMapping("/seated")

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { OAUTH_SCOPES, OAUTH_SCOPE_NAMES } from './oauth-scopes';
 
-describe('OAuth scope registry (C-7)', () => {
-  it('lists the nine C-4 scopes in order; the mcp-service contract test pins the same list', () => {
+describe('OAuth scope registry', () => {
+  it('lists the nine scopes in order; the mcp-service contract test pins the same list', () => {
     expect(OAUTH_SCOPE_NAMES).toEqual([
       'tickets:read',
       'orders:read',

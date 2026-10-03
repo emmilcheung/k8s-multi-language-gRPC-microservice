@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # services/kong-gateway/scripts/test-jwt-scope.sh
 #
-# Behavioural test of plugins/jwt-scope.lua (C-10 REST audience rule + scope gate).
+# Behavioural test of plugins/jwt-scope.lua (REST audience rule + scope gate).
 # Runs the REAL Lua, with its placeholders substituted the way build.sh does it,
 # under `resty` in a one-shot container of the same Kong image validate.sh uses.
 # Only the kong PDK pieces the snippet touches are stubbed
@@ -57,7 +57,7 @@ local cases = {
   { "aud = API + /x (prefix)", '{"client_id":"c","scope":"orders:read","aud":"' .. API .. '/x"}', 401 },
   { "aud = API + trailing slash", '{"client_id":"c","scope":"orders:read","aud":"' .. API .. '/"}', 401 },
   { "aud with upper-case host", '{"client_id":"c","scope":"orders:read","aud":"' .. API:gsub("ticketing", "TICKETING") .. '"}', 401 },
-  { "oauth with no aud (tolerated until WS-N)", '{"client_id":"c","scope":"orders:read"}', nil },
+  { "oauth with no aud (tolerated for now)", '{"client_id":"c","scope":"orders:read"}', nil },
   { "escaped fake aud inside another claim + real MCP aud",
     '{"client_id":"c","scope":"orders:read","note":"x\\"aud\\":\\"' .. API .. '\\"","aud":"' .. MCP .. '"}', 401 },
   { "right aud, missing scope -> scope still enforced", '{"client_id":"c","scope":"tickets:read","aud":"' .. API .. '"}', 403 },

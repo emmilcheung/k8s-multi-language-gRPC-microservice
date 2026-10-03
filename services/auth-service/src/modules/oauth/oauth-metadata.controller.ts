@@ -4,9 +4,9 @@ import { readOAuthConfig } from './oauth-config';
 import { OAUTH_SCOPES, OAUTH_SCOPE_NAMES } from './oauth-scopes';
 
 /**
- * RFC 8414 Authorization Server Metadata (C-4) and the scope registry for the
- * consent page (C-7). These are public GETs and not RFC 6749 §5.2 endpoints, so
- * OAuthExceptionFilter (token/revoke/register only, D8) is deliberately not
+ * RFC 8414 Authorization Server Metadata and the scope registry for the
+ * consent page. These are public GETs and not RFC 6749 §5.2 endpoints, so
+ * OAuthExceptionFilter (token/revoke/register only) is deliberately not
  * applied: there is no request body to reject and no OAuth error to report.
  */
 @Controller()
@@ -17,7 +17,7 @@ export class OAuthMetadataController {
   @Header('Cache-Control', 'public, max-age=300')
   metadata() {
     // The issuer is published as configured whatever OAUTH_ISSUER_ENABLED says:
-    // that flag only picks the JWT `iss` claim (D3), while clients check this
+    // that flag only picks the JWT `iss` claim, while clients check this
     // value against the origin they discovered it from.
     const { issuer, cimdEnabled } = readOAuthConfig(this.config);
     return {

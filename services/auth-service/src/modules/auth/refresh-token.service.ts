@@ -23,7 +23,7 @@ export interface RefreshSession {
   ipAddress: string | null;
 }
 
-/** Who may rotate a refresh session: the browser, or one OAuth client (C-11). */
+/** Who may rotate a refresh session: the browser, or one OAuth client. */
 export type RefreshAudience =
   | { kind: 'browser' }
   | { kind: 'oauth'; clientId: string };
@@ -32,8 +32,8 @@ interface RefreshTokenRecord extends RefreshSession {
   tokenHash: string;
   /**
    * OAuth client that owns the session; null for a browser session. Absent on
-   * records written before F1; resolveOAuthClientId falls back to the
-   * session-scope marker for those (removed by WS-N at deploy + 7 d).
+   * records written before the audience binding; resolveOAuthClientId falls back to the
+   * session-scope marker for those (removed once those records have expired, 7 days after the rollout).
    */
   oauthClientId?: string | null;
 }
@@ -272,7 +272,7 @@ export class RefreshTokenService {
   /**
    * Rotate a refresh token for the given audience. A session owned by another
    * audience is rejected before anything is written, so its real holder keeps
-   * a working token (F1, F1b).
+   * a working token.
    */
   async rotate(
     token: string,

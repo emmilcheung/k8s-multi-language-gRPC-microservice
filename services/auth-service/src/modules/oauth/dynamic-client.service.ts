@@ -20,7 +20,7 @@ export interface DynamicOAuthClient {
   accessTokenLifetimeSeconds: number; // default: 900
   refreshTokenLifetimeSeconds: number; // default: 86400
   isFirstParty: false;
-  /** RFC 7591 application_type; records stored before WS-I read as 'web'. */
+  /** RFC 7591 application_type; records stored before the field existed read as 'web'. */
   applicationType?: OAuthApplicationType;
   registeredAt: string; // ISO timestamp
 }

@@ -54,7 +54,7 @@ export interface UpstreamRequest {
 
 export interface UpstreamResponse {
   data: unknown;
-  /** order-service answered an already-seen Idempotency-Key (`Idempotent-Replayed: true`, C-8). */
+  /** order-service answered an already-seen Idempotency-Key (`Idempotent-Replayed: true`). */
   replayed: boolean;
 }
 
@@ -90,7 +90,7 @@ async function classify(res: Response): Promise<FailureCode> {
   const { status } = res;
   if (status === 401) return 'UNAUTHORIZED';
   if (status === 403) {
-    // Kong's queue gate answers `{"message":"waiting room: ..."}` (C-9).
+    // Kong's queue gate answers `{"message":"waiting room: ..."}`.
     const body = (await readJson(res)) as { message?: unknown } | undefined;
     return typeof body?.message === 'string' &&
       body.message.startsWith('waiting room:')
@@ -112,7 +112,7 @@ async function classify(res: Response): Promise<FailureCode> {
 
 /**
  * Calls the API through Kong with an exchanged, API-audience token narrowed to
- * the tool's scopes (C-5). Anything that goes wrong becomes a ToolFailure with
+ * the tool's scopes. Anything that goes wrong becomes a ToolFailure with
  * fixed text: upstream bodies and tokens never reach a tool result or a log.
  */
 export function createUpstream(opts: UpstreamOptions): Upstream {
@@ -135,7 +135,7 @@ export function createUpstream(opts: UpstreamOptions): Upstream {
         // Only `invalid_grant` says the subject token is bad (re-authorize).
         // invalid_client / unauthorized_client / invalid_target / invalid_scope
         // and 5xx or network failures are our misconfiguration or an outage:
-        // looping the user through consent would not fix them (C-5).
+        // looping the user through consent would not fix them.
         if (oauthError === 'invalid_grant') {
           opts.logger?.warn(
             { tool, status, oauthError },

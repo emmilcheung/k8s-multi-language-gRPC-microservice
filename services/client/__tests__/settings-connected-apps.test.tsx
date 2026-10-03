@@ -1,4 +1,4 @@
-// L-2: the Connected apps section of /settings (spec F8). A user must be able
+// L-2: the Connected apps section of /settings. A user must be able
 // to recognise which app holds a grant: dynamic clients register as a UUID, so
 // the registered NAME has to be what is shown, and revoke has to target the
 // client, not a single session.
@@ -82,7 +82,7 @@ describe("getConnectedApps (L-2)", () => {
 describe("revokeConnectedAppAction (L-2)", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("I-7: DELETEs /oauth/clients?client_id= with the id URL-encoded, so a URL id never sits in a path segment", async () => {
+  it("DELETEs /oauth/clients?client_id= with the id URL-encoded, so a URL id never sits in a path segment", async () => {
     serverApiMock.mockResolvedValueOnce(undefined);
     const form = new FormData();
     form.set("clientId", "https://app.example.com/oauth/client.json");
@@ -97,7 +97,7 @@ describe("revokeConnectedAppAction (L-2)", () => {
     expect(String(serverApiMock.mock.calls[0][0])).not.toMatch(/\/oauth\/clients\/./);
   });
 
-  it("I-7: an opaque id is sent the same way", async () => {
+  it("an opaque id is sent the same way", async () => {
     serverApiMock.mockResolvedValueOnce(undefined);
     const form = new FormData();
     form.set("clientId", UUID);
@@ -168,7 +168,7 @@ describe("ConnectedApps section (L-2)", () => {
     expect(screen.queryByText(/no connected apps/i)).not.toBeInTheDocument();
   });
 
-  it("R3: Revoke is disabled while its request is in flight (no double DELETE)", async () => {
+  it("Revoke is disabled while its request is in flight (no double DELETE)", async () => {
     const revoke = vi.fn(() => new Promise<void>(() => {}));
     render(<ConnectedApps apps={[app]} revokeAction={revoke} />);
 
@@ -181,7 +181,7 @@ describe("ConnectedApps section (L-2)", () => {
   });
 });
 
-describe("Connected apps domain and party marker (I-7 / ruling 7)", () => {
+describe("Connected apps domain and party marker", () => {
   const base: ConnectedApp = { clientId: "c", name: "Agent", isFirstParty: false, scopes: [] };
 
   const withAddr = (documentHost: string | undefined, hosts: [string, boolean][]) => ({
@@ -193,25 +193,25 @@ describe("Connected apps domain and party marker (I-7 / ruling 7)", () => {
     },
   });
 
-  it("R1: a CIMD app shows its identity-document host and its registered redirect hosts as separate lines", () => {
+  it("a CIMD app shows its identity-document host and its registered redirect hosts as separate lines", () => {
     render(<ConnectedApps apps={[withAddr("app.example.com", [["app.example.com", false]])]} revokeAction={vi.fn()} />);
     expect(screen.getByTestId("app-document-host")).toHaveTextContent("App identity document hosted at app.example.com");
     expect(screen.getByTestId("app-redirect-hosts")).toHaveTextContent("Redirects to app.example.com");
   });
 
-  it("R1: a DCR app has no document line, only where it redirects", () => {
+  it("a DCR app has no document line, only where it redirects", () => {
     render(<ConnectedApps apps={[withAddr(undefined, [["cb.example.org", false]])]} revokeAction={vi.fn()} />);
     expect(screen.queryByTestId("app-document-host")).not.toBeInTheDocument();
     expect(screen.getByTestId("app-redirect-hosts")).toHaveTextContent("cb.example.org");
   });
 
-  it("R1: a loopback redirect reads as an app on this device", () => {
+  it("a loopback redirect reads as an app on this device", () => {
     render(<ConnectedApps apps={[withAddr(undefined, [["localhost", true]])]} revokeAction={vi.fn()} />);
     expect(screen.getByTestId("app-redirect-hosts")).toHaveTextContent("an app on this device");
     expect(screen.getByTestId("app-redirect-hosts")).not.toHaveTextContent("localhost");
   });
 
-  it("M-10: at most 3 redirect hosts are listed, the rest collapse to +N more", () => {
+  it("at most 3 redirect hosts are listed, the rest collapse to +N more", () => {
     const hosts: [string, boolean][] = ["a", "b", "c", "d", "e"].map((h) => [`${h}.example.com`, false]);
     render(<ConnectedApps apps={[withAddr(undefined, hosts)]} revokeAction={vi.fn()} />);
     const el = screen.getByTestId("app-redirect-hosts");

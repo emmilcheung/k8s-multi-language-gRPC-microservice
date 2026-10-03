@@ -14,7 +14,7 @@ import { createMcpServer } from './server.ts';
 import { createUpstream } from './upstream.ts';
 import { createVerifier } from './verifier.ts';
 
-/** C-3: every scope a client may request. The registry lives in auth-service. */
+/** every scope a client may request. The registry lives in auth-service. */
 export const SCOPES_SUPPORTED = [
   'tickets:read',
   'seating:read',
@@ -25,7 +25,7 @@ export const SCOPES_SUPPORTED = [
   'payments:create',
 ];
 
-/** C-6: scopes advertised in the initial 401 challenge (read-only bundle). */
+/** scopes advertised in the initial 401 challenge (read-only bundle). */
 const INITIAL_CHALLENGE_SCOPES = [
   'tickets:read',
   'seating:read',
@@ -83,7 +83,7 @@ export function createApp({
       url: config.TOKEN_EXCHANGE_URL,
       clientId: config.TOKEN_EXCHANGE_CLIENT_ID,
       clientSecret: config.TOKEN_EXCHANGE_CLIENT_SECRET,
-      // C-5: the API audience, as auth-service derives it (`<origin>/api`).
+      // the API audience, as auth-service derives it (`<origin>/api`).
       resource: config.API_AUDIENCE ?? `${resource.origin}/api`,
       fetch: outboundFetch,
     }),
@@ -107,7 +107,7 @@ export function createApp({
   ): Promise<Response | undefined> {
     const res = oauthMetadataResponse(request, metadataOptions);
     if (!res || request.method !== 'GET' || res.status !== 200) return res;
-    // The SDK omits bearer_methods_supported, which C-3 requires.
+    // The SDK omits bearer_methods_supported, which the spec requires.
     const body = (await res.json()) as Record<string, unknown>;
     return Response.json(
       { ...body, bearer_methods_supported: ['header'] },

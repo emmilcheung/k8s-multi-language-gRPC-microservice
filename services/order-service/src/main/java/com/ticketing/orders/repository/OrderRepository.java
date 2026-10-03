@@ -21,7 +21,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     Optional<Order> findByIdWithTicket(UUID id);
 
     /**
-     * WS-F: idempotent-retry lookup. reservation_id is derived from (userId, key), so the
+     * idempotent-retry lookup. reservation_id is derived from (userId, key), so the
      * user check is defence in depth; uq_orders_reservation_id makes the result unique.
      */
     @Query("SELECT o FROM Order o JOIN FETCH o.ticket WHERE o.reservationId = :reservationId AND o.userId = :userId")
@@ -35,7 +35,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     /**
      * Returns the ids of open (CREATED / AWAITING_PAYMENT) orders that expired
-     * before {@code cutoff}, oldest first, at most {@code limit} of them (SR-16).
+     * before {@code cutoff}, oldest first, at most {@code limit} of them.
      * Native query so the status literals match V7's partial index predicate.
      */
     @Query(value = "SELECT id FROM orders"

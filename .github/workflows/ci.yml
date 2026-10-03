@@ -23,7 +23,7 @@
 # Kafka and Redis integration tests use Testcontainers (Docker-in-Docker on ubuntu-24.04).
 # No images are pushed — no registry credentials needed.
 #
-# Deploy stages (I-11):
+# Deploy stages:
 #   - Conditional on secrets.AWS_DEPLOY_ROLE_ARN being set.
 #   - Won't run on forks or in environments without real EKS infrastructure.
 #   - staging and prod gates require manual approval (configure in repo Settings → Environments).
@@ -894,7 +894,7 @@ jobs:
           breaking: true
           breaking_against: "https://github.com/${{ github.repository }}.git#branch=main,subdir=proto"
 
-  # ── kong-gateway (build.sh → validate.sh) (I-15) ───────────────────────────
+  # ── kong-gateway (build.sh → validate.sh) ───────────────────────────
   kong:
     name: kong-gateway
     runs-on: ubuntu-24.04
@@ -1508,12 +1508,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 3
 
-  # ── deploy-dev (I-11) ────────────────────────────────────────────────────────
+  # ── deploy-dev ────────────────────────────────────────────────────────
   # Deploys the umbrella Helm chart to the dev EKS namespace.
   # Conditional on:
   #   - Running on the main branch (not PRs)
   #   - secrets.AWS_DEPLOY_ROLE_ARN being set (skip silently on forks / no-infra)
-  # Image tag = git SHA (no :latest — I-12 already satisfied).
+  # Image tag = git SHA (no :latest).
   # Uses OIDC → AWS IAM role assumption (no long-lived AWS credentials).
   # deploy-dev:
   #   name: Deploy → dev
@@ -1585,7 +1585,7 @@ jobs:
   #         echo "Smoke test failed after 10 attempts"
   #         exit 1
 
-  # # ── deploy-staging (I-11) ─────────────────────────────────────────────────────
+  # # ── deploy-staging ─────────────────────────────────────────────────────
   # # Manual approval gate: configure "staging" Environment in repo Settings →
   # # Environments → staging → Required reviewers.
   # deploy-staging:
@@ -1651,7 +1651,7 @@ jobs:
   #         echo "Smoke test failed after 10 attempts"
   #         exit 1
 
-  # # ── deploy-prod (I-11) ────────────────────────────────────────────────────────
+  # # ── deploy-prod ────────────────────────────────────────────────────────
   # # Manual approval gate: configure "production" Environment in repo Settings →
   # # Environments → production → Required reviewers.
   # # This gate is separate from staging — prod reviewers should be a strict subset

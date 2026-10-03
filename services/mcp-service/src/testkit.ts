@@ -73,7 +73,7 @@ export function mintUnsecuredToken(): string {
   })}.`;
 }
 
-/** Mints a C-1 "MCP token" shape by default; override one claim per test. */
+/** Mints an "MCP token" shape by default; override one claim per test. */
 export async function mintToken(opts: MintOptions = {}): Promise<string> {
   const jwt = new SignJWT({
     scope: opts.scope ?? 'tickets:read',
@@ -190,7 +190,7 @@ export function harness(
   opts: HarnessOptions = {},
 ) {
   const calls: UpstreamCall[] = [];
-  /** Form of every token-exchange request (C-5), in order. */
+  /** Form of every token-exchange request, in order. */
   const exchanges: URLSearchParams[] = [];
   const stubFetch: typeof fetch = (input, init) => {
     const url = new URL(

@@ -11,7 +11,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Derivation rules of contract C-8. */
+/** Derivation rules of the idempotency key. */
 class IdempotencyKeysTest {
 
     private final ObjectMapper mapper = new ObjectMapper();

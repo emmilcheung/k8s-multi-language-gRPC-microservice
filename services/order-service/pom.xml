@@ -220,7 +220,7 @@
       <version>5.4.0</version>
     </dependency>
 
-    <!-- ── Resilience4j — circuit breaker on gRPC client (R-01) ─────────────── -->
+    <!-- ── Resilience4j — circuit breaker on gRPC client ─────────────── -->
     <dependency>
       <groupId>io.github.resilience4j</groupId>
       <artifactId>resilience4j-spring-boot3</artifactId>

@@ -50,7 +50,7 @@ import type {
 } from './oauth.dto';
 
 const ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token';
-/** C-1: an exchanged token lives at most this long (and never past its subject). */
+/** an exchanged token lives at most this long (and never past its subject). */
 const EXCHANGED_TOKEN_MAX_SECONDS = 300;
 
 const TRANSIENT_CIMD_REASONS: ReadonlySet<string> = new Set([
@@ -140,7 +140,7 @@ export class OAuthService implements OnModuleInit {
     });
   }
 
-  /** RFC 8707 / C-2: a resource must be an exact member of OAUTH_RESOURCES. */
+  /** RFC 8707: a resource must be an exact member of OAUTH_RESOURCES. */
   private assertAllowedResource(resource: string | undefined): void {
     if (
       resource !== undefined &&
@@ -153,7 +153,7 @@ export class OAuthService implements OnModuleInit {
     }
   }
 
-  /** Every token audience and issuer decision is made here (C-1, D3). */
+  /** Every token audience and issuer decision is made here. */
   private mintAccessToken(
     userId: string,
     scope: string,
@@ -340,7 +340,7 @@ export class OAuthService implements OnModuleInit {
   }
 
   /**
-   * RFC 8693 token exchange (C-5). mcp-service trades the user's MCP-audience
+   * RFC 8693 token exchange. mcp-service trades the user's MCP-audience
    * token for a short-lived API-audience token that keeps the ORIGINAL client
    * id and can only narrow scope. Client authentication happens first so an
    * unauthenticated caller learns nothing about the subject token.

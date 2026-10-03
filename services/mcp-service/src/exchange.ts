@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-/** Refresh this long before expiry so a token never dies in flight (C-5). */
+/** Refresh this long before expiry so a token never dies in flight. */
 const SAFETY_WINDOW_MS = 30_000;
 const DEFAULT_MAX_ENTRIES = 1000;
 /**
@@ -47,7 +47,7 @@ export type TokenExchange = (
 ) => Promise<string>;
 
 /**
- * RFC 8693 client for C-5. The MCP-audience token is swapped for a short-lived
+ * RFC 8693 client. The MCP-audience token is swapped for a short-lived
  * API-audience token scoped to the one scope a tool needs; the MCP token itself
  * is never forwarded upstream. Results are cached in-process in a bounded LRU
  * keyed by sha256(subject token) + scope, valid until

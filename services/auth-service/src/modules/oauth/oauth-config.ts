@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-/** Auth-service token issuer for browser tokens; Kong's credential key (D3). */
+/** Auth-service token issuer for browser tokens; Kong's credential key. */
 export const BROWSER_TOKEN_ISSUER = 'auth-service';
 
 const DEV_ORIGIN = 'http://localhost:8000';
@@ -12,7 +12,7 @@ const boolString = z
   .transform((v) => v === 'true');
 
 /**
- * OAuth resource-server env (C-2, C-4, D3). Outside production these default to
+ * OAuth resource-server env. Outside production these default to
  * the local Kong origin; in production they are required (see refineOAuthConfig).
  * The strings are kept raw here: `parseResources` splits the list.
  */
@@ -22,20 +22,20 @@ export const oauthEnvFields = {
   OAUTH_MCP_RESOURCE: z.string().url().optional(),
   OAUTH_API_AUDIENCE: z.string().url().optional(),
   /**
-   * D3 rollout switch. Off: OAuth tokens keep `iss: auth-service` so Kong's
-   * existing credential still accepts them on REST. WS-K adds the second Kong
+   * Rollout switch. Off: OAuth tokens keep `iss: auth-service` so Kong's
+   * existing credential still accepts them on REST. The second Kong
    * jwt_secret keyed on OAUTH_ISSUER and flips this in the same release.
    */
   OAUTH_ISSUER_ENABLED: boolString,
   /**
-   * Client ID Metadata Documents (WS-I, D12). Off by default: turning it on makes
+   * Client ID Metadata Documents. Off by default: turning it on makes
    * auth-service (the token signing key holder) fetch HTTPS documents from URLs
    * chosen by unauthenticated callers, which in a cluster also needs an egress
    * NetworkPolicy opening that the owner must approve (spec hard stop 10).
    */
   OAUTH_CIMD_ENABLED: boolString,
   /**
-   * lowercase hex SHA-256 of the mcp-service client secret (C-5). Unset or empty
+   * lowercase hex SHA-256 of the mcp-service client secret. Unset or empty
    * disables the token-exchange grant (the client cannot authenticate); a set
    * but malformed value fails startup. See refineOAuthConfig.
    */
@@ -203,7 +203,7 @@ export function readTokenExchangeSecretHash(
   return config.get('MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH') || undefined;
 }
 
-/** The one place the `iss` of an OAuth access token is chosen (D3, E-9). */
+/** The one place the `iss` of an OAuth access token is chosen. */
 export function resolveOAuthTokenIssuer(cfg: OAuthResourceConfig): string {
   return cfg.issuerEnabled ? cfg.issuer : BROWSER_TOKEN_ISSUER;
 }

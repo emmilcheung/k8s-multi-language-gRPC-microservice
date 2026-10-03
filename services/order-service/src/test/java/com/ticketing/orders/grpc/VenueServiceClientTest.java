@@ -30,7 +30,7 @@ class VenueServiceClientTest {
 
     @Test
     void released_reservation_is_surfaced_as_a_distinct_exception_for_key_exhaustion() {
-        // C-8 pre-check: venue-service rejects a reserve on a RELEASED id with this phrase.
+        // Pre-check: venue-service rejects a reserve on a RELEASED id with this phrase.
         // It must not be flattened into the generic 422, or the caller cannot tell the key is dead.
         var client = clientFailingWith(Status.FAILED_PRECONDITION
                 .withDescription("reservation r was already released"));

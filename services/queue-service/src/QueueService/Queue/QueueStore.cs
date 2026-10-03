@@ -8,7 +8,7 @@ public sealed class QueueStore(IConnectionMultiplexer mux)
 {
     private IDatabase Db => mux.GetDatabase();
 
-    // SR-17. The event id sits inside a literal hash tag (`{{` is a literal brace
+    // The event id sits inside a literal hash tag (`{{` is a literal brace
     // in an interpolated string), so every key for one event hashes to the same
     // Redis Cluster slot. FreezeLua and EnqueueLateLua each take two of these keys
     // in one script, which a cluster refuses with CROSSSLOT unless they share a slot.

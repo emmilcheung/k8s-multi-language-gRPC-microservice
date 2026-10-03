@@ -7,10 +7,10 @@
 --
 -- QUEUE_GATE_MODE_PLACEHOLDER is replaced by build.sh with the mode:
 --   graphql-reserve : gate only bodies containing "reserve" (GraphQL route)
---   always          : gate every request on the route (REST order creation, F3)
+--   always          : gate every request on the route (REST order creation)
 --
 -- require() works here only because the gateway image and the helm values
--- set KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES=resty.openssl.hmac (D13, F12).
+-- set KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES=resty.openssl.hmac.
 -- Known gap, kept as-is: the pass HMAC is checked, but not its expiry, event
 -- or single use.
 

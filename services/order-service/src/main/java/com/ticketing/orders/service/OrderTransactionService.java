@@ -33,10 +33,9 @@ import java.util.UUID;
  * is correctly applied — ensuring the order row and the outbox row are always written
  * atomically.
  *
- * CP-05: accepts {@code reservationId} and {@code quantity} from the GA reservation
+ * accepts {@code reservationId} and {@code quantity} from the GA reservation
  * response so they are persisted on the order and included in the outbox event.
  *
- * See audit finding C-01.
  */
 @Service
 public class OrderTransactionService {
@@ -115,7 +114,7 @@ public class OrderTransactionService {
                         reservationId.toString(),
                         quantity,
                         order.getVersion(),
-                        null  // GA orders have no seat IDs (CP-12)
+                        null  // GA orders have no seat IDs
                 ));
 
         log.info("Order created orderId={} userId={} ticketId={} reservationId={} quantity={}",

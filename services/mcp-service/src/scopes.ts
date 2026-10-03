@@ -1,7 +1,7 @@
 import type { ScopeChallengeHandler } from '@modelcontextprotocol/server';
 
 /**
- * C-7 (concept lock CL-SCOPES): the scope each tool needs. The registry of
+ * The scope each tool needs. The registry of
  * scopes lives in auth-service (oauth-scopes.ts); scopes.spec.ts pins this map
  * against a copy of it. Key order is the tool registration order.
  */
@@ -24,23 +24,23 @@ export type ToolName = keyof typeof TOOL_SCOPES;
 export type ToolScope = (typeof TOOL_SCOPES)[ToolName];
 
 /**
- * Scopes a tool needs beyond its C-7 scope because it makes more than one
+ * Scopes a tool needs beyond its table scope because it makes more than one
  * upstream call: pay_for_order_with_default lists saved methods (payments:read)
  * before charging (payments:create). Without it the step-up would pass and the
- * upstream read would then 403. C-7 was amended (2026-10-02) to say so.
+ * upstream read would then 403.
  */
 export const EXTRA_SCOPES: Partial<Record<ToolName, readonly ToolScope[]>> = {
   pay_for_order_with_default: ['payments:read'],
 };
 
-/** Every scope the tool's upstream calls need, C-7 scope first. */
+/** Every scope the tool's upstream calls need, table scope first. */
 export const scopesForTool = (tool: ToolName): ToolScope[] => [
   TOOL_SCOPES[tool],
   ...(EXTRA_SCOPES[tool] ?? []),
 ];
 
 /**
- * C-6 step-up: challenge with held ∪ required so the re-consent keeps what the
+ * Step-up: challenge with held ∪ required so the re-consent keeps what the
  * user already granted. The SDK's own `requireScopes` asks for the required set
  * only, which would make a client drop its existing grants on step-up.
  * Unauthenticated requests are left to the bearer gate in app.ts.

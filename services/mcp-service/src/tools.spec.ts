@@ -15,7 +15,7 @@ const ORDER = '22222222-2222-4222-8222-222222222222';
 const ALL_SCOPES = [...new Set(Object.values(TOOL_SCOPES))].join(' ');
 
 describe.each(ERAS)('MCP tools (%s)', (era) => {
-  it('J-1: lists the twelve C-7 tools in a deterministic order, each with an outputSchema', async () => {
+  it('lists the twelve tools in a deterministic order, each with an outputSchema', async () => {
     const h = harness();
     const client = await connect(
       era,
@@ -28,7 +28,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('J-1: annotations follow C-7 (reads are readOnly; writes are non-destructive+idempotent; cancel and pay are destructive)', async () => {
+  it('annotations follow the tool table (reads are readOnly; writes are non-destructive+idempotent; cancel and pay are destructive)', async () => {
     const h = harness();
     const client = await connect(
       era,
@@ -68,7 +68,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('J-1: pay_for_order accepts saved methods only: no raw paymentToken input can reach Stripe through an agent', async () => {
+  it('pay_for_order accepts saved methods only: no raw paymentToken input can reach Stripe through an agent', async () => {
     const h = harness();
     const client = await connect(
       era,
@@ -84,7 +84,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('J-2: create_order with only tickets:read is refused with HTTP 403 insufficient_scope asking for held + required', async () => {
+  it('create_order with only tickets:read is refused with HTTP 403 insufficient_scope asking for held + required', async () => {
     const h = harness();
     const client = await connect(
       era,
@@ -107,7 +107,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('J-2: pay_for_order_with_default also asks for payments:read, because it lists methods before paying', async () => {
+  it('pay_for_order_with_default also asks for payments:read, because it lists methods before paying', async () => {
     const h = harness();
     const client = await connect(
       era,
@@ -130,7 +130,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('J-3: the same args twice send the same Idempotency-Key, so a retry replays instead of double-ordering', async () => {
+  it('the same args twice send the same Idempotency-Key, so a retry replays instead of double-ordering', async () => {
     const h = harness();
     const client = await connect(
       era,
@@ -154,7 +154,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('J-3: an explicit idempotencyKey wins over the derived one', async () => {
+  it('an explicit idempotencyKey wins over the derived one', async () => {
     const h = harness();
     const client = await connect(
       era,
@@ -175,7 +175,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('J-4: a Kong waiting-room 403 becomes WAITING_ROOM_ACTIVE with a browser handoffUrl, not a dead end', async () => {
+  it('a Kong waiting-room 403 becomes WAITING_ROOM_ACTIVE with a browser handoffUrl, not a dead end', async () => {
     const h = harness(() =>
       Response.json(
         { message: 'waiting room: pass required' },
@@ -200,7 +200,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('J-4: a 403 that is not the waiting room is a plain refusal, never a handoff', async () => {
+  it('a 403 that is not the waiting room is a plain refusal, never a handoff', async () => {
     const h = harness(() =>
       Response.json({ message: 'forbidden' }, { status: 403 }),
     );
@@ -219,7 +219,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('J-6: an upstream 500 body never appears in the tool result', async () => {
+  it('an upstream 500 body never appears in the tool result', async () => {
     const leak = 'postgres://svc:hunter2@db/orders stack at Object.<anonymous>';
     const h = harness(() => new Response(leak, { status: 500 }));
     const client = await connect(
@@ -239,7 +239,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('J-6: neither the MCP token nor the exchanged token reaches a tool result', async () => {
+  it('neither the MCP token nor the exchanged token reaches a tool result', async () => {
     const token = await mintToken({ scope: ALL_SCOPES });
     const h = harness();
     const client = await connect(era, token, h.viaApp);
@@ -253,7 +253,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('J-5: upstream gets the exchanged API-audience token, never the MCP-audience one (C-5)', async () => {
+  it('upstream gets the exchanged API-audience token, never the MCP-audience one', async () => {
     const token = await mintToken({ scope: ALL_SCOPES });
     const h = harness();
     const client = await connect(era, token, h.viaApp);
@@ -267,7 +267,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('J-3: 409 EXHAUSTED and 422 REUSED become distinct, sanitised errors the agent can act on', async () => {
+  it('409 EXHAUSTED and 422 REUSED become distinct, sanitised errors the agent can act on', async () => {
     for (const [status, code] of [
       [409, 'IDEMPOTENCY_KEY_EXHAUSTED'],
       [422, 'IDEMPOTENCY_KEY_REUSED'],
@@ -365,7 +365,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await c2.close();
   });
 
-  it('R5: only an invalid_grant exchange failure asks the user to re-authorize; every other failure is an operator-visible error', async () => {
+  it('only an invalid_grant exchange failure asks the user to re-authorize; every other failure is an operator-visible error', async () => {
     const secretText = 'client secret mismatch for mcp-service';
     const cases: [number, string][] = [
       [401, 'invalid_client'],
@@ -428,7 +428,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await c2.close();
   });
 
-  it('R5: an unreachable exchange endpoint is an operator error, not a re-authorize', async () => {
+  it('an unreachable exchange endpoint is an operator error, not a re-authorize', async () => {
     const errors: unknown[][] = [];
     const h = harness(undefined, {
       exchange: () => {
@@ -457,7 +457,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('R6: a replayed create reports replayed: true, a first create replayed: false', async () => {
+  it('a replayed create reports replayed: true, a first create replayed: false', async () => {
     for (const replayed of [false, true]) {
       const h = harness((c) => {
         const res = realisticReply(c);
@@ -485,7 +485,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     }
   });
 
-  it('R6: both create tools tell the model that identical arguments return the existing order and how to place another', async () => {
+  it('both create tools tell the model that identical arguments return the existing order and how to place another', async () => {
     const h = harness();
     const client = await connect(
       era,
@@ -505,7 +505,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('R7: two users placing the same order get different idempotency keys', async () => {
+  it('two users placing the same order get different idempotency keys', async () => {
     const keys: (string | null)[] = [];
     for (const sub of ['user-a', 'user-b']) {
       const h = harness();
@@ -525,7 +525,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     expect(keys[1]).not.toBe(keys[0]);
   });
 
-  it('R1: the seating plan is part of the seated-order fingerprint, so another plan is another order', async () => {
+  it('the seating plan is part of the seated-order fingerprint, so another plan is another order', async () => {
     const h = harness();
     const client = await connect(
       era,
@@ -552,7 +552,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('R1: create_seated_order refuses ambiguous or empty selections before anything is sent', async () => {
+  it('create_seated_order refuses ambiguous or empty selections before anything is sent', async () => {
     const h = harness();
     const client = await connect(
       era,
@@ -580,7 +580,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('R11: search_events offers no paging: no after input, no nextCursor, and it says the newest events only', async () => {
+  it('search_events offers no paging: no after input, no nextCursor, and it says the newest events only', async () => {
     const t = (id: string) => ({ id, title: 'T', price: '1.00' });
     const ids = [
       'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -611,7 +611,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('R12: a handler that throws something unexpected becomes a sanitised error, never raw text', async () => {
+  it('a handler that throws something unexpected becomes a sanitised error, never raw text', async () => {
     const errors: unknown[][] = [];
     const h = harness(
       () =>
@@ -645,7 +645,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
     await client.close();
   });
 
-  it('R9: an upstream reply missing a key field is a sanitised tool error, never a schema-violating success', async () => {
+  it('an upstream reply missing a key field is a sanitised tool error, never a schema-violating success', async () => {
     const errors: unknown[][] = [];
     const h = harness(() => Response.json({ id: ORDER, leak: 'hunter2' }), {
       logger: {

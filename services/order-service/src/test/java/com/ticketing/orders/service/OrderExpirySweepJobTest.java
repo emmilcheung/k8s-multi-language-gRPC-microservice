@@ -24,7 +24,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * SR-16: the backstop that expires orders whose asynq job was lost in a Redis failover.
+ * the backstop that expires orders whose asynq job was lost in a Redis failover.
  */
 @ExtendWith(MockitoExtension.class)
 class OrderExpirySweepJobTest {

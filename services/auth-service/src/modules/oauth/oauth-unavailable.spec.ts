@@ -19,8 +19,8 @@ function host() {
   };
 }
 
-describe('M-2: 503 temporarily_unavailable with Retry-After', () => {
-  it('M-2: the authorize filter answers 503 with the OAuth error body and Retry-After', () => {
+describe('503 temporarily_unavailable with Retry-After', () => {
+  it('the authorize filter answers 503 with the OAuth error body and Retry-After', () => {
     const { res, json, h } = host();
     new OAuthUnavailableFilter().catch(
       new OAuthTemporarilyUnavailableException(5),
@@ -34,7 +34,7 @@ describe('M-2: 503 temporarily_unavailable with Retry-After', () => {
     });
   });
 
-  it('M-2: the /token filter does the same instead of folding it into a 400 invalid_request', () => {
+  it('the /token filter does the same instead of folding it into a 400 invalid_request', () => {
     const { res, json, h } = host();
     new OAuthExceptionFilter({ error: vi.fn() } as never).catch(
       new OAuthTemporarilyUnavailableException(60),

@@ -1,5 +1,5 @@
 -- V8__order_idempotency.sql
--- WS-F / contract C-8: Idempotency-Key on POST /api/orders and /api/orders/seated.
+-- Idempotency-Key on POST /api/orders and /api/orders/seated.
 --
 -- request_fingerprint: sha256 (hex, 64 chars) of the canonical JSON request body,
 --   stored so a retry with the same key but a different body can be told apart from a

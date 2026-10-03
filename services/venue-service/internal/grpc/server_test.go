@@ -66,7 +66,7 @@ func (s *stubReservationRepo) CreateReservation(ctx context.Context, r *reposito
 	return nil
 }
 
-// nopSectionRepo satisfies SectionRepository with no-ops (not used by CP-10 RPCs).
+// nopSectionRepo satisfies SectionRepository with no-ops (not used by the reservation RPCs).
 type nopSectionRepo struct {
 	getAvailableFn func(ctx context.Context, sectionID string) ([]*repository.Seat, error)
 }

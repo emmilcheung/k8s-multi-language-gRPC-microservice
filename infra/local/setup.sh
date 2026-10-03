@@ -111,7 +111,7 @@ else
     --driver=docker
 fi
 
-# E1 / SR-09. The service charts all ship an HPA, and an HPA with no metrics
+# The service charts all ship an HPA, and an HPA with no metrics
 # source sits at <unknown>/70% forever. minikube ships metrics-server as an
 # addon; enabling it is idempotent, so this runs on an already-started cluster
 # too. Without it, `kubectl top` and every HPA in the namespace are dead.

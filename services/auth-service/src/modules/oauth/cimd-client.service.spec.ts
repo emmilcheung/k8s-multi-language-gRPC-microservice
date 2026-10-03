@@ -38,7 +38,7 @@ function make(opts: { enabled?: boolean } = {}) {
   return { service, redis, store, fetchDoc, logger };
 }
 
-describe('cimdCacheTtlSeconds (I-10)', () => {
+describe('cimdCacheTtlSeconds', () => {
   it.each([
     [undefined, 300],
     ['', 300],
@@ -53,19 +53,19 @@ describe('cimdCacheTtlSeconds (I-10)', () => {
     ['max-age=abc', 300],
     ['max-age=-5', 300],
     ['MAX-AGE=600', 600],
-  ])('I-10: Cache-Control %j caches for %i s', (header, ttl) => {
+  ])('Cache-Control %j caches for %i s', (header, ttl) => {
     expect(cimdCacheTtlSeconds(header)).toBe(ttl);
   });
 });
 
-describe('CimdClientService (I-10)', () => {
-  it('I-5: a valid document resolves to a client', async () => {
+describe('CimdClientService', () => {
+  it('a valid document resolves to a client', async () => {
     const { service } = make();
     const r = await service.resolve(URL_ID);
     expect(r.ok && r.client.clientName).toBe('Example Agent');
   });
 
-  it('I-10: a second resolve within the TTL does not fetch again', async () => {
+  it('a second resolve within the TTL does not fetch again', async () => {
     const { service, fetchDoc } = make();
     await service.resolve(URL_ID);
     const second = await service.resolve(URL_ID);
@@ -73,7 +73,7 @@ describe('CimdClientService (I-10)', () => {
     expect(fetchDoc).toHaveBeenCalledTimes(1);
   });
 
-  it('I-10: max-age=0 and no-store still cache for the 60 s floor, so a caller cannot force a fetch per request', async () => {
+  it('max-age=0 and no-store still cache for the 60 s floor, so a caller cannot force a fetch per request', async () => {
     for (const cc of ['max-age=0', 'no-store']) {
       const { service, fetchDoc, store } = make();
       fetchDoc.mockResolvedValue({ body: body(), cacheControl: cc });
@@ -84,7 +84,7 @@ describe('CimdClientService (I-10)', () => {
     }
   });
 
-  it('I-10: the TTL is clamped at 24 h whatever the server asks for', async () => {
+  it('the TTL is clamped at 24 h whatever the server asks for', async () => {
     const { service, fetchDoc, store } = make();
     fetchDoc.mockResolvedValue({
       body: body(),
@@ -94,7 +94,7 @@ describe('CimdClientService (I-10)', () => {
     expect([...store.values()][0].ttl).toBe(86400);
   });
 
-  it('I-10: a failed fetch is negatively cached for 60 s and the reason survives the cache', async () => {
+  it('a failed fetch is negatively cached for 60 s and the reason survives the cache', async () => {
     const { service, fetchDoc, store } = make();
     fetchDoc.mockRejectedValue(new CimdFetchError('timeout'));
     const first = await service.resolve(URL_ID);
@@ -105,7 +105,7 @@ describe('CimdClientService (I-10)', () => {
     expect([...store.values()][0].ttl).toBe(60);
   });
 
-  it('I-10/I-4: an invalid document (client_id mismatch) is negatively cached too', async () => {
+  it('an invalid document (client_id mismatch) is negatively cached too', async () => {
     const { service, fetchDoc } = make();
     fetchDoc.mockResolvedValue({
       body: body({ client_id: 'https://evil.example.com/x.json' }),
@@ -136,7 +136,7 @@ describe('CimdClientService (I-10)', () => {
     expect(fetchDoc).not.toHaveBeenCalled();
   });
 
-  it('I-8: with the flag off nothing is read or fetched', async () => {
+  it('with the flag off nothing is read or fetched', async () => {
     const { service, redis, fetchDoc } = make({ enabled: false });
     expect(await service.resolve(URL_ID)).toEqual({
       ok: false,
@@ -178,7 +178,7 @@ describe('CimdClientService (I-10)', () => {
     expect(store.size).toBe(8);
   });
 
-  it('M-1: once the 8 fetches have completed, a 9th is attempted (slots are released, not leaked)', async () => {
+  it('once the 8 fetches have completed, a 9th is attempted (slots are released, not leaked)', async () => {
     const { service, fetchDoc } = make();
     const release: (() => void)[] = [];
     fetchDoc.mockImplementation(
@@ -203,7 +203,7 @@ describe('CimdClientService (I-10)', () => {
     expect(fetchDoc).toHaveBeenCalledTimes(1);
   });
 
-  it('M-1: slots are also released when fetches fail', async () => {
+  it('slots are also released when fetches fail', async () => {
     const { service, fetchDoc } = make();
     fetchDoc.mockRejectedValue(new CimdFetchError('timeout'));
     for (let i = 0; i < 20; i++) {
@@ -235,7 +235,7 @@ describe('CimdClientService (I-10)', () => {
   });
 });
 
-describe('G2: refused URL client ids leave a structured warn', () => {
+describe('refused URL client ids leave a structured warn', () => {
   const warns = (logger: { warn: ReturnType<typeof vi.fn> }) =>
     logger.warn.mock.calls.map((c) => c[0] as Record<string, unknown>);
 
@@ -247,7 +247,7 @@ describe('G2: refused URL client ids leave a structured warn', () => {
       'db.internal',
     ],
   ])(
-    'G2: %s logs exactly one url_rejected with the reason and host only',
+    '%s logs exactly one url_rejected with the reason and host only',
     async (id, reason, host) => {
       const { service, logger, fetchDoc } = make();
       await service.resolve(id);
@@ -261,7 +261,7 @@ describe('G2: refused URL client ids leave a structured warn', () => {
     },
   );
 
-  it('G2: an unparseable string logs the reason without a host and without the raw input', async () => {
+  it('an unparseable string logs the reason without a host and without the raw input', async () => {
     const { service, logger } = make();
     await service.resolve('https://exa mple.com/not a url "quoted"');
     const w = warns(logger);
@@ -273,13 +273,13 @@ describe('G2: refused URL client ids leave a structured warn', () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('quoted');
   });
 
-  it('G2: a very long host is cut to 253 characters', async () => {
+  it('a very long host is cut to 253 characters', async () => {
     const { service, logger } = make();
     await service.resolve(`https://${'a'.repeat(300)}.internal/x.json`);
     expect((warns(logger)[0].host as string).length).toBeLessThanOrEqual(253);
   });
 
-  it('G2: the ninth concurrent fetch logs oauth.cimd.busy with the host only', async () => {
+  it('the ninth concurrent fetch logs oauth.cimd.busy with the host only', async () => {
     const { service, logger, fetchDoc } = make();
     const release: (() => void)[] = [];
     fetchDoc.mockImplementation(
@@ -298,7 +298,7 @@ describe('G2: refused URL client ids leave a structured warn', () => {
     await Promise.all(pending);
   });
 
-  it('G2: with the flag off nothing is logged', async () => {
+  it('with the flag off nothing is logged', async () => {
     const { service, logger } = make({ enabled: false });
     await service.resolve('https://169.254.169.254/x.json');
     expect(logger.warn).not.toHaveBeenCalled();

@@ -226,10 +226,10 @@ describe('RefreshTokenService', () => {
     );
   });
 
-  describe('refresh audience binding (F1, F1b)', () => {
-    // An OAuth refresh token must never mint a browser session (F1: that turns
+  describe('refresh audience binding', () => {
+    // An OAuth refresh token must never mint a browser session (that turns
     // a scoped agent grant into a full session with roles), and a browser
-    // refresh token must never be burned by /oauth/token (F1b: the user would
+    // refresh token must never be burned by /oauth/token (the user would
     // be logged out by someone else's failed call). Rejection must come
     // before any Redis write, so the rightful holder's token still works.
     const SESSION_PREFIX = 'auth-service:refresh:session:';
@@ -291,13 +291,13 @@ describe('RefreshTokenService', () => {
       ).toBeNull();
     });
 
-    it('browser refresh refuses an OAuth session and writes nothing (F1)', async () => {
+    it('browser refresh refuses an OAuth session and writes nothing', async () => {
       const { token, raw } = await issued('ticketing-mcp');
       serve(raw, null);
       await expectInvalid(service.rotate(token, {}, BROWSER));
     });
 
-    it('OAuth refresh refuses a browser session and writes nothing (F1b)', async () => {
+    it('OAuth refresh refuses a browser session and writes nothing', async () => {
       const { token, raw } = await issued(null);
       serve(raw, null);
       await expectInvalid(service.rotate(token, {}, OAUTH));

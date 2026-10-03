@@ -1,6 +1,6 @@
 package integration_test
 
-// consumer_reservation_integration_test.go — CP-04
+// consumer_reservation_integration_test.go
 //
 // Integration tests for the updated Kafka consumer:
 //   - orders.order.cancelled with reservationId → ReleaseReservation (GA path)

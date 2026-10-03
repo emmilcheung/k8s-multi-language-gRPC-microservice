@@ -217,7 +217,7 @@ func main() {
 	defer ticketConn.Close() //nolint:errcheck
 	ticketClient := grpcserver.NewResilientTicketClient(ticketsv1.NewTicketServiceClient(ticketConn), log)
 
-	// gRPC server — wired with real repos in CP-08.
+	// gRPC server — wired with real repos.
 	grpcSrv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, ticketClient, log)
 	grpcCtx, grpcCancel := context.WithCancel(context.Background())
 	defer grpcCancel()
@@ -288,7 +288,7 @@ func main() {
 	})
 	e.POST("/graphql", echo.WrapHandler(gqlgraph.WrapWithUserIDSignatureValidation(gqlHandler, sigValidator)))
 
-	// R-06: Use errgroup to propagate server errors back to main instead of
+	// Use errgroup to propagate server errors back to main instead of
 	// calling log.Fatal inside goroutines (which calls os.Exit, skipping all deferred cleanup).
 	eg, egCtx := errgroup.WithContext(context.Background())
 

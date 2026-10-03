@@ -13,7 +13,7 @@ import pino from 'pino';
 import path from 'path';
 import { runSqlMigrations } from './common/database/sql-migration-runner';
 
-// Standalone structured logger for the migration script (O-09).
+// Standalone structured logger for the migration script.
 // Uses the same JSON format as the main app without requiring NestJS bootstrap.
 const log = pino({ base: { service: 'payment-service' }, messageKey: 'message' });
 

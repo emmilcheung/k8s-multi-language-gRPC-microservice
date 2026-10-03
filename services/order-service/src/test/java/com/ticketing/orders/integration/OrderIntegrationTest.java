@@ -64,7 +64,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Full-stack integration test — real PostgreSQL + Kafka via Testcontainers,
  * in-process gRPC server for ticket-service stub.
  *
- * CP-05: stub now implements {@code ReserveQuota} (GA path) and
+ * stub now implements {@code ReserveQuota} (GA path) and
  * {@code ReleaseReservation} (compensation path) in addition to the legacy
  * {@code ValidateTicketAvailability}. The concurrency test uses an atomic flag
  * on the stub to simulate ticket-service returning RESOURCE_EXHAUSTED on the
@@ -129,12 +129,12 @@ class OrderIntegrationTest {
         /** Set to true after the first ReserveQuota is accepted. */
         final AtomicBoolean reservedOnce = new AtomicBoolean(false);
 
-        /** WS-F: how many ReserveQuota / ReleaseReservation calls reached ticket-service. */
+        /** how many ReserveQuota / ReleaseReservation calls reached ticket-service. */
         final AtomicInteger reserveCalls = new AtomicInteger();
         final AtomicInteger releaseCalls = new AtomicInteger();
 
         /**
-         * WS-F: when set, ReserveQuota behaves like the real ticket-service for a repeated
+         * when set, ReserveQuota behaves like the real ticket-service for a repeated
          * reservationId (idempotent success) instead of the one-shot quota gate, and every
          * caller waits at this barrier so two concurrent same-key requests are guaranteed
          * to both miss the order lookup and race into the unique index.
@@ -275,7 +275,7 @@ class OrderIntegrationTest {
         orderTicketRepository.deleteAll();
     }
 
-    // ── WS-F: Idempotency-Key on POST /api/orders (contract C-8) ─────────────
+    // Idempotency-Key on POST /api/orders ─────────────
     // Why: an MCP tool call may be retried by the host after a timeout. Without a
     // key every retry mints a fresh reservationId and buys the tickets twice.
 
@@ -295,7 +295,7 @@ class OrderIntegrationTest {
     }
 
     @Test
-    @DisplayName("F-1: same key same body returns same order with one reserve call")
+    @DisplayName("same key same body returns same order with one reserve call")
     void F_1_same_key_same_body_returns_same_order_with_one_reserve_call() throws Exception {
         stubTicketService.idempotentReserve = true;
         String body = "{ \"ticketId\": \"%s\" }".formatted(ticketId);
@@ -314,7 +314,7 @@ class OrderIntegrationTest {
     }
 
     @Test
-    @DisplayName("F-2: same key different body is rejected 422 without reserving")
+    @DisplayName("same key different body is rejected 422 without reserving")
     void F_2_same_key_different_body_is_rejected_422_without_reserving() throws Exception {
         stubTicketService.idempotentReserve = true;
         String body = "{ \"ticketId\": \"%s\", \"quantity\": 1 }".formatted(ticketId);
@@ -331,7 +331,7 @@ class OrderIntegrationTest {
     }
 
     @Test
-    @DisplayName("F-3: concurrent same key yields one order and never compensates")
+    @DisplayName("concurrent same key yields one order and never compensates")
     void F_3_concurrent_same_key_yields_one_order_and_never_compensates() throws Exception {
         stubTicketService.idempotentReserve = true;
         stubTicketService.reserveBarrier = new CyclicBarrier(2);
@@ -367,7 +367,7 @@ class OrderIntegrationTest {
     }
 
     @Test
-    @DisplayName("F-4: without header behaviour is unchanged")
+    @DisplayName("without header behaviour is unchanged")
     void F_4_without_header_behaviour_is_unchanged() throws Exception {
         stubTicketService.idempotentReserve = true;
         String body = "{ \"ticketId\": \"%s\" }".formatted(ticketId);
@@ -384,7 +384,7 @@ class OrderIntegrationTest {
     }
 
     @Test
-    @DisplayName("F-5: malformed key is 400 validation failed before any reserve")
+    @DisplayName("malformed key is 400 validation failed before any reserve")
     void F_5_malformed_key_is_400_validation_failed_before_any_reserve() throws Exception {
         stubTicketService.idempotentReserve = true;
         String body = "{ \"ticketId\": \"%s\" }".formatted(ticketId);

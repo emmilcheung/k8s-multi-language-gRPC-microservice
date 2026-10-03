@@ -43,13 +43,13 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-// CP-05: replaced Redisson distributed lock + ValidateTicketAvailability with a
+// replaced Redisson distributed lock + ValidateTicketAvailability with a
 // synchronous ReserveQuota gRPC call. Atomicity is now enforced by the inventory
 // owner (ticket-service) through the reservation ledger, not by an application-level
 // lock.  If the DB transaction fails after a successful reservation, a synchronous
 // ReleaseReservation compensation call is made immediately.
 //
-// CP-12: added createSeatedOrder() for MANUAL_SEATED and AUTO_ASSIGN_SEATED flows
+// added createSeatedOrder() for MANUAL_SEATED and AUTO_ASSIGN_SEATED flows
 // backed by VenueServiceClient RPCs.
 
 /**
@@ -64,7 +64,7 @@ import java.util.stream.Collectors;
  *   <li>Authorisation (ownership check) happens before any write.</li>
  *   <li>The transactional creation is delegated to {@link OrderTransactionService} (GA) or
  *       {@link SeatedOrderTransactionService} (seated) to avoid the Spring AOP self-invocation
- *       proxy bypass (audit finding C-01).</li>
+ *       proxy bypass.</li>
  * </ul>
  */
 @Service
@@ -155,7 +155,7 @@ public class OrderService {
     }
 
     /**
-     * C-8: as {@link #createOrder(UUID, CreateOrderRequest)}, but with an optional
+     * as {@link #createOrder(UUID, CreateOrderRequest)}, but with an optional
      * {@code Idempotency-Key}. With a key the reservationId is derived from (user, key), a
      * retry replays the existing order, and a concurrent duplicate collapses onto the winner.
      */
@@ -215,7 +215,7 @@ public class OrderService {
     // ── Create (Seated) ───────────────────────────────────────────────────────
 
     /**
-     * Create a new order using the seated reservation flow (CP-12).
+     * Create a new order using the seated reservation flow.
      *
      * <p>Supports two sub-flows:
      * <ul>
@@ -235,7 +235,7 @@ public class OrderService {
         return createSeatedOrder(userId, request, null).order();
     }
 
-    /** C-8: as {@link #createSeatedOrder(UUID, CreateOrderRequest)}, with an optional {@code Idempotency-Key}. */
+    /** as {@link #createSeatedOrder(UUID, CreateOrderRequest)}, with an optional {@code Idempotency-Key}. */
     public CreateOrderResult createSeatedOrder(UUID userId, CreateOrderRequest request, String idempotencyKey) {
         request.validate();
 
@@ -345,7 +345,7 @@ public class OrderService {
         }
     }
 
-    // ── Idempotency (C-8) ─────────────────────────────────────────────────────
+    // ── Idempotency ─────────────────────────────────────────────────────
 
     /**
      * Existing order for a derived reservationId: same fingerprint is a replay, a different

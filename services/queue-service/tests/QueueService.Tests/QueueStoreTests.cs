@@ -89,7 +89,7 @@ public class QueueStoreTests(RedisFixture fx)
         Assert.InRange(ttl!.Value.TotalSeconds, 1, 120);
     }
 
-    // SR-17. FreezeLua touches cfg + prequeue and EnqueueLateLua touches latepos +
+    // FreezeLua touches cfg + prequeue and EnqueueLateLua touches latepos +
     // late in one script. On a Redis Cluster (or ElastiCache in cluster mode) a
     // script whose keys hash to different slots is refused with CROSSSLOT, so the
     // freeze never happens and no latecomer is ever given a position: the waiting
@@ -120,7 +120,7 @@ public class QueueStoreTests(RedisFixture fx)
     [Theory]
     [InlineData("somekey", 11058)]
     [InlineData("foo{hash_tag}", 2515)]
-    [InlineData("q:E-abc:cfg", 3073)]      // the pre-SR-17 layout: cfg and prequeue
+    [InlineData("q:E-abc:cfg", 3073)]      // the old layout: cfg and prequeue
     [InlineData("q:E-abc:prequeue", 5656)] // in different slots -> CROSSSLOT
     [InlineData("q:{E-abc}:cfg", 8481)]
     [InlineData("q:{E-abc}:prequeue", 8481)]

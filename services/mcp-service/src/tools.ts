@@ -22,7 +22,7 @@ import {
 interface ToolDeps {
   upstream: Upstream;
   logger?: Pick<Logger, 'error'>;
-  /** Public web origin, for the C-9 browser handoff. */
+  /** Public web origin, for the browser handoff. */
   publicWebUrl: string;
 }
 
@@ -133,7 +133,7 @@ interface ToolDef<I extends z.ZodObject> {
   input: I;
   output: z.ZodObject;
   annotations: Record<string, boolean>;
-  /** Ticket id for the C-9 handoff when the tool can hit the waiting room. */
+  /** Ticket id for the browser handoff when the tool can hit the waiting room. */
   ticketId?: (args: z.infer<I>) => string;
   run: (args: z.infer<I>, env: Env) => Promise<Record<string, unknown>>;
 }
@@ -395,7 +395,7 @@ const TOOLS = [
   }),
 ];
 
-/** Registers the twelve C-7 tools in TOOL_SCOPES order (deterministic listing). */
+/** Registers the twelve tools in TOOL_SCOPES order (deterministic listing). */
 export function registerTools(server: McpServer, deps: ToolDeps): void {
   const byName = new Map<string, (typeof TOOLS)[number]>(
     TOOLS.map((t) => [t.name, t]),
@@ -413,7 +413,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         inputSchema: def.input,
         outputSchema: def.output,
         annotations: def.annotations,
-        // C-6: the only source of step-up 403s; handlers never throw OAuthError.
+        // the only source of step-up 403s; handlers never throw OAuthError.
         scopeChallenge: requireScope(...scopes),
       },
       async (args: Record<string, unknown>, ctx: ServerContext) => {

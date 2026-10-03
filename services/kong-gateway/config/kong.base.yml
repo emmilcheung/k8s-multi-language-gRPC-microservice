@@ -52,7 +52,7 @@ consumers:
           {{RSA_PUBLIC_KEY}}
     # Consumer-scoped rate limit — authenticated users get a higher allowance.
     # Attaching it here (on the consumer) rather than as a second global plugin
-    # avoids the duplicate-global-plugin issue in Kong OSS DB-less mode (I-19).
+    # avoids the duplicate-global-plugin issue in Kong OSS DB-less mode.
     plugins:
       - name: rate-limiting
         config:
@@ -311,7 +311,7 @@ services:
         methods: [GET]
         strip_path: false
 
-      # Public: RFC 8414 Authorization Server Metadata (C-4). No jwt plugin, so
+      # Public: RFC 8414 Authorization Server Metadata. No jwt plugin, so
       # no scope/deny guard applies. Clients discover the AS here before any token exists.
       - name: auth-as-metadata
         paths:
@@ -319,7 +319,7 @@ services:
         methods: [GET]
         strip_path: false
 
-      # Public: OAuth scope registry (C-7), read by the client's consent page to
+      # Public: OAuth scope registry, read by the client's consent page to
       # label scopes. Static, non-user-specific data; no jwt plugin, so no guard.
       - name: auth-oauth-scopes
         paths:
@@ -1065,7 +1065,7 @@ plugins:
   # routes that do not run the JWT plugin.  The jwt post-function then sets these
   # headers authoritatively on protected routes after token validation.
   # Plugin execution order: global → service → route → consumer, so this always
-  # runs first regardless of route-level plugins.  (Fixes audit finding S-02.)
+  # runs first regardless of route-level plugins.
   - name: request-transformer
     config:
       remove:
@@ -1088,7 +1088,7 @@ plugins:
   # IP-based limit for anonymous (unauthenticated) requests.
   # Authenticated consumers get a higher limit via the consumer-scoped plugin
   # on the auth-service-issuer consumer (defined above) — avoids duplicate
-  # global plugin instances that Kong OSS DB-less mode does not support (I-19).
+  # global plugin instances that Kong OSS DB-less mode does not support.
   - name: rate-limiting
     config:
       minute: {{RATE_LIMIT_ANONYMOUS_PER_MINUTE}}
@@ -1102,7 +1102,7 @@ plugins:
       hide_client_headers: false
 
   # Request size limiting — reject oversized request bodies before they reach
-  # upstream services (R-09).  Default cap of 1 MB covers all REST API payloads;
+  # upstream services.  Default cap of 1 MB covers all REST API payloads;
   # adjust per-route for any endpoint that legitimately needs larger bodies.
   - name: request-size-limiting
     config:

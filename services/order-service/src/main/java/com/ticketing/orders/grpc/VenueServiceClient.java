@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit;
  * (name "venueService"), and maps gRPC status codes to HTTP exceptions so the
  * service layer stays free of gRPC concerns.
  *
- * CP-12: supports the seated order flow — reserve held seats (manual), auto-assign
+ * supports the seated order flow — reserve held seats (manual), auto-assign
  * and reserve (auto-assign), release (compensation), and finalize (payment captured).
  */
 @Component

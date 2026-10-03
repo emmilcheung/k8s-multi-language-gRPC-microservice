@@ -17,7 +17,7 @@ const inProcessFetch = (input: string | URL, init?: RequestInit) =>
   app(new Request(input, init));
 
 describe('one endpoint serves both protocol eras', () => {
-  it('G-6: a v2 client with versionNegotiation auto lists the tool (2026-07-28 era)', async () => {
+  it('a v2 client with versionNegotiation auto lists the tool (2026-07-28 era)', async () => {
     const token = await mintToken();
     const client = new ClientV2(
       { name: 'v2-auto', version: '0' },
@@ -36,7 +36,7 @@ describe('one endpoint serves both protocol eras', () => {
     await client.close();
   });
 
-  it('G-6: a v1.29 client still lists the tool (Claude Code / connectors on 2025-11-25)', async () => {
+  it('a v1.29 client still lists the tool (Claude Code / connectors on 2025-11-25)', async () => {
     const token = await mintToken();
     const client = new ClientV1({ name: 'v1', version: '0' });
     await client.connect(

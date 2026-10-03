@@ -23,13 +23,13 @@ interface Expected {
   path: string;
   query?: Record<string, string>;
   body?: unknown;
-  /** Create calls carry a derived Idempotency-Key (C-8); nothing else does. */
+  /** Create calls carry a derived Idempotency-Key; nothing else does. */
   idempotent?: true;
 }
 interface Row {
   tool: string;
   args: Record<string, unknown>;
-  /** Scope string the token exchange must request (C-7, amended). */
+  /** Scope string the token exchange must request. */
   scope: string;
   calls: Expected[];
   /** Where the expected values come from; they are NOT read off tools.ts. */
@@ -71,7 +71,7 @@ const ROWS: Row[] = [
     ],
   },
   {
-    // R4: ticket-service has no title search, so a stale `query` argument must
+    // ticket-service has no title search, so a stale `query` argument must
     // not turn into a `search=` parameter that is silently ignored upstream.
     tool: 'search_events',
     args: { query: 'rock concerts' },
@@ -263,7 +263,7 @@ describe.each(ERAS)('upstream call contract (%s)', (era) => {
         else expect(key).toBeNull();
       });
 
-      // C-5 least privilege: one exchange, narrowed to this tool's scope(s),
+      // Least privilege: one exchange, narrowed to this tool's scope(s),
       // for the API audience (pinned literal: auth-service OAUTH_API_AUDIENCE).
       expect(h.exchanges).toHaveLength(1);
       expect(Object.fromEntries(h.exchanges[0])).toMatchObject({

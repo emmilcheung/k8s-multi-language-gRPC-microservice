@@ -4,7 +4,6 @@
  * An agent holding `tickets:read orders:read` must not reach routes outside
  * that scope, whether it sends the token as a Bearer header or as the `token`
  * cookie. Browser sessions and the anonymous GraphQL token must be unaffected.
- * Spec: F2, F11, D9, C-10.
  */
 import { test, expect } from "@playwright/test";
 import { KONG_URL, authorizeUrl, obtainOAuthAccessToken, signupViaApi } from "./_helpers/oauth";
@@ -31,14 +30,14 @@ test.describe("OAuth tokens are refused outside their scope", () => {
     ["Bearer", () => bearer(oauth.accessToken)],
     ["cookie", () => cookie(oauth.accessToken)],
   ] as const) {
-    test(`unscoped route refuses an OAuth token sent as ${how} (F11)`, async () => {
+    test(`unscoped route refuses an OAuth token sent as ${how}`, async () => {
       const res = await fetch(`${KONG_URL}/api/users/sessions`, { headers: headers() });
       expect(res.status).toBe(403);
       expect(await res.json()).toMatchObject({ error: "insufficient_scope" });
       expect(res.headers.get("www-authenticate")).toBe('Bearer error="insufficient_scope"');
     });
 
-    test(`scoped route refuses an OAuth token lacking the scope, sent as ${how} (F11 cookie bypass)`, async () => {
+    test(`scoped route refuses an OAuth token lacking the scope, sent as ${how} (cookie bypass)`, async () => {
       const res = await fetch(`${KONG_URL}/api/payments/methods`, { headers: headers() });
       expect(res.status).toBe(403);
       expect(await res.json()).toMatchObject({ error: "insufficient_scope" });
@@ -58,7 +57,7 @@ test.describe("OAuth tokens are refused outside their scope", () => {
     expect(await res.json()).toMatchObject({ error: "insufficient_scope" });
   });
 
-  test("GraphQL refuses an OAuth token (F2)", async () => {
+  test("GraphQL refuses an OAuth token", async () => {
     const res = await gql(bearer(oauth.accessToken));
     expect(res.status).toBe(403);
   });
@@ -85,7 +84,7 @@ test.describe("everything that worked before still works", () => {
 });
 
 test.describe("sessions and grants never convert into each other", () => {
-  test("an OAuth access token is not a session at /oauth/authorize (F11b)", async () => {
+  test("an OAuth access token is not a session at /oauth/authorize", async () => {
     const res = await fetch(authorizeUrl("orders:create payments:create", "x".repeat(43)), {
       redirect: "manual",
       headers: { Cookie: `token=${oauth.accessToken}` },
@@ -94,7 +93,7 @@ test.describe("sessions and grants never convert into each other", () => {
     expect(res.headers.get("location")).toContain("/auth/signin?next=");
   });
 
-  test("an OAuth refresh token cannot mint a browser session, and survives the attempt (F1)", async () => {
+  test("an OAuth refresh token cannot mint a browser session, and survives the attempt", async () => {
     const grant = await obtainOAuthAccessToken(session.accessToken);
     const browser = await fetch(`${KONG_URL}/api/auth/refresh`, {
       method: "POST",
@@ -110,7 +109,7 @@ test.describe("sessions and grants never convert into each other", () => {
     expect(agent.status).toBe(200);
   });
 
-  test("a browser refresh token is refused at /oauth/token in RFC shape, and the browser stays signed in (F1b, F9)", async () => {
+  test("a browser refresh token is refused at /oauth/token in RFC shape, and the browser stays signed in", async () => {
     const user = await signupViaApi();
     const agent = await fetch(`${KONG_URL}/oauth/token`, {
       method: "POST",

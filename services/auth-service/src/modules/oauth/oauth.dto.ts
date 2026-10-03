@@ -95,7 +95,7 @@ export class TokenBody {
   @IsOptional()
   resource?: string;
 
-  // token-exchange grant (RFC 8693, C-5)
+  // token-exchange grant (RFC 8693)
   @IsString()
   @IsOptional()
   subject_token?: string;
@@ -135,7 +135,7 @@ export interface TokenResponse {
   refresh_token: string;
 }
 
-/** Response shape for the token-exchange grant: no refresh token (C-5). */
+/** Response shape for the token-exchange grant: no refresh token. */
 export interface TokenExchangeResponse {
   access_token: string;
   issued_token_type: 'urn:ietf:params:oauth:token-type:access_token';

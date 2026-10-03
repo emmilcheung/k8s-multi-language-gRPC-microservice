@@ -7,7 +7,7 @@ import { RefreshTokenService } from '../auth/refresh-token.service';
 function makeService() {
   const authService = {
     // An OAuth access token verifies as a JWT, so a session check that only
-    // calls verifyAccessToken would accept it (F11b). Task 2 relies on this.
+    // calls verifyAccessToken would accept it. Task 2 relies on this.
     verifyAccessToken: vi.fn().mockResolvedValue({
       sub: 'user-1',
       email: 'user@example.com',
@@ -63,7 +63,7 @@ function makeService() {
 }
 
 describe('OAuthService refresh_token grant', () => {
-  it('only lets RefreshTokenService rotate this client’s session, and answers invalid_grant (F1b)', async () => {
+  it('only lets RefreshTokenService rotate this client’s session, and answers invalid_grant', async () => {
     const { service, refreshTokenService, codeStore } = makeService();
     const req = { headers: {}, ip: '203.0.113.9' } as unknown as Request;
 
@@ -91,7 +91,7 @@ describe('OAuthService refresh_token grant', () => {
   });
 });
 
-describe('OAuthService authorize session check (F11b)', () => {
+describe('OAuthService authorize session check', () => {
   it('sends a request whose cookie holds an OAuth access token to sign-in instead of consent', async () => {
     const { service, authService, consentStore } = makeService();
     const req = {

@@ -88,7 +88,7 @@ export class PaymentsService {
    * Returns true when STRIPE_SECRET_KEY contains 'test_mock'.
    *
    * Handles both 'test_mock' (bare) and 'sk_test_mock' (with prefix) — fixes
-   * audit finding C-06 where the bare equality check missed the sk_ prefix variant
+   * a bug where the bare equality check missed the sk_ prefix variant
    * present in local dev docker-compose.
    */
   private get isMockMode(): boolean {
@@ -376,7 +376,7 @@ export class PaymentsService {
             paymentId: payment.id,
           },
         },
-        { idempotencyKey: order.orderId }, // prevents double-charge on retry (fixes R-12)
+        { idempotencyKey: order.orderId }, // prevents double-charge on retry
       );
 
       return this.resolveStripeIntentOutcome(payment, intent);

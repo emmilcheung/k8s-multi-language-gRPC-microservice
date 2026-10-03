@@ -9,8 +9,8 @@ import (
 )
 
 // VenueService provides business logic for the venue-service.
-// CP-07 covers only Kafka event handling (release/finalize seated reservations).
-// Full seat hold and reservation logic arrives in CP-09/CP-10.
+// This service covers only Kafka event handling (release/finalize seated reservations).
+// Seat hold and reservation logic lives in the gRPC server.
 type VenueService struct {
 	reservationRepo repository.ReservationRepository
 	sectionRepo     repository.SectionRepository

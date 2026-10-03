@@ -59,12 +59,12 @@ type TicketEvent struct {
 
 // Ticket is the domain model stored in MongoDB.
 //
-// Quota fields were added as part of the N-seat quota enhancement (CP-02).
+// Quota fields were added as part of the N-seat quota enhancement.
 // The Price field migrates from float64 to decimal string to avoid precision drift
 // on purchase paths. The OrderID field is kept for backward compatibility during
 // rollout but is no longer the primary reservation mechanism.
 //
-// SeatingPlanID (CP-13): when non-empty the ticket is a "seated" ticket linked
+// SeatingPlanID: when non-empty the ticket is a "seated" ticket linked
 // to a venue-service seating plan. Seated tickets bypass the GA quota path —
 // inventory is managed by the venue-service seat reservation instead.
 //
@@ -80,7 +80,7 @@ type Ticket struct {
 	Price         string              `bson:"price"` // decimal string; migrated from float64
 	UserID        string              `bson:"userId"`
 	OrderID       string              `bson:"orderId,omitempty"`       // deprecated: kept for backward compat during migration
-	SeatingPlanID string              `bson:"seatingPlanId,omitempty"` // CP-13: venue seating plan UUID; empty = GA ticket
+	SeatingPlanID string              `bson:"seatingPlanId,omitempty"` // Venue seating plan UUID; empty = GA ticket
 	TicketType    string              `bson:"ticket_type,omitempty"`   // WS3: "GA" | "SEATED_MANUAL" | "SEATED_AUTO"
 	Category      string              `bson:"category,omitempty"`      // event category; defaults to OTHER
 	Quota         int                 `bson:"quota"`                   // total available inventory (GA tickets only)
@@ -241,7 +241,7 @@ var ErrReservationNotFound = errors.New("reservation not found")
 var ErrReservationConflict = errors.New("reservation state conflict")
 
 // ErrSeatedTicket is returned when a GA quota operation is attempted on a seated ticket.
-// Seated tickets are managed exclusively by the venue-service reservation path (CP-13).
+// Seated tickets are managed exclusively by the venue-service reservation path.
 var ErrSeatedTicket = errors.New("ticket is seated — use venue-service reservation path")
 
 // ErrSeatingPlanAlreadyAttached is returned when a seating plan is attached to a ticket
@@ -292,7 +292,7 @@ type TicketRepository interface {
 	// ReleaseTicket clears the orderId on a ticket (idempotent).
 	ReleaseTicket(ctx context.Context, ticketID string) error
 
-	// --- Quota-based reservation methods (CP-02) ---
+	// --- Quota-based reservation methods ---
 
 	// CreateReservation atomically decrements the ticket's available counter and
 	// writes a durable TicketReservation record. Returns ErrInsufficientQuota
@@ -443,7 +443,7 @@ func ensureCollectionSchema(ctx context.Context, db *mongo.Database, coll *mongo
 					{Key: "minimum", Value: 1},
 				}},
 				{Key: "version", Value: bson.D{{Key: "bsonType", Value: "int"}}},
-				// seatingPlanId is optional — present only for seated tickets (CP-13).
+				// seatingPlanId is optional — present only for seated tickets.
 				{Key: "seatingPlanId", Value: bson.D{{Key: "bsonType", Value: "string"}}},
 			}},
 		}},
@@ -560,7 +560,7 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection) error {
 			Keys:    bson.D{{Key: "orderId", Value: 1}},
 			Options: options.Index().SetName("idx_orderId").SetSparse(true),
 		},
-		// Sparse index for seating plan lookups — only present on seated tickets (CP-13).
+		// Sparse index for seating plan lookups — only present on seated tickets.
 		{
 			Keys:    bson.D{{Key: "seatingPlanId", Value: 1}},
 			Options: options.Index().SetName("idx_seatingPlanId").SetSparse(true),
@@ -846,7 +846,7 @@ func (r *MongoTicketRepository) Update(ctx context.Context, t *Ticket) error {
 		return fmt.Errorf("update ticket: %w", err)
 	}
 	if result.MatchedCount == 0 {
-		// Distinguish not-found from a concurrent version conflict (C-04):
+		// Distinguish not-found from a concurrent version conflict:
 		// do a follow-up find to check whether the document exists.
 		var existing Ticket
 		findErr := r.collection.FindOne(ctx, bson.M{"_id": t.ID}).Decode(&existing)

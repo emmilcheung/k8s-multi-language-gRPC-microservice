@@ -1,9 +1,9 @@
 /**
- * kong-queue-gate.spec.ts: the waiting room covers every way to reserve (D4).
+ * kong-queue-gate.spec.ts: the waiting room covers every way to reserve.
  *
  * When armed, REST order creation (the path agents use) needs a qq_pass just
- * like the GraphQL reserve mutation (F3), and a genuine pass must be admitted
- * rather than crash the gateway (F12). When disarmed, the gate must be inert.
+ * like the GraphQL reserve mutation, and a genuine pass must be admitted
+ * rather than crash the gateway. When disarmed, the gate must be inert.
  * The armed block runs only with E2E_KONG_QUEUE_ARMED=1 against a gateway
  * rendered with QUEUE_GATE_ARMED: "true".
  */
@@ -47,7 +47,7 @@ test.describe("disarmed gate", () => {
 test.describe("armed gate", () => {
   test.skip(!ARMED, "set E2E_KONG_QUEUE_ARMED=1 against an armed gateway");
 
-  test("REST order creation without a pass is sent to the waiting room (F3)", async () => {
+  test("REST order creation without a pass is sent to the waiting room", async () => {
     const res = await createOrder();
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ message: "waiting room: pass required" });
@@ -59,13 +59,13 @@ test.describe("armed gate", () => {
     expect(await res.json()).toEqual({ message: "waiting room: invalid pass" });
   });
 
-  test("a genuine pass is admitted instead of crashing the gateway (F12)", async () => {
+  test("a genuine pass is admitted instead of crashing the gateway", async () => {
     const res = await createOrder(pass());
     expect(res.status).not.toBe(403);
     expect(res.status).toBeLessThan(500);
   });
 
-  test("GraphQL reserve with a genuine pass is admitted (F12)", async () => {
+  test("GraphQL reserve with a genuine pass is admitted", async () => {
     const res = await fetch(`${KONG_URL}/graphql`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: `token=${session}; qq_pass=${pass()}` },

@@ -1,21 +1,21 @@
 -- jwt-scope.lua
--- OAuth scope gate for routes that admit OAuth access tokens (D9, C-10).
+-- OAuth scope gate for routes that admit OAuth access tokens.
 --
 -- Runs as the FIRST post-function access entry, after the jwt plugin has
 -- verified the token, and reads that verified token from
 -- kong.ctx.shared.authenticated_jwt_token. A token sent as the `token` cookie
--- is therefore checked exactly like an Authorization: Bearer one (F11).
+-- is therefore checked exactly like an Authorization: Bearer one.
 --
 --   no `scope` and no `client_id` -> browser session / anonymous token -> pass
 --   otherwise                     -> OAuth access token -> must hold
 --                                    SCOPE_PLACEHOLDER, else 403. A `client_id`
 --                                    token without `scope` is refused.
 --
--- REST audience rule (C-10): an OAuth token (has `client_id`) that carries an
+-- REST audience rule: an OAuth token (has `client_id`) that carries an
 -- `aud` not containing API_AUDIENCE_PLACEHOLDER is refused 401 before the scope
 -- check. This is what keeps an MCP-audience token (aud <origin>/mcp) out of REST
 -- routes; only the exchanged API-audience token passes. A token with no `aud` is
--- tolerated until WS-N makes `aud` mandatory, and each one that passes is logged
+-- tolerated until `aud` is made mandatory, and each one that passes is logged
 -- at notice level. Browser tokens have no client_id and are never subject to it.
 --
 -- Why no require "cjson": Kong's untrusted Lua sandbox blocks require() (only

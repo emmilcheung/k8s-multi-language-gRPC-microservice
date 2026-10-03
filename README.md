@@ -299,7 +299,7 @@ Java (order-service) generates stubs at Maven build time via the `protobuf-maven
 │       └── environments/{dev,staging,prod}/
 │
 ├── packages/
-│   └── ticketing-mcp-server/       legacy stdio MCP server (deprecated, retirement planned: WS-N)
+│   └── ticketing-mcp-server/       legacy stdio MCP server (deprecated, retirement planned)
 ├── buf.yaml                        buf lint + breaking-change config
 ├── buf.gen.yaml                    code generation config (buf generate)
 ├── docker-compose.yml              all services + infra for local dev (no K8s)

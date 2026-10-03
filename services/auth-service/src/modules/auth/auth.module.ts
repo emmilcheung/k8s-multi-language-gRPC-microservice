@@ -20,7 +20,7 @@ export function buildJwtOptions(config: ConfigService): JwtModuleOptions {
   );
   // Derive the public key from the private key so JwtService can both
   // sign (privateKey) and verify (publicKey) tokens in the same module.
-  // This is needed for the defense-in-depth verification in currentUser (S-03).
+  // This is needed for the defense-in-depth verification in currentUser.
   const publicKey = createPublicKey(privateKey)
     .export({ type: 'spki', format: 'pem' })
     .toString();
@@ -34,7 +34,7 @@ export function buildJwtOptions(config: ConfigService): JwtModuleOptions {
     },
     verifyOptions: {
       algorithms: ['RS256'],
-      // OAuth tokens carry OAUTH_ISSUER once WS-K flips OAUTH_ISSUER_ENABLED (D3).
+      // OAuth tokens carry OAUTH_ISSUER once the rollout flips OAUTH_ISSUER_ENABLED.
       issuer: ['auth-service', readOAuthConfig(config).issuer],
     },
   };

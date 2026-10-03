@@ -43,11 +43,11 @@ variable "node_desired_size" {
   default = 3
 }
 
-# ── E2 / SR-09 · Karpenter ────────────────────────────────────────────────────
+# Karpenter ────────────────────────────────────────────────────
 
 variable "karpenter_version" {
   description = <<-EOT
-    Karpenter chart version. Pinned, not "latest" — repo rule I-04, and a
+    Karpenter chart version. Pinned, never "latest", and a
     controller that silently upgrades itself is a controller that can start
     terminating nodes differently after an unrelated apply. Check the version
     against the cluster version in Karpenter's compatibility matrix before
@@ -61,7 +61,7 @@ variable "karpenter_capacity_types" {
   description = <<-EOT
     Purchase options Karpenter may use. On-demand only by default: spot
     reclaims give two minutes' notice, and while venue-service now drains its
-    SSE streams gracefully (E5) the rest of the platform has not been tested
+    SSE streams gracefully the rest of the platform has not been tested
     against involuntary node loss. Adding "spot" is a cost decision that wants
     a soak behind it, not a default.
   EOT

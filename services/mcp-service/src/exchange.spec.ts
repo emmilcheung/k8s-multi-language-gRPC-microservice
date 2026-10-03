@@ -38,8 +38,8 @@ function setup(expiresIn = 300) {
   };
 }
 
-describe('token exchange client (C-5)', () => {
-  it('R10: client id and secret are form-urlencoded before Basic encoding, so auth-service (RFC 6749 2.3.1) recovers them', async () => {
+describe('token exchange client', () => {
+  it('client id and secret are form-urlencoded before Basic encoding, so auth-service (RFC 6749 2.3.1) recovers them', async () => {
     const secret = 'a+b/c=d%e:f g';
     const calls: Headers[] = [];
     const exchange = createTokenExchange({
@@ -67,7 +67,7 @@ describe('token exchange client (C-5)', () => {
     expect(decode(raw.slice(i + 1))).toBe(secret);
   });
 
-  it('J-5: sends the C-5 request shape (Basic client auth, token-exchange grant, API resource, narrow scope)', async () => {
+  it('sends the RFC 8693 request shape (Basic client auth, token-exchange grant, API resource, narrow scope)', async () => {
     const { exchange, calls, nowSeconds } = setup();
     await exchange('mcp-jwt', nowSeconds() + 900, 'orders:create');
     const { headers, body } = calls[0];
@@ -86,7 +86,7 @@ describe('token exchange client (C-5)', () => {
     });
   });
 
-  it('J-5: caches per sha256(token)+scope, so a token or scope change never reuses another grant', async () => {
+  it('caches per sha256(token)+scope, so a token or scope change never reuses another grant', async () => {
     const { exchange, calls, nowSeconds } = setup();
     const exp = nowSeconds() + 900;
     const a = await exchange('tok-a', exp, 'orders:read');
@@ -97,7 +97,7 @@ describe('token exchange client (C-5)', () => {
     expect(calls).toHaveLength(3);
   });
 
-  it('J-5: refreshes 30 s before the exchanged token expires', async () => {
+  it('refreshes 30 s before the exchanged token expires', async () => {
     const { exchange, calls, advance, nowSeconds } = setup(50);
     const exp = nowSeconds() + 3600;
     await exchange('tok', exp, 'orders:read');
@@ -121,7 +121,7 @@ describe('token exchange client (C-5)', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('J-5: never caches past the subject token expiry minus 30 s', async () => {
+  it('never caches past the subject token expiry minus 30 s', async () => {
     const { exchange, calls, advance, nowSeconds } = setup(300);
     const exp = nowSeconds() + 80; // subject dies before the 300 s API token
     await exchange('tok', exp, 'orders:read');
@@ -133,7 +133,7 @@ describe('token exchange client (C-5)', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('J-5: the cache is bounded (LRU), so many distinct tokens cannot grow memory without limit', async () => {
+  it('the cache is bounded (LRU), so many distinct tokens cannot grow memory without limit', async () => {
     const { exchange, calls, nowSeconds } = setup();
     const exp = nowSeconds() + 900;
     await exchange('t1', exp, 's');
@@ -147,7 +147,7 @@ describe('token exchange client (C-5)', () => {
     expect(calls).toHaveLength(4);
   });
 
-  it('J-5: a failed exchange is not cached and its response body never reaches the error', async () => {
+  it('a failed exchange is not cached and its response body never reaches the error', async () => {
     let n = 0;
     const exchange = createTokenExchange({
       url: URL_,
@@ -174,7 +174,7 @@ describe('token exchange client (C-5)', () => {
     expect(await exchange('tok', undefined, 's')).toBe('ok');
   });
 
-  it('R5: a hung exchange endpoint times out into a status-less failure instead of hanging every tool call', async () => {
+  it('a hung exchange endpoint times out into a status-less failure instead of hanging every tool call', async () => {
     const exchange = createTokenExchange({
       url: URL_,
       clientId: 'mcp-service',
@@ -193,7 +193,7 @@ describe('token exchange client (C-5)', () => {
     );
   });
 
-  it('R5: only the RFC 6749 error code survives from a rejection body, and only if it looks like a code', async () => {
+  it('only the RFC 6749 error code survives from a rejection body, and only if it looks like a code', async () => {
     const reject = (body: unknown) =>
       createTokenExchange({
         url: URL_,
@@ -211,7 +211,7 @@ describe('token exchange client (C-5)', () => {
     ).rejects.toMatchObject({ status: 400, oauthError: undefined });
   });
 
-  it('R12: an exchange whose body stalls after the headers fails as an ExchangeError, not a raw abort', async () => {
+  it('an exchange whose body stalls after the headers fails as an ExchangeError, not a raw abort', async () => {
     const exchange = createTokenExchange({
       url: URL_,
       clientId: 'c',

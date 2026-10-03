@@ -15,14 +15,14 @@ const withCode = (code: string): Error =>
   Object.assign(new Error('boom'), { code });
 
 describe('verifier hardening (Wave 2 review minors)', () => {
-  it('J-7: a token that expired a few seconds ago is still accepted, so small clock skew between pods does not log users out', async () => {
+  it('a token that expired a few seconds ago is still accepted, so small clock skew between pods does not log users out', async () => {
     const token = await mintToken({ expiresIn: '-5s' });
     await expect(verifier().verifyAccessToken(token)).resolves.toMatchObject({
       clientId: 'test-client',
     });
   });
 
-  it('J-7: tolerance is small: a token expired a minute ago is rejected', async () => {
+  it('tolerance is small: a token expired a minute ago is rejected', async () => {
     const token = await mintToken({ expiresIn: '-1m' });
     await expect(verifier().verifyAccessToken(token)).rejects.toBeInstanceOf(
       OAuthError,
@@ -36,7 +36,7 @@ describe('verifier hardening (Wave 2 review minors)', () => {
     );
   });
 
-  it('J-7: a jose defect recognised only by err.code (e.g. a second jose copy breaks instanceof) is still a 401-class token error', async () => {
+  it('a jose defect recognised only by err.code (e.g. a second jose copy breaks instanceof) is still a 401-class token error', async () => {
     const jwks: JWTVerifyGetKey = () =>
       Promise.reject(withCode('ERR_JWKS_NO_MATCHING_KEY'));
     await expect(
@@ -44,7 +44,7 @@ describe('verifier hardening (Wave 2 review minors)', () => {
     ).rejects.toBeInstanceOf(OAuthError);
   });
 
-  it('J-7: a JWKS infrastructure code (timeout) is NOT a token defect: it must surface as a server error', async () => {
+  it('a JWKS infrastructure code (timeout) is NOT a token defect: it must surface as a server error', async () => {
     const jwks: JWTVerifyGetKey = () =>
       Promise.reject(withCode('ERR_JWKS_TIMEOUT'));
     const err = await verifier(jwks)

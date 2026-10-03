@@ -153,7 +153,7 @@ func (s *TicketGrpcServer) ReserveQuota(ctx context.Context, req *v1.ReserveQuot
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 
-	// CP-13: seated tickets must not be reserved via the GA quota path.
+	// seated tickets must not be reserved via the GA quota path.
 	// Callers must use the venue-service seated reservation endpoint instead.
 	if ticket.SeatingPlanID != "" {
 		s.log.Info("grpc ReserveQuota: rejected for seated ticket",
@@ -351,7 +351,7 @@ func (s *TicketGrpcServer) FinalizeReservation(ctx context.Context, req *v1.Fina
 // Start binds and starts the gRPC server on the given address. It blocks until
 // the context is cancelled, then performs a graceful stop.
 //
-// Interceptors and handlers applied (R-08, O-07):
+// Interceptors and handlers applied:
 //   - otelgrpc.NewServerHandler: propagates W3C traceparent from gRPC metadata
 //     and creates server spans — makes every RPC part of the distributed trace.
 //   - recovery: catches panics in handlers, logs a stack trace, returns INTERNAL to client.
@@ -418,7 +418,7 @@ func Start(ctx context.Context, addr string, srv *TicketGrpcServer, log *zap.Log
 
 	grpcServer := grpc.NewServer(
 		// OTel trace propagation: extracts W3C traceparent from incoming gRPC
-		// metadata and starts a server span for every RPC (O-07).
+		// metadata and starts a server span for every RPC.
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainUnaryInterceptor(
 			// Logging first so we always capture timing even if recovery fires

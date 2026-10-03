@@ -21,8 +21,8 @@ export interface OAuthErrorBody {
 
 /**
  * RFC 6749 §5.2 / RFC 7009 §2.2.1 errors for /oauth/token and /oauth/revoke
- * (spec D8). Every 4xx becomes 400 {error, error_description} except
- * Basic-auth invalid_client, which stays 401 (C-5); anything else
+ *. Every 4xx becomes 400 {error, error_description} except
+ * Basic-auth invalid_client, which stays 401; anything else
  * is a 500 server_error that leaks nothing. The rest of auth-service keeps the
  * docs/03 {error:{code,message}} shape via GlobalExceptionFilter.
  */
