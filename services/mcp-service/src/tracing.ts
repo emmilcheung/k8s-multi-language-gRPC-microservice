@@ -32,8 +32,5 @@ const sdk = new NodeSDK({
 
 sdk.start();
 
-process.on('SIGTERM', () => {
-  sdk
-    .shutdown()
-    .catch((err: unknown) => console.error('OTel shutdown error', err));
-});
+/** Called by main's single SIGTERM handler, after the server has drained. */
+export const shutdownTracing = (): Promise<void> => sdk.shutdown();
