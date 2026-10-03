@@ -125,6 +125,17 @@ public class OrderService {
         }
     }
 
+    /**
+     * A keyed create failed and no winning order exists, so the reservation stays held until
+     * the expiry sweep (see keyedWinner). Counting it makes a burst of order-DB failures
+     * during an on-sale visible as stranded inventory rather than apparent sell-outs.
+     */
+    private void keyedFailureUncompensated(String flow, UUID reservationId) {
+        log.warn("Keyed create failed with no winning order — reservation {} (flow={}) stays held until the expiry sweep",
+                reservationId, flow);
+        meterRegistry.counter("order.keyed.uncompensated", "flow", flow).increment();
+    }
+
     // ── Create (GA) ───────────────────────────────────────────────────────────
 
     /**
@@ -189,6 +200,7 @@ public class OrderService {
                 if (winner.isPresent()) {
                     return winner.get();
                 }
+                keyedFailureUncompensated("ga", resId);
                 throw e; // keyed requests never compensate, see keyedWinner
             }
             // Compensation: release the reservation so inventory is returned immediately.
@@ -288,6 +300,7 @@ public class OrderService {
                     if (winner.isPresent()) {
                         return winner.get();
                     }
+                    keyedFailureUncompensated("seated_manual", resId);
                     throw e; // keyed requests never compensate, see keyedWinner
                 }
                 log.error("Seated order TX failed after ReserveHeldSeats — compensating "
@@ -321,6 +334,7 @@ public class OrderService {
                 if (winner.isPresent()) {
                     return winner.get();
                 }
+                keyedFailureUncompensated("seated_auto", resId);
                 throw e; // keyed requests never compensate, see keyedWinner
             }
             log.error("Seated order TX failed after AutoAssignAndReserve — compensating "

@@ -787,6 +787,9 @@ class OrderServiceTest {
                 .hasMessageContaining("db write failed");
 
         verify(ticketServiceClient, never()).releaseReservation(any(UUID.class), anyString());
+        assertThat(meterRegistry.counter("order.keyed.uncompensated", "flow", "ga").count())
+                .as("a stranded keyed reservation must be countable so it can be alerted on")
+                .isEqualTo(1.0);
     }
 
     @Test
@@ -803,6 +806,9 @@ class OrderServiceTest {
 
         assertThat(result.replayed()).isTrue();
         verify(ticketServiceClient, never()).releaseReservation(any(UUID.class), anyString());
+        assertThat(meterRegistry.counter("order.keyed.uncompensated", "flow", "ga").count())
+                .as("a replayed winner strands nothing")
+                .isZero();
     }
 
     @Test
@@ -848,6 +854,8 @@ class OrderServiceTest {
                 .hasMessageContaining("db exploded");
 
         verify(venueServiceClient, never()).releaseSeatReservation(any(), anyString());
+        assertThat(meterRegistry.counter("order.keyed.uncompensated", "flow", "seated_manual").count())
+                .isEqualTo(1.0);
     }
 
     @Test
@@ -900,6 +908,8 @@ class OrderServiceTest {
                 .hasMessageContaining("db exploded");
 
         verify(venueServiceClient, never()).releaseSeatReservation(any(), anyString());
+        assertThat(meterRegistry.counter("order.keyed.uncompensated", "flow", "seated_auto").count())
+                .isEqualTo(1.0);
     }
 
     @Test
