@@ -5,7 +5,7 @@ const args = { ticketId: 't-1', quantity: 2 };
 // Start of an arbitrary window, so offsets below stay inside or leave it exactly.
 const T0 = 1_000 * IDEMPOTENCY_WINDOW_MS;
 
-describe('deriveIdempotencyKey (F-01)', () => {
+describe('deriveIdempotencyKey', () => {
   it('is stable inside one window, so an agent retry replays the first order', () => {
     const first = deriveIdempotencyKey('u', 'create_order', args, T0);
     const retry = deriveIdempotencyKey(

@@ -3,6 +3,12 @@ import { createHash } from 'node:crypto';
 /** Refresh this long before expiry so a token never dies in flight (C-5). */
 const SAFETY_WINDOW_MS = 30_000;
 const DEFAULT_MAX_ENTRIES = 1000;
+/**
+ * Longest an exchanged token is reused without asking auth-service again. Every
+ * exchange re-checks the subject token, so this is how long a disconnected app can
+ * keep acting after the user revokes it, however long the tokens themselves live.
+ */
+const MAX_CACHE_MS = 60_000;
 
 export class ExchangeError extends Error {
   /** HTTP status of the failed exchange; `undefined` for a network failure. */
@@ -45,7 +51,7 @@ export type TokenExchange = (
  * API-audience token scoped to the one scope a tool needs; the MCP token itself
  * is never forwarded upstream. Results are cached in-process in a bounded LRU
  * keyed by sha256(subject token) + scope, valid until
- * min(exchanged exp, subject exp) - 30 s.
+ * min(exchanged exp, subject exp) - 30 s, and never longer than 60 s.
  */
 export function createTokenExchange(opts: ExchangeOptions): TokenExchange {
   const doFetch = opts.fetch ?? fetch;
@@ -117,7 +123,7 @@ export function createTokenExchange(opts: ExchangeOptions): TokenExchange {
     }
     cache.set(key, {
       token: body.access_token,
-      validUntil: expiresAt - SAFETY_WINDOW_MS,
+      validUntil: Math.min(expiresAt - SAFETY_WINDOW_MS, now() + MAX_CACHE_MS),
     });
     if (cache.size > maxEntries) {
       cache.delete(cache.keys().next().value as string);

@@ -276,7 +276,7 @@ describe.each(ERAS)('upstream call contract (%s)', (era) => {
   );
 });
 
-describe('exchange audience (F-08)', () => {
+describe('exchange audience', () => {
   const exchangeResource = async (config?: { API_AUDIENCE?: string }) => {
     const h = harness(undefined, { config });
     const client = await connect(

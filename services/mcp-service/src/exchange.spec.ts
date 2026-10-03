@@ -98,10 +98,10 @@ describe('token exchange client (C-5)', () => {
   });
 
   it('J-5: refreshes 30 s before the exchanged token expires', async () => {
-    const { exchange, calls, advance, nowSeconds } = setup(300);
+    const { exchange, calls, advance, nowSeconds } = setup(50);
     const exp = nowSeconds() + 3600;
     await exchange('tok', exp, 'orders:read');
-    advance(269); // 31 s of life left: still served from cache
+    advance(19); // 31 s of life left: still served from cache
     await exchange('tok', exp, 'orders:read');
     expect(calls).toHaveLength(1);
     advance(2); // 29 s left: inside the safety window, must refresh
@@ -109,11 +109,23 @@ describe('token exchange client (C-5)', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('asks auth-service again within a minute even when the tokens live longer, so a disconnected app is cut off quickly', async () => {
+    const { exchange, calls, advance, nowSeconds } = setup(300);
+    const exp = nowSeconds() + 900;
+    await exchange('tok', exp, 'orders:create');
+    advance(59);
+    await exchange('tok', exp, 'orders:create');
+    expect(calls).toHaveLength(1);
+    advance(2);
+    await exchange('tok', exp, 'orders:create');
+    expect(calls).toHaveLength(2);
+  });
+
   it('J-5: never caches past the subject token expiry minus 30 s', async () => {
     const { exchange, calls, advance, nowSeconds } = setup(300);
-    const exp = nowSeconds() + 100; // subject dies before the 300 s API token
+    const exp = nowSeconds() + 80; // subject dies before the 300 s API token
     await exchange('tok', exp, 'orders:read');
-    advance(69);
+    advance(49);
     await exchange('tok', exp, 'orders:read');
     expect(calls).toHaveLength(1);
     advance(2);

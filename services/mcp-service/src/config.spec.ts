@@ -27,7 +27,7 @@ describe('config', () => {
     expect(loadConfig(valid).TOKEN_EXCHANGE_CLIENT_ID).toBe('mcp-service');
   });
 
-  it('F-08: API_AUDIENCE is optional but must be a URL when set', () => {
+  it('API_AUDIENCE is optional but must be a URL when set', () => {
     expect(loadConfig(valid).API_AUDIENCE).toBeUndefined();
     expect(
       loadConfig({ ...valid, API_AUDIENCE: 'http://localhost:8000/api' })
