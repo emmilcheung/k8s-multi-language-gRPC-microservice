@@ -83,8 +83,8 @@ export function createApp({
       url: config.TOKEN_EXCHANGE_URL,
       clientId: config.TOKEN_EXCHANGE_CLIENT_ID,
       clientSecret: config.TOKEN_EXCHANGE_CLIENT_SECRET,
-      // C-5: the API audience is `<origin>/api`, as auth-service derives it.
-      resource: `${resource.origin}/api`,
+      // C-5: the API audience, as auth-service derives it (`<origin>/api`).
+      resource: config.API_AUDIENCE ?? `${resource.origin}/api`,
       fetch: outboundFetch,
     }),
     fetch: outboundFetch,

@@ -14,6 +14,11 @@ const schema = z.object({
   // detected at startup; auth-service would answer `invalid_target`, which the
   // tools report as an operator error. Pinned in upstream-contract.spec.ts.
   MCP_RESOURCE: url,
+  // Audience of the token minted by the exchange; must equal auth-service's
+  // OAUTH_API_AUDIENCE. Optional: unset, it is derived from MCP_RESOURCE as
+  // described above. Helm sets it from the same publicOrigin as auth-service, so
+  // the two cannot drift and the derivation quirks above stop mattering.
+  API_AUDIENCE: url.optional(),
   // Authorization Server issuer; the required `iss` of every token.
   OAUTH_ISSUER: url,
   // In-cluster JWKS endpoint used to verify signatures.

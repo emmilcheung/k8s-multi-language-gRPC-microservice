@@ -181,6 +181,8 @@ export interface HarnessOptions {
   /** Replaces the token-exchange endpoint's reply. */
   exchange?: () => Response | Promise<Response>;
   logger?: Pick<Logger, 'warn' | 'error'>;
+  /** Overrides individual config values (e.g. API_AUDIENCE). */
+  config?: Partial<Config>;
 }
 
 export function harness(
@@ -217,7 +219,7 @@ export function harness(
     return Promise.resolve(respond(call));
   };
   const app = createApp({
-    config: testConfig,
+    config: { ...testConfig, ...opts.config },
     jwks: stubJwks,
     logger: opts.logger,
     fetch: stubFetch,

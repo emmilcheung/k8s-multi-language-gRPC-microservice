@@ -275,3 +275,27 @@ describe.each(ERAS)('upstream call contract (%s)', (era) => {
     },
   );
 });
+
+describe('exchange audience (F-08)', () => {
+  const exchangeResource = async (config?: { API_AUDIENCE?: string }) => {
+    const h = harness(undefined, { config });
+    const client = await connect(
+      ERAS[1],
+      await mintToken({ scope: 'orders:read' }),
+      h.viaApp,
+    );
+    await client.callTool({ name: 'list_my_orders', arguments: {} });
+    await client.close();
+    return h.exchanges[0]?.get('resource');
+  };
+
+  it('uses the explicit API_AUDIENCE, so it matches auth-service even where deriving from MCP_RESOURCE would not', async () => {
+    expect(
+      await exchangeResource({ API_AUDIENCE: 'https://shop.example.com/api' }),
+    ).toBe('https://shop.example.com/api');
+  });
+
+  it('falls back to <MCP_RESOURCE origin>/api when API_AUDIENCE is unset', async () => {
+    expect(await exchangeResource()).toBe('http://localhost:8000/api');
+  });
+});

@@ -27,6 +27,17 @@ describe('config', () => {
     expect(loadConfig(valid).TOKEN_EXCHANGE_CLIENT_ID).toBe('mcp-service');
   });
 
+  it('F-08: API_AUDIENCE is optional but must be a URL when set', () => {
+    expect(loadConfig(valid).API_AUDIENCE).toBeUndefined();
+    expect(
+      loadConfig({ ...valid, API_AUDIENCE: 'http://localhost:8000/api' })
+        .API_AUDIENCE,
+    ).toBe('http://localhost:8000/api');
+    expect(() => loadConfig({ ...valid, API_AUDIENCE: 'nope' })).toThrow(
+      /API_AUDIENCE/,
+    );
+  });
+
   it('rejects a non-URL issuer so a typo cannot silently disable the iss check', () => {
     expect(() => loadConfig({ ...valid, OAUTH_ISSUER: 'not a url' })).toThrow(
       /OAUTH_ISSUER/,
