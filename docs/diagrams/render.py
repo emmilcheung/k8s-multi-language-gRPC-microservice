@@ -1,132 +1,126 @@
 #!/usr/bin/env python3
-"""Render helper for the v2 diagrams.
+"""Render helper for the architecture diagrams.
 
-  1. Re-runs every NN-*.py drawing script (AWS icons, awsdiagram.py) to refresh the SVG + PNG.
-  2. Wraps each .mermaid source in a self-contained HTML page that loads
-     Mermaid from a CDN, so the user can double-click the HTML and preview.
-  3. Produces an index.html landing page that links all four diagrams.
+  1. Re-runs every NN-*.py drawing script (AWS icons, awsdiagram.py) to refresh the SVG + PNG
+     (skip with --pages-only).
+  2. Writes one viewer page per diagram (sidebar listing every diagram, zoom, SVG embed), so
+     you can move between diagrams without the browser's back button.
+  3. Writes index.html, the landing page whose tiles open the viewer pages.
+
+Add a diagram: drop NN-name.py + NN-name.svg here and add one row to DIAGRAMS.
 
 Usage:
-    python3 render.py
+    python3 render.py [--pages-only]
 """
 from __future__ import annotations
 
 import subprocess
+import sys
+from html import escape
 from pathlib import Path
 
 HERE = Path(__file__).parent
 
-MERMAID_DIAGRAMS = [
-    ("02-data-model.mermaid", "02-data-model.html",
-     "Data Model — per-service ownership"),
-    ("03-c4-container.mermaid", "03-c4-container.html",
-     "C4 Container — service topology & protocols"),
-    ("04-data-flow-sequence.mermaid", "04-data-flow-sequence.html",
-     "Data Flow — reservation + payment saga (sequence)"),
-    ("05-auth-flows.mermaid", "05-auth-flows.html",
-     "Auth Flows — signup, login, JWT refresh"),
-    ("06-waiting-room-flow.mermaid", "06-waiting-room-flow.html",
-     "Virtual Waiting Room — onsale surge gate flow"),
-    ("07-search-dataflow.mermaid", "07-search-dataflow.html",
-     "Search Dataflow — CQRS index + query (with Mongo fallback)"),
+# (file stem, nav label, kind, sidebar colour, description). Order is the order shown.
+# A stem with a .py script is redrawn; 03 is a pre-rendered SVG with no script.
+DIAGRAMS = [
+    ("01-aws-infrastructure", "AWS Infrastructure", "AWS icons", "#FF9900",
+     "Reference production architecture on EKS: VPC, MSK, RDS Multi-AZ, ElastiCache, Kong, edge services, observability, IRSA."),
+    ("08-aws-architecture", "AWS Architecture (service view)", "AWS icons", "#F97316",
+     "Edge, VPC and EKS services grouped by domain (Identity, Catalog, Transaction), with REST, gRPC, GraphQL Federation and Kafka flows on one page."),
+    ("02-data-model", "Data Model", "AWS icons", "#2563EB",
+     "Per-service database ownership. Dotted lines mark logical cross-service references (no enforced foreign keys)."),
+    ("03-c4-container", "C4 Container", "C4", "#8B5CF6",
+     "Service topology and protocols."),
+    ("04-data-flow-sequence", "Data Flow / Saga", "Sequence", "#10B981",
+     "Reservation, payment, finalize and expire flow with CloudEvents on MSK, transactional outbox and DLQ."),
+    ("05-auth-flows", "Auth Flows (web)", "Sequence", "#EF4444",
+     "Browser sign-in, refresh rotation with family revocation, internal gRPC trust and the Stripe webhook; RS256 JWTs verified at Kong."),
+    ("09-mcp-auth-flows", "MCP Auth Flows", "Sequence", "#14B8A6",
+     "How an MCP agent gets access: OAuth 2.1 + PKCE, client metadata document (CIMD) or dynamic registration, consent, audience-bound tokens, per-call token exchange, scope step-up, revocation."),
+    ("06-waiting-room-flow", "Virtual Waiting Room", "Sequence", "#EAB308",
+     "Onsale surge gate: pre-queue fair draw, rate-based admission, single-use HMAC pass, clean-URL redemption."),
+    ("07-search-dataflow", "Search Dataflow", "Sequence", "#6366F1",
+     "OpenSearch CQRS read model: Kafka-fed index path and the ranked query path with live Mongo hydration and regex fallback."),
 ]
 
-
-HTML_TEMPLATE = """<!DOCTYPE html>
+PAGE_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{title}</title>
-  <style>
-    :root {{ color-scheme: light; }}
-    body {{
-      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-      margin: 0;
-      padding: 24px;
-      background: #F7F8FA;
-      color: #232F3E;
-    }}
-    header {{
-      max-width: 1400px;
-      margin: 0 auto 16px auto;
-    }}
-    header h1 {{ margin: 0 0 4px 0; font-size: 20px; }}
-    header p {{ margin: 0; color: #556070; font-size: 13px; }}
-    .card {{
-      background: #fff;
-      border: 1px solid #E5E7EB;
-      border-radius: 12px;
-      padding: 24px;
-      max-width: 1400px;
-      margin: 0 auto;
-      overflow-x: auto;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-    }}
-    .nav {{
-      max-width: 1400px;
-      margin: 0 auto 12px auto;
-      font-size: 13px;
-    }}
-    .nav a {{ color: #1A73E8; text-decoration: none; margin-right: 12px; }}
-    .nav a:hover {{ text-decoration: underline; }}
-  </style>
+  <title>{label} - Ticketing Platform</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="zoom.js"></script>
 </head>
 <body>
-  <div class="nav">
-    <a href="index.html">← Index</a>
-    <a href="01-aws-infrastructure.svg">AWS Infra (SVG)</a>
-    <a href="02-data-model.svg">Data Model</a>
-    <a href="08-aws-architecture.svg">Architecture (AWS)</a>
-    <a href="04-data-flow-sequence.svg">Data Flow</a>
-    <a href="05-auth-flows.svg">Auth Flows</a>
-    <a href="06-waiting-room-flow.svg">Waiting Room</a>
-    <a href="07-search-dataflow.svg">Search Dataflow</a>
+<div class="page">
+
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <a class="sidebar-back" href="index.html">&larr; All diagrams</a>
+      <div class="sidebar-brand-title">Ticketing Platform</div>
+      <div class="sidebar-brand-sub">Architecture Diagrams</div>
+    </div>
+    <div class="sidebar-nav">
+      <div class="sidebar-nav-label">Diagrams</div>
+{items}
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="main-header">
+      <h1>{label}</h1>
+      <p>{description} Files: <a href="{stem}.svg">SVG</a> &middot; <a href="{stem}.png">PNG</a></p>
+    </div>
+    <div class="diagram-wrapper">
+      <div class="zoom-bar">
+        <button class="zoom-btn" id="zoom-out"   title="Zoom out (-)">&#x2212;</button>
+        <span class="zoom-level" id="zoom-level">100%</span>
+        <button class="zoom-btn" id="zoom-in"    title="Zoom in (+)">+</button>
+        <button class="zoom-btn zoom-btn-reset" id="zoom-reset" title="Reset (0)">&#x21BA;</button>
+      </div>
+      <div class="diagram-card">
+        <img src="{stem}.svg" alt="{label} diagram" style="max-width:100%;height:auto;display:block;" />
+      </div>
+    </div>
   </div>
-  <header>
-    <h1>{title}</h1>
-    <p>Rendered client-side via Mermaid 11. Source: <code>{source}</code></p>
-  </header>
-  <div class="card">
-    <pre class="mermaid">
-{content}
-    </pre>
-  </div>
-  <script type="module">
-    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-    mermaid.initialize({{
-      startOnLoad: true,
-      theme: "base",
-      securityLevel: "loose",
-      er: {{ useMaxWidth: true }},
-      sequence: {{ useMaxWidth: true, actorMargin: 60, messageAlign: "center" }},
-      flowchart: {{ useMaxWidth: true, htmlLabels: true, curve: "basis" }}
-    }});
-  </script>
+
+</div>
 </body>
 </html>
 """
 
+ITEM_TEMPLATE = """      <a class="sidebar-item{active}" href="{stem}.html">
+        <span class="sidebar-dot" style="background:{colour};"></span>
+        <span class="sidebar-item-label">
+          {label}
+          <span class="sidebar-item-sub">{kind}</span>
+        </span>
+      </a>
+"""
 
+# Plain string, not .format()ed: the CSS braces stay single.
 INDEX_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Ticketing Platform — Architecture Diagrams (v2)</title>
+  <title>Ticketing Platform - Architecture Diagrams</title>
   <style>
-    body {{
+    body {
       font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
       margin: 0;
       padding: 48px 24px;
       background: #F7F8FA;
       color: #232F3E;
-    }}
-    main {{ max-width: 960px; margin: 0 auto; }}
-    h1 {{ font-size: 28px; margin: 0 0 8px 0; }}
-    p.sub {{ color: #556070; margin: 0 0 28px 0; }}
-    .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }}
-    .tile {{
+    }
+    main { max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 28px; margin: 0 0 8px 0; }
+    p.sub { color: #556070; margin: 0 0 28px 0; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+    .tile {
       background: #fff;
       border: 1px solid #E5E7EB;
       border-radius: 12px;
@@ -135,97 +129,68 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
       color: inherit;
       transition: border-color .15s, transform .15s;
       display: block;
-    }}
-    .tile:hover {{ border-color: #FF9900; transform: translateY(-2px); }}
-    .tile h2 {{ margin: 0 0 6px 0; font-size: 16px; color: #232F3E; }}
-    .tile p {{ margin: 0; color: #556070; font-size: 13px; }}
-    .badge {{
+    }
+    .tile:hover { border-color: #FF9900; transform: translateY(-2px); }
+    .tile h2 { margin: 0 0 6px 0; font-size: 16px; color: #232F3E; }
+    .tile p { margin: 0; color: #556070; font-size: 13px; }
+    .badge {
       display: inline-block; font-size: 11px; padding: 2px 8px;
       border-radius: 999px; margin-bottom: 8px; font-weight: 600;
-    }}
-    .b-aws {{ background: #FFE6BF; color: #8A4B00; }}
-    .b-mer {{ background: #D9E8FC; color: #0B3D91; }}
+      background: #E8EEF7; color: #1F3B63;
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>Ticketing Platform — Architecture Diagrams</h1>
-    <p class="sub">Diagrams covering AWS infrastructure, per-service data ownership,
-      C4 container topology, the reservation + payment saga, auth flows, the virtual
-      waiting room, and the OpenSearch search dataflow. Generated from source — kept in sync with the code.</p>
+    <h1>Ticketing Platform - Architecture Diagrams</h1>
+    <p class="sub">AWS infrastructure, service view, data ownership, the reservation and payment saga,
+      web and MCP authentication, the virtual waiting room and search. Generated from source
+      (<code>docs/diagrams/*.py</code>) and kept in sync with the code.</p>
     <div class="grid">
-      <a class="tile" href="01-aws-infrastructure.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>1 · AWS Infrastructure</h2>
-        <p>Reference production architecture on EKS: VPC, MSK, RDS Multi-AZ,
-          ElastiCache, Kong, edge services, observability, IRSA.</p>
-      </a>
-      <a class="tile" href="02-data-model.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>2 · Data Model</h2>
-        <p>Per-service database ownership. Dotted lines mark
-          <i>logical</i> cross-service references (no enforced FKs).</p>
-      </a>
-      <a class="tile" href="08-aws-architecture.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>3 · AWS Architecture (service view)</h2>
-        <p>Edge → VPC → EKS services grouped by domain (Identity · Catalog · Transaction),
-          with REST, gRPC, GraphQL Federation and Kafka flows on one page.</p>
-      </a>
-      <a class="tile" href="04-data-flow-sequence.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>4 · Data Flow / Saga</h2>
-        <p>Full reservation → payment → finalize / expire flow with
-          CloudEvents on MSK, transactional outbox, DLQ.</p>
-      </a>
-      <a class="tile" href="05-auth-flows.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>5 · Auth Flows</h2>
-        <p>Signup / login / refresh, RS256 JWT issuance, and JWKS
-          distribution to Kong for gateway-side verification.</p>
-      </a>
-      <a class="tile" href="06-waiting-room-flow.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>6 · Virtual Waiting Room</h2>
-        <p>Onsale surge gate: pre-queue fair draw, rate-based admission,
-          single-use HMAC pass, clean-URL redemption.</p>
-      </a>
-      <a class="tile" href="07-search-dataflow.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>7 · Search Dataflow</h2>
-        <p>OpenSearch CQRS read model: Kafka-fed index path and the
-          ranked query path with live Mongo hydration + regex fallback.</p>
-      </a>
+%TILES%
     </div>
   </main>
 </body>
 </html>
 """
 
+TILE_TEMPLATE = """      <a class="tile" href="{stem}.html">
+        <span class="badge">{kind}</span>
+        <h2>{n} &middot; {label}</h2>
+        <p>{description}</p>
+      </a>"""
 
-def wrap_mermaid(src: Path, out: Path, title: str) -> None:
-    content = src.read_text(encoding="utf-8")
-    # Mermaid is whitespace-sensitive in <pre>; we keep it verbatim.
-    html = HTML_TEMPLATE.format(title=title, source=src.name, content=content)
-    out.write_text(html, encoding="utf-8")
-    print(f"wrote {out.name}")
+
+def write_pages() -> None:
+    for stem, label, _kind, _colour, description in DIAGRAMS:
+        items = "".join(
+            ITEM_TEMPLATE.format(active=" active" if s == stem else "", stem=s,
+                                 colour=c, label=escape(l), kind=k)
+            for s, l, k, c, _ in DIAGRAMS)
+        html = PAGE_TEMPLATE.format(stem=stem, label=escape(label),
+                                    description=escape(description), items=items.rstrip("\n"))
+        (HERE / f"{stem}.html").write_text(html, encoding="utf-8")
+        print(f"wrote {stem}.html")
+
+    tiles = "\n".join(
+        TILE_TEMPLATE.format(stem=s, kind=k, n=i, label=escape(l), description=escape(d))
+        for i, (s, l, k, _c, d) in enumerate(DIAGRAMS, 1))
+    (HERE / "index.html").write_text(INDEX_TEMPLATE.replace("%TILES%", tiles), encoding="utf-8")
+    print("wrote index.html")
 
 
 def main() -> None:
-    # Redraw every AWS-icon diagram (shared framework: awsdiagram.py).
-    for script in ("01-aws-infrastructure.py", "02-data-model.py", "04-data-flow-sequence.py",
-                   "05-auth-flows.py", "06-waiting-room-flow.py", "07-search-dataflow.py",
-                   "08-aws-architecture.py"):
-        print(f"→ drawing {script} …")
-        subprocess.run(["python3", str(HERE / script)], cwd=HERE, check=True)
-
-    # Wrap each Mermaid source in an HTML page.
-    for src_name, out_name, title in MERMAID_DIAGRAMS:
-        wrap_mermaid(HERE / src_name, HERE / out_name, title)
-
-    # Landing page.
-    (HERE / "index.html").write_text(INDEX_TEMPLATE, encoding="utf-8")
-    print("wrote index.html")
+    if "--pages-only" not in sys.argv:
+        # Redraw every AWS-icon diagram (shared framework: awsdiagram.py).
+        for stem, *_ in DIAGRAMS:
+            script = HERE / f"{stem}.py"
+            if script.exists():
+                print(f"-> drawing {script.name} ...")
+                subprocess.run([sys.executable, str(script)], cwd=HERE, check=True)
+    for stem, *_ in DIAGRAMS:
+        if not (HERE / f"{stem}.svg").exists():
+            sys.exit(f"missing {stem}.svg")
+    write_pages()
 
 
 if __name__ == "__main__":

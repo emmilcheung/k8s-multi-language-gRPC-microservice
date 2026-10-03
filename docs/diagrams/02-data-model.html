@@ -3,345 +3,105 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Data Model — per-service ownership</title>
-  <style>
-    :root { color-scheme: light; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-      margin: 0;
-      padding: 24px;
-      background: #F7F8FA;
-      color: #232F3E;
-    }
-    header {
-      max-width: 1400px;
-      margin: 0 auto 16px auto;
-    }
-    header h1 { margin: 0 0 4px 0; font-size: 20px; }
-    header p { margin: 0; color: #556070; font-size: 13px; }
-    .card {
-      background: #fff;
-      border: 1px solid #E5E7EB;
-      border-radius: 12px;
-      padding: 24px;
-      max-width: 1400px;
-      margin: 0 auto;
-      overflow-x: auto;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-    }
-    .nav {
-      max-width: 1400px;
-      margin: 0 auto 12px auto;
-      font-size: 13px;
-    }
-    .nav a { color: #1A73E8; text-decoration: none; margin-right: 12px; }
-    .nav a:hover { text-decoration: underline; }
-  </style>
+  <title>Data Model - Ticketing Platform</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="zoom.js"></script>
 </head>
 <body>
-  <div class="nav">
-    <a href="index.html">← Index</a>
-    <a href="01-aws-infrastructure.svg">AWS Infra (SVG)</a>
-    <a href="02-data-model.svg">Data Model</a>
-    <a href="08-aws-architecture.svg">Architecture (AWS)</a>
-    <a href="04-data-flow-sequence.svg">Data Flow</a>
-    <a href="05-auth-flows.svg">Auth Flows</a>
-    <a href="06-waiting-room-flow.svg">Waiting Room</a>
-    <a href="07-search-dataflow.svg">Search Dataflow</a>
+<div class="page">
+
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <a class="sidebar-back" href="index.html">&larr; All diagrams</a>
+      <div class="sidebar-brand-title">Ticketing Platform</div>
+      <div class="sidebar-brand-sub">Architecture Diagrams</div>
+    </div>
+    <div class="sidebar-nav">
+      <div class="sidebar-nav-label">Diagrams</div>
+      <a class="sidebar-item" href="01-aws-infrastructure.html">
+        <span class="sidebar-dot" style="background:#FF9900;"></span>
+        <span class="sidebar-item-label">
+          AWS Infrastructure
+          <span class="sidebar-item-sub">AWS icons</span>
+        </span>
+      </a>
+      <a class="sidebar-item" href="08-aws-architecture.html">
+        <span class="sidebar-dot" style="background:#F97316;"></span>
+        <span class="sidebar-item-label">
+          AWS Architecture (service view)
+          <span class="sidebar-item-sub">AWS icons</span>
+        </span>
+      </a>
+      <a class="sidebar-item active" href="02-data-model.html">
+        <span class="sidebar-dot" style="background:#2563EB;"></span>
+        <span class="sidebar-item-label">
+          Data Model
+          <span class="sidebar-item-sub">AWS icons</span>
+        </span>
+      </a>
+      <a class="sidebar-item" href="03-c4-container.html">
+        <span class="sidebar-dot" style="background:#8B5CF6;"></span>
+        <span class="sidebar-item-label">
+          C4 Container
+          <span class="sidebar-item-sub">C4</span>
+        </span>
+      </a>
+      <a class="sidebar-item" href="04-data-flow-sequence.html">
+        <span class="sidebar-dot" style="background:#10B981;"></span>
+        <span class="sidebar-item-label">
+          Data Flow / Saga
+          <span class="sidebar-item-sub">Sequence</span>
+        </span>
+      </a>
+      <a class="sidebar-item" href="05-auth-flows.html">
+        <span class="sidebar-dot" style="background:#EF4444;"></span>
+        <span class="sidebar-item-label">
+          Auth Flows (web)
+          <span class="sidebar-item-sub">Sequence</span>
+        </span>
+      </a>
+      <a class="sidebar-item" href="09-mcp-auth-flows.html">
+        <span class="sidebar-dot" style="background:#14B8A6;"></span>
+        <span class="sidebar-item-label">
+          MCP Auth Flows
+          <span class="sidebar-item-sub">Sequence</span>
+        </span>
+      </a>
+      <a class="sidebar-item" href="06-waiting-room-flow.html">
+        <span class="sidebar-dot" style="background:#EAB308;"></span>
+        <span class="sidebar-item-label">
+          Virtual Waiting Room
+          <span class="sidebar-item-sub">Sequence</span>
+        </span>
+      </a>
+      <a class="sidebar-item" href="07-search-dataflow.html">
+        <span class="sidebar-dot" style="background:#6366F1;"></span>
+        <span class="sidebar-item-label">
+          Search Dataflow
+          <span class="sidebar-item-sub">Sequence</span>
+        </span>
+      </a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="main-header">
+      <h1>Data Model</h1>
+      <p>Per-service database ownership. Dotted lines mark logical cross-service references (no enforced foreign keys). Files: <a href="02-data-model.svg">SVG</a> &middot; <a href="02-data-model.png">PNG</a></p>
+    </div>
+    <div class="diagram-wrapper">
+      <div class="zoom-bar">
+        <button class="zoom-btn" id="zoom-out"   title="Zoom out (-)">&#x2212;</button>
+        <span class="zoom-level" id="zoom-level">100%</span>
+        <button class="zoom-btn" id="zoom-in"    title="Zoom in (+)">+</button>
+        <button class="zoom-btn zoom-btn-reset" id="zoom-reset" title="Reset (0)">&#x21BA;</button>
+      </div>
+      <div class="diagram-card">
+        <img src="02-data-model.svg" alt="Data Model diagram" style="max-width:100%;height:auto;display:block;" />
+      </div>
+    </div>
   </div>
-  <header>
-    <h1>Data Model — per-service ownership</h1>
-    <p>Rendered client-side via Mermaid 11. Source: <code>02-data-model.mermaid</code></p>
-  </header>
-  <div class="card">
-    <pre class="mermaid">
-%%{init: {'theme':'base','themeVariables':{'primaryColor':'#FF9900','primaryBorderColor':'#232F3E','primaryTextColor':'#232F3E','lineColor':'#232F3E','secondaryColor':'#EAF2FB','tertiaryColor':'#F7F8FA','background':'#FFF'},'themeCSS':'.root { background-color: #ffffff; }'}}%%
-erDiagram
-    %% ------------------------------------------------------------
-    %% Cross-service references use DOTTED style to make it clear
-    %% that they are LOGICAL references, not enforced foreign keys
-    %% (each service owns its own database — AGENTS.md §4 "Data Ownership").
-    %% ------------------------------------------------------------
 
-    %% auth_db  (RDS PostgreSQL — owned by auth-service)
-    USERS ||..o{ ORDERS : "user_id (logical)"
-    USERS ||..o{ PAYMENTS : "user_id (logical)"
-    USERS ||..o| USER_PROFILES : "1:1 (logical)"
-    USERS ||..o| USER_PREFERENCES : "1:1 (logical)"
-    USERS ||..o| BILLING_ADDRESSES : "1:1 (logical)"
-
-    %% order_db (RDS PostgreSQL — owned by order-service)
-    ORDERS ||--|{ ORDER_ITEMS : "contains"
-    ORDERS ||..|| PAYMENTS : "order_id (logical, 1:1)"
-    ORDERS ||--o{ ORDER_OUTBOX : "transactional outbox"
-    ORDERS ||..o{ TICKETS : "ticket_id (logical, via gRPC)"
-    ORDERS ||..o{ SEAT_RESERVATIONS : "reservation_id (logical)"
-
-    %% ticket_db (MongoDB — owned by ticket-service)
-    TICKETS ||--|{ RESERVATIONS : "has quota"
-    TICKETS ||..o| SEATING_PLANS : "seating_plan_id (logical, via gRPC)"
-
-    %% venue_db (RDS PostgreSQL — owned by venue-service)
-    VENUES ||--|{ VENUE_SECTIONS : "layout template"
-    VENUES ||--|{ SEATING_PLANS : "has"
-    SEATING_PLANS ||--|{ SECTIONS : "grouped by"
-    SEATING_PLANS ||--o{ PRICE_TIERS : "pricing levels"
-    SECTIONS ||--|{ SEATS : "contains"
-    SEATING_PLANS ||--o{ SEAT_RESERVATIONS : "reservation ledger"
-    SEAT_RESERVATIONS ||--|{ SEAT_RESERVATION_ITEMS : "line items"
-    ORGANIZER_SETTINGS ||..|| VENUES : "organizer_id (logical)"
-
-    %% payment_db (RDS PostgreSQL — owned by payment-service)
-    PAYMENTS ||--o{ PAYMENT_RECORDS : "audit trail"
-    PAYMENTS ||--o{ PAYMENT_WEBHOOKS : "Stripe events"
-
-    %% redis (ElastiCache — owned by expiration-service + venue-service for holds)
-    RESERVATIONS ||..o{ EXPIRATION_TIMERS : "scheduled (Redis)"
-
-    %% =====================  ENTITIES  ============================
-
-    USERS {
-        uuid id PK "auth_db · auth-service"
-        text email UK
-        text password_hash
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    USER_PROFILES {
-        text user_id PK "user_db · user-service"
-        text display_name
-        text locale
-        text timezone
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    USER_PREFERENCES {
-        text user_id PK "user_db · user-service"
-        bool marketing_opt_in
-        bool order_updates
-        bool product_updates
-    }
-
-    BILLING_ADDRESSES {
-        text user_id PK "user_db · user-service"
-        text line1
-        text line2
-        text city
-        text postal_code
-        text country
-    }
-
-    ORDERS {
-        uuid id PK "order_db · order-service"
-        uuid user_id "logical FK → USERS"
-        uuid reservation_id UK "from ticket-service"
-        string status "PENDING|AWAITING_PAYMENT|CONFIRMED|CANCELLED|EXPIRED"
-        decimal total_amount
-        int version "optimistic lock"
-        timestamptz expires_at
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    ORDER_ITEMS {
-        uuid id PK
-        uuid order_id FK
-        string ticket_id "logical FK → TICKETS"
-        int quantity
-        decimal unit_price
-        string seat_ids "optional, CSV"
-    }
-
-    ORDER_OUTBOX {
-        uuid id PK
-        uuid aggregate_id
-        string event_type "orders.order.created|cancelled|completed"
-        jsonb payload
-        timestamptz created_at
-        timestamptz published_at "NULL until publisher drains"
-    }
-
-    TICKETS {
-        string id PK "ticket_db (MongoDB) · ticket-service"
-        string title
-        decimal price
-        int quota
-        int reserved
-        int sold
-        int max_per_user
-        string seating_plan_id "logical FK → SEATING_PLANS"
-        string ticket_type "GA|SEATED_MANUAL|SEATED_AUTO"
-        jsonb event "title, startsAt, endsAt, venue metadata"
-        int version "optimistic lock"
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    RESERVATIONS {
-        string id PK "ticket_db (MongoDB)"
-        string ticket_id FK
-        string user_id "logical FK → USERS"
-        int quantity
-        string status "HELD|FINALIZED|RELEASED|EXPIRED"
-        timestamptz expires_at
-        timestamptz created_at
-    }
-
-    VENUES {
-        uuid id PK "venue_db (PostgreSQL) · venue-service"
-        uuid organizer_id
-        text name
-        int capacity
-        text timezone
-        text address
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    VENUE_SECTIONS {
-        uuid id PK "venue_db · reusable layout template"
-        uuid venue_id FK
-        text name
-        text type "seated|ga"
-        int row_count
-        int column_count
-        jsonb position_json
-        int display_order
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    ORGANIZER_SETTINGS {
-        uuid organizer_id PK "venue_db · per-organizer config"
-        int hold_ttl_sec "default 600"
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    SEATING_PLANS {
-        uuid id PK "venue_db"
-        uuid venue_id FK
-        uuid ticket_id "required at creation (ticket-first)"
-        uuid organizer_id
-        text name
-        text status "draft|active|inactive"
-        int max_seats_per_order "default 10"
-        text assignment_mode "manual|auto"
-        text pricing_mode "single|section|seat"
-        jsonb layout_json "canvas editor state"
-        int version "optimistic lock"
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    PRICE_TIERS {
-        uuid id PK "venue_db"
-        uuid plan_id FK
-        text name
-        decimal price "e.g. 75.00"
-        timestamptz created_at
-    }
-
-    SECTIONS {
-        uuid id PK "venue_db · event-scoped (cloned from venue_sections)"
-        uuid plan_id FK
-        text name
-        text type "seated|ga"
-        int row_count
-        int column_count
-        uuid price_tier_id FK "optional"
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    SEATS {
-        uuid id PK "venue_db"
-        uuid section_id FK
-        uuid plan_id FK
-        uuid price_tier_id FK "optional per-seat override"
-        text seat_label "e.g. R1S3"
-        text row_label "e.g. R1"
-        int column_number
-        text status "AVAILABLE|HELD|RESERVED|SOLD|BLOCKED"
-        uuid held_by "user holding this seat"
-        timestamptz held_until
-        jsonb attributes
-        int version "optimistic lock"
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    SEAT_RESERVATIONS {
-        uuid id PK "venue_db · durable reservation ledger"
-        uuid plan_id FK
-        uuid ticket_id "logical FK → TICKETS"
-        uuid order_id "set after order creation"
-        uuid user_id
-        uuid section_id
-        text status "RESERVED|RELEASED|SOLD|EXPIRED"
-        timestamptz expires_at
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    SEAT_RESERVATION_ITEMS {
-        uuid reservation_id FK "venue_db · one row per seat"
-        uuid seat_id FK
-        uuid section_id FK
-        decimal price "snapshot at reservation time"
-        text seat_label
-    }
-
-    PAYMENTS {
-        uuid id PK "payment_db · payment-service"
-        uuid order_id UK "logical FK → ORDERS"
-        uuid user_id "logical FK → USERS"
-        string method "CARD|APPLE_PAY|GOOGLE_PAY"
-        decimal amount
-        string currency "ISO 4217"
-        string status "PENDING|SUCCEEDED|FAILED|REFUNDED"
-        string stripe_payment_intent_id UK
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    PAYMENT_RECORDS {
-        uuid id PK
-        uuid payment_id FK
-        string event_type "attempted|succeeded|failed|refunded"
-        jsonb payload
-        timestamptz recorded_at
-    }
-
-    PAYMENT_WEBHOOKS {
-        uuid id PK
-        string stripe_event_id UK "idempotency"
-        string event_type
-        jsonb body
-        timestamptz received_at
-        timestamptz processed_at
-    }
-
-    EXPIRATION_TIMERS {
-        string key PK "Redis ZSET — expiration-service"
-        string reservation_id
-        timestamptz fires_at
-    }
-
-    </pre>
-  </div>
-  <script type="module">
-    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-    mermaid.initialize({
-      startOnLoad: true,
-      theme: "base",
-      securityLevel: "loose",
-      er: { useMaxWidth: true },
-      sequence: { useMaxWidth: true, actorMargin: 60, messageAlign: "center" },
-      flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" }
-    });
-  </script>
+</div>
 </body>
 </html>

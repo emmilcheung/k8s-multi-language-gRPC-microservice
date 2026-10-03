@@ -4,7 +4,7 @@
 
 The host never sees the user's password. It holds a short-lived OAuth 2.1 token that the user granted on a consent screen and can revoke. mcp-service verifies that token, exchanges it per call for a narrower API token, and calls the public REST API through Kong, so agent traffic is subject to the same scope, waiting-room and rate-limit rules as a browser.
 
-This README is the service overview and data-flow reference. The operator guide (setup, troubleshooting, manual verification) is [`docs/ticketing/mcp.md`](../../docs/ticketing/mcp.md); the threat model is in [`docs/06-security.md`](../../docs/06-security.md).
+This README is the service overview and data-flow reference. The operator guide (setup, troubleshooting, manual verification) is [`docs/ticketing/mcp.md`](../../docs/ticketing/mcp.md); the threat model is in [`docs/06-security.md`](../../docs/06-security.md). An icon-style version of the auth flows is in [`docs/diagrams/09-mcp-auth-flows.svg`](../../docs/diagrams/09-mcp-auth-flows.svg).
 
 ## Responsibilities
 

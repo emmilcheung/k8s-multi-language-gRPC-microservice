@@ -46,8 +46,15 @@ _FONTS = {}
 def _font(size, bold=False):
     key = (size, bold)
     if key not in _FONTS:
-        p = "/usr/share/fonts/truetype/liberation/LiberationSans-%s.ttf" % ("Bold" if bold else "Regular")
-        _FONTS[key] = ImageFont.truetype(p, size)
+        face = "Bold" if bold else "Regular"
+        # Liberation Sans (Linux) and Arial (macOS) share metrics, so wrapping matches.
+        for p in ("/usr/share/fonts/truetype/liberation/LiberationSans-%s.ttf" % face,
+                  "/System/Library/Fonts/Supplemental/Arial%s.ttf" % (" Bold" if bold else "")):
+            if os.path.exists(p):
+                _FONTS[key] = ImageFont.truetype(p, size)
+                break
+        else:
+            raise FileNotFoundError("Liberation Sans or Arial is required to measure diagram text")
     return _FONTS[key]
 
 

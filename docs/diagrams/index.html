@@ -3,20 +3,21 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Ticketing Platform — Architecture Diagrams (v2)</title>
+  <title>Ticketing Platform - Architecture Diagrams</title>
   <style>
-    body {{
+    body {
       font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
       margin: 0;
       padding: 48px 24px;
       background: #F7F8FA;
       color: #232F3E;
-    }}
-    main {{ max-width: 960px; margin: 0 auto; }}
-    h1 {{ font-size: 28px; margin: 0 0 8px 0; }}
-    p.sub {{ color: #556070; margin: 0 0 28px 0; }}
-    .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }}
-    .tile {{
+    }
+    main { max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 28px; margin: 0 0 8px 0; }
+    p.sub { color: #556070; margin: 0 0 28px 0; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+    .tile {
       background: #fff;
       border: 1px solid #E5E7EB;
       border-radius: 12px;
@@ -25,66 +26,68 @@
       color: inherit;
       transition: border-color .15s, transform .15s;
       display: block;
-    }}
-    .tile:hover {{ border-color: #FF9900; transform: translateY(-2px); }}
-    .tile h2 {{ margin: 0 0 6px 0; font-size: 16px; color: #232F3E; }}
-    .tile p {{ margin: 0; color: #556070; font-size: 13px; }}
-    .badge {{
+    }
+    .tile:hover { border-color: #FF9900; transform: translateY(-2px); }
+    .tile h2 { margin: 0 0 6px 0; font-size: 16px; color: #232F3E; }
+    .tile p { margin: 0; color: #556070; font-size: 13px; }
+    .badge {
       display: inline-block; font-size: 11px; padding: 2px 8px;
       border-radius: 999px; margin-bottom: 8px; font-weight: 600;
-    }}
-    .b-aws {{ background: #FFE6BF; color: #8A4B00; }}
-    .b-mer {{ background: #D9E8FC; color: #0B3D91; }}
+      background: #E8EEF7; color: #1F3B63;
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>Ticketing Platform — Architecture Diagrams</h1>
-    <p class="sub">Diagrams covering AWS infrastructure, per-service data ownership,
-      C4 container topology, the reservation + payment saga, auth flows, the virtual
-      waiting room, and the OpenSearch search dataflow. Generated from source — kept in sync with the code.</p>
+    <h1>Ticketing Platform - Architecture Diagrams</h1>
+    <p class="sub">AWS infrastructure, service view, data ownership, the reservation and payment saga,
+      web and MCP authentication, the virtual waiting room and search. Generated from source
+      (<code>docs/diagrams/*.py</code>) and kept in sync with the code.</p>
     <div class="grid">
-      <a class="tile" href="01-aws-infrastructure.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>1 · AWS Infrastructure</h2>
-        <p>Reference production architecture on EKS: VPC, MSK, RDS Multi-AZ,
-          ElastiCache, Kong, edge services, observability, IRSA.</p>
+      <a class="tile" href="01-aws-infrastructure.html">
+        <span class="badge">AWS icons</span>
+        <h2>1 &middot; AWS Infrastructure</h2>
+        <p>Reference production architecture on EKS: VPC, MSK, RDS Multi-AZ, ElastiCache, Kong, edge services, observability, IRSA.</p>
       </a>
-      <a class="tile" href="02-data-model.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>2 · Data Model</h2>
-        <p>Per-service database ownership. Dotted lines mark
-          <i>logical</i> cross-service references (no enforced FKs).</p>
+      <a class="tile" href="08-aws-architecture.html">
+        <span class="badge">AWS icons</span>
+        <h2>2 &middot; AWS Architecture (service view)</h2>
+        <p>Edge, VPC and EKS services grouped by domain (Identity, Catalog, Transaction), with REST, gRPC, GraphQL Federation and Kafka flows on one page.</p>
       </a>
-      <a class="tile" href="08-aws-architecture.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>3 · AWS Architecture (service view)</h2>
-        <p>Edge → VPC → EKS services grouped by domain (Identity · Catalog · Transaction),
-          with REST, gRPC, GraphQL Federation and Kafka flows on one page.</p>
+      <a class="tile" href="02-data-model.html">
+        <span class="badge">AWS icons</span>
+        <h2>3 &middot; Data Model</h2>
+        <p>Per-service database ownership. Dotted lines mark logical cross-service references (no enforced foreign keys).</p>
       </a>
-      <a class="tile" href="04-data-flow-sequence.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>4 · Data Flow / Saga</h2>
-        <p>Full reservation → payment → finalize / expire flow with
-          CloudEvents on MSK, transactional outbox, DLQ.</p>
+      <a class="tile" href="03-c4-container.html">
+        <span class="badge">C4</span>
+        <h2>4 &middot; C4 Container</h2>
+        <p>Service topology and protocols.</p>
       </a>
-      <a class="tile" href="05-auth-flows.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>5 · Auth Flows</h2>
-        <p>Signup / login / refresh, RS256 JWT issuance, and JWKS
-          distribution to Kong for gateway-side verification.</p>
+      <a class="tile" href="04-data-flow-sequence.html">
+        <span class="badge">Sequence</span>
+        <h2>5 &middot; Data Flow / Saga</h2>
+        <p>Reservation, payment, finalize and expire flow with CloudEvents on MSK, transactional outbox and DLQ.</p>
       </a>
-      <a class="tile" href="06-waiting-room-flow.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>6 · Virtual Waiting Room</h2>
-        <p>Onsale surge gate: pre-queue fair draw, rate-based admission,
-          single-use HMAC pass, clean-URL redemption.</p>
+      <a class="tile" href="05-auth-flows.html">
+        <span class="badge">Sequence</span>
+        <h2>6 &middot; Auth Flows (web)</h2>
+        <p>Browser sign-in, refresh rotation with family revocation, internal gRPC trust and the Stripe webhook; RS256 JWTs verified at Kong.</p>
       </a>
-      <a class="tile" href="07-search-dataflow.svg">
-        <span class="badge b-aws">AWS icons · SVG/PNG</span>
-        <h2>7 · Search Dataflow</h2>
-        <p>OpenSearch CQRS read model: Kafka-fed index path and the
-          ranked query path with live Mongo hydration + regex fallback.</p>
+      <a class="tile" href="09-mcp-auth-flows.html">
+        <span class="badge">Sequence</span>
+        <h2>7 &middot; MCP Auth Flows</h2>
+        <p>How an MCP agent gets access: OAuth 2.1 + PKCE, client metadata document (CIMD) or dynamic registration, consent, audience-bound tokens, per-call token exchange, scope step-up, revocation.</p>
+      </a>
+      <a class="tile" href="06-waiting-room-flow.html">
+        <span class="badge">Sequence</span>
+        <h2>8 &middot; Virtual Waiting Room</h2>
+        <p>Onsale surge gate: pre-queue fair draw, rate-based admission, single-use HMAC pass, clean-URL redemption.</p>
+      </a>
+      <a class="tile" href="07-search-dataflow.html">
+        <span class="badge">Sequence</span>
+        <h2>9 &middot; Search Dataflow</h2>
+        <p>OpenSearch CQRS read model: Kafka-fed index path and the ranked query path with live Mongo hydration and regex fallback.</p>
       </a>
     </div>
   </main>

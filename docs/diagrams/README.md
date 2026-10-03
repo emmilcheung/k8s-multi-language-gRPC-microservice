@@ -18,19 +18,24 @@ They share `awsdiagram.py`, a small Python framework on top of the `diagrams` ic
 | `01-aws-infrastructure.py` | Three-AZ infrastructure (VPC, subnets, NAT, RDS, Redis, MSK) | free placement |
 | `02-data-model.py` | Database-per-service data model | table cards |
 | `04-data-flow-sequence.py` | Reservation + payment saga | sequence |
-| `05-auth-flows.py` | Six auth flows A to F | sequence |
+| `05-auth-flows.py` | Web auth flows A to D (sign-in, refresh rotation, internal gRPC, Stripe webhook) | sequence |
+| `09-mcp-auth-flows.py` | MCP agent auth flows A to E (OAuth 2.1 + PKCE, CIMD or dynamic registration, consent, token exchange, revocation) | sequence |
 | `06-waiting-room-flow.py` | Virtual waiting room | sequence |
 | `07-search-dataflow.py` | OpenSearch CQRS index + query | sequence |
 | `08-aws-architecture.py` | Service-level AWS architecture (replaces the C4 Mermaid) | free placement |
 
 ```bash
 pip install diagrams playwright pillow && playwright install chromium
-python3 render.py        # redraws every NN-*.py; writes NN-*.svg + NN-*.png
+python3 render.py        # redraws every NN-*.py; writes NN-*.svg + NN-*.png + one viewer page per diagram
+python3 render.py --pages-only   # only rewrite the HTML pages and index.html
 ```
 
-The Mermaid sources and their HTML viewers are kept for reference, but the index page, the
-navigation bars and the root README now point at the new `.svg` files. The Tooling section
-below describes the original Mermaid/Graphviz approach.
+`render.py` writes a viewer page for every diagram (`NN-name.html`: a sidebar listing all
+diagrams, zoom and pan, and the SVG) and `index.html`, whose tiles open those pages. To add a
+diagram, add `NN-name.py` and one row to `DIAGRAMS` in `render.py`. The `*.mermaid` files are
+older sources kept for reference only; they are no longer rendered and may be out of date
+(`05-auth-flows.mermaid` still shows the retired stdio MCP flows). The Tooling section below
+describes the original Mermaid/Graphviz approach.
 
 ## Tooling choice (why these three, not one)
 
@@ -81,12 +86,13 @@ v2/
 ## How to regenerate
 
 ```bash
-cd docs/diagrams/v2
+cd docs/diagrams
 python3 render.py
 ```
 
-This re-runs Graphviz for the infra diagram and re-wraps every `*.mermaid` in its
-`*.html` viewer. Commit the regenerated `.svg` / `.png` along with the source.
+This redraws every diagram and rewrites the viewer pages. The drawing scripts measure text with
+Liberation Sans (Linux) or Arial (macOS). Commit the regenerated `.svg` / `.png` / `.html` along
+with the source.
 
 ## What each diagram shows
 
@@ -181,6 +187,17 @@ pre-queue randomized draw → rate-based admission by pure time-math (`serving(t
 reserve-mutation backstop. Pairs with "how would you protect the buy path under a
 Taylor-Swift-scale onsale" interview questions. Run `python3 render.py` to (re)wrap it
 into its HTML viewer and the landing page.
+
+### 9. MCP agent authentication (`09-mcp-auth-flows.svg`)
+
+How an MCP host such as Claude Code gets access, and how it differs from the web login in
+`05-auth-flows`. Source of truth: `services/mcp-service/README.md` and `docs/ticketing/mcp.md`.
+
+- **A. Discovery**: the `401` challenge, protected-resource metadata (RFC 9728), authorization-server metadata.
+- **B. Client identity**: a Client ID Metadata Document (CIMD, local only) fetched and cached by auth-service, or dynamic registration (RFC 7591).
+- **C. Authorization**: code + PKCE S256, sign-in, consent screen, token with `aud=<origin>/mcp`.
+- **D. Tool call**: mcp-service verifies the token, asks for scope step-up if needed, exchanges it (RFC 8693) for a one-scope `aud=<origin>/api` token, and calls the API through Kong.
+- **E. Revocation**: Settings, Connected apps, Disconnect.
 
 ## Quick online verification
 
