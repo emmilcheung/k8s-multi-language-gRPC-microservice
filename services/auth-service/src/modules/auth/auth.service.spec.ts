@@ -691,7 +691,7 @@ describe('AuthService', () => {
       ).rejects.toThrow();
     });
 
-    it('F-04: the generic verifier accepts the session issuer only, so an OAuth-issuer token is no session even without a client_id claim', async () => {
+    it('the generic verifier accepts the session issuer only, so an OAuth-issuer token is no session even without a client_id claim', async () => {
       const { jwt, bound } = realJwt();
       const { service } = makeAuthService({ jwtService: bound });
       await expect(
@@ -701,6 +701,66 @@ describe('AuthService', () => {
         service.verifyAccessToken(sign(jwt, OAUTH_ISS)),
       ).rejects.toMatchObject({
         response: { error: { code: 'INVALID_TOKEN' } },
+      });
+    });
+
+    describe('disconnecting a client', () => {
+      const oauthClaims = {
+        client_id: 'ticketing-mcp',
+        scope: 'tickets:read',
+        aud: 'https://ticketing.example.com/mcp',
+      };
+      const revokedAfterKey =
+        'auth-service:oauth:revoked-after:uuid-1:ticketing-mcp';
+      const exchangeWith = (storedRevokedAfter: Record<string, string>) => {
+        const { jwt, bound } = realJwt();
+        const { service } = makeAuthService({
+          jwtService: bound,
+          redis: {
+            get: vi.fn((key: string) =>
+              Promise.resolve(storedRevokedAfter[key] ?? null),
+            ),
+          },
+        });
+        return {
+          verify: () =>
+            service.verifyOAuthSubjectToken(sign(jwt, OAUTH_ISS, oauthClaims)),
+        };
+      };
+      const now = () => Math.floor(Date.now() / 1000);
+
+      it('stops exchanging a token that was issued before the disconnect, though it has not expired', async () => {
+        const { verify } = exchangeWith({ [revokedAfterKey]: String(now()) });
+        await expect(verify()).rejects.toMatchObject({
+          response: { error: { code: 'TOKEN_REVOKED' } },
+        });
+      });
+
+      it('still exchanges a token issued after the disconnect, so reconnecting works', async () => {
+        const { verify } = exchangeWith({
+          [revokedAfterKey]: String(now() - 10),
+        });
+        await expect(verify()).resolves.toMatchObject({ sub: 'uuid-1' });
+      });
+
+      it("leaves the same user's other clients alone", async () => {
+        const { verify } = exchangeWith({
+          'auth-service:oauth:revoked-after:uuid-1:some-other-client':
+            String(now()),
+        });
+        await expect(verify()).resolves.toMatchObject({ sub: 'uuid-1' });
+      });
+
+      it('records the disconnect with an expiry, so the marker cannot pile up', async () => {
+        const set = vi.fn().mockResolvedValue('OK');
+        const { service } = makeAuthService({ redis: { set } });
+        await service.revokeOAuthClientAccess('uuid-1', 'ticketing-mcp');
+        expect(set).toHaveBeenCalledWith(
+          revokedAfterKey,
+          expect.stringMatching(/^\d{10}$/),
+          'EX',
+          expect.any(Number),
+        );
       });
     });
 

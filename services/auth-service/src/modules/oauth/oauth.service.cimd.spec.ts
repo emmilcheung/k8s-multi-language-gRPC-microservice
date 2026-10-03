@@ -48,6 +48,7 @@ function makeService(opts: { cimd?: boolean } = {}) {
   );
   const authService = {
     verifySessionAccessToken: vi.fn().mockResolvedValue({ sub: 'user-1' }),
+    revokeOAuthClientAccess: vi.fn().mockResolvedValue(undefined),
     issueAccessTokenForOAuth: vi.fn().mockReturnValue('access.jwt'),
   };
   const refreshTokenService = {
@@ -102,6 +103,7 @@ function makeService(opts: { cimd?: boolean } = {}) {
     refreshTokenService,
     codeStore,
     consentStore,
+    authService,
     dynamicClientService,
   };
 }
@@ -409,7 +411,8 @@ describe('I-7: listing and revoking a CIMD grant', () => {
   });
 
   it('I-7: revokeClient removes the sessions of a URL client id and leaves other clients alone', async () => {
-    const { service, refreshTokenService, codeStore } = makeService();
+    const { service, refreshTokenService, codeStore, authService } =
+      makeService();
     refreshTokenService.listSessions.mockResolvedValue([
       session,
       { ...session, sessionId: 'sid-2' },
@@ -419,6 +422,11 @@ describe('I-7: listing and revoking a CIMD grant', () => {
       clientId: sid === 'sid-1' ? URL_ID : 'other',
     }));
     await service.revokeClient('user-1', URL_ID);
+    // Tokens already in the client's hands stop working now, not at expiry.
+    expect(authService.revokeOAuthClientAccess).toHaveBeenCalledWith(
+      'user-1',
+      URL_ID,
+    );
     expect(refreshTokenService.revokeSession).toHaveBeenCalledTimes(1);
     expect(refreshTokenService.revokeSession).toHaveBeenCalledWith(
       'user-1',

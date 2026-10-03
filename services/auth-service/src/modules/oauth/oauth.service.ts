@@ -806,6 +806,9 @@ export class OAuthService implements OnModuleInit {
 
   /** DELETE /oauth/clients/:clientId — revoke all sessions for a given client */
   async revokeClient(userId: string, clientId: string): Promise<void> {
+    // First: access tokens the client already holds stop exchanging at once,
+    // not when they expire.
+    await this.authService.revokeOAuthClientAccess(userId, clientId);
     const sessions = await this.refreshTokenService.listSessions(userId);
 
     await Promise.all(

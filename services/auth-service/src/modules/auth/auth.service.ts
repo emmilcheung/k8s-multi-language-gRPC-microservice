@@ -67,10 +67,21 @@ const oauthSubjectSchema = z.object({
   jti: z.string().min(1),
   iss: z.string().min(1),
   aud: z.union([z.string(), z.array(z.string())]),
+  iat: z.number().int().positive().optional(),
   exp: z.number().int().positive(),
   scope: z.string(),
   client_id: z.string().min(1),
 });
+
+/**
+ * How long a "this client was disconnected at T" marker is kept. It only has to
+ * outlive the longest access token (JWT_EXPIRY, default 15 min); a day is far past
+ * any plausible setting and the key count is bounded by user revocations.
+ */
+const OAUTH_CLIENT_REVOCATION_TTL_SECONDS = 24 * 60 * 60;
+
+const oauthClientRevokedAfterKey = (userId: string, clientId: string) =>
+  `auth-service:oauth:revoked-after:${userId}:${clientId}`;
 
 /** Verified claims of an OAuth access token used as a token-exchange subject. */
 export type OAuthSubjectClaims = z.infer<typeof oauthSubjectSchema>;
@@ -342,10 +353,17 @@ export class AuthService {
         },
       });
     }
-    const blacklisted = await this.redis.get(
-      `auth-service:blacklist:${claims.jti}`,
-    );
-    if (blacklisted) {
+    const [blacklisted, revokedAfter] = await Promise.all([
+      this.redis.get(`auth-service:blacklist:${claims.jti}`),
+      this.redis.get(oauthClientRevokedAfterKey(claims.sub, claims.client_id)),
+    ]);
+    // A disconnect invalidates every token the client got before it, so no
+    // fresh exchange can succeed on a token that is still within its lifetime. A
+    // token without iat cannot be placed before or after, so it fails closed.
+    const disconnected =
+      revokedAfter !== null &&
+      (claims.iat === undefined || claims.iat <= Number(revokedAfter));
+    if (blacklisted || disconnected) {
       throw new UnauthorizedException({
         error: {
           code: 'TOKEN_REVOKED',
@@ -354,6 +372,23 @@ export class AuthService {
       });
     }
     return claims;
+  }
+
+  /**
+   * Cut off every OAuth access token already issued to `clientId` for `userId`
+   * (Connected apps → Disconnect). Tokens are stateless, so this records a
+   * not-before time that verifyOAuthSubjectToken enforces on every exchange.
+   */
+  async revokeOAuthClientAccess(
+    userId: string,
+    clientId: string,
+  ): Promise<void> {
+    await this.redis.set(
+      oauthClientRevokedAfterKey(userId, clientId),
+      String(Math.floor(Date.now() / 1000)),
+      'EX',
+      OAUTH_CLIENT_REVOCATION_TTL_SECONDS,
+    );
   }
 
   getJwks(): object {
@@ -400,7 +435,7 @@ export class AuthService {
     try {
       // Session tokens only: the module verifies both issuers (OAuth subject tokens
       // need that), so narrow to the session issuer here. A third-party OAuth token
-      // minted for another client or resource is never a session (F-04).
+      // minted for another client or resource is never a session.
       payload = jwtPayloadSchema.parse(
         await (
           this.jwtService.verifyAsync as (
