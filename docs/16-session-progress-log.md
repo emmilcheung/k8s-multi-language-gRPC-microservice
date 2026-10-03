@@ -1562,6 +1562,11 @@ version change (the Trivy and dependency gates are untouched).
   flushes telemetry (3 s), under the 30 s pod grace period.
 - **Docs**: the V8 migration pre-check and concurrent-build steps are in
   `docs/11-kubernetes-deployment.md`.
+- **Disconnect and REST access**: a dynamically registered or metadata-document client is
+  now limited to the MCP resource (a missing `resource` means `/mcp`, `/api` is
+  `invalid_target`), because a token minted for `/api` directly bypassed the exchange and
+  stayed valid for up to 15 minutes after Disconnect. The static `ticketing-mcp` client is
+  unchanged and `docs/06-security.md` says so.
 
 Left open on purpose: the queue-gate pass has no expiry or event binding (changing it
 changes what an admission means after 10 minutes and must match the client gate), and

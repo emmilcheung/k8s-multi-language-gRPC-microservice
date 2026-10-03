@@ -80,6 +80,14 @@ export function dynamicToStaticShape(
   };
 }
 
+/**
+ * A client the platform did not configure itself: registered dynamically or
+ * identified by a metadata document. Its tokens are limited to the MCP resource.
+ */
+export function isDelegatedClient(client: OAuthClient): boolean {
+  return client.source === 'dynamic' || client.source === 'cimd';
+}
+
 /** A URL-shaped client_id is a CIMD candidate; it is never an opaque id. */
 export function isUrlClientId(clientId: string): boolean {
   return /^https?:\/\//i.test(clientId);

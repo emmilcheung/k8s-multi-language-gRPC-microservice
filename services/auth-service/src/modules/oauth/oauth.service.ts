@@ -19,6 +19,7 @@ import {
   validateScopes,
   dynamicToStaticShape,
   describeClientAddresses,
+  isDelegatedClient,
   isUrlClientId,
   MCP_SERVICE_CLIENT_ID,
   TOKEN_EXCHANGE_GRANT,
@@ -140,15 +141,29 @@ export class OAuthService implements OnModuleInit {
     });
   }
 
-  /** RFC 8707: a resource must be an exact member of OAUTH_RESOURCES. */
-  private assertAllowedResource(resource: string | undefined): void {
-    if (
-      resource !== undefined &&
-      !readOAuthConfig(this.config).resources.includes(resource)
-    ) {
+  /**
+   * RFC 8707: a resource must be an exact member of OAUTH_RESOURCES. A
+   * registered or metadata-document client may only ask for the MCP resource:
+   * its REST access goes through mcp-service's token exchange, where a
+   * disconnect takes effect within a minute, while a token minted for the REST
+   * API directly would keep working until it expires.
+   */
+  private assertAllowedResource(
+    resource: string | undefined,
+    client?: OAuthClient,
+  ): void {
+    if (resource === undefined) return;
+    const cfg = readOAuthConfig(this.config);
+    if (!cfg.resources.includes(resource)) {
       throw new BadRequestException({
         error: 'invalid_target',
         error_description: 'resource is not a recognised resource server',
+      });
+    }
+    if (client && isDelegatedClient(client) && resource !== cfg.mcpResource) {
+      throw new BadRequestException({
+        error: 'invalid_target',
+        error_description: 'this client may only request the MCP resource',
       });
     }
   }
@@ -157,14 +172,21 @@ export class OAuthService implements OnModuleInit {
   private mintAccessToken(
     userId: string,
     scope: string,
-    clientId: string,
+    client: OAuthClient,
     resource: string | undefined,
   ): string {
     const cfg = readOAuthConfig(this.config);
-    return this.authService.issueAccessTokenForOAuth(userId, scope, clientId, {
-      aud: resource ?? cfg.apiAudience,
-      iss: resolveOAuthTokenIssuer(cfg),
-    });
+    // A third-party client's audience is the MCP resource whatever an older
+    // grant recorded, so grants made before that rule cannot reach REST either.
+    const aud = isDelegatedClient(client)
+      ? cfg.mcpResource
+      : (resource ?? cfg.apiAudience);
+    return this.authService.issueAccessTokenForOAuth(
+      userId,
+      scope,
+      client.clientId,
+      { aud, iss: resolveOAuthTokenIssuer(cfg) },
+    );
   }
 
   /** RFC 9207: tell the client which AS produced this authorization response. */
@@ -211,7 +233,7 @@ export class OAuthService implements OnModuleInit {
         error_description: 'redirect_uri not registered for this client',
       });
     }
-    this.assertAllowedResource(query.resource);
+    this.assertAllowedResource(query.resource, client);
 
     // 3. Check user is authenticated via access token cookie
     const cookieName = this.config.get<string>('JWT_COOKIE_NAME', 'token');
@@ -538,7 +560,7 @@ export class OAuthService implements OnModuleInit {
     }
 
     // Reject an unknown resource before the code is consumed (RFC 8707).
-    this.assertAllowedResource(body.resource);
+    this.assertAllowedResource(body.resource, client);
 
     // Consume the code (single-use — deleted from Redis on read)
     const record = await this.codeStore.consumeCode(body.code);
@@ -598,7 +620,7 @@ export class OAuthService implements OnModuleInit {
     const accessToken = this.mintAccessToken(
       user.id,
       record.scope,
-      client.clientId,
+      client,
       record.resource,
     );
 
@@ -656,7 +678,7 @@ export class OAuthService implements OnModuleInit {
       });
     }
 
-    this.assertAllowedResource(body.resource);
+    this.assertAllowedResource(body.resource, client);
 
     // A refresh may not switch audience. Same rule as the authorization_code
     // grant: an explicit resource must equal the one bound to the grant (none
@@ -742,7 +764,7 @@ export class OAuthService implements OnModuleInit {
     const accessToken = this.mintAccessToken(
       user.id,
       scopeMeta.scope,
-      client.clientId,
+      client,
       scopeMeta.resource,
     );
 

@@ -86,7 +86,14 @@ function makeService(
       isFirstParty: true,
     });
   }
-  return { service, authService, refreshTokenService, codeStore, consentStore };
+  return {
+    service,
+    authService,
+    refreshTokenService,
+    codeStore,
+    consentStore,
+    dynamicClientService,
+  };
 }
 
 const authReq = {
@@ -417,6 +424,132 @@ describe('resource binds code and token audience', () => {
     await service.submitConsent('req-1', 'user-1', true);
     expect(codeStore.storeCode).toHaveBeenCalledWith(
       expect.objectContaining({ resource: MCP }),
+    );
+  });
+});
+
+describe('a registered client can only get a token for the MCP resource', () => {
+  const dynamicBody = (extra: Record<string, unknown> = {}) =>
+    ({
+      grant_type: 'authorization_code',
+      client_id: 'dyn-1',
+      code: 'c',
+      code_verifier: 'v',
+      redirect_uri: 'http://127.0.0.1:5000/cb',
+      ...extra,
+    }) as never;
+  const dynamicCode = (resource?: string) => ({
+    code: 'c',
+    clientId: 'dyn-1',
+    userId: 'user-1',
+    scope: 'tickets:read',
+    codeChallenge: 'chal',
+    codeChallengeMethod: 'S256',
+    redirectUri: 'http://127.0.0.1:5000/cb',
+    createdAt: 'now',
+    ...(resource ? { resource } : {}),
+  });
+  const dynamicAuthorize = (extra: Record<string, unknown> = {}) =>
+    authorizeQuery({
+      client_id: 'dyn-1',
+      redirect_uri: 'http://127.0.0.1:5000/cb',
+      ...extra,
+    });
+
+  it('authorize refuses the REST API as the resource, so disconnecting the app cannot be bypassed by calling REST directly', async () => {
+    const { service, consentStore } = makeService();
+    const body = await errorOf(
+      service.authorize(dynamicAuthorize({ resource: API }), authReq),
+    );
+    expect(body).toMatchObject({
+      error: 'invalid_target',
+      error_description: 'this client may only request the MCP resource',
+    });
+    expect(consentStore.storePendingConsent).not.toHaveBeenCalled();
+  });
+
+  it('the token endpoint refuses it too and leaves the code unconsumed', async () => {
+    const { service, codeStore } = makeService();
+    const body = await errorOf(
+      service.token(dynamicBody({ resource: API }), tokenReq),
+    );
+    expect(body).toMatchObject({ error: 'invalid_target' });
+    expect(codeStore.consumeCode).not.toHaveBeenCalled();
+  });
+
+  it('with no resource named, the token audience is the MCP resource rather than the REST API', async () => {
+    const { service, codeStore, authService } = makeService();
+    codeStore.consumeCode.mockResolvedValue(dynamicCode());
+    await service.token(dynamicBody(), tokenReq);
+    expect(authService.issueAccessTokenForOAuth).toHaveBeenCalledWith(
+      'user-1',
+      'tickets:read',
+      'dyn-1',
+      expect.objectContaining({ aud: MCP }),
+    );
+  });
+
+  it('a session recorded with the REST audience before this rule refreshes to the MCP audience', async () => {
+    const { service, codeStore, authService, dynamicClientService } =
+      makeService();
+    dynamicClientService.findClient.mockResolvedValue({
+      clientId: 'dyn-1',
+      clientName: 'Dyn',
+      redirectUris: ['http://127.0.0.1:5000/cb'],
+      grantTypes: ['authorization_code', 'refresh_token'],
+      allowedScopes: ['tickets:read'],
+      pkceRequired: true,
+      accessTokenLifetimeSeconds: 900,
+      refreshTokenLifetimeSeconds: 3600,
+    });
+    codeStore.getSessionScope.mockResolvedValue({
+      scope: 'tickets:read',
+      clientId: 'dyn-1',
+      resource: API,
+    });
+    await service.token(
+      {
+        grant_type: 'refresh_token',
+        client_id: 'dyn-1',
+        refresh_token: 'sid.secret',
+      } as never,
+      tokenReq,
+    );
+    expect(authService.issueAccessTokenForOAuth).toHaveBeenCalledWith(
+      'user-1',
+      'tickets:read',
+      'dyn-1',
+      expect.objectContaining({ aud: MCP }),
+    );
+  });
+
+  it("the platform's own static client still defaults to the REST API", async () => {
+    const { service, codeStore, authService } = makeService();
+    codeStore.consumeCode.mockResolvedValue({
+      code: 'c',
+      clientId: 'ticketing-mcp',
+      userId: 'user-1',
+      scope: 'tickets:read',
+      codeChallenge: 'chal',
+      codeChallengeMethod: 'S256',
+      redirectUri: 'http://127.0.0.1:19836/callback',
+      createdAt: 'now',
+    });
+    await service.token(
+      {
+        grant_type: 'authorization_code',
+        client_id: 'ticketing-mcp',
+        code: 'c',
+        code_verifier: 'v',
+        redirect_uri: 'http://127.0.0.1:19836/callback',
+      } as never,
+      tokenReq,
+    );
+    expect(authService.issueAccessTokenForOAuth).toHaveBeenCalledWith(
+      'user-1',
+      'tickets:read',
+      'ticketing-mcp',
+      expect.objectContaining({ aud: API }),
     );
   });
 });
