@@ -1537,3 +1537,33 @@ review of migration 008 (attendance outbox schema, so far only exercised against
 throwaway local DB); the redundant `chore/cve-sweep-2026-09` branch, whose contents
 now live in #122; and the non-gating `SSH.NET` 2025.1.0 HIGH advisories in
 queue-service's **test** project.
+
+---
+
+## 2026-10-03 — PR #153 audit fixes
+
+Fixes from the MCP platform review, on `feat/mcp-platform`, with no dependency or
+version change (the Trivy and dependency gates are untouched).
+
+- **Idempotency**: the derived key now includes a 15-minute window, so a cancelled or
+  expired order no longer replays forever; a missing `sub` is an auth failure instead
+  of falling back to the client id.
+- **OAuth**: the session verifier accepts only the session issuer; disconnecting a
+  client records a not-before time that blocks exchange of earlier tokens; mcp-service
+  reuses an exchanged token for at most 60 seconds.
+- **Config**: `API_AUDIENCE` is an explicit optional setting; Helm derives the issuer,
+  resource and audience from `global.publicOrigin`, and the umbrella chart fails the
+  render when mcp-service is enabled without it.
+- **Observability**: Kong logs each audience-less OAuth token it admits;
+  `order.keyed.uncompensated{flow}` counts keyed creates that leave a reservation held.
+- **Contracts**: venue-service pins the "was already released" phrase order-service
+  matches on, as ticket-service already did for its prefix.
+- **Shutdown**: one SIGTERM handler in mcp-service drains connections (20 s), then
+  flushes telemetry (3 s), under the 30 s pod grace period.
+- **Docs**: the V8 migration pre-check and concurrent-build steps are in
+  `docs/11-kubernetes-deployment.md`.
+
+Left open on purpose: the queue-gate pass has no expiry or event binding (changing it
+changes what an admission means after 10 minutes and must match the client gate), and
+dynamic client registration still defaults to every scope (read-only defaults would stop
+a client that registers without a scope from ever stepping up to `orders:create`).

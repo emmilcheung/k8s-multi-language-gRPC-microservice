@@ -38,6 +38,14 @@ infra          # Kong, observability stack, cert-manager
 - Use `NetworkPolicy` to restrict ingress/egress — only allow known communication paths.
 - Kong Ingress Controller manages external ingress — no `NodePort` in production.
 
+## Release Checks
+
+- Before order-service migration `V8__order_idempotency.sql` runs in an environment, this must return no rows, or the unique index fails and Flyway aborts:
+  `SELECT reservation_id FROM orders WHERE reservation_id IS NOT NULL GROUP BY 1 HAVING count(*) > 1;`
+- The index build blocks writes to `orders` while it runs. Outside a small table, build it first by hand, outside a transaction, and let the migration's `IF NOT EXISTS` make it a no-op:
+  `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_orders_reservation_id ON orders (reservation_id) WHERE reservation_id IS NOT NULL;`
+  A failed concurrent build leaves an invalid index that `IF NOT EXISTS` skips silently: check `pg_index.indisvalid` and drop it before retrying.
+
 ## EKS-Specific
 
 - Use managed node groups with Karpenter for auto-scaling.
