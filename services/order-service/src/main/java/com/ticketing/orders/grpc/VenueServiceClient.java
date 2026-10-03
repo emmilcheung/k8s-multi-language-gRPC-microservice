@@ -214,7 +214,8 @@ public class VenueServiceClient {
                 new ResponseStatusException(HttpStatus.CONFLICT,
                         "Seats are no longer available");
             // venue-service answers a reserve on a RELEASED/EXPIRED reservationId with this
-            // exact phrase; order-service turns it into IDEMPOTENCY_KEY_EXHAUSTED (C-8).
+            // exact phrase (venue-service internal/grpc/server.go ReservationReleasedSuffix);
+            // order-service turns it into IDEMPOTENCY_KEY_EXHAUSTED.
             case FAILED_PRECONDITION -> description != null && description.contains("was already released")
                 ? new ReservationReleasedException(description)
                 : new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,

@@ -20,6 +20,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// ReservationReleasedSuffix ends the FailedPrecondition message returned when a reserve
+// targets a RELEASED or EXPIRED reservation. order-service matches it
+// (VenueServiceClient) to turn the failure into IDEMPOTENCY_KEY_EXHAUSTED.
+const ReservationReleasedSuffix = "was already released"
+
 // VenueGrpcServer implements the generated VenueServiceServer interface.
 // CP-10 implemented the seated reservation lifecycle RPCs.
 // CP-11 implements AutoAssignAndReserve.
@@ -74,7 +79,7 @@ func (s *VenueGrpcServer) ReserveHeldSeats(ctx context.Context, req *venuev1.Res
 			}, nil
 		case repository.ReservationStatusReleased, repository.ReservationStatusExpired:
 			return nil, status.Errorf(codes.FailedPrecondition,
-				"reservation %s was already released", req.ReservationId)
+				"reservation %s %s", req.ReservationId, ReservationReleasedSuffix)
 		case repository.ReservationStatusSold:
 			return nil, status.Errorf(codes.FailedPrecondition,
 				"reservation %s was already sold", req.ReservationId)
@@ -190,7 +195,7 @@ func (s *VenueGrpcServer) AutoAssignAndReserve(ctx context.Context, req *venuev1
 			}, nil
 		case repository.ReservationStatusReleased, repository.ReservationStatusExpired:
 			return nil, status.Errorf(codes.FailedPrecondition,
-				"reservation %s was already released", req.ReservationId)
+				"reservation %s %s", req.ReservationId, ReservationReleasedSuffix)
 		case repository.ReservationStatusSold:
 			return nil, status.Errorf(codes.FailedPrecondition,
 				"reservation %s was already sold", req.ReservationId)

@@ -3,6 +3,7 @@ package grpcserver_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -717,4 +718,38 @@ func TestAutoAssignAndReserve_ShouldReturnInternal_WhenAtomicReserveFails(t *tes
 	})
 	require.Error(t, err)
 	assert.Equal(t, codes.Internal, status.Code(err))
+}
+
+// order-service decides "this Idempotency-Key is dead" by matching this phrase in the
+// FailedPrecondition description of both reserve RPCs. Rewording it without updating
+// VenueServiceClient would turn that outcome into a generic 422.
+func TestReservationReleasedSuffix_ContractValue(t *testing.T) {
+	if grpcserver.ReservationReleasedSuffix != "was already released" {
+		t.Fatalf("suffix changed to %q: update order-service VenueServiceClient and its contract test", grpcserver.ReservationReleasedSuffix)
+	}
+}
+
+func TestReserveRpcs_ShouldCarryReleasedSuffix_WhenReservationReleasedOrExpired(t *testing.T) {
+	for _, st := range []repository.ReservationStatus{repository.ReservationStatusReleased, repository.ReservationStatusExpired} {
+		stub := &stubReservationRepo{
+			findByIDFn: func(_ context.Context, id string) (*repository.SeatReservation, error) {
+				return &repository.SeatReservation{ID: id, Status: st}, nil
+			},
+		}
+		srv := newTestServer(stub)
+
+		_, held := srv.ReserveHeldSeats(context.Background(), &venuev1.ReserveHeldSeatsRequest{
+			PlanId: "plan-1", TicketId: "ticket-1", ReservationId: "res-1", UserId: "user-1", SeatIds: []string{"seat-1"},
+		})
+		_, auto := srv.AutoAssignAndReserve(context.Background(), &venuev1.AutoAssignAndReserveRequest{
+			PlanId: "plan-1", TicketId: "ticket-1", SectionId: "sec-1", ReservationId: "res-1", UserId: "user-1", Quantity: 1,
+		})
+
+		for name, err := range map[string]error{"ReserveHeldSeats": held, "AutoAssignAndReserve": auto} {
+			require.Error(t, err, "%s/%s", name, st)
+			assert.Equal(t, codes.FailedPrecondition, status.Code(err), "%s/%s", name, st)
+			assert.True(t, strings.HasSuffix(status.Convert(err).Message(), grpcserver.ReservationReleasedSuffix),
+				"%s/%s message %q", name, st, status.Convert(err).Message())
+		}
+	}
 }
