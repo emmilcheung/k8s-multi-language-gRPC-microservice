@@ -15,8 +15,8 @@
 -- `aud` not containing API_AUDIENCE_PLACEHOLDER is refused 401 before the scope
 -- check. This is what keeps an MCP-audience token (aud <origin>/mcp) out of REST
 -- routes; only the exchanged API-audience token passes. A token with no `aud` is
--- tolerated until WS-N makes `aud` mandatory. Browser tokens have no client_id
--- and are never subject to it.
+-- tolerated until WS-N makes `aud` mandatory, and each one that passes is logged
+-- at notice level. Browser tokens have no client_id and are never subject to it.
 --
 -- Why no require "cjson": Kong's untrusted Lua sandbox blocks require() (only
 -- resty.openssl.hmac is allow-listed, for queue-gate.lua). Claims are read
@@ -72,6 +72,11 @@ if payload_json:find('"client_id"%s*:') then
         }
       )
     end
+  else
+    -- Tolerated for now, but never silently: this line going quiet is the evidence
+    -- that no OAuth client still sends an audience-less token, i.e. that making `aud`
+    -- mandatory is safe. Fixed text only; the token is never logged.
+    kong.log.notice("oauth token without aud accepted on a REST route (aud becomes mandatory later)")
   end
 end
 

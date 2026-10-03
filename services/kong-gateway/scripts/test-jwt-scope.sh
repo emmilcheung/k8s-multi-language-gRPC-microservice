@@ -68,11 +68,12 @@ local cases = {
 
 local failed = 0
 for _, c in ipairs(cases) do
-  local exit_status, exit_calls = nil, 0
+  local exit_status, exit_calls, noticed = nil, 0, false
   -- Like real Kong, the first exit decides the response; a second call means
   -- the snippet kept running after exiting (a dropped `return`).
   _G.kong = {
     ctx = { shared = { authenticated_jwt_token = "h." .. b64url(c[2]) .. ".s" } },
+    log = { notice = function() noticed = true end },
     response = { exit = function(status)
       exit_calls = exit_calls + 1
       if exit_status == nil then exit_status = status end
@@ -80,7 +81,12 @@ for _, c in ipairs(cases) do
   }
   local chunk = assert(loadfile(arg[1]))
   chunk()
-  if exit_calls > 1 then
+  -- The audience-less token that is let through must leave a trace; nothing else may.
+  local want_notice = c[2]:find('"client_id"', 1, true) ~= nil and c[2]:find('"aud"', 1, true) == nil
+  if noticed ~= want_notice then
+    failed = failed + 1
+    print("FAIL: " .. c[1] .. " -> notice logged: " .. tostring(noticed) .. ", want " .. tostring(want_notice))
+  elseif exit_calls > 1 then
     failed = failed + 1
     print("FAIL: " .. c[1] .. " -> exit called " .. exit_calls .. " times")
   elseif exit_status == c[3] then
