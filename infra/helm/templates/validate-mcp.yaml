@@ -1,0 +1,20 @@
+{{- /*
+  Refuses to render a mcp-service that cannot work. Without these, nothing breaks at
+  deploy time and every /mcp request 401s at runtime:
+    - publicOrigin drives the issuer, resource and audience mcp-service verifies.
+    - auth-service stamps that issuer on OAuth tokens only when OAUTH_ISSUER_ENABLED=true;
+      otherwise tokens carry iss=auth-service and mcp-service rejects every one.
+  Kong's second jwt credential (KONG_OAUTH_ISSUER) is deployed outside this chart: set it
+  to the same origin.
+*/ -}}
+{{- $mcp := index .Values "mcp-service" -}}
+{{- if and $mcp $mcp.enabled -}}
+  {{- if not .Values.global.publicOrigin -}}
+    {{- fail "mcp-service.enabled requires global.publicOrigin (the public origin of Kong). It sets the issuer, resource and audience mcp-service verifies." -}}
+  {{- end -}}
+  {{- $auth := index .Values "auth-service" | default dict -}}
+  {{- $flag := get ($auth.env | default dict) "OAUTH_ISSUER_ENABLED" | toString -}}
+  {{- if ne $flag "true" -}}
+    {{- fail "mcp-service.enabled requires auth-service.env.OAUTH_ISSUER_ENABLED=\"true\": otherwise OAuth tokens carry iss=auth-service and every MCP request is rejected with 401." -}}
+  {{- end -}}
+{{- end -}}

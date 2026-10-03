@@ -229,8 +229,7 @@ user-service:
 mcp-service:
   replicaCount: 1
   env:
-    MCP_RESOURCE: http://localhost:8000/mcp
-    OAUTH_ISSUER: http://localhost:8000
+    # MCP_RESOURCE / OAUTH_ISSUER / API_AUDIENCE come from global.publicOrigin.
     PUBLIC_WEB_URL: http://localhost:3000
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://ticketing-observability-otel-collector:4317"
     OTEL_SERVICE_NAME: mcp-service

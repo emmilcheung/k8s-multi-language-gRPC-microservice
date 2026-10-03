@@ -75,6 +75,19 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- with .Values.global.publicOrigin }}
+            {{- $origin := trimSuffix "/" . }}
+            # Same owner-set origin auth-service derives its OAuth URLs from, so the
+            # issuer, resource and exchange audience cannot drift from it. Unset emits
+            # nothing and the pod fails loud at startup (config.ts); the umbrella
+            # (templates/validate-mcp.yaml) refuses to render that combination.
+            - name: OAUTH_ISSUER
+              value: {{ $origin | quote }}
+            - name: MCP_RESOURCE
+              value: {{ printf "%s/mcp" $origin | quote }}
+            - name: API_AUDIENCE
+              value: {{ printf "%s/api" $origin | quote }}
+            {{- end }}
           {{- if .Values.secretRef }}
           envFrom:
             - secretRef:

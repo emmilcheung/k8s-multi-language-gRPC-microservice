@@ -183,8 +183,10 @@ expiration-service:
 
 # ── mcp-service (MCP resource server) ─────────────────────────────────────────
 # Off until the Kong /mcp route lands and its secret exists: without
-# MCP_RESOURCE/OAUTH_ISSUER/PUBLIC_WEB_URL (per-environment overlays) and
-# mcp-service-secrets the pod refuses to boot by design.
+# global.publicOrigin, mcp-service.env.PUBLIC_WEB_URL (per-environment overlays) and
+# mcp-service-secrets the pod refuses to boot by design. Enabling it also needs
+# auth-service.env.OAUTH_ISSUER_ENABLED="true" and Kong's KONG_OAUTH_ISSUER set to
+# the same origin; templates/validate-mcp.yaml fails the render without the first two.
 mcp-service:
   enabled: false
   image:
