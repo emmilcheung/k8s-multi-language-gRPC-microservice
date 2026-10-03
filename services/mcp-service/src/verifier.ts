@@ -76,6 +76,9 @@ export function createVerifier(opts: VerifierOptions): OAuthTokenVerifier {
         if (isTokenDefect(err)) throw invalid(err.message);
         throw err;
       }
+      if (typeof payload.sub !== 'string' || !payload.sub) {
+        throw invalid('missing "sub" claim');
+      }
       if (typeof payload.client_id !== 'string' || !payload.client_id) {
         throw invalid('missing "client_id" claim');
       }

@@ -29,6 +29,13 @@ describe('verifier hardening (Wave 2 review minors)', () => {
     );
   });
 
+  it('F-13: a token with an empty subject is rejected, so idempotency can never be keyed by client instead of by user', async () => {
+    const token = await mintToken({ sub: '' });
+    await expect(verifier().verifyAccessToken(token)).rejects.toBeInstanceOf(
+      OAuthError,
+    );
+  });
+
   it('J-7: a jose defect recognised only by err.code (e.g. a second jose copy breaks instanceof) is still a 401-class token error', async () => {
     const jwks: JWTVerifyGetKey = () =>
       Promise.reject(withCode('ERR_JWKS_NO_MATCHING_KEY'));

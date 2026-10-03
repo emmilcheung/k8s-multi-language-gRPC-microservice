@@ -234,7 +234,7 @@ const TOOLS = [
   defineTool({
     name: 'create_order',
     description:
-      'Buy general-admission tickets. Reserves quota immediately; payment is a separate step. Safe to retry: identical arguments return the existing order (replayed: true) instead of creating another. To deliberately place another identical order, pass a new idempotencyKey.',
+      'Buy general-admission tickets. Reserves quota immediately; payment is a separate step. Safe to retry: identical arguments within about 15 minutes return the existing order (replayed: true) instead of creating another. If the replayed order is CANCELLED or EXPIRED, or you deliberately want another identical order, pass a new idempotencyKey.',
     input: z.object({
       ticketId: uuid('The ticket/event ID'),
       quantity: z.number().int().min(1).max(10).describe('Number of tickets'),
@@ -258,7 +258,7 @@ const TOOLS = [
   defineTool({
     name: 'create_seated_order',
     description:
-      'Reserve specific seats (seatIds) or auto-assign seats from a section (sectionId + quantity) for a seated event. seatingPlanId comes from get_event. Payment is a separate step. Safe to retry: identical arguments return the existing order (replayed: true) instead of creating another. To deliberately place another identical order, pass a new idempotencyKey.',
+      'Reserve specific seats (seatIds) or auto-assign seats from a section (sectionId + quantity) for a seated event. seatingPlanId comes from get_event. Payment is a separate step. Safe to retry: identical arguments within about 15 minutes return the existing order (replayed: true) instead of creating another. If the replayed order is CANCELLED or EXPIRED, or you deliberately want another identical order, pass a new idempotencyKey.',
     input: z
       .object({
         ticketId: uuid('The ticket/event ID'),
@@ -419,8 +419,11 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       async (args: Record<string, unknown>, ctx: ServerContext) => {
         const auth = ctx.http?.authInfo;
         if (!auth) return fail('UNAUTHORIZED', 'Authentication is required.');
-        const sub =
-          typeof auth.extra?.sub === 'string' ? auth.extra.sub : auth.clientId;
+        // The verifier rejects a token without a string `sub`. Never fall back to
+        // the client id: it would key idempotency per client and merge users.
+        const sub = auth.extra?.sub;
+        if (typeof sub !== 'string' || !sub)
+          return fail('UNAUTHORIZED', 'Authentication is required.');
         try {
           const send = (req: UpstreamRequest) =>
             deps.upstream.request(auth, name, req);

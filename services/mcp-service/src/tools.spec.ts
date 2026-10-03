@@ -498,7 +498,7 @@ describe.each(ERAS)('MCP tools (%s)', (era) => {
         (tools.find((t) => t.name === name) as { description?: string })
           .description ?? '';
       expect(description, name).toContain(
-        'identical arguments return the existing order',
+        'identical arguments within about 15 minutes return the existing order',
       );
       expect(description, name).toContain('new idempotencyKey');
     }
