@@ -288,7 +288,7 @@ export class AuthController {
     // This catches cases where someone bypasses Kong and hits the pod directly.
     if (token) {
       try {
-        const payload = await this.authService.verifyAccessToken(token);
+        const payload = await this.authService.verifySessionAccessToken(token);
         // Cross-check: if Kong also set X-User-Id, it must match the JWT sub.
         if (kongUserId && kongUserId !== payload.sub) {
           // Header/token mismatch — reject the request rather than trust either.
@@ -433,7 +433,7 @@ export class AuthController {
 
     if (token) {
       try {
-        const payload = await this.authService.verifyAccessToken(token);
+        const payload = await this.authService.verifySessionAccessToken(token);
         if (kongUserId && kongUserId !== payload.sub) {
           throw new UnauthorizedException({
             error: {

@@ -691,7 +691,20 @@ describe('AuthService', () => {
       ).rejects.toThrow();
     });
 
-    it('F11b still holds with the new issuer: an OAuth token with iss=OAUTH_ISSUER is rejected as a session', async () => {
+    it('F-04: the generic verifier accepts the session issuer only, so an OAuth-issuer token is no session even without a client_id claim', async () => {
+      const { jwt, bound } = realJwt();
+      const { service } = makeAuthService({ jwtService: bound });
+      await expect(
+        service.verifyAccessToken(sign(jwt, 'auth-service')),
+      ).resolves.toMatchObject({ sub: 'uuid-1' });
+      await expect(
+        service.verifyAccessToken(sign(jwt, OAUTH_ISS)),
+      ).rejects.toMatchObject({
+        response: { error: { code: 'INVALID_TOKEN' } },
+      });
+    });
+
+    it('F11b still holds with the new issuer: an OAuth token is rejected as a session whichever issuer it carries', async () => {
       const { jwt, bound } = realJwt();
       const { service } = makeAuthService({ jwtService: bound });
       const oauthToken = sign(jwt, OAUTH_ISS, {
@@ -704,10 +717,18 @@ describe('AuthService', () => {
       ).rejects.toMatchObject({
         response: { error: { code: 'INVALID_TOKEN' } },
       });
-      // Control: the same token minus client_id verifies, so the rejection is
-      // the client_id gate and not an issuer failure.
+      // Flag-off shape: an OAuth token still minted under iss=auth-service is
+      // caught by the client_id gate, not by the issuer.
       await expect(
-        service.verifySessionAccessToken(sign(jwt, OAUTH_ISS)),
+        service.verifySessionAccessToken(
+          sign(jwt, 'auth-service', { client_id: 'ticketing-mcp' }),
+        ),
+      ).rejects.toMatchObject({
+        response: { error: { code: 'INVALID_TOKEN' } },
+      });
+      // Control: a plain session token verifies, so both rejections are real.
+      await expect(
+        service.verifySessionAccessToken(sign(jwt, 'auth-service')),
       ).resolves.toMatchObject({ sub: 'uuid-1' });
     });
   });

@@ -391,15 +391,23 @@ export class AuthService {
    * unauthenticated callers.
    *
    * Returns the verified payload on success. Throws UnauthorizedException if
-   * the token is invalid, expired, or blacklisted.
+   * the token is invalid, expired, or blacklisted. Accepts the session issuer
+   * only; callers that must also refuse OAuth tokens minted under that issuer
+   * (flag off) use verifySessionAccessToken.
    */
   async verifyAccessToken(token: string): Promise<JwtPayload> {
     let payload: JwtPayload;
     try {
+      // Session tokens only: the module verifies both issuers (OAuth subject tokens
+      // need that), so narrow to the session issuer here. A third-party OAuth token
+      // minted for another client or resource is never a session (F-04).
       payload = jwtPayloadSchema.parse(
         await (
-          this.jwtService.verifyAsync as (value: string) => Promise<unknown>
-        )(token),
+          this.jwtService.verifyAsync as (
+            value: string,
+            options: { issuer: string },
+          ) => Promise<unknown>
+        )(token, { issuer: 'auth-service' }),
       );
     } catch {
       throw new UnauthorizedException({
