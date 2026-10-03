@@ -173,6 +173,13 @@ func main() {
 	defer sweeperCancel()
 	go sweeper.Start(sweeperCtx)
 
+	// Reservation sweeper — expires RESERVED reservations past expires_at every
+	// 5 minutes (same cadence as ticket-service's quota reconciler).
+	resSweeper := hold.NewReservationSweeper(reservationRepo, 5*time.Minute, log)
+	resSweeperCtx, resSweeperCancel := context.WithCancel(context.Background())
+	defer resSweeperCancel()
+	go resSweeper.Start(resSweeperCtx)
+
 	// Redis reconciler — re-seeds the seat state hash after a Redis restart.
 	// Only started when Redis is configured; no-op otherwise.
 	var reconcilerCancel context.CancelFunc
@@ -210,7 +217,7 @@ func main() {
 	defer ticketConn.Close() //nolint:errcheck
 	ticketClient := grpcserver.NewResilientTicketClient(ticketsv1.NewTicketServiceClient(ticketConn), log)
 
-	// gRPC server — wired with real repos in CP-08.
+	// gRPC server — wired with real repos.
 	grpcSrv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, ticketClient, log)
 	grpcCtx, grpcCancel := context.WithCancel(context.Background())
 	defer grpcCancel()
@@ -281,7 +288,7 @@ func main() {
 	})
 	e.POST("/graphql", echo.WrapHandler(gqlgraph.WrapWithUserIDSignatureValidation(gqlHandler, sigValidator)))
 
-	// R-06: Use errgroup to propagate server errors back to main instead of
+	// Use errgroup to propagate server errors back to main instead of
 	// calling log.Fatal inside goroutines (which calls os.Exit, skipping all deferred cleanup).
 	eg, egCtx := errgroup.WithContext(context.Background())
 

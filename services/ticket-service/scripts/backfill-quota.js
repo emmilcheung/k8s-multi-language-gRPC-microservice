@@ -1,4 +1,4 @@
-// backfill-quota.js — one-time migration for ticket documents created before CP-02.
+// backfill-quota.js — one-time migration for ticket documents created before quota tracking existed.
 //
 // Run with: mongosh <MONGO_URI> services/ticket-service/scripts/backfill-quota.js
 //

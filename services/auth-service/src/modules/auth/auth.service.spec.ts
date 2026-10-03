@@ -7,12 +7,14 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import type { UsersRepository } from '../users/users.repository';
+import { JwtService as RealJwtService } from '@nestjs/jwt';
 import type { JwtService } from '@nestjs/jwt';
 import type { ConfigService } from '@nestjs/config';
 import type { PinoLogger } from 'nestjs-pino';
 import type { RefreshTokenService } from './refresh-token.service';
 import type { SigninAbuseProtectionService } from './signin-abuse-protection.service';
 import * as argon2 from 'argon2';
+import { buildJwtOptions } from './auth.module';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -228,7 +230,11 @@ describe('AuthService', () => {
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1', {});
+      expect(refreshTokenService.issue).toHaveBeenCalledWith(
+        'uuid-1',
+        {},
+        null,
+      );
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(logger.info).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -311,7 +317,11 @@ describe('AuthService', () => {
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(jwtService.sign).toHaveBeenCalledOnce();
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(refreshTokenService.issue).toHaveBeenCalledWith('uuid-1', {});
+      expect(refreshTokenService.issue).toHaveBeenCalledWith(
+        'uuid-1',
+        {},
+        null,
+      );
       expect(
         (
           signinAbuseProtectionService as unknown as {
@@ -538,6 +548,248 @@ describe('AuthService', () => {
       await service.blacklistAccessToken('signed.jwt.token');
 
       expect(redisSet).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('verifySessionAccessToken', () => {
+    // /oauth/authorize treats its cookie as proof of a signed-in user. An
+    // OAuth access token must not count: a tickets:read agent could otherwise
+    // authorize itself for every scope.
+    const base = { sub: 'uuid-1', email: 'user@example.com', jti: 'jti-1' };
+
+    it('rejects an OAuth access token', async () => {
+      const { service } = makeAuthService({
+        jwtService: {
+          verifyAsync: vi.fn().mockResolvedValue({
+            ...base,
+            scope: 'tickets:read',
+            client_id: 'ticketing-mcp',
+          }),
+        },
+      });
+      await expect(
+        service.verifySessionAccessToken('oauth.jwt'),
+      ).rejects.toMatchObject({
+        response: { error: { code: 'INVALID_TOKEN' } },
+      });
+    });
+
+    it('accepts a browser session token', async () => {
+      const { service } = makeAuthService({
+        jwtService: { verifyAsync: vi.fn().mockResolvedValue(base) },
+      });
+      await expect(
+        service.verifySessionAccessToken('session.jwt'),
+      ).resolves.toMatchObject({ sub: 'uuid-1' });
+    });
+  });
+
+  it('stamps client_id on every OAuth access token (Kong guards and the session verifier rely on it)', () => {
+    const { service, jwtService } = makeAuthService();
+    service.issueAccessTokenForOAuth('uuid-1', 'orders:read', 'ticketing-mcp', {
+      aud: 'http://localhost:8000/api',
+      iss: 'auth-service',
+    });
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    expect(jwtService.sign).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client_id: 'ticketing-mcp',
+        scope: 'orders:read',
+      }),
+      expect.anything(),
+    );
+  });
+
+  describe('token claims', () => {
+    // makeJwtService spreads its overrides, which drops prototype methods, so
+    // bind the real ones explicitly.
+    const realJwt = () => {
+      const jwt = new RealJwtService({
+        privateKey: TEST_RSA_PEM,
+        signOptions: {
+          algorithm: 'RS256',
+          expiresIn: '15m',
+          issuer: 'auth-service',
+        },
+      });
+      return {
+        sign: jwt.sign.bind(jwt),
+        decode: jwt.decode.bind(jwt),
+      } as unknown as JwtService;
+    };
+
+    const claimsOf = (jwt: JwtService, token: string) =>
+      jwt.decode<unknown>(token) as Record<string, unknown>;
+
+    it('an OAuth token carries the requested aud and the chosen iss, and no email or roles (MCP tokens are audience-bound and PII-free)', () => {
+      const jwt = realJwt();
+      const { service } = makeAuthService({ jwtService: jwt });
+      const token = service.issueAccessTokenForOAuth(
+        'uuid-1',
+        'orders:read',
+        'ticketing-mcp',
+        { aud: 'http://localhost:8000/mcp', iss: 'http://localhost:8000' },
+      );
+      const claims = claimsOf(jwt, token);
+      expect(claims).toMatchObject({
+        iss: 'http://localhost:8000',
+        aud: 'http://localhost:8000/mcp',
+        sub: 'uuid-1',
+        client_id: 'ticketing-mcp',
+        scope: 'orders:read',
+      });
+      expect(claims).not.toHaveProperty('email');
+      expect(claims).not.toHaveProperty('roles');
+      expect(claims.jti).toEqual(expect.any(String));
+    });
+
+    it('a browser token still has iss auth-service and no aud, so Kong and REST see no change', async () => {
+      const jwt = realJwt();
+      const { service } = makeAuthService({
+        jwtService: jwt,
+        usersRepo: { findById: vi.fn().mockResolvedValue(makeUser()) },
+      });
+      const token = await service.issueAccessTokenForUser('uuid-1');
+      const claims = claimsOf(jwt, token);
+      expect(claims.iss).toBe('auth-service');
+      expect(claims).not.toHaveProperty('aud');
+      expect(claims).not.toHaveProperty('client_id');
+    });
+  });
+  describe('OAUTH_ISSUER verification', () => {
+    const OAUTH_ISS = 'https://ticketing.example.com';
+    // Real JwtService built from the module's own options, so the accepted
+    // issuers are the ones production uses.
+    const realJwt = () => {
+      const config = {
+        getOrThrow: () => TEST_RSA_PEM,
+        get: (key: string, fallback?: unknown) =>
+          ({ OAUTH_ISSUER: OAUTH_ISS })[key] ?? fallback,
+      } as unknown as ConfigService;
+      const jwt = new RealJwtService(buildJwtOptions(config));
+      return {
+        jwt,
+        bound: {
+          sign: jwt.sign.bind(jwt),
+          verifyAsync: jwt.verifyAsync.bind(jwt),
+        } as unknown as JwtService,
+      };
+    };
+    const sign = (jwt: RealJwtService, iss: string, extra = {}) =>
+      jwt.sign({ sub: 'uuid-1', jti: 'j1', ...extra }, { issuer: iss });
+
+    it('JwtModule verification accepts auth-service and OAUTH_ISSUER, and rejects any other issuer', async () => {
+      const { jwt } = realJwt();
+      await expect(
+        jwt.verifyAsync(sign(jwt, 'auth-service')),
+      ).resolves.toMatchObject({ iss: 'auth-service' });
+      await expect(
+        jwt.verifyAsync(sign(jwt, OAUTH_ISS)),
+      ).resolves.toMatchObject({ iss: OAUTH_ISS });
+      await expect(
+        jwt.verifyAsync(sign(jwt, 'https://evil.example.com')),
+      ).rejects.toThrow();
+    });
+
+    it('the generic verifier accepts the session issuer only, so an OAuth-issuer token is no session even without a client_id claim', async () => {
+      const { jwt, bound } = realJwt();
+      const { service } = makeAuthService({ jwtService: bound });
+      await expect(
+        service.verifyAccessToken(sign(jwt, 'auth-service')),
+      ).resolves.toMatchObject({ sub: 'uuid-1' });
+      await expect(
+        service.verifyAccessToken(sign(jwt, OAUTH_ISS)),
+      ).rejects.toMatchObject({
+        response: { error: { code: 'INVALID_TOKEN' } },
+      });
+    });
+
+    describe('disconnecting a client', () => {
+      const oauthClaims = {
+        client_id: 'ticketing-mcp',
+        scope: 'tickets:read',
+        aud: 'https://ticketing.example.com/mcp',
+      };
+      const revokedAfterKey =
+        'auth-service:oauth:revoked-after:uuid-1:ticketing-mcp';
+      const exchangeWith = (storedRevokedAfter: Record<string, string>) => {
+        const { jwt, bound } = realJwt();
+        const { service } = makeAuthService({
+          jwtService: bound,
+          redis: {
+            get: vi.fn((key: string) =>
+              Promise.resolve(storedRevokedAfter[key] ?? null),
+            ),
+          },
+        });
+        return {
+          verify: () =>
+            service.verifyOAuthSubjectToken(sign(jwt, OAUTH_ISS, oauthClaims)),
+        };
+      };
+      const now = () => Math.floor(Date.now() / 1000);
+
+      it('stops exchanging a token that was issued before the disconnect, though it has not expired', async () => {
+        const { verify } = exchangeWith({ [revokedAfterKey]: String(now()) });
+        await expect(verify()).rejects.toMatchObject({
+          response: { error: { code: 'TOKEN_REVOKED' } },
+        });
+      });
+
+      it('still exchanges a token issued after the disconnect, so reconnecting works', async () => {
+        const { verify } = exchangeWith({
+          [revokedAfterKey]: String(now() - 10),
+        });
+        await expect(verify()).resolves.toMatchObject({ sub: 'uuid-1' });
+      });
+
+      it("leaves the same user's other clients alone", async () => {
+        const { verify } = exchangeWith({
+          'auth-service:oauth:revoked-after:uuid-1:some-other-client':
+            String(now()),
+        });
+        await expect(verify()).resolves.toMatchObject({ sub: 'uuid-1' });
+      });
+
+      it('records the disconnect with an expiry, so the marker cannot pile up', async () => {
+        const set = vi.fn().mockResolvedValue('OK');
+        const { service } = makeAuthService({ redis: { set } });
+        await service.revokeOAuthClientAccess('uuid-1', 'ticketing-mcp');
+        expect(set).toHaveBeenCalledWith(
+          revokedAfterKey,
+          expect.stringMatching(/^\d{10}$/),
+          'EX',
+          expect.any(Number),
+        );
+      });
+    });
+
+    it('still holds with the new issuer: an OAuth token is rejected as a session whichever issuer it carries', async () => {
+      const { jwt, bound } = realJwt();
+      const { service } = makeAuthService({ jwtService: bound });
+      const oauthToken = sign(jwt, OAUTH_ISS, {
+        client_id: 'ticketing-mcp',
+        scope: 'tickets:read',
+        aud: 'https://ticketing.example.com/mcp',
+      });
+      await expect(
+        service.verifySessionAccessToken(oauthToken),
+      ).rejects.toMatchObject({
+        response: { error: { code: 'INVALID_TOKEN' } },
+      });
+      // Flag-off shape: an OAuth token still minted under iss=auth-service is
+      // caught by the client_id gate, not by the issuer.
+      await expect(
+        service.verifySessionAccessToken(
+          sign(jwt, 'auth-service', { client_id: 'ticketing-mcp' }),
+        ),
+      ).rejects.toMatchObject({
+        response: { error: { code: 'INVALID_TOKEN' } },
+      });
+      // Control: a plain session token verifies, so both rejections are real.
+      await expect(
+        service.verifySessionAccessToken(sign(jwt, 'auth-service')),
+      ).resolves.toMatchObject({ sub: 'uuid-1' });
     });
   });
 });

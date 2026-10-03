@@ -264,7 +264,7 @@ func main() {
 	})
 	e.POST("/graphql", echo.WrapHandler(gqlgraph.WrapWithUserIDSignatureValidation(gqlHandler, signatureValidator)))
 
-	// R-06: Use errgroup to propagate server errors back to main instead of
+	// Use errgroup to propagate server errors back to main instead of
 	// calling log.Fatal inside goroutines (which calls os.Exit, skipping all deferred cleanup).
 	eg, egCtx := errgroup.WithContext(context.Background())
 

@@ -5,7 +5,7 @@
 # and for every other service.
 #
 # Why these are here:
-#   All six are the same defect class in glibc, present in the base image
+#   The first six are the same defect class in glibc, present in the base image
 #   mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled, which ships
 #   libc6 2.39-0ubuntu8.8. Every one is fixed only by 2.39-0ubuntu8.9.
 #
@@ -45,3 +45,34 @@ vulnerabilities:
   - id: CVE-2026-80489
     statement: glibc in base image aspnet:10.0-noble-chiseled; fixed only in libc6 2.39-0ubuntu8.9, not yet published by Microsoft.
     expired_at: 2026-12-21
+
+# OpenSSL in the same base image (added 2026-10-02).
+#
+#   aspnet:10.0-noble-chiseled (image built 2026-09-04) ships openssl and
+#   libssl3t64 3.0.13-0ubuntu3.15. All six below are fixed only by
+#   3.0.13-0ubuntu3.16, and the same "no package manager" reasoning applies.
+#   One of them, CVE-2026-84782, is HIGH; the other five are LOW.
+#
+#   Microsoft republished the non-chiseled 10.0-noble tag on 2026-10-02 with
+#   the patched package, so the chiseled rebuild should follow shortly. The
+#   expiry is therefore two weeks, not the glibc date above: if the chiseled
+#   tag has not been rebuilt by then, a HIGH in the TLS library needs a
+#   deliberate decision (wait longer, or move to the non-chiseled base).
+  - id: CVE-2026-84782
+    statement: openssl/libssl3t64 in base image aspnet:10.0-noble-chiseled; fixed only in 3.0.13-0ubuntu3.16, not yet in the chiseled tag.
+    expired_at: 2026-10-16
+  - id: CVE-2026-35189
+    statement: openssl/libssl3t64 in base image aspnet:10.0-noble-chiseled; fixed only in 3.0.13-0ubuntu3.16, not yet in the chiseled tag.
+    expired_at: 2026-10-16
+  - id: CVE-2026-54872
+    statement: openssl/libssl3t64 in base image aspnet:10.0-noble-chiseled; fixed only in 3.0.13-0ubuntu3.16, not yet in the chiseled tag.
+    expired_at: 2026-10-16
+  - id: CVE-2026-75805
+    statement: openssl/libssl3t64 in base image aspnet:10.0-noble-chiseled; fixed only in 3.0.13-0ubuntu3.16, not yet in the chiseled tag.
+    expired_at: 2026-10-16
+  - id: CVE-2026-75806
+    statement: openssl/libssl3t64 in base image aspnet:10.0-noble-chiseled; fixed only in 3.0.13-0ubuntu3.16, not yet in the chiseled tag.
+    expired_at: 2026-10-16
+  - id: CVE-2026-77696
+    statement: openssl/libssl3t64 in base image aspnet:10.0-noble-chiseled; fixed only in 3.0.13-0ubuntu3.16, not yet in the chiseled tag.
+    expired_at: 2026-10-16

@@ -33,10 +33,9 @@ import java.util.UUID;
  * is correctly applied — ensuring the order row and the outbox row are always written
  * atomically.
  *
- * CP-05: accepts {@code reservationId} and {@code quantity} from the GA reservation
+ * accepts {@code reservationId} and {@code quantity} from the GA reservation
  * response so they are persisted on the order and included in the outbox event.
  *
- * See audit finding C-01.
  */
 @Service
 public class OrderTransactionService {
@@ -76,12 +75,13 @@ public class OrderTransactionService {
      * @param reserveResponse the gRPC ReserveQuota response (contains title, price, etc.)
      * @param reservationId  the UUID used as the idempotency key for ReserveQuota
      * @param quantity       number of units being purchased
+     * @param requestFingerprint sha256 of the request body when created with an Idempotency-Key, else null
      * @return the created order as a response DTO
      */
     @Transactional
     public OrderResponse createOrderTransactional(
             UUID userId, UUID ticketId, ReserveQuotaResponse reserveResponse,
-            UUID reservationId, int quantity) {
+            UUID reservationId, int quantity, String requestFingerprint) {
 
         // Upsert the local ticket replica from the authoritative gRPC response.
         // In normal production flow this row already exists (written by TicketEventConsumer
@@ -97,6 +97,7 @@ public class OrderTransactionService {
 
         OffsetDateTime expiresAt = OffsetDateTime.now().plusMinutes(expirationMinutes);
         Order order = new Order(userId, OrderStatus.CREATED, expiresAt, ticket, reservationId, quantity);
+        order.setRequestFingerprint(requestFingerprint);
         orderRepository.save(order);
 
         // Write outbox message in the same transaction — this is the invariant that
@@ -113,7 +114,7 @@ public class OrderTransactionService {
                         reservationId.toString(),
                         quantity,
                         order.getVersion(),
-                        null  // GA orders have no seat IDs (CP-12)
+                        null  // GA orders have no seat IDs
                 ));
 
         log.info("Order created orderId={} userId={} ticketId={} reservationId={} quantity={}",

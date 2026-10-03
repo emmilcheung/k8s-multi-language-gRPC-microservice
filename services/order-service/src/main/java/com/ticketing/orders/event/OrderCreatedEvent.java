@@ -9,10 +9,10 @@ import java.util.UUID;
  * CloudEvents-envelope-compatible POJO published to {@code orders.order.created}.
  * The OutboxRelay serialises this to JSON and sets it as the Kafka message value.
  *
- * CP-05: added {@code reservationId} and {@code quantity} so ticket-service consumer
+ * added {@code reservationId} and {@code quantity} so ticket-service consumer
  * can identify the reservation associated with this order event.
  *
- * CP-12: added {@code seatIds} (null for GA orders) so venue-service consumer can
+ * added {@code seatIds} (null for GA orders) so venue-service consumer can
  * correlate which specific seats belong to this order.
  */
 public class OrderCreatedEvent {

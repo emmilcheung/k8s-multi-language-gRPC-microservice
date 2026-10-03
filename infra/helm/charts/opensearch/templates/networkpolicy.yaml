@@ -1,5 +1,5 @@
 {{- if .Values.networkPolicy.enabled }}
-# NetworkPolicy for opensearch (I-01)
+# NetworkPolicy for opensearch
 # Ingress: ticket-service pods on 9200 only.
 # This policy is the primary authz boundary for this chart per docs/06-security.md:50.
 # In-cluster transport security is provided by the Linkerd service mesh.

@@ -9,7 +9,7 @@ import (
 )
 
 // RequestLogger returns an Echo middleware that logs every request as structured JSON.
-// It injects the OTel traceId and spanId from the active span into each log line (O-02).
+// It injects the OTel traceId and spanId from the active span into each log line.
 func RequestLogger(log *zap.Logger) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {

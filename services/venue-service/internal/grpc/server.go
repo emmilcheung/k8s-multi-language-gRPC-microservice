@@ -20,9 +20,13 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// ReservationReleasedSuffix ends the FailedPrecondition message returned when a reserve
+// targets a RELEASED or EXPIRED reservation. order-service matches it
+// (VenueServiceClient) to turn the failure into IDEMPOTENCY_KEY_EXHAUSTED.
+const ReservationReleasedSuffix = "was already released"
+
 // VenueGrpcServer implements the generated VenueServiceServer interface.
-// CP-10 implemented the seated reservation lifecycle RPCs.
-// CP-11 implements AutoAssignAndReserve.
+// It implements the seated reservation lifecycle RPCs and AutoAssignAndReserve.
 type VenueGrpcServer struct {
 	venuev1.UnimplementedVenueServiceServer
 	reservationRepo repository.ReservationRepository
@@ -74,7 +78,7 @@ func (s *VenueGrpcServer) ReserveHeldSeats(ctx context.Context, req *venuev1.Res
 			}, nil
 		case repository.ReservationStatusReleased, repository.ReservationStatusExpired:
 			return nil, status.Errorf(codes.FailedPrecondition,
-				"reservation %s was already released", req.ReservationId)
+				"reservation %s %s", req.ReservationId, ReservationReleasedSuffix)
 		case repository.ReservationStatusSold:
 			return nil, status.Errorf(codes.FailedPrecondition,
 				"reservation %s was already sold", req.ReservationId)
@@ -190,7 +194,7 @@ func (s *VenueGrpcServer) AutoAssignAndReserve(ctx context.Context, req *venuev1
 			}, nil
 		case repository.ReservationStatusReleased, repository.ReservationStatusExpired:
 			return nil, status.Errorf(codes.FailedPrecondition,
-				"reservation %s was already released", req.ReservationId)
+				"reservation %s %s", req.ReservationId, ReservationReleasedSuffix)
 		case repository.ReservationStatusSold:
 			return nil, status.Errorf(codes.FailedPrecondition,
 				"reservation %s was already sold", req.ReservationId)
@@ -369,7 +373,7 @@ func (s *VenueGrpcServer) FinalizeSeatReservation(ctx context.Context, req *venu
 }
 
 // GetSeatingPlan returns the plan metadata including status and attached ticket.
-// Fully implemented in CP-08.
+// Fully implemented.
 func (s *VenueGrpcServer) GetSeatingPlan(ctx context.Context, req *venuev1.GetSeatingPlanRequest) (*venuev1.GetSeatingPlanResponse, error) {
 	if req.PlanId == "" {
 		return nil, status.Error(codes.InvalidArgument, "plan_id is required")

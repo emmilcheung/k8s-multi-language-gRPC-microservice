@@ -15,7 +15,7 @@ import { Pool } from 'pg';
 import path from 'path';
 import pino from 'pino';
 
-// Standalone structured logger for the migration script (O-09).
+// Standalone structured logger for the migration script.
 // Uses the same JSON format as the main app without requiring NestJS bootstrap.
 const log = pino({ base: { service: 'auth-service' }, messageKey: 'message' });
 

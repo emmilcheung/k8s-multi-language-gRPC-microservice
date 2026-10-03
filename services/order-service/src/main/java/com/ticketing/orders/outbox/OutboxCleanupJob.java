@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 import java.time.OffsetDateTime;
 
 /**
- * Periodically purges old published outbox rows (R-14).
+ * Periodically purges old published outbox rows.
  *
  * Without cleanup the outbox table grows unboundedly. Rows that have been successfully
  * published to Kafka are no longer needed for at-least-once delivery; keeping them

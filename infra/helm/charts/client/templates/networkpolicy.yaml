@@ -1,5 +1,5 @@
 {{- if .Values.networkPolicy.enabled }}
-# NetworkPolicy for client (Next.js) (I-01)
+# NetworkPolicy for client (Next.js)
 # Ingress: Kong (HTTP:4000)
 # Egress:  Kong (internal API calls for SSR), DNS (53), HTTPS for external assets
 apiVersion: networking.k8s.io/v1

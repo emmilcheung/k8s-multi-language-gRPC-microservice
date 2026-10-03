@@ -12,12 +12,15 @@
 #   GET  /api/users/currentuser            → auth-service   (JWT required)
 #   GET  /api/users/lookup                 → auth-service   (JWT required)
 #   GET  /.well-known/jwks.json            → auth-service   (public)
+#   GET  /.well-known/oauth-authorization-server → auth-service (public)
 #   GET  /api/tickets/*                    → ticket-service (public)
 #   *    /api/tickets/*                    → ticket-service (JWT required)
 #   *    /api/orders/*                     → order-service  (JWT required)
 #   *    /api/payments/*                   → payment-service (JWT required)
 #   *    /api/user-settings/*              → user-service   (JWT required)
 #   *    /api/attendance/*                 → attendance-service (JWT required)
+#   GET  /.well-known/oauth-protected-resource/mcp → mcp-service (public)
+#   POST|GET|DELETE /mcp                   → mcp-service    (no Kong JWT; mcp-service verifies the token)
 #   /*                                     → client         (catch-all, no JWT)
 #
 # Auth strategy:
@@ -38,9 +41,18 @@ consumers:
         algorithm: RS256
         rsa_public_key: |
           {{RSA_PUBLIC_KEY}}
+      # Same RSA key, keyed on the OAuth issuer origin. Once auth-service sets
+      # OAUTH_ISSUER_ENABLED, OAuth-issued tokens (MCP, exchanged API tokens)
+      # carry iss=<origin> instead of `auth-service`; without this entry the jwt
+      # plugin 401s every one of them. The REST audience rule in jwt-scope.lua
+      # then decides which of these tokens a REST route accepts.
+      - key: {{OAUTH_ISSUER}}
+        algorithm: RS256
+        rsa_public_key: |
+          {{RSA_PUBLIC_KEY}}
     # Consumer-scoped rate limit — authenticated users get a higher allowance.
     # Attaching it here (on the consumer) rather than as a second global plugin
-    # avoids the duplicate-global-plugin issue in Kong OSS DB-less mode (I-19).
+    # avoids the duplicate-global-plugin issue in Kong OSS DB-less mode.
     plugins:
       - name: rate-limiting
         config:
@@ -128,6 +140,8 @@ services:
             config:
               access:
                 - |
+                  {{OAUTH_DENY_LUA}}
+                - |
                   {{JWT_SUB_LUA}}
 
       # OAuth: consent approval — JWT required (cookie); user confirms or denies.
@@ -147,6 +161,8 @@ services:
           - name: post-function
             config:
               access:
+                - |
+                  {{OAUTH_DENY_LUA}}
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -168,6 +184,8 @@ services:
           - name: post-function
             config:
               access:
+                - |
+                  {{OAUTH_DENY_LUA}}
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -220,6 +238,8 @@ services:
             config:
               access:
                 - |
+                  {{OAUTH_DENY_LUA}}
+                - |
                   {{JWT_SUB_LUA}}
 
       # Protected: user lookup for internal tooling (scanner email fallback)
@@ -238,6 +258,8 @@ services:
           - name: post-function
             config:
               access:
+                - |
+                  {{OAUTH_DENY_LUA}}
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -258,6 +280,8 @@ services:
             config:
               access:
                 - |
+                  {{OAUTH_DENY_LUA}}
+                - |
                   {{JWT_SUB_LUA}}
 
       - name: auth-sessions-revoke
@@ -276,12 +300,30 @@ services:
             config:
               access:
                 - |
+                  {{OAUTH_DENY_LUA}}
+                - |
                   {{JWT_SUB_LUA}}
 
       # Public: JWKS endpoint (consumed by Kong itself + tooling)
       - name: auth-jwks
         paths:
           - /.well-known/jwks.json
+        methods: [GET]
+        strip_path: false
+
+      # Public: RFC 8414 Authorization Server Metadata. No jwt plugin, so
+      # no scope/deny guard applies. Clients discover the AS here before any token exists.
+      - name: auth-as-metadata
+        paths:
+          - /.well-known/oauth-authorization-server
+        methods: [GET]
+        strip_path: false
+
+      # Public: OAuth scope registry, read by the client's consent page to
+      # label scopes. Static, non-user-specific data; no jwt plugin, so no guard.
+      - name: auth-oauth-scopes
+        paths:
+          - ~/oauth/scopes$
         methods: [GET]
         strip_path: false
 
@@ -319,6 +361,8 @@ services:
             config:
               access:
                 - |
+                  {{OAUTH_DENY_LUA}}
+                - |
                   {{JWT_SUB_LUA}}
 
   # ── order-service ─────────────────────────────────────────────────────────────
@@ -340,14 +384,11 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
-          - name: pre-function
+          - name: post-function
             config:
               access:
                 - |
                   {{SCOPE_CHECK_LUA:orders:read}}
-          - name: post-function
-            config:
-              access:
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -364,14 +405,13 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
-          - name: pre-function
+          - name: post-function
             config:
               access:
                 - |
                   {{SCOPE_CHECK_LUA:orders:create}}
-          - name: post-function
-            config:
-              access:
+                - |
+                  {{QUEUE_GATE_LUA:always}}
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -387,14 +427,11 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
-          - name: pre-function
+          - name: post-function
             config:
               access:
                 - |
                   {{SCOPE_CHECK_LUA:orders:read}}
-          - name: post-function
-            config:
-              access:
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -410,14 +447,11 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
-          - name: pre-function
+          - name: post-function
             config:
               access:
                 - |
                   {{SCOPE_CHECK_LUA:orders:cancel}}
-          - name: post-function
-            config:
-              access:
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -448,14 +482,11 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
-          - name: pre-function
+          - name: post-function
             config:
               access:
                 - |
                   {{SCOPE_CHECK_LUA:payments:read}}
-          - name: post-function
-            config:
-              access:
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -471,14 +502,11 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
-          - name: pre-function
+          - name: post-function
             config:
               access:
                 - |
                   {{SCOPE_CHECK_LUA:payments:create}}
-          - name: post-function
-            config:
-              access:
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -496,14 +524,11 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
-          - name: pre-function
+          - name: post-function
             config:
               access:
                 - |
                   {{SCOPE_CHECK_LUA:payments:read}}
-          - name: post-function
-            config:
-              access:
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -519,14 +544,11 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
-          - name: pre-function
+          - name: post-function
             config:
               access:
                 - |
                   {{SCOPE_CHECK_LUA:payments:create}}
-          - name: post-function
-            config:
-              access:
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -542,14 +564,11 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
-          - name: pre-function
+          - name: post-function
             config:
               access:
                 - |
                   {{SCOPE_CHECK_LUA:payments:create}}
-          - name: post-function
-            config:
-              access:
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -565,14 +584,11 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
-          - name: pre-function
+          - name: post-function
             config:
               access:
                 - |
                   {{SCOPE_CHECK_LUA:payments:create}}
-          - name: post-function
-            config:
-              access:
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -588,14 +604,11 @@ services:
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
-          - name: pre-function
+          - name: post-function
             config:
               access:
                 - |
                   {{SCOPE_CHECK_LUA:payments:read}}
-          - name: post-function
-            config:
-              access:
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -623,6 +636,8 @@ services:
           - name: post-function
             config:
               access:
+                - |
+                  {{OAUTH_DENY_LUA}}
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -677,6 +692,8 @@ services:
             config:
               access:
                 - |
+                  {{OAUTH_DENY_LUA}}
+                - |
                   {{JWT_SUB_LUA}}
 
       # Protected: buyer seat hold/release — JWT required only
@@ -697,6 +714,8 @@ services:
             config:
               access:
                 - |
+                  {{OAUTH_DENY_LUA}}
+                - |
                   {{JWT_SUB_LUA}}
 
       # Protected: list seating plans by venue — JWT required; results scoped to caller in venue-service
@@ -716,6 +735,8 @@ services:
             config:
               access:
                 - |
+                  {{OAUTH_DENY_LUA}}
+                - |
                   {{JWT_SUB_LUA}}
 
       # Protected: catch-all for nested plan write paths not listed explicitly above
@@ -734,6 +755,8 @@ services:
           - name: post-function
             config:
               access:
+                - |
+                  {{OAUTH_DENY_LUA}}
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -756,6 +779,8 @@ services:
           - name: post-function
             config:
               access:
+                - |
+                  {{OAUTH_DENY_LUA}}
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -820,6 +845,8 @@ services:
             config:
               access:
                 - |
+                  {{OAUTH_DENY_LUA}}
+                - |
                   {{JWT_SUB_LUA}}
           - name: rate-limiting
             config:
@@ -852,6 +879,8 @@ services:
           - name: post-function
             config:
               access:
+                - |
+                  {{OAUTH_DENY_LUA}}
                 - |
                   {{JWT_SUB_LUA}}
 
@@ -894,27 +923,7 @@ services:
                     )
                   end
                 - |
-                  -- Virtual waiting room backstop (inert unless armed).
-                  if "{{QUEUE_GATE_ARMED}}" ~= "true" then return end
-                  -- Only gate the reserve mutation; reads and SSR pass freely.
-                  local ok, body = pcall(function() return kong.request.get_raw_body() end)
-                  body = (ok and body) or ""
-                  if not body:find("reserve", 1, true) then return end
-                  local cookie = kong.request.get_header("Cookie") or ""
-                  local token = cookie:match("qq_pass=([^;]+)")
-                  if not token then
-                    return kong.response.exit(403, { message = "waiting room: pass required" })
-                  end
-                  local b64, sig = token:match("^([^%.]+)%.([^%.]+)$")
-                  if not b64 then
-                    return kong.response.exit(403, { message = "waiting room: malformed pass" })
-                  end
-                  local hmac = require("resty.openssl.hmac").new("{{QUEUE_HMAC_SECRET}}", "sha256")
-                  hmac:update(b64)
-                  local expected = ngx.encode_base64(hmac:final()):gsub("%+", "-"):gsub("/", "_"):gsub("=+$", "")
-                  if expected ~= sig then
-                    return kong.response.exit(403, { message = "waiting room: invalid pass" })
-                  end
+                  {{QUEUE_GATE_LUA:graphql-reserve}}
           - name: jwt
             config:
               key_claim_name: iss
@@ -924,6 +933,8 @@ services:
           - name: post-function
             config:
               access:
+                - |
+                  {{OAUTH_DENY_LUA}}
                 - |
                   {{JWT_SUB_LUA}}
           - name: cors
@@ -944,6 +955,62 @@ services:
               redis_port: {{RATE_LIMIT_REDIS_PORT}}
               redis_ssl: {{RATE_LIMIT_REDIS_SSL}}
               redis_ssl_verify: {{RATE_LIMIT_REDIS_SSL_VERIFY}}
+
+  # ── mcp-service (MCP resource server) ────────────────────────────────────────
+  # Hard stop #10: both routes are new public surface; owner reviews before merge.
+  # Neither has a jwt plugin: mcp-service verifies its own audience-bound token
+  # (RFC 9728) and answers 401 with the resource_metadata challenge. Kong must
+  # NOT run the jwt plugin here, or a valid MCP token (aud=<origin>/mcp) would be
+  # judged by the REST rules. The build lint therefore cannot see these routes;
+  # scripts/test-build-lint.sh asserts them instead.
+  # /mcp is stateless request/response: POST (JSON-RPC) and DELETE are served,
+  # GET answers 405 (no server-initiated SSE stream; no subscriptions capability),
+  # so the upstream uses the short MCP_READ_TIMEOUT_MS, not the SSE one.
+  - name: mcp-service
+    url: http://{{HOST_MCP}}
+    connect_timeout: {{CONNECT_TIMEOUT_MS}}
+    read_timeout: {{MCP_READ_TIMEOUT_MS}}
+    write_timeout: {{WRITE_TIMEOUT_MS}}
+    routes:
+      # Public: RFC 9728 protected-resource metadata for /mcp, discovered before any token
+      # exists. Only the path-suffixed URL is routed (the bare path would 404 upstream).
+      - name: mcp-protected-resource-metadata
+        paths:
+          - ~/\.well-known/oauth-protected-resource/mcp$
+        methods: [GET]
+        strip_path: false
+
+      # Streamable HTTP transport: POST (JSON-RPC), GET (server stream), DELETE (end session).
+      - name: mcp
+        paths:
+          - ~/mcp$
+        methods: [POST, GET, DELETE]
+        strip_path: false
+        plugins:
+          # A route-level plugin replaces the global request-transformer, so the
+          # identity headers are cleared again here (and X-User-Id-Sig, which the
+          # global one does not list). No jwt-sub.lua runs on this route, so a
+          # client-supplied X-User-* would otherwise reach mcp-service unmodified.
+          - name: request-transformer
+            config:
+              remove:
+                headers:
+                  - X-User-Id
+                  - X-User-Roles
+                  - X-User-Id-Sig
+          # Replaces the global limiter for this route; per source IP because the
+          # caller is unauthenticated at the edge.
+          - name: rate-limiting
+            config:
+              minute: {{RATE_LIMIT_MCP_PER_MINUTE}}
+              limit_by: ip
+              policy: {{RATE_LIMIT_POLICY}}
+              redis_host: {{RATE_LIMIT_REDIS_HOST}}
+              redis_port: {{RATE_LIMIT_REDIS_PORT}}
+              redis_ssl: {{RATE_LIMIT_REDIS_SSL}}
+              redis_ssl_verify: {{RATE_LIMIT_REDIS_SSL_VERIFY}}
+              fault_tolerant: true
+              hide_client_headers: false
 
   # ── client (Next.js SSR) — catch-all, must be last ────────────────────────────
   # Kong matches routes by longest-prefix first; all /api/* routes above always
@@ -998,7 +1065,7 @@ plugins:
   # routes that do not run the JWT plugin.  The jwt post-function then sets these
   # headers authoritatively on protected routes after token validation.
   # Plugin execution order: global → service → route → consumer, so this always
-  # runs first regardless of route-level plugins.  (Fixes audit finding S-02.)
+  # runs first regardless of route-level plugins.
   - name: request-transformer
     config:
       remove:
@@ -1021,7 +1088,7 @@ plugins:
   # IP-based limit for anonymous (unauthenticated) requests.
   # Authenticated consumers get a higher limit via the consumer-scoped plugin
   # on the auth-service-issuer consumer (defined above) — avoids duplicate
-  # global plugin instances that Kong OSS DB-less mode does not support (I-19).
+  # global plugin instances that Kong OSS DB-less mode does not support.
   - name: rate-limiting
     config:
       minute: {{RATE_LIMIT_ANONYMOUS_PER_MINUTE}}
@@ -1035,7 +1102,7 @@ plugins:
       hide_client_headers: false
 
   # Request size limiting — reject oversized request bodies before they reach
-  # upstream services (R-09).  Default cap of 1 MB covers all REST API payloads;
+  # upstream services.  Default cap of 1 MB covers all REST API payloads;
   # adjust per-route for any endpoint that legitimately needs larger bodies.
   - name: request-size-limiting
     config:

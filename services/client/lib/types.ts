@@ -66,7 +66,7 @@ export interface Ticket {
   sold?: number;
   /** Maximum units a single buyer can reserve per order */
   maxPerUser?: number;
-  /** CP-13: optional seating plan UUID — if set, this is a seated ticket */
+  /** optional seating plan UUID — if set, this is a seated ticket */
   seatingPlanId?: string | null;
   /** WS3: Ticket type: "GA", "SEATED_MANUAL", or "SEATED_AUTO" */
   ticketType?: string;

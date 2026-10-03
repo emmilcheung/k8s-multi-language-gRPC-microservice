@@ -1,7 +1,7 @@
 apiVersion: v2
 name: karpenter-nodepool
 description: >-
-  Karpenter NodePool and EC2NodeClass for the ticketing cluster (E2 / SR-09).
+  Karpenter NodePool and EC2NodeClass for the ticketing cluster.
   Packaged as a chart rather than kubernetes_manifest resources because
   kubernetes_manifest reads a CRD's schema at plan time, which cannot work on
   the apply that installs the CRDs.

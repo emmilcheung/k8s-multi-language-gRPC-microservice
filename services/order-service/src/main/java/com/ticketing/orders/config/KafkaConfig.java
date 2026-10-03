@@ -41,7 +41,7 @@ public class KafkaConfig {
      * when the Kafka broker is unavailable (e.g. local dev with Kafka disabled).
      *
      * Previously hardcoded to "localhost:9092" — now reads from spring.kafka.bootstrap-servers
-     * so it works in all environments (fixes audit finding R-15).
+     * so it works in all environments.
      */
     @Bean
     @Primary

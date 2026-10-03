@@ -33,7 +33,7 @@ HELM_RELEASE  := ticketing
 
 # Tag used for locally built service images. values-local.yaml ships the
 # placeholder `SET_BY_CI`, which nothing substitutes outside CI, so the local
-# deploy must pass the tag explicitly. Not `latest` — repo rule I-04.
+# deploy must pass the tag explicitly. Never `latest`.
 IMAGE_TAG     ?= local
 
 # Read a value from infra/local/secrets.env without sourcing the file
@@ -234,6 +234,8 @@ secrets: _check-secrets _namespace
 	STRIPE_SECRET_KEY='$(call _secret,STRIPE_SECRET_KEY)' \
 	QR_SIGNING_KEY='$(call _secret,QR_SIGNING_KEY)' \
 	X_USER_ID_SIGNING_KEY='$(call _secret,X_USER_ID_SIGNING_KEY)' \
+	MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH='$(call _secret,MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH)' \
+	MCP_TOKEN_EXCHANGE_CLIENT_SECRET='$(call _secret,MCP_TOKEN_EXCHANGE_CLIENT_SECRET)' \
 	 bash -c '\
 		_apply() { \
 			kubectl delete secret "$$1" -n $(NAMESPACE) --ignore-not-found=true 2>/dev/null; \
@@ -248,7 +250,8 @@ secrets: _check-secrets _namespace
 			--from-literal=COOKIE_DOMAIN="localhost" \
 			--from-literal=KAFKA_BROKERS="ticketing-cp-kafka.ticketing.svc.cluster.local:9092" \
 			--from-literal=REDIS_URL="redis://ticketing-redis-master:6379" \
-			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
+			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY" \
+			--from-literal=MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH="$$MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH"; \
 		\
 		_apply ticket-service-secrets \
 			--from-literal=MONGO_URI="mongodb://mongo_user:mongo-local-secret@ticketing-mongodb-0.ticketing-mongodb-headless.ticketing.svc.cluster.local:27017/tickets?authSource=admin&replicaSet=rs0" \
@@ -290,6 +293,13 @@ secrets: _check-secrets _namespace
 			--from-literal=QR_SIGNING_KEY="$$QR_SIGNING_KEY" \
 			--from-literal=TICKET_SERVICE_URL="ticketing-ticket-service.ticketing.svc.cluster.local:50051" \
 			--from-literal=X_USER_ID_SIGNING_KEY="$$X_USER_ID_SIGNING_KEY"; \
+		\
+		if [ -n "$$MCP_TOKEN_EXCHANGE_CLIENT_SECRET" ]; then \
+			_apply mcp-service-secrets \
+				--from-literal=TOKEN_EXCHANGE_CLIENT_SECRET="$$MCP_TOKEN_EXCHANGE_CLIENT_SECRET"; \
+		else \
+			echo "  MCP_TOKEN_EXCHANGE_CLIENT_SECRET is empty or absent: skipping mcp-service-secrets"; \
+		fi; \
 		\
 		_apply user-service-secrets \
 			--from-literal=DATABASE_URL="postgresql://users_user:users-local-secret@ticketing-postgres-users:5432/users_db" \
@@ -452,7 +462,7 @@ _minikube-start:
 		echo "Starting minikube (5 CPU, 7851 MB RAM)..."; \
 		minikube start --cpus=5 --memory=7851 --disk-size=50g --driver=docker; \
 	fi
-	@echo "Enabling metrics-server (E1/SR-09 — HPAs have no signal without it)..."
+	@echo "Enabling metrics-server (HPAs have no signal without it)..."
 	@minikube addons enable metrics-server
 
 _namespace:

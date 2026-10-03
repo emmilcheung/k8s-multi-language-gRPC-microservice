@@ -26,6 +26,9 @@ dependencies:
 - name: user-service
   repository: file://charts/user-service
   version: 0.1.0
+- name: mcp-service
+  repository: file://charts/mcp-service
+  version: 0.1.0
 - name: apollo-router
   repository: file://charts/apollo-router
   version: 0.1.0
@@ -68,5 +71,5 @@ dependencies:
 - name: kong
   repository: https://charts.konghq.com
   version: 2.48.0
-digest: sha256:e0f87b3083845614a473d204fe7fb6e0eadf0cb99bc5785459e9c1ba2f49da8e
-generated: "2026-06-24T14:20:25.019065+08:00"
+digest: sha256:5fd027c057365c91d0783c348cc4d269170839db2f34cd21e5b7ffd6b01c02bb
+generated: "2026-09-30T12:32:53.128047+08:00"

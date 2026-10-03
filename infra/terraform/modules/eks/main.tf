@@ -26,7 +26,7 @@ module "eks" {
     vpc-cni            = { most_recent = true }
     aws-ebs-csi-driver = { most_recent = true }
 
-    # E1 / SR-09. Every workload chart ships an HPA, and without metrics-server
+    # Every workload chart ships an HPA, and without metrics-server
     # none of them has a metrics source: the HPA reports <unknown>/70% and never
     # scales. This is not an enhancement — it is the component that makes the
     # autoscaling already configured in this repo do anything at all. EKS ships
@@ -66,14 +66,14 @@ module "eks" {
   }
 }
 
-# ── E2 / SR-09 · Karpenter ────────────────────────────────────────────────────
+# Karpenter ────────────────────────────────────────────────────
 #
 # The cluster was already tagged for Karpenter and Karpenter was never
 # installed, so the only thing that could add capacity was the managed node
 # group's own desired_size, which nothing changes automatically. An HPA that
 # wants more pods than the nodes can hold just leaves them Pending.
 #
-# This is a hard prerequisite for E3. The charts now spread across zones with
+# This is a hard prerequisite for the zone spread. The charts now spread across zones with
 # whenUnsatisfiable: DoNotSchedule, which means a pod that has no room in its
 # zone does not fall back to another one — it waits for a node. Without a node
 # autoscaler that wait never ends.

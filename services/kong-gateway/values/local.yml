@@ -12,6 +12,9 @@ HOST_ATTENDANCE: attendance-service:3007
 HOST_CLIENT: client:4000
 HOST_VENUE: venue-service:3003
 HOST_APOLLO_ROUTER: apollo-router:4001
+HOST_MCP: mcp-service:3000
+# Dev origin; build.sh lets KONG_OAUTH_ISSUER override it. Matches the auth-service dev OAUTH_ISSUER.
+OAUTH_ISSUER: http://localhost:8000
 JWT_COOKIE_NAME: token
 
 # Local/test limits are deliberately high: the e2e suite drives bursts of
@@ -23,5 +26,6 @@ RATE_LIMIT_POLICY: local
 RATE_LIMIT_AUTHENTICATED_PER_MINUTE: 6000
 RATE_LIMIT_AUTH_ENDPOINTS_PER_MINUTE: 6000
 RATE_LIMIT_ATTENDANCE_SCAN_PER_MINUTE: 1200
+RATE_LIMIT_MCP_PER_MINUTE: 6000
 RATE_LIMIT_REDIS_HOST: "127.0.0.1"
 RATE_LIMIT_REDIS_PORT: 6379

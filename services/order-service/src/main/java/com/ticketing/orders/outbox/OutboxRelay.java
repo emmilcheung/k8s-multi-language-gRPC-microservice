@@ -23,7 +23,7 @@ import java.util.List;
  *
  * The claim uses FOR UPDATE SKIP LOCKED, which only isolates replicas for as long as the
  * claiming transaction lives — hence {@code @Transactional} on this method. That supersedes
- * the earlier per-message-transaction arrangement (C-02): with 2–8 replicas, per-message
+ * the earlier per-message-transaction arrangement: with 2–8 replicas, per-message
  * commits meant every replica published every row on every poll, which is a far larger
  * correctness problem than the batch commit this reintroduces. Batch scope is bounded by the
  * page size.

@@ -22,7 +22,7 @@ function makeAuthService(overrides: Partial<AuthService> = {}): AuthService {
       refreshToken: 'refresh-token-id',
     }),
     blacklistAccessToken: vi.fn().mockResolvedValue(undefined),
-    verifyAccessToken: vi.fn().mockResolvedValue({
+    verifySessionAccessToken: vi.fn().mockResolvedValue({
       sub: 'user-uuid-1',
       email: 'user@example.com',
       jti: 'jti-1',
@@ -303,6 +303,7 @@ describe('AuthController', () => {
       expect(refreshTokenService.rotate).toHaveBeenCalledWith(
         'old-refresh-id',
         { userAgent: 'VitestBrowser/2.0', ipAddress: null },
+        { kind: 'browser' },
       );
       expect(authService.issueAccessTokenForUser).toHaveBeenCalledWith(
         'user-uuid-1',
@@ -498,7 +499,7 @@ describe('AuthController', () => {
     it('should return null when token verification fails (revoked/expired)', async () => {
       const { controller } = makeController({
         authService: {
-          verifyAccessToken: vi
+          verifySessionAccessToken: vi
             .fn()
             .mockRejectedValue(new Error('token expired')),
         },
@@ -525,7 +526,7 @@ describe('AuthController', () => {
     it('should return null when JWT sub and X-User-Id header disagree', async () => {
       const { controller } = makeController({
         authService: {
-          verifyAccessToken: vi.fn().mockResolvedValue({
+          verifySessionAccessToken: vi.fn().mockResolvedValue({
             sub: 'jwt-user-id',
             email: 'user@example.com',
             jti: 'jti-1',

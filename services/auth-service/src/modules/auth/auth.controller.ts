@@ -98,7 +98,7 @@ export class AuthController {
 
     // Blacklist the access token so it cannot be reused before it naturally
     // expires. This is a defence-in-depth measure — the primary defence is the
-    // short (15 min) token lifetime (S-04).
+    // short (15 min) token lifetime.
     const accessToken = req.cookies[this.accessTokenCookieName()] as
       | string
       | undefined;
@@ -139,6 +139,7 @@ export class AuthController {
     const { userId, refreshToken } = await this.refreshTokenService.rotate(
       oldRefreshToken,
       this.sessionMetadataFromRequest(req),
+      { kind: 'browser' },
     );
 
     const accessToken = await this.authService.issueAccessTokenForUser(userId);
@@ -266,7 +267,7 @@ export class AuthController {
 
   // GET /api/users/currentuser
   // Kong injects X-User-Id after JWT verification. As a defense-in-depth
-  // measure (S-03), we also verify the JWT from the cookie ourselves so that
+  // measure, we also verify the JWT from the cookie ourselves so that
   // direct pod access (bypassing Kong) is rejected for unauthenticated callers.
   // Additionally, X-User-Id-Sig must be valid; missing or invalid signatures result in 401.
   @Get('api/users/currentuser')
@@ -287,7 +288,7 @@ export class AuthController {
     // This catches cases where someone bypasses Kong and hits the pod directly.
     if (token) {
       try {
-        const payload = await this.authService.verifyAccessToken(token);
+        const payload = await this.authService.verifySessionAccessToken(token);
         // Cross-check: if Kong also set X-User-Id, it must match the JWT sub.
         if (kongUserId && kongUserId !== payload.sub) {
           // Header/token mismatch — reject the request rather than trust either.
@@ -432,7 +433,7 @@ export class AuthController {
 
     if (token) {
       try {
-        const payload = await this.authService.verifyAccessToken(token);
+        const payload = await this.authService.verifySessionAccessToken(token);
         if (kongUserId && kongUserId !== payload.sub) {
           throw new UnauthorizedException({
             error: {
@@ -498,7 +499,7 @@ export class AuthController {
 
   private setAccessTokenCookie(res: Response, token: string): void {
     // Derive maxAge from JWT_EXPIRY config so cookie lifetime stays in sync
-    // with the token's actual validity window (S-06).
+    // with the token's actual validity window.
     const expiry = this.config.get<string>('JWT_EXPIRY', '15m');
     const maxAgeMs = ms(expiry as Parameters<typeof ms>[0]) ?? 15 * 60 * 1000;
     const domain = this.cookieDomain();

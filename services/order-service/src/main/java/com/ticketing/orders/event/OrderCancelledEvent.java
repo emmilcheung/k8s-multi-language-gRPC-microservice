@@ -9,10 +9,10 @@ import java.util.UUID;
  * Consumed by ticket-service (to release the reservation) and payment-service
  * (to void any pending charge).
  *
- * CP-05: added {@code reservationId} and {@code quantity} so ticket-service can use
+ * added {@code reservationId} and {@code quantity} so ticket-service can use
  * the GA path (ReleaseReservation) instead of the legacy path (ReleaseTicket).
  *
- * CP-12: added {@code seatIds} (null for GA/legacy) so venue-service consumer can
+ * added {@code seatIds} (null for GA/legacy) so venue-service consumer can
  * release individual seat reservations.
  */
 public class OrderCancelledEvent {

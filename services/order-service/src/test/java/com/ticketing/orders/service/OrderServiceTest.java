@@ -57,7 +57,7 @@ import static org.mockito.Mockito.when;
 /**
  * Unit tests for {@link OrderService} and {@link OrderTransactionService}.
  *
- * CP-05 rewrite: Redisson distributed lock removed. Order creation now uses
+ * Redisson distributed lock removed. Order creation now uses
  * ReserveQuota gRPC call (GA reservation path). Tests verify:
  * - reserveQuota is called and order is saved on success
  * - compensation (releaseReservation) is called when the DB transaction fails
@@ -230,7 +230,7 @@ class OrderServiceTest {
         when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
 
         OrderResponse response = orderTransactionService.createOrderTransactional(
-                userId, ticketId, reserveResponse, reservationId, 1);
+                userId, ticketId, reserveResponse, reservationId, 1, null);
 
         verify(orderTicketRepository).save(any(OrderTicket.class));
         verify(orderRepository).save(any(Order.class));
@@ -249,7 +249,7 @@ class OrderServiceTest {
         when(orderRepository.save(orderCaptor.capture())).thenAnswer(inv -> inv.getArgument(0));
 
         orderTransactionService.createOrderTransactional(
-                userId, ticketId, reserveResponse, reservationId, quantity);
+                userId, ticketId, reserveResponse, reservationId, quantity, null);
 
         Order saved = orderCaptor.getValue();
         assertThat(saved.getReservationId()).isEqualTo(reservationId);
@@ -714,5 +714,215 @@ class OrderServiceTest {
                 .add(new BigDecimal(response.getFacilityFee()))
                 .add(new BigDecimal(response.getTax()));
         assertThat(totalComputed).isEqualByComparingTo(new BigDecimal(response.getTotal()));
+    }
+
+    // ── Pre-check: retry after a compensated seated reserve ───────────────
+
+    @Test
+    void F_pre_seated_retry_on_released_reservation_is_409_exhausted_and_creates_nothing() {
+        UUID seatId = UUID.randomUUID();
+        UUID planId = UUID.randomUUID();
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+        req.setPlanId(planId.toString());
+        req.setSeatIds(List.of(seatId.toString()));
+        req.setQuantity(1);
+        when(venueServiceClient.getSeatingPlan(planId.toString()))
+                .thenReturn(GetSeatingPlanResponse.newBuilder().setAssignmentMode("manual").build());
+        // venue-service rejects a reserve on a RELEASED id (server.go ReserveHeldSeats); the key's
+        // derived reservationId is therefore permanently dead and only a new key can succeed.
+        when(venueServiceClient.reserveHeldSeats(
+                anyString(), anyString(), any(UUID.class), eq(userId), anyList(), any(Instant.class)))
+                .thenThrow(new com.ticketing.orders.grpc.ReservationReleasedException(
+                        "reservation x was already released"));
+
+        assertThatThrownBy(() -> orderService.createSeatedOrder(userId, req, "retry-key-0009"))
+                .isInstanceOf(com.ticketing.orders.exception.IdempotencyKeyExhaustedException.class);
+
+        verify(orderRepository, never()).save(any());
+        verify(venueServiceClient, never()).releaseSeatReservation(any(), anyString());
+    }
+
+    // ── A keyed request never compensates ──────────────────────
+
+    private static final String KEY = "retry-key-0001";
+
+    private CreateOrderRequest gaRequest() {
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+        return req;
+    }
+
+    private void stubGaReserveThenTxFailure() {
+        when(ticketServiceClient.reserveQuota(
+                eq(ticketId.toString()), any(UUID.class), eq(userId), eq(1), any(Instant.class)))
+                .thenAnswer(inv -> buildReserveResponse(inv.getArgument(1), 1));
+        when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
+        when(orderRepository.save(any(Order.class))).thenThrow(new RuntimeException("db write failed"));
+    }
+
+    @Test
+    void F_keyed_failure_with_throwing_lookup_surfaces_original_exception_and_never_releases() {
+        stubGaReserveThenTxFailure();
+        // pre-reserve replay lookup finds nothing; the post-failure lookup hits a dead DB
+        when(orderRepository.findByReservationIdAndUserId(any(UUID.class), eq(userId)))
+                .thenReturn(Optional.empty())
+                .thenThrow(new IllegalStateException("db down"));
+
+        assertThatThrownBy(() -> orderService.createOrder(userId, gaRequest(), KEY))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("db write failed");
+
+        verify(ticketServiceClient, never()).releaseReservation(any(UUID.class), anyString());
+    }
+
+    @Test
+    void F_keyed_failure_without_winner_rethrows_original_and_never_releases() {
+        stubGaReserveThenTxFailure();
+        when(orderRepository.findByReservationIdAndUserId(any(UUID.class), eq(userId)))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> orderService.createOrder(userId, gaRequest(), KEY))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("db write failed");
+
+        verify(ticketServiceClient, never()).releaseReservation(any(UUID.class), anyString());
+        assertThat(meterRegistry.counter("order.keyed.uncompensated", "flow", "ga").count())
+                .as("a stranded keyed reservation must be countable so it can be alerted on")
+                .isEqualTo(1.0);
+    }
+
+    @Test
+    void F_keyed_failure_with_winner_replays_and_never_releases() {
+        CreateOrderRequest req = gaRequest();
+        stubGaReserveThenTxFailure();
+        Order winner = new Order(userId, OrderStatus.CREATED, OffsetDateTime.now().plusMinutes(15), ticket);
+        winner.setRequestFingerprint(IdempotencyKeys.fingerprint(new ObjectMapper(), req));
+        when(orderRepository.findByReservationIdAndUserId(any(UUID.class), eq(userId)))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+
+        CreateOrderResult result = orderService.createOrder(userId, req, KEY);
+
+        assertThat(result.replayed()).isTrue();
+        verify(ticketServiceClient, never()).releaseReservation(any(UUID.class), anyString());
+        assertThat(meterRegistry.counter("order.keyed.uncompensated", "flow", "ga").count())
+                .as("a replayed winner strands nothing")
+                .isZero();
+    }
+
+    @Test
+    void F_unkeyed_failure_still_releases_the_reservation() {
+        stubGaReserveThenTxFailure();
+
+        assertThatThrownBy(() -> orderService.createOrder(userId, gaRequest(), null))
+                .hasMessageContaining("db write failed");
+
+        verify(orderRepository, never()).findByReservationIdAndUserId(any(UUID.class), any(UUID.class));
+        verify(ticketServiceClient).releaseReservation(any(UUID.class), eq("COMPENSATION"));
+    }
+
+    private CreateOrderRequest seatedManualRequest(UUID planId, UUID seatId) {
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+        req.setPlanId(planId.toString());
+        req.setSeatIds(List.of(seatId.toString()));
+        req.setQuantity(1);
+        when(venueServiceClient.getSeatingPlan(planId.toString()))
+                .thenReturn(GetSeatingPlanResponse.newBuilder().setAssignmentMode("manual").build());
+        when(venueServiceClient.reserveHeldSeats(
+                eq(planId.toString()), eq(ticketId.toString()), any(UUID.class),
+                eq(userId), anyList(), any(Instant.class)))
+                .thenReturn(ReserveHeldSeatsResponse.newBuilder()
+                        .setSuccess(true)
+                        .setReservationId(UUID.randomUUID().toString())
+                        .addSeats(buildSeatDetail(seatId, UUID.randomUUID(), "B2"))
+                        .build());
+        when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
+        when(orderRepository.save(any(Order.class))).thenThrow(new RuntimeException("db exploded"));
+        return req;
+    }
+
+    @Test
+    void F_seated_keyed_failure_with_throwing_lookup_surfaces_original_and_never_releases() {
+        CreateOrderRequest req = seatedManualRequest(UUID.randomUUID(), UUID.randomUUID());
+        when(orderRepository.findByReservationIdAndUserId(any(UUID.class), eq(userId)))
+                .thenReturn(Optional.empty())
+                .thenThrow(new IllegalStateException("db down"));
+
+        assertThatThrownBy(() -> orderService.createSeatedOrder(userId, req, KEY))
+                .hasMessageContaining("db exploded");
+
+        verify(venueServiceClient, never()).releaseSeatReservation(any(), anyString());
+        assertThat(meterRegistry.counter("order.keyed.uncompensated", "flow", "seated_manual").count())
+                .isEqualTo(1.0);
+    }
+
+    @Test
+    void F_seated_keyed_failure_with_winner_replays_and_never_releases() {
+        CreateOrderRequest req = seatedManualRequest(UUID.randomUUID(), UUID.randomUUID());
+        Order winner = new Order(userId, OrderStatus.CREATED, OffsetDateTime.now().plusMinutes(15), ticket);
+        winner.setRequestFingerprint(IdempotencyKeys.fingerprint(new ObjectMapper(), req));
+        when(orderRepository.findByReservationIdAndUserId(any(UUID.class), eq(userId)))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+
+        CreateOrderResult result = orderService.createSeatedOrder(userId, req, KEY);
+
+        assertThat(result.replayed()).isTrue();
+        verify(venueServiceClient, never()).releaseSeatReservation(any(), anyString());
+    }
+
+    @Test
+    void F_seated_unkeyed_failure_still_releases() {
+        CreateOrderRequest req = seatedManualRequest(UUID.randomUUID(), UUID.randomUUID());
+
+        assertThatThrownBy(() -> orderService.createSeatedOrder(userId, req, null))
+                .hasMessageContaining("db exploded");
+
+        verify(venueServiceClient).releaseSeatReservation(any(UUID.class), eq("COMPENSATION"));
+    }
+
+    @Test
+    void F_seated_auto_keyed_failure_without_winner_rethrows_original_and_never_releases() {
+        UUID planId = UUID.randomUUID();
+        UUID sectionId = UUID.randomUUID();
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setTicketId(ticketId.toString());
+        req.setPlanId(planId.toString());
+        req.setSectionId(sectionId.toString());
+        req.setQuantity(1);
+        when(venueServiceClient.getSeatingPlan(planId.toString()))
+                .thenReturn(GetSeatingPlanResponse.newBuilder().setAssignmentMode("auto").build());
+        when(venueServiceClient.autoAssignAndReserve(
+                eq(planId.toString()), eq(ticketId.toString()), eq(sectionId.toString()),
+                any(UUID.class), eq(userId), eq(1), any(Instant.class)))
+                .thenReturn(AutoAssignAndReserveResponse.newBuilder()
+                        .addSeats(buildSeatDetail(UUID.randomUUID(), sectionId, "A1")).build());
+        when(orderTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
+        when(orderRepository.save(any(Order.class))).thenThrow(new RuntimeException("db exploded"));
+        when(orderRepository.findByReservationIdAndUserId(any(UUID.class), eq(userId)))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> orderService.createSeatedOrder(userId, req, KEY))
+                .hasMessageContaining("db exploded");
+
+        verify(venueServiceClient, never()).releaseSeatReservation(any(), anyString());
+        assertThat(meterRegistry.counter("order.keyed.uncompensated", "flow", "seated_auto").count())
+                .isEqualTo(1.0);
+    }
+
+    @Test
+    void F_keyed_ga_reserve_on_inactive_reservation_is_409_exhausted() {
+        when(ticketServiceClient.reserveQuota(
+                eq(ticketId.toString()), any(UUID.class), eq(userId), eq(1), any(Instant.class)))
+                .thenThrow(new com.ticketing.orders.grpc.ReservationReleasedException(
+                        "reservation no longer active: r is RELEASED"));
+
+        assertThatThrownBy(() -> orderService.createOrder(userId, gaRequest(), KEY))
+                .isInstanceOf(com.ticketing.orders.exception.IdempotencyKeyExhaustedException.class);
+
+        verify(orderRepository, never()).save(any());
+        verify(ticketServiceClient, never()).releaseReservation(any(UUID.class), anyString());
     }
 }

@@ -1,6 +1,6 @@
 package integration_test
 
-// consumer_dlq_integration_test.go — R-03
+// consumer_dlq_integration_test.go
 //
 // Verifies that when the OrderConsumer's handler fails on every attempt, the
 // raw message is routed to the dead-letter topic and the offset is committed
@@ -70,7 +70,7 @@ func startKafkaForDLQ(t *testing.T) (brokers string, cleanup func()) {
 	return "localhost:" + hostPort, func() { _ = container.Terminate(ctx) }
 }
 
-// TestOrderConsumer_FailedMessageRoutedToDLQ verifies R-03:
+// TestOrderConsumer_FailedMessageRoutedToDLQ verifies that:
 // when handler processing fails on all 3 attempts, the message appears on
 // orders.order.created.dlq and the offset is committed.
 func TestOrderConsumer_FailedMessageRoutedToDLQ(t *testing.T) {

@@ -51,7 +51,7 @@ autoscaling:
   # No memory trigger: the JVM reserves its heap up front, so container memory
   # reports roughly the heap size whatever the load, and an HPA reading it either
   # never fires or never scales back in. CPU is the honest signal for this
-  # service until a request-rate metric is available (E6/SR-09 — that needs a
+  # service until a request-rate metric is available (that needs a
   # metrics adapter, which is a cluster-level install).
   # targetMemoryUtilizationPercentage: 80
 

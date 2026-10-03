@@ -307,6 +307,19 @@ services:
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
       X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
+      # OAuth AS metadata + resource allowlist. Dev values. ISSUER_ENABLED is true because the local
+      # Kong (values/local.yml OAUTH_ISSUER, same origin) carries a jwt_secret for that issuer.
+      OAUTH_ISSUER: http://localhost:8000
+      OAUTH_RESOURCES: http://localhost:8000/mcp,http://localhost:8000/api
+      OAUTH_MCP_RESOURCE: http://localhost:8000/mcp
+      OAUTH_API_AUDIENCE: http://localhost:8000/api
+      OAUTH_ISSUER_ENABLED: "true"
+      # Client ID Metadata Documents: auth-service fetches https client-metadata URLs.
+      # Local-only default; schema default is false (cluster needs an owner-approved egress rule).
+      OAUTH_CIMD_ENABLED: "true"
+      # SHA-256 hex of MCP_TOKEN_EXCHANGE_CLIENT_SECRET (see .env.example). Empty
+      # disables the RFC 8693 token-exchange grant; auth-service still boots.
+      MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH: "${MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH:-}"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: auth-service
     depends_on:
@@ -321,6 +334,44 @@ services:
     mem_limit: 512m
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - microservices-net
+
+  # ── mcp-service: Node.js / MCP resource server ──────────────────────────────
+  # Opt-in (profile "mcp"): it fails config validation at boot unless
+  # MCP_TOKEN_EXCHANGE_CLIENT_SECRET is set in the git-ignored root .env.
+  # The Kong /mcp route exists (services/kong-gateway); whether this service
+  # joins the default profile is the owner's call.
+  mcp-service:
+    profiles: ["mcp"]
+    build:
+      context: ./services/mcp-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      MCP_RESOURCE: http://localhost:8000/mcp
+      OAUTH_ISSUER: http://localhost:8000
+      AUTH_JWKS_URL: http://auth-service:3000/.well-known/jwks.json
+      KONG_INTERNAL_URL: http://kong:8000
+      TOKEN_EXCHANGE_URL: http://auth-service:3000/oauth/token
+      TOKEN_EXCHANGE_CLIENT_ID: mcp-service
+      TOKEN_EXCHANGE_CLIENT_SECRET: "${MCP_TOKEN_EXCHANGE_CLIENT_SECRET:-}"
+      PUBLIC_WEB_URL: http://localhost:3000
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: mcp-service
+    depends_on:
+      auth-service:
+        condition: service_healthy
+    ports:
+      - "3010:3000"
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 10s
       timeout: 5s
       retries: 5

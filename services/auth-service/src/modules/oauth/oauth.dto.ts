@@ -1,3 +1,4 @@
+import type { ClientAddresses } from './oauth-clients.config';
 import {
   IsString,
   IsNotEmpty,
@@ -7,7 +8,11 @@ import {
   ArrayNotEmpty,
   IsUrl,
   IsBoolean,
+  MaxLength,
 } from 'class-validator';
+
+/** Longest client_name accepted from DCR and CIMD; it is rendered on the consent page. */
+export const CLIENT_NAME_MAX_LENGTH = 100;
 
 /** Query params for GET /oauth/authorize */
 export class AuthorizeQuery {
@@ -40,13 +45,22 @@ export class AuthorizeQuery {
   @IsNotEmpty()
   @IsIn(['S256'])
   code_challenge_method!: string;
+
+  /** RFC 8707 resource indicator; checked against OAUTH_RESOURCES. */
+  @IsString()
+  @IsOptional()
+  resource?: string;
 }
 
 /** Body for POST /oauth/token (application/x-www-form-urlencoded or JSON) */
 export class TokenBody {
   @IsString()
   @IsNotEmpty()
-  @IsIn(['authorization_code', 'refresh_token'])
+  @IsIn([
+    'authorization_code',
+    'refresh_token',
+    'urn:ietf:params:oauth:grant-type:token-exchange',
+  ])
   grant_type!: string;
 
   // authorization_code grant
@@ -58,9 +72,14 @@ export class TokenBody {
   @IsOptional()
   redirect_uri?: string;
 
+  /**
+   * Required for the authorization_code and refresh_token grants (checked in
+   * OAuthService.token). A token-exchange caller authenticates with HTTP Basic
+   * instead, so it may omit this.
+   */
   @IsString()
-  @IsNotEmpty()
-  client_id!: string;
+  @IsOptional()
+  client_id?: string;
 
   @IsString()
   @IsOptional()
@@ -70,6 +89,30 @@ export class TokenBody {
   @IsString()
   @IsOptional()
   refresh_token?: string;
+
+  /** RFC 8707 resource indicator; must match the one used at authorize. */
+  @IsString()
+  @IsOptional()
+  resource?: string;
+
+  // token-exchange grant (RFC 8693)
+  @IsString()
+  @IsOptional()
+  subject_token?: string;
+
+  @IsString()
+  @IsOptional()
+  subject_token_type?: string;
+
+  /** RFC 8693 target; equivalent to `resource` and must agree with it. */
+  @IsString()
+  @IsOptional()
+  audience?: string;
+
+  /** Requested scope for the exchange (must be a subset of the subject's). */
+  @IsString()
+  @IsOptional()
+  scope?: string;
 }
 
 /** Body for POST /oauth/revoke */
@@ -92,10 +135,29 @@ export interface TokenResponse {
   refresh_token: string;
 }
 
+/** Response shape for the token-exchange grant: no refresh token. */
+export interface TokenExchangeResponse {
+  access_token: string;
+  issued_token_type: 'urn:ietf:params:oauth:token-type:access_token';
+  token_type: 'Bearer';
+  expires_in: number;
+  scope: string;
+}
+
+/** Client credentials from an HTTP Basic header (client_secret_basic). */
+export interface ClientCredentials {
+  clientId: string;
+  clientSecret: string;
+}
+
 /** Item in GET /oauth/clients response */
 export interface OAuthClientSession {
   clientId: string;
   clientName: string;
+  /** client_id host (CIMD only) and registered redirect hosts; see describeClientAddresses. */
+  addresses?: ClientAddresses;
+  /** True for static-config clients; false for DCR and CIMD apps. */
+  isFirstParty: boolean;
   scope: string;
   sessionId: string;
   lastRotatedAt: string;
@@ -103,8 +165,10 @@ export interface OAuthClientSession {
 
 /** Body for POST /oauth/clients/register — RFC 7591 dynamic client registration */
 export class RegisterClientBody {
+  /** Shown verbatim on the consent page, so it is capped (CLIENT_NAME_MAX_LENGTH). */
   @IsString()
   @IsNotEmpty()
+  @MaxLength(CLIENT_NAME_MAX_LENGTH)
   client_name!: string;
 
   @IsArray()
@@ -120,6 +184,11 @@ export class RegisterClientBody {
   @IsOptional()
   @IsString({ each: true })
   grant_types?: string[];
+
+  /** RFC 7591 application_type; defaults to 'web'. */
+  @IsOptional()
+  @IsIn(['native', 'web'])
+  application_type?: 'native' | 'web';
 }
 
 /** Response shape for POST /oauth/clients/register */
@@ -130,6 +199,7 @@ export interface RegisterClientResponse {
   grant_types: string[];
   scope: string;
   token_endpoint_auth_method: 'none'; // public client
+  application_type: 'native' | 'web';
   pkce_required: true;
 }
 
@@ -144,6 +214,8 @@ export interface ConsentDetails {
   requestId: string;
   clientId: string;
   clientName: string;
+  addresses?: ClientAddresses;
+  isFirstParty: boolean;
   scopes: string[];
   expiresInSeconds: number;
 }

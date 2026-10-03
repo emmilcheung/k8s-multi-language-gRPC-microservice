@@ -11,7 +11,7 @@ spec:
         name: default
       # Karpenter chooses the instance type per batch of pending pods, so these
       # are bounds rather than a choice. The point of leaving them wide is that
-      # a zone short of one family can still be satisfied from another — E3's
+      # a zone short of one family can still be satisfied from another — the zone spread's
       # DoNotSchedule spread depends on every zone being satisfiable.
       requirements:
         - key: kubernetes.io/arch
@@ -46,7 +46,7 @@ spec:
       # deletes the remaining pods whether or not a PDB still blocks them. It
       # has to clear the longest terminationGracePeriodSeconds in the fleet
       # (30 s) with a wide margin, or consolidation kills pods mid-shutdown —
-      # which for venue-service means cutting live SSE streams, the thing E5
+      # which for venue-service means cutting live SSE streams, the thing the preStop drain
       # exists to avoid.
       terminationGracePeriod: 5m
   disruption:

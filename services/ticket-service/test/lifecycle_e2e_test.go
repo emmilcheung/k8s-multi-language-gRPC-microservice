@@ -1,9 +1,9 @@
 package integration_test
 
-// lifecycle_e2e_test.go — CP-06 acceptance criteria
+// lifecycle_e2e_test.go — acceptance criteria
 //
 // These tests exercise the full GA reservation lifecycle end-to-end through the
-// repository layer, providing explicit evidence for the three CP-06 acceptance
+// repository layer, providing explicit evidence for the three acceptance
 // criteria:
 //
 //  AC-1  create → cancel → re-purchase works

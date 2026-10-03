@@ -217,7 +217,7 @@ func TestPatchEventSettings_FirstCreate_SetsOrganizerID(t *testing.T) {
 
 	captured := &capturePolicyRepo{}
 	// Provide a stub lookup that confirms this organizer owns the event; without it
-	// EnsureOrganizerOwnsEvent now fails closed (ErrForbidden) per the R4 fix.
+	// EnsureOrganizerOwnsEvent now fails closed (ErrForbidden).
 	svc := service.NewAttendanceServiceWithTicketLookup(
 		&stubCredentialRepo{},
 		captured,

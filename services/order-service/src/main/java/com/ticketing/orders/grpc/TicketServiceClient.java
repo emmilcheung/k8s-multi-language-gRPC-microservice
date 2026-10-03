@@ -19,15 +19,15 @@ import java.util.concurrent.TimeUnit;
  * Thin wrapper around the gRPC stub — applies deadlines, a circuit breaker, and maps
  * gRPC errors to application exceptions.  Keeps gRPC concerns out of the service layer.
  *
- * Circuit breaker (R-01): when ticket-service is unreachable the circuit opens after
+ * Circuit breaker: when ticket-service is unreachable the circuit opens after
  * 50 % of 10 calls fail.  While open, the fallback methods are called immediately
  * (no 5-second deadline wait per request), returning a clear error to the caller
  * without cascading load onto order-service threads.
  *
- * Status mapping (R-13): gRPC status codes are translated to the appropriate HTTP
+ * Status mapping: gRPC status codes are translated to the appropriate HTTP
  * status codes rather than collapsing all errors into 400.
  *
- * CP-05: added {@link #reserveQuota} and {@link #releaseReservation} for the GA path.
+ * added {@link #reserveQuota} and {@link #releaseReservation} for the GA path.
  */
 @Component
 public class TicketServiceClient {
@@ -35,6 +35,13 @@ public class TicketServiceClient {
     private static final Logger log = LoggerFactory.getLogger(TicketServiceClient.class);
     private static final int READ_DEADLINE_SECONDS = 5;
     private static final int WRITE_DEADLINE_SECONDS = 10;
+
+    /**
+     * Start of the FAILED_PRECONDITION description ticket-service returns when a duplicate
+     * reserve hits a reservation that is no longer RESERVED. Must equal ticket-service
+     * internal/grpc/server.go ReservationInactivePrefix (covered by TicketServiceClientTest).
+     */
+    static final String RESERVATION_INACTIVE_PREFIX = "reservation no longer active: ";
 
     private final TicketServiceGrpc.TicketServiceBlockingStub stub;
 
@@ -142,7 +149,7 @@ public class TicketServiceClient {
 
     /**
      * Maps a gRPC {@link StatusRuntimeException} to the appropriate Spring HTTP exception.
-     * Ensures callers receive accurate HTTP status codes (R-13) rather than a blanket 400.
+     * Ensures callers receive accurate HTTP status codes rather than a blanket 400.
      */
     private RuntimeException mapGrpcStatus(StatusRuntimeException e, String ticketId) {
         Status.Code code = e.getStatus().getCode();
@@ -188,9 +195,11 @@ public class TicketServiceClient {
                 // Sold-out or quota exceeded
                 new ResponseStatusException(HttpStatus.CONFLICT,
                         "Ticket is sold out or quota exceeded: " + ticketId);
-            case FAILED_PRECONDITION ->
-                // Per-user purchase limit exceeded
-                new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+            case FAILED_PRECONDITION -> description != null && description.startsWith(RESERVATION_INACTIVE_PREFIX)
+                // Duplicate reserve on a released/expired/sold reservation (key exhausted)
+                ? new ReservationReleasedException(description)
+                // Otherwise: per-user purchase limit exceeded
+                : new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                         "Purchase limit exceeded for this ticket");
             case UNAVAILABLE, DEADLINE_EXCEEDED ->
                 new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
@@ -235,6 +244,14 @@ public class TicketServiceClient {
         log.warn("Circuit breaker OPEN for ticket-service — rejecting reserveQuota ticketId={}", ticketId);
         throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                 "Ticket service is temporarily unavailable. Please try again shortly.");
+    }
+
+    /** An inactive reservation is a business answer, not a ticket-service outage: let it reach OrderService. */
+    @SuppressWarnings("unused")
+    private ReserveQuotaResponse reserveQuotaFallback(
+            String ticketId, UUID reservationId, UUID userId, int quantity, Instant expiresAt,
+            ReservationReleasedException ex) {
+        throw ex;
     }
 
     @SuppressWarnings("unused")

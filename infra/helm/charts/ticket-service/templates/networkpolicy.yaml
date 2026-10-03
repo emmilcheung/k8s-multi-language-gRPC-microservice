@@ -1,5 +1,5 @@
 {{- if .Values.networkPolicy.enabled }}
-# NetworkPolicy for ticket-service (I-01)
+# NetworkPolicy for ticket-service
 # Ingress: Kong (HTTP:3001) + order-service (gRPC:50051)
 # Egress:  MongoDB (27017), Kafka (9092), DNS (53)
 apiVersion: networking.k8s.io/v1

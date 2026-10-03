@@ -999,7 +999,7 @@ describe('PaymentsService.processOrderCreatedEvent', () => {
     expect(insertArgs).toBeDefined();
   });
 
-  it('should use isMockMode correctly for sk_test_mock prefix (C-06 fix)', async () => {
+  it('should use isMockMode correctly for sk_test_mock prefix', async () => {
     // sk_test_mock is what docker-compose sets; the old code checked === 'test_mock' (bare)
     // and missed this. The new isMockMode uses .includes('test_mock').
     const mockDb = makeDb();

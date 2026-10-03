@@ -19,6 +19,11 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// ReservationInactivePrefix starts the FailedPrecondition message returned when a duplicate
+// ReserveQuota targets a reservation that is no longer RESERVED. order-service matches it
+// (TicketServiceClient.RESERVATION_INACTIVE_PREFIX) to tell it apart from the per-user limit.
+const ReservationInactivePrefix = "reservation no longer active: "
+
 // TicketGrpcServer implements the generated TicketServiceServer interface.
 type TicketGrpcServer struct {
 	v1.UnimplementedTicketServiceServer
@@ -148,7 +153,7 @@ func (s *TicketGrpcServer) ReserveQuota(ctx context.Context, req *v1.ReserveQuot
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 
-	// CP-13: seated tickets must not be reserved via the GA quota path.
+	// seated tickets must not be reserved via the GA quota path.
 	// Callers must use the venue-service seated reservation endpoint instead.
 	if ticket.SeatingPlanID != "" {
 		s.log.Info("grpc ReserveQuota: rejected for seated ticket",
@@ -189,6 +194,12 @@ func (s *TicketGrpcServer) ReserveQuota(ctx context.Context, req *v1.ReserveQuot
 			// We treat an existing RESERVED reservation with same id as idempotent success.
 			existing, findErr := s.repo.FindReservationByID(ctx, req.ReservationId)
 			if findErr == nil && existing.TicketID == req.TicketId && existing.UserID == req.UserId && existing.Quantity == int(req.Quantity) {
+				// Only a live reservation may be reused; a released/expired/sold one no longer
+				// holds inventory, so accepting it would let the caller oversell.
+				if existing.Status != repository.ReservationStatusReserved {
+					return nil, status.Errorf(codes.FailedPrecondition,
+						"%s%s is %s", ReservationInactivePrefix, req.ReservationId, existing.Status)
+				}
 				s.log.Info("grpc ReserveQuota: idempotent duplicate accepted",
 					zap.String("reservationId", req.ReservationId),
 				)
@@ -340,7 +351,7 @@ func (s *TicketGrpcServer) FinalizeReservation(ctx context.Context, req *v1.Fina
 // Start binds and starts the gRPC server on the given address. It blocks until
 // the context is cancelled, then performs a graceful stop.
 //
-// Interceptors and handlers applied (R-08, O-07):
+// Interceptors and handlers applied:
 //   - otelgrpc.NewServerHandler: propagates W3C traceparent from gRPC metadata
 //     and creates server spans — makes every RPC part of the distributed trace.
 //   - recovery: catches panics in handlers, logs a stack trace, returns INTERNAL to client.
@@ -407,7 +418,7 @@ func Start(ctx context.Context, addr string, srv *TicketGrpcServer, log *zap.Log
 
 	grpcServer := grpc.NewServer(
 		// OTel trace propagation: extracts W3C traceparent from incoming gRPC
-		// metadata and starts a server span for every RPC (O-07).
+		// metadata and starts a server span for every RPC.
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainUnaryInterceptor(
 			// Logging first so we always capture timing even if recovery fires

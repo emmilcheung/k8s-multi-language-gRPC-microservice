@@ -73,7 +73,7 @@ const envSchema = z
     }
   });
 
-/** Inject the active OTel traceId and spanId into every pino log line (O-02). */
+/** Inject the active OTel traceId and spanId into every pino log line. */
 function otelMixin(): Record<string, string> {
   const span = trace.getActiveSpan();
   if (!span) return {};
@@ -112,7 +112,7 @@ function otelMixin(): Record<string, string> {
             config.get('NODE_ENV') !== 'production'
               ? { target: 'pino-pretty', options: { colorize: true } }
               : undefined,
-          // Inject OTel traceId + spanId into every log line (O-02)
+          // Inject OTel traceId + spanId into every log line
           mixin: otelMixin,
           redact: [
             'req.headers.authorization',

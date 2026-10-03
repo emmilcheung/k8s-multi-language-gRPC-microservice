@@ -9,6 +9,122 @@
 
 ---
 
+## Session: 2026-10-02 — feat(mcp): Wave 4 — client metadata documents, end-to-end spec, MCP docs ⏳ IN PR, NOT MERGED
+
+**Branch:** `feat/mcp-platform-wave4` — lanes `feat/mcp-w4-{i,m}` merged `--no-ff` (I, then M), then merged `--no-ff` into the integration branch `feat/mcp-platform`. The wave and lane branches were deleted after the merge; the work is on `feat/mcp-platform`, in a PR to `main`.
+
+**What landed**
+
+- **WS-I (auth-service, client):** Client ID Metadata Documents. With `OAUTH_CIMD_ENABLED` on, a host may use an `https` URL as its `client_id`; auth-service fetches the JSON document behind an SSRF guard and treats it as a public, never-first-party client. The guard: strict URL shape (https, port 443, DNS name, no internal suffix, no query/fragment/userinfo), its own DNS resolution with every address checked against a block list, a connection pinned to the vetted address with TLS bound to the host name, no redirects, 200 + JSON only, 5 KB, one 3 s deadline, at most 8 fetches in flight, Redis cache (60 s – 24 h, 60 s negative). A refused document is 400 `invalid_client`; a transient failure is 503 `temporarily_unavailable` with `Retry-After`. The flag defaults to **false** and is true only in compose and `values-local.yaml`. Dynamic registration stays and now shares one validation rule with CIMD. The consent page and Settings → Connected apps show where the client's document is hosted and where the user is sent after allowing, with a caution when the two differ; the consent buttons stay disabled until the page hydrates (an early click used to be lost silently — the cause of the Wave 3 flake). Revoke gained a query form, `DELETE /oauth/clients?client_id=`, because a URL id cannot sit in a path segment.
+- **WS-M (client E2E, docs, CI):** `tests/e2e/mcp-full-flow.spec.ts` plays an MCP host through Kong: discovery, dynamic registration, PKCE with `resource`, browser login and consent, `initialize`, `tools/list` (12), a read tool, `create_order` twice (second `replayed: true`), payment, and the negative edges (no token, MCP token on REST, step-up, 405 on GET/DELETE, internal-address CIMD ids refused). `docs/ticketing/mcp.md` replaces three stale stdio-era files; `docs/06-security.md` gains the MCP threat model and `docs/03-api-design.md` the two documented exceptions (mcp-service verifies its own token; it calls Kong's public REST).
+
+**Spec deviation:** D12 said `dns.promises.lookup`; the fetcher uses `dns.promises.Resolver` (c-ares) instead, so a slow lookup cannot occupy the libuv thread pool that password hashing shares, and can be cancelled at the deadline. Still node built-ins, no dependency.
+
+**Behaviour change for integrators (dynamic registration):** redirect URIs with a fragment (even an empty `#`) or userinfo are now refused, as are non-http(s) schemes on loopback hosts; `client_name` is limited to 100 characters with no control or formatting characters (which also rejects emoji joined by a zero-width joiner).
+
+**Exit gate (wave branch `110924f`, then three post-gate fixes re-checked on `5a399c6`): PASS WITH NOTES.** Static: auth-service 464 unit / 25 integration, lint 0 errors; client 244 unit (2 skipped: `queue-gate.integration`, needs `QUEUE_REAL_TOKEN`, untouched here); mcp-service 127. The two real-socket CIMD specs ran 5 × clean (OpenSSL 3). `OAUTH_CIMD_ENABLED` is true only in compose and `values-local.yaml`; no NetworkPolicy, `package.json` or lockfile changed. Live through Kong on a compose stack: `mcp-full-flow.spec.ts` 13/13 three times without retries, `oauth-agent-boundaries` 13/13, `connected-apps` 1/1, the ticketing consent test 1/1. In a real browser: the consent page shows the redirect destination ("an app on this device" for loopback), wraps an 84-character host at 375 px, and its buttons are `disabled` in the server HTML and enabled after hydration with no console warnings; Revoke sends `DELETE /oauth/clients?client_id=` → 204 and the old refresh token then fails. Dynamic registration refuses the listed bad redirect URIs and names and accepts the good ones. CIMD: metadata advertises support; six internal or malformed URL ids are refused with 400 in ~3 ms and no outbound request; one real fetch (`example.com`, a 404) is refused, logged with host and reason only, and answered from the negative cache on repeat.
+
+**Fixed after the gate:** the consent "Application" block squeezed the new address lines beside the client-id chip and clipped the chip at 375 px (now stacked, re-checked in a browser at 375 px and desktop); a URL client id refused before any fetch left no log line (now `oauth.cimd.url_rejected` / `oauth.cimd.busy`, reason and host only).
+
+**Not verified:** a successful fetch of a valid public metadata document; the consent page for a CIMD client in a browser (document-host line and mismatch caution are unit-tested only); the 503 `temporarily_unavailable` path live; the transport spec under LibreSSL; the full umbrella `helm template` (only the auth-service chart was rendered: flag present for local, absent for staging and prod); the edited `e2e` CI job on a runner; any cluster deploy.
+
+**Owner items**
+
+- **Hard stop #10 — egress for CIMD.** Enabling `OAUTH_CIMD_ENABLED` in any cluster needs an auth-service egress NetworkPolicy (TCP 443 to the public internet excluding private ranges, plus DNS). None exists and none was written; staging and prod keep the flag off. `/oauth/authorize` is unauthenticated, so with the flag on anyone can make auth-service fetch a public URL of their choice (bounded by the Kong per-IP limit, the caches and the in-flight cap).
+- **Refresh tokens (pre-existing, now documented):** no reuse detection; rotation is read-then-write, so two concurrent refreshes can both succeed; the 24 h lifetime is sliding, so a stolen refresh token used daily works until the user revokes. Decide whether to fix (atomic rotation + family revocation on reuse, absolute lifetime) before any public exposure.
+- **Dynamic registration:** no cap or quota beyond the per-IP limit and the one-year key expiry.
+- **auth-service request log (pre-existing):** the pino-http line logs the request URL with its query string on every route, so the whole `/oauth/authorize` URL (client id, redirect URI, `state`, PKCE challenge) and the email on `GET` lookups land in the access log. No token or client secret travels in a query string on the OAuth routes. Decide whether to strip or redact the query.
+- **`/oauth/authorize` errors (pre-existing):** a 4xx is the general error envelope with the OAuth error as a string inside it, shown raw to the browser. A human-readable error page is not built.
+- **`MaxListenersExceededWarning`** (11 `finish` listeners on the response) appears in auth-service logs per request. This wave changed no auth-service source outside `modules/oauth` and no dependency, so it is not from here; not traced.
+- **Manual check with a real host: run after the gate** (Claude Code 2.1.285, compose stack). The host connected with its `claude.ai` metadata-document client id, so this also covered a successful fetch of a valid public document and the consent page for a CIMD client in a browser, both listed above as not verified. Twelve tools visible; `create_order` twice gave one order (`replayed: true`); revoke forced a new sign-in once the 15-minute token expired. Result and what was left out are in `docs/ticketing/mcp.md`.
+- **CI:** the `e2e` job now needs the `mcp` job, starts mcp-service (`COMPOSE_PROFILES: mcp`) and generates a throwaway exchange secret on the runner. Not run on a runner: watch the 20-minute limit on the first PR, and confirm `secrets.STRIPE_SECRET_KEY` contains `test_mock`. `audit/scripts/scrub-secrets.sh` does not know `TOKEN_EXCHANGE` names.
+- **Left for WS-N (stdio retirement, needs the owner's date):** `packages/ticketing-mcp-server`, the static `ticketing-mcp` client, `.mcp.json`, and the stdio parts of `docs/diagrams/05-auth-flows.*`.
+
+Ledger: `.superpowers/sdd/2026-10-02-mcp-wave4/` (`exit-gate.md`, per-lane reports, reviews and rulings).
+
+---
+
+## Session: 2026-10-02 — feat(mcp): Wave 3 — token exchange, MCP tools, consent UI, Kong `/mcp` ⏳ IN PR, NOT MERGED
+
+**Branch:** `feat/mcp-platform-wave3` — lanes `feat/mcp-w3-{l,h,j,k}` merged `--no-ff` (L → H → J, then K on top), then merged `--no-ff` into the integration branch `feat/mcp-platform`. The wave and lane branches were deleted after the merge.
+
+**What landed**
+
+- **WS-H (auth-service):** RFC 8693 token exchange at `POST /oauth/token` for one confidential client, `mcp-service` (`client_secret_basic`). The secret is stored as a SHA-256 hex digest (`MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH`) and compared in constant time; unset disables the grant with a warning, malformed fails startup. The exchanged token carries the API audience, `act: {sub: mcp-service}`, and never outlives the subject token (`exp = min(iat + 300, subject.exp)`). Audit event `oauth.token.exchanged`. `GET /oauth/clients` returns the registered client name.
+- **WS-J (mcp-service):** the 12 tools of contract C-7, each calling Kong's public REST with an exchanged token (no passthrough). Exchange results are cached per (token hash, scope); a derived `Idempotency-Key` makes create tools safe to retry and reports `replayed`; a missing scope returns the C-6 step-up challenge. `search_events` has no free-text query or paging because ticket-service REST offers neither (owner item below).
+- **WS-L (client):** consent page shows the registered client name and per-scope descriptions from `GET /oauth/scopes`, with a Sensitive marker; an unknown scope fails closed. Settings → Connected apps lists and revokes grants.
+- **WS-K (kong-gateway):** routes `/mcp` and `/.well-known/oauth-protected-resource/mcp` → mcp-service with no Kong jwt plugin (mcp-service verifies its own audience-bound token), identity headers cleared, per-IP limit. A second `jwt_secret` keyed on the OAuth issuer origin, and the **REST audience rule (C-10)** in `jwt-scope.lua`: an OAuth token whose `aud` is not `<issuer>/api` is refused 401, so an MCP-audience token cannot be replayed against REST. New fail-loud build input `KONG_OAUTH_ISSUER` (dev/staging/prod). `OAUTH_ISSUER_ENABLED` is now `true` in compose and `values-local.yaml`; staging/prod keep the schema default (false). New `scripts/test-jwt-scope.sh` runs the real Lua under `resty`; the Kong CI job now runs it and `test-build-lint.sh` (previously run by nothing).
+
+**Spec amendment:** C-7 — `pay_for_order_with_default` needs `payments:read` in addition to `payments:create`.
+
+**Exit gate (wave branch `530decf`): PASS WITH NOTES.** Static: auth-service 234 unit / 25 integration; mcp-service 127 tests, image non-root; client 227 unit; Kong build + validate for local, minikube, dev, staging, prod, `test-build-lint.sh` 18/18, `test-jwt-scope.sh` 15 cases; umbrella chart renders with mcp-service enabled. Live through Kong on a compose stack: discovery documents agree on issuer and resource; `/mcp` without a token → 401 with `resource_metadata`; dynamic registration + authorization-code/PKCE → `tools/list` returns 12 tools and read tools succeed via the live exchange; `create_order` twice → second call `replayed: true`, one order upstream; missing `orders:create` → 403 `insufficient_scope`; MCP-audience token on `GET /api/orders` → 401, browser token → 200, OAuth token on `/graphql` → 403, forged `X-User-*` on `/mcp` → 401; refresh after revoke → `invalid_grant`; consent and Connected apps verified in Chromium; `oauth-agent-boundaries.spec.ts` + `connected-apps.spec.ts` 14/14.
+
+**Not verified:** the consent page's unknown-scope branch live (auth-service drops unknown scopes at registration; unit tests only); `/mcp` 429 and the Redis rate-limit policy; payment tools, `create_seated_order`, `cancel_order` and the waiting-room mapping against a live stack; any cluster deploy (helm render only); the new CI step on a real runner. One Playwright flake on a cold `next dev` (consent POST hung once, not reproduced in three re-runs).
+
+**Accepted behaviour:** revoking an app blocks refresh immediately, but an MCP access token already issued stays exchangeable until it expires (≤ 15 min).
+
+**Owner items**
+
+- Hard stop #10 review of the new public Kong routes: `POST|GET|DELETE /mcp`, `GET /.well-known/oauth-protected-resource/mcp`, `GET /oauth/scopes`. Tuning points: `/mcp` is limited per source IP (600/min), which hosted MCP clients on shared egress IPs would share; no CORS/OPTIONS on `/mcp` (browser-based MCP clients would need it).
+- Deploy pipelines for dev/staging/prod must set `KONG_OAUTH_ISSUER` to the same origin as Helm `global.publicOrigin`; the audience rule applies even while `OAUTH_ISSUER_ENABLED` is false, so a mismatch 401s every OAuth REST call.
+- Add `MCP_TOKEN_EXCHANGE_CLIENT_SECRET` and `MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH` (SHA-256 hex of the secret; generator in `.env.example`) to the local `.env` and `infra/local/secrets.env`; decide whether mcp-service leaves the opt-in `mcp` compose profile.
+- ticket-service REST needs a search parameter and a returned next cursor before `search_events` can search or page.
+- `.github/workflows/ci.yml` (Kong job) was edited by this wave: a stand-in `KONG_OAUTH_ISSUER` and one test step.
+
+Ledger: `.superpowers/sdd/2026-10-02-mcp-wave3/` (`exit-gate.md`, per-lane reports and reviews).
+
+---
+
+## Session: 2026-10-02 — feat(mcp): Wave 2 — AS metadata, order idempotency, mcp-service scaffold ⏳ IN PR, NOT MERGED
+
+**Branch:** `feat/mcp-platform-wave2` — lanes `feat/mcp-w2-{e,f,g}` merged `--no-ff` (E → F → G), then merged `--no-ff` into the integration branch `feat/mcp-platform`. All MCP branches were rebased onto `main` `04307ee` first (integration with `--rebase-merges`). The wave and lane branches were deleted after the merge.
+
+**What landed**
+
+- **WS-E (auth-service):** RFC 8414 metadata at `/.well-known/oauth-authorization-server` (public Kong route `auth-as-metadata`), `/oauth/scopes`, scope registry, RFC 8707 `resource` → `aud`, loopback redirect matching (RFC 8252 §7.3). The four `OAUTH_*` URLs derive from one Helm value, `global.publicOrigin`; unset in production, auth-service refuses to start and names the value. Production rejects http / loopback / fragment issuer and resource URLs. Refresh validates `resource` before rotating.
+- **WS-F (order-service, ticket-service, venue-service):** `Idempotency-Key` on `POST /api/orders` and `/api/orders/seated` (V8 migration: `request_fingerprint`, unique `reservation_id`). A keyed create never compensates on failure — the reservation is shared across retries, so releasing it could strand a sibling's committed order; expiry reclaims it instead (worst case ~21 min). ticket-service accepts a duplicate reserve only while RESERVED. **venue-service gained a reservation expiry sweep** (it stored `expires_at` and never acted on it), and release/finalize on an EXPIRED reservation are now safe.
+- **WS-G (mcp-service):** new resource-server scaffold — RS256-only bearer verification against the auth-service JWKS, RFC 9728 protected-resource metadata, 401 challenge, non-root image, Helm chart (disabled by default) with NetworkPolicy, compose `mcp` profile, CI job.
+
+**Exit gate (merged branch):** auth-service 177 unit / 25 integration; order-service checkstyle + 97 unit / 19 IT; ticket-service and venue-service `go vet` + `go test`; mcp-service 20 tests, image runs as uid 100; Kong `test-build-lint.sh` 10/10, local/staging/prod build + validate, guards SCOPE 11 / DENY 17. Umbrella chart renders the four `OAUTH_*` vars for local and when `publicOrigin` is set, none when unset. Through Kong on freshly built auth/order/ticket/venue/kong/mcp images: metadata issuer `http://localhost:8000`, `oauth-agent-boundaries.spec.ts` 13/13, live idempotency check 201 → 200 `Idempotent-Replayed: true` (same id) → 422 on a changed body.
+
+**Not verified:** the `mcp` compose profile (the secret is not in the local `.env`; the image was run standalone instead and token exchange was not exercised); payment/user/attendance/expiration images were not rebuilt; multi-replica sweep contention; any deploy.
+
+**Owner items**
+
+- Set `global.publicOrigin` (public https origin) in `values-staging.yaml` and `values-prod.yaml` before deploying — auth-service will not start without it.
+- Hard stop #10 review: Kong public route `auth-as-metadata`; mcp-service NetworkPolicy (ingress Kong:3000; egress DNS 53 to any, Kong 8000, auth-service 3000, otel-collector 4317; podSelector-only).
+- Hard stop #9: mcp-service dependencies, incl. `@modelcontextprotocol/client` 2.2.0 (devDependency, test-only).
+- Add `MCP_TOKEN_EXCHANGE_CLIENT_SECRET` to the local `.env`; run the V8 duplicate pre-check in non-local environments.
+- Acknowledge two known P0s the new venue sweep touches (tracked separately, not fixed here): a seat freed by a DB-only release stays un-holdable on the Redis manual-pick path; a seated order paid after its reservation expired now fails to finalize, as GA already does.
+
+Ledger: `.superpowers/sdd/2026-09-30-mcp-wave2/`.
+
+---
+
+## Session: 2026-09-30 — test(e2e): Wave-1 OAuth boundary regressions pin the exit gate ⏳ AWAITING OWNER APPROVAL (Wave 2)
+
+**Branch:** `feat/mcp-platform-wave1` (Task 7, the Wave-1 exit gate; Tasks 1–6 already committed on this branch). Per controller ruling, Task 7 ran and committed on this branch instead of a fresh `test/mcp-wave1-exit-gate` off `main`; the PR/hand-off half of the brief's Step 3 is deferred to a `finishing-a-development-branch` pass with the owner.
+
+**Wave 1 is closed:** F1, F1b, F2, F3, F5, F6, F9, F11, F11b and F12. Appended three regression tests to `services/client/tests/e2e/oauth-agent-boundaries.spec.ts` (`sessions and grants never convert into each other`) pinning the cross-service invariant that OAuth grants and browser sessions never convert into each other:
+
+- `an OAuth access token is not a session at /oauth/authorize (F11b)`
+- `an OAuth refresh token cannot mint a browser session, and survives the attempt (F1)`
+- `a browser refresh token is refused at /oauth/token in RFC shape, and the browser stays signed in (F1b, F9)`
+
+All 13 tests in the spec pass; full Playwright suite 70 passed / 1 skipped-by-design set (queue-gate armed tests) / 1 pre-existing failure unrelated to Wave 1 (see Concerns below); both queue-gate modes (disarmed and armed) verified as in Task 5 Step 6; full client unit suite green (207 passed / 2 skipped); lint + `tsc --noEmit` clean on the touched file.
+
+**Known gap (carried forward, not fixed here):** the queue gate checks the pass HMAC only — it has no `exp`, event or single-use check (`services/kong-gateway/plugins/queue-gate.lua`). Tracked as a Wave 2+ hardening item.
+
+**F1 owner decision (2026-09-30): Option A.** The shipped code (`e36c7b1`) implements Option A's behaviour: a legacy session-scope-marker fallback in `RefreshTokenService.resolveOAuthClientId`. That fallback means a pre-deploy OAuth refresh session idle past 24h is indistinguishable from a browser session until it naturally expires (≤7 days post-deploy). The owner accepted that window and the fallback is removed at deploy + 7 days (tracked as WS-N). Option B (force-logout every untagged session at deploy) was rejected as unacceptable UX.
+
+**Concerns:**
+- The full Playwright suite has one failure, triaged as **PRE-EXISTING** (not caused by this branch): `ticketing.spec.ts:999` ("authenticated user can manage a seated ticket plan lifecycle (Phase 3)") fails at line 1083, `toBeVisible` timeout waiting for "Create Replacement Plan" after clicking "Deactivate Plan" a second time. A `--trace on` rerun's network log shows every response in the flow is 200/304 — zero 403/429/`insufficient_scope`, so Kong's OAuth-deny guards and the queue gate are ruled out, and `local.yml`/the running Kong container were confirmed disarmed and unchanged at the time. The only anomaly is the *prior* step's "Reactivate Plan" POST to `/api/seating-plans/.../activate`, which shows client status `-1` (browser-cancelled) because the test's own `expect.poll` fires `page.reload({ waitUntil: "domcontentloaded" })` ~5ms after the click, before the request settles; the reload itself then finds the plan already reactivated (server processed it anyway) and the poll passes. The actual failing step — the second "Deactivate Plan" click at line 1082 — produces **no network request at all**, consistent with a hydration race: the button is visible right after a `domcontentloaded` reload before React re-attaches its click handler, so the click is a no-op and the subsequent 18s wait for "Create Replacement Plan" times out. This is a timing race in the test's own reload-then-click pattern (`ticketing.spec.ts` lines 1062–1083), not something Task 7 introduced or that Kong/auth reject; Task 7 touched no seating-plan/venue code. Flagging for owner triage (tighten the poll to wait on hydration, e.g. an interactability check, before Wave 2 opens); not fixed here per the no-app-code-changes constraint on this triage.
+- `CreateOrder INTERNAL_ERROR` and similar GraphQL error log lines during the full suite are the known noise from the stale order-service image, not real failures.
+
+Full report: `.superpowers/sdd/2026-09-29-mcp-platform-upgrade/task-7-report.md`.
+
+---
+
 ## Session: 2026-09-29 — chore(agent): instruction-surface audit against main ⏳ AWAITING REVIEW
 
 Audited the agent instruction surface (`CLAUDE.md`, `AGENTS.md`, service `AGENTS.md`,
@@ -1421,3 +1537,38 @@ review of migration 008 (attendance outbox schema, so far only exercised against
 throwaway local DB); the redundant `chore/cve-sweep-2026-09` branch, whose contents
 now live in #122; and the non-gating `SSH.NET` 2025.1.0 HIGH advisories in
 queue-service's **test** project.
+
+---
+
+## 2026-10-03 — PR #153 audit fixes
+
+Fixes from the MCP platform review, on `feat/mcp-platform`, with no dependency or
+version change (the Trivy and dependency gates are untouched).
+
+- **Idempotency**: the derived key now includes a 15-minute window, so a cancelled or
+  expired order no longer replays forever; a missing `sub` is an auth failure instead
+  of falling back to the client id.
+- **OAuth**: the session verifier accepts only the session issuer; disconnecting a
+  client records a not-before time that blocks exchange of earlier tokens; mcp-service
+  reuses an exchanged token for at most 60 seconds.
+- **Config**: `API_AUDIENCE` is an explicit optional setting; Helm derives the issuer,
+  resource and audience from `global.publicOrigin`, and the umbrella chart fails the
+  render when mcp-service is enabled without it.
+- **Observability**: Kong logs each audience-less OAuth token it admits;
+  `order.keyed.uncompensated{flow}` counts keyed creates that leave a reservation held.
+- **Contracts**: venue-service pins the "was already released" phrase order-service
+  matches on, as ticket-service already did for its prefix.
+- **Shutdown**: one SIGTERM handler in mcp-service drains connections (20 s), then
+  flushes telemetry (3 s), under the 30 s pod grace period.
+- **Docs**: the V8 migration pre-check and concurrent-build steps are in
+  `docs/11-kubernetes-deployment.md`.
+- **Disconnect and REST access**: a dynamically registered or metadata-document client is
+  now limited to the MCP resource (a missing `resource` means `/mcp`, `/api` is
+  `invalid_target`), because a token minted for `/api` directly bypassed the exchange and
+  stayed valid for up to 15 minutes after Disconnect. The static `ticketing-mcp` client is
+  unchanged and `docs/06-security.md` says so.
+
+Left open on purpose: the queue-gate pass has no expiry or event binding (changing it
+changes what an admission means after 10 minutes and must match the client gate), and
+dynamic client registration still defaults to every scope (read-only defaults would stop
+a client that registers without a scope from ever stepping up to `orders:create`).

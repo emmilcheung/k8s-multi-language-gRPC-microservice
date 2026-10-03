@@ -1,5 +1,5 @@
 /**
- * Next.js built-in instrumentation hook (O-01).
+ * Next.js built-in instrumentation hook.
  * This file is loaded once by the Next.js runtime before any page or API route.
  * @vercel/otel auto-wires the OTel SDK with sensible defaults for Next.js App Router.
  *

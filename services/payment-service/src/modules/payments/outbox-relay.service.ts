@@ -31,7 +31,7 @@ const CLEANUP_MAX_BATCHES = 20;
  * the process crashes between the DB write and the Kafka send, the row remains
  * unpublished and will be retried on the next poll.
  *
- * Implements audit finding C-05: payments.payment.captured is now published to
+ * payments.payment.captured is now published to
  * Kafka via the transactional outbox pattern instead of being injected directly
  * by E2E tests.
  */

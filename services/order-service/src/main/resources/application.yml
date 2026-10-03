@@ -126,7 +126,7 @@ redis:
 order:
   expiration:
     minutes: ${ORDER_EXPIRATION_MINUTES:15}
-  # SR-16 backstop for expiration-service's asynq jobs, which a Redis failover can
+  # Backstop for expiration-service's asynq jobs, which a Redis failover can
   # lose. Orders still open this long past expires_at are expired from Postgres.
   # The grace leaves the normal asynq -> Kafka path time to win.
   expiry-sweep:
@@ -152,14 +152,14 @@ outbox:
     # first failure, so this also bounds the claim's total lifetime.
     publish-timeout-ms: ${OUTBOX_RELAY_PUBLISH_TIMEOUT_MS:10000}
   cleanup:
-    # Published rows deleted per committed batch (SR-06). Tune down if the delete
+    # Published rows deleted per committed batch. Tune down if the delete
     # shows up in lock waits. Override via OUTBOX_CLEANUP_BATCH_SIZE.
     batch-size: ${OUTBOX_CLEANUP_BATCH_SIZE:500}
     # Cap per invocation (500 × 100 = 50k rows); the rest waits for the next
     # schedule. Override via OUTBOX_CLEANUP_MAX_BATCHES.
     max-batches: ${OUTBOX_CLEANUP_MAX_BATCHES:100}
 
-# ── Resilience4j — circuit breaker on gRPC client (R-01) ─────────────────────
+# ── Resilience4j — circuit breaker on gRPC client ─────────────────────
 resilience4j:
   circuitbreaker:
     instances:

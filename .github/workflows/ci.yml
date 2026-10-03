@@ -23,7 +23,7 @@
 # Kafka and Redis integration tests use Testcontainers (Docker-in-Docker on ubuntu-24.04).
 # No images are pushed — no registry credentials needed.
 #
-# Deploy stages (I-11):
+# Deploy stages:
 #   - Conditional on secrets.AWS_DEPLOY_ROLE_ARN being set.
 #   - Won't run on forks or in environments without real EKS infrastructure.
 #   - staging and prod gates require manual approval (configure in repo Settings → Environments).
@@ -60,6 +60,7 @@ jobs:
       proto:      ${{ steps.filter.outputs.proto }}
       ticket:     ${{ steps.filter.outputs.ticket }}
       user:       ${{ steps.filter.outputs.user }}
+      mcp:        ${{ steps.filter.outputs.mcp }}
       venue:      ${{ steps.filter.outputs.venue }}
       queue:      ${{ steps.filter.outputs.queue }}
       skip-ci:    ${{ steps.set-skip-ci.outputs.skip-ci }}
@@ -114,6 +115,9 @@ jobs:
               - '.github/workflows/ci.yml'
             user:
               - 'services/user-service/**'
+              - '.github/workflows/ci.yml'
+            mcp:
+              - 'services/mcp-service/**'
               - '.github/workflows/ci.yml'
             venue:
               - 'services/venue-service/**'
@@ -789,6 +793,79 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
+  # ── mcp-service (TypeScript / MCP SDK / pnpm / Vitest) ────────────────────
+  mcp:
+    name: mcp-service
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.mcp == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: services/mcp-service
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/mcp-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: services/mcp-service/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --silent
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/mcp-service
+          file: services/mcp-service/Dockerfile
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/mcp-service.tar
+
+      - name: Load image for scanning
+        run: docker load --input /tmp/mcp-service.tar
+        working-directory: .
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF report
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-results.sarif
+
   # ── proto (buf lint + breaking change detection) ────────────────────────────
   proto:
     name: proto
@@ -817,7 +894,7 @@ jobs:
           breaking: true
           breaking_against: "https://github.com/${{ github.repository }}.git#branch=main,subdir=proto"
 
-  # ── kong-gateway (build.sh → validate.sh) (I-15) ───────────────────────────
+  # ── kong-gateway (build.sh → validate.sh) ───────────────────────────
   kong:
     name: kong-gateway
     runs-on: ubuntu-24.04
@@ -855,6 +932,18 @@ jobs:
           # hash). build.sh refuses to render without it, so CI supplies a syntactic
           # stand-in — this job only parses the config, it never connects.
           KONG_RATE_LIMIT_REDIS_HOST: redis.ci.invalid
+          # dev/staging/prod have no committed OAuth issuer origin (build.sh
+          # refuses to render the MCP routes without one); syntactic stand-in.
+          KONG_OAUTH_ISSUER: https://ticketing.ci.invalid
+
+      # Self-contained: both scripts generate their own throwaway key and
+      # placeholders, so no repo secrets are needed. The jwt-scope test runs
+      # the real Lua under resty in the kong image (docker is on the runner).
+      - name: Kong build-lint and jwt-scope behavioural tests
+        run: |
+          set -euo pipefail
+          bash scripts/test-build-lint.sh
+          bash scripts/test-jwt-scope.sh
 
   # ── ticket-service (Go 1.25 / Echo v4 / confluent-kafka-go CGO) ────────────
   ticket:
@@ -1130,10 +1219,13 @@ jobs:
     name: Playwright E2E (full stack)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    needs: [changes, attendance, auth, client, expiration, kong, order, payment, proto, ticket, user, venue]
+    needs: [changes, attendance, auth, client, expiration, kong, mcp, order, payment, proto, ticket, user, venue]
     env:
       E2E_INFRA_SERVICES: postgres-auth postgres-orders postgres-payments postgres-attendance mongodb redis kafka schema-registry
-      E2E_APP_SERVICES: auth-service ticket-service venue-service order-service payment-service expiration-service user-service attendance-service
+      E2E_APP_SERVICES: auth-service ticket-service venue-service order-service payment-service expiration-service user-service attendance-service mcp-service
+      # mcp-service is profile-gated in docker-compose.yml; the mcp-full-flow spec needs it.
+      # The profile also makes `docker compose build` build its image.
+      COMPOSE_PROFILES: mcp
     # Only run when:
     #   - The event is a pull_request (not a push to main)
     #   - Not a docs-only change (skip-ci == false)
@@ -1152,14 +1244,21 @@ jobs:
       # auth-service reads RSA_PRIVATE_KEY; payment-service reads STRIPE_SECRET_KEY.
       # RSA_PRIVATE_KEY and KONG_RSA_PUBLIC_KEY are stored as single-line \n-escaped
       # PEM strings; printf '%b' expands \n → real newlines for Docker Compose.
+      # mcp-service authenticates its RFC 8693 token exchange with an ephemeral secret generated
+      # on the runner (auth-service stores only the lowercase hex sha256). Not a GitHub secret.
       - name: Write root .env
         run: |
+          mcp_exchange_secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$mcp_exchange_secret"
+          mcp_exchange_hash="$(printf %s "$mcp_exchange_secret" | sha256sum | cut -d' ' -f1)"
           {
             printf 'RSA_PRIVATE_KEY="%b"\n' "$RSA_PRIVATE_KEY"
             printf 'STRIPE_SECRET_KEY=%s\n' "$STRIPE_SECRET_KEY"
             printf 'KONG_RSA_PUBLIC_KEY="%b"\n' "$KONG_RSA_PUBLIC_KEY"
             printf 'X_USER_ID_SIGNING_KEY=%s\n' "$X_USER_ID_SIGNING_KEY"
             printf 'QR_SIGNING_KEY=%s\n' "${QR_SIGNING_KEY:-ci_qr_signing_key_32_bytes_minimum_length_value}"
+            printf 'MCP_TOKEN_EXCHANGE_CLIENT_SECRET=%s\n' "$mcp_exchange_secret"
+            printf 'MCP_TOKEN_EXCHANGE_CLIENT_SECRET_HASH=%s\n' "$mcp_exchange_hash"
           } > .env
         env:
           RSA_PRIVATE_KEY: ${{ secrets.RSA_PRIVATE_KEY }}
@@ -1381,7 +1480,7 @@ jobs:
       - name: Enforce secret-free compose logs
         if: always()
         run: |
-          SECRET_PATTERN='STRIPE_SECRET|DATABASE_URL|SIGNING_KEY|REFRESH_TOKEN|JWT_SECRET|RSA_PRIVATE_KEY'
+          SECRET_PATTERN='STRIPE_SECRET|DATABASE_URL|SIGNING_KEY|REFRESH_TOKEN|JWT_SECRET|RSA_PRIVATE_KEY|TOKEN_EXCHANGE'
           if grep -qiE "$SECRET_PATTERN" /tmp/compose-logs.raw.txt; then
             echo "FAIL: secret-like pattern detected in compose logs"
             exit 1
@@ -1409,12 +1508,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 3
 
-  # ── deploy-dev (I-11) ────────────────────────────────────────────────────────
+  # ── deploy-dev ────────────────────────────────────────────────────────
   # Deploys the umbrella Helm chart to the dev EKS namespace.
   # Conditional on:
   #   - Running on the main branch (not PRs)
   #   - secrets.AWS_DEPLOY_ROLE_ARN being set (skip silently on forks / no-infra)
-  # Image tag = git SHA (no :latest — I-12 already satisfied).
+  # Image tag = git SHA (no :latest).
   # Uses OIDC → AWS IAM role assumption (no long-lived AWS credentials).
   # deploy-dev:
   #   name: Deploy → dev
@@ -1486,7 +1585,7 @@ jobs:
   #         echo "Smoke test failed after 10 attempts"
   #         exit 1
 
-  # # ── deploy-staging (I-11) ─────────────────────────────────────────────────────
+  # # ── deploy-staging ─────────────────────────────────────────────────────
   # # Manual approval gate: configure "staging" Environment in repo Settings →
   # # Environments → staging → Required reviewers.
   # deploy-staging:
@@ -1552,7 +1651,7 @@ jobs:
   #         echo "Smoke test failed after 10 attempts"
   #         exit 1
 
-  # # ── deploy-prod (I-11) ────────────────────────────────────────────────────────
+  # # ── deploy-prod ────────────────────────────────────────────────────────
   # # Manual approval gate: configure "production" Environment in repo Settings →
   # # Environments → production → Required reviewers.
   # # This gate is separate from staging — prod reviewers should be a strict subset
@@ -1636,7 +1735,7 @@ jobs:
     name: CI
     runs-on: ubuntu-24.04
     if: always()
-    needs: [changes, attendance, auth, client, expiration, graphql, helm-validate, queue, kong, order, payment, proto, ticket, user, venue, e2e]
+    needs: [changes, attendance, auth, client, expiration, graphql, helm-validate, queue, kong, mcp, order, payment, proto, ticket, user, venue, e2e]
     steps:
       - name: Check all jobs passed (or skip if only markdown changed)
         run: |

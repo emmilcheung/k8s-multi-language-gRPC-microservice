@@ -83,3 +83,5 @@ Always use this consistent format:
 - Plugins applied globally (at gateway level): authentication, rate limiting, request logging, correlation ID injection.
 - Plugins applied per-route: additional auth scopes, custom rate limits, request/response transformation.
 - Never route internal gRPC traffic through Kong — gRPC stays on the internal cluster network.
+
+**Exception: `mcp-service` (D7).** `mcp-service` is an edge client, not an internal service. Instead of calling internal gRPC it calls Kong's public REST API (`/api/...`) with a short-lived, API-audience token obtained by RFC 8693 token exchange, so the same scope checks, waiting-room gate and rate limits apply to agent traffic as to a browser. It gets no back door to the internal network, and the exception does not widen to other services: internal service-to-service calls stay gRPC. Security rationale: [06](06-security.md#mcp-surface-threat-model); operator guide: [`ticketing/mcp.md`](ticketing/mcp.md).
