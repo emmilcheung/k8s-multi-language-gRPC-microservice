@@ -5,6 +5,7 @@ Project documentation. Organized for on-demand loading by agents and humans.
 ## Categories
 
 - **Standards** — `01-*.md` through `14-*.md`: engineering conventions (API, data, security, observability, etc.). See [`../AGENTS.md`](../AGENTS.md) for the full TOC.
+- **Development guide** — [`development.md`](development.md): run, test and debug locally (Compose, minikube, protobuf, E2E)
 - **Process** — agent-facing procedures:
   - [`15-agent-hard-stops.md`](15-agent-hard-stops.md) — operations requiring explicit user confirmation
   - [`17-agent-workflow.md`](17-agent-workflow.md) — post-harness validation loop

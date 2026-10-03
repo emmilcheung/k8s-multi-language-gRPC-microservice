@@ -4,6 +4,8 @@ Lets an MCP host (Claude Code, or any client that speaks MCP Streamable HTTP and
 
 This guide replaces the old stdio-based `mcp-setup.md`, `mcp-structure.md` and `oauth-mcp-status.md`. The stdio package (`packages/ticketing-mcp-server`) still exists and is deprecated; its retirement is planned (see [Planned](#planned-not-in-this-commit)). Client ID Metadata Documents are built; see [Client ID Metadata Documents](#client-id-metadata-documents-cimd).
 
+Service overview and data-flow diagrams (authorization, CIMD, authenticated tool call): [`services/mcp-service/README.md`](../../services/mcp-service/README.md).
+
 Security analysis lives in [`docs/06-security.md`](../06-security.md#mcp-surface-threat-model). This file is the operator and developer guide.
 
 ---
@@ -11,23 +13,42 @@ Security analysis lives in [`docs/06-security.md`](../06-security.md#mcp-surface
 ## Architecture
 
 ```text
-MCP host (Claude Code)
-   |  1. POST /mcp  (no token)  ->  401 + WWW-Authenticate: resource_metadata=...
-   |  2. GET /.well-known/oauth-protected-resource/mcp   -> names the authorization server
-   |  3. GET /.well-known/oauth-authorization-server     -> endpoints, S256, registration
-   |  4. POST /oauth/clients/register                    -> client_id (RFC 7591), or skip it:
-   |     a host may use an https URL it hosts as client_id (CIMD, only if enabled)
-   |  5. browser: /oauth/authorize (PKCE S256, resource=<origin>/mcp) -> sign in -> consent -> code
-   |  6. POST /oauth/token (code + verifier + resource)  -> access token, aud=<origin>/mcp
-   v
-Kong (:8000)  /mcp, /.well-known/oauth-protected-resource/mcp
-   |  no jwt plugin on /mcp; strips X-User-Id / X-User-Roles / X-User-Id-Sig; rate limit per IP
-   v
-mcp-service  (verifies the MCP-audience token: RS256, iss, aud, exp, client_id)
-   |  RFC 8693 token exchange with auth-service (client-authenticated)
-   |  -> short-lived token, aud=<origin>/api, same client_id, scope narrowed to the tool
-   v
-Kong public REST (/api/...)   <- the same scope, waiting-room and rate-limit rules as any other client
+MCP host              Browser            Kong           auth-service         claude.ai        mcp-service
+(Claude Code)          (user)                                                 (the client's
+     |                    |                 |                  |               own website)          |
+ 1.  |-- POST /mcp (no token) ------------->|------------------------------------------------------->|
+     |<------------- 401 + "where to find my authorization server" ----------------------------------|
+     |                    |                 |                  |                    |                |
+ 2.  |-- GET /.well-known/oauth-authorization-server --------->|                    |                |
+     |<-- metadata: client_id_metadata_document_supported=true-|                    |                |
+     |                    |                 |                  |                    |                |
+ 3.  |-- open browser --->|                 |                  |                    |                |
+     |                    |-- GET /oauth/authorize ----------->|                    |                |
+     |                    |   client_id=https://claude.ai/...  |                    |                |
+     |                    |   + PKCE challenge + resource=/mcp |                    |                |
+     |                    |                 |                  |                    |                |
+ 4.  |                    |                 |      [SSRF guard checks the URL]      |                |
+     |                    |                 |                  |-- GET the JSON --->|                |
+     |                    |                 |                  |<-- {client_id,     |                |
+     |                    |                 |                  |     client_name,   |                |
+     |                    |                 |                  |     redirect_uris} |                |
+     |                    |                 |      [validate document, cache in Redis]               |
+     |                    |                 |                  |                    |                |
+ 5.  |                    |<-- sign-in, then consent page -----|                    |                |
+     |                    |    "App identity document hosted   |                    |                |
+     |                    |     at claude.ai" + permissions    |                    |                |
+     |                    |-- user clicks Allow -------------->|                    |                |
+     |<-- redirect to http://localhost:PORT/callback?code=...--|                    |                |
+     |                    |                 |                  |                    |                |
+ 6.  |-- POST /oauth/token (code + PKCE verifier) ------------>|                    |                |
+     |<-- access token (15 min) + refresh token ---------------|                    |                |
+     |                    |                 |                  |                    |                |
+ 7.  |-- POST /mcp with the token --------->|------------------------------------------------------->|
+     |<-------------------------------- tool results ------------------------------------------------|
+
+Step 4 is the only part that is new with CIMD. Everything else is the normal OAuth 2.1 authorization-code flow with PKCE.
+
+What SSRF is and why step 4 is dangerous
 ```
 
 Three points that explain most of the design:

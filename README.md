@@ -1,112 +1,59 @@
-# E-Ticketing platform
+# E-Ticketing Platform
 
-> **Project inspiration:** This project re-designs the concept and domain from the Udemy course
-> [Microservices with Node JS and React](https://www.udemy.com/course/microservices-with-node-js-and-react/),
-> but with a completely redesigned architecture, polyglot stack, and distributed infrastructure.
+[![CI](https://github.com/emmilcheung/k8s-multi-language-gRPC-microservice/actions/workflows/ci.yml/badge.svg)](https://github.com/emmilcheung/k8s-multi-language-gRPC-microservice/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Work in progress — practice project.**
->
-> This is a deliberately over-engineered E-Commerce app built as a hands-on study of
-> **polyglot microservices**, **multi-language inter-process communication**, and
-> **Kubernetes infrastructure patterns** — not as a production system.
+An event-ticketing marketplace built as a **polyglot microservices** system: Go, Java, TypeScript and C# services talking over gRPC and Kafka, behind a Kong gateway, deployed with Helm and Terraform. It also exposes the platform to AI agents through an [MCP](https://modelcontextprotocol.io) server with OAuth 2.1.
 
-> The goal is to experience the real friction of operating multiple languages and runtimes inside a kubernetes: shared contracts, independent deployments, cost trade-offs,
-> It also explores human-in-the-loop and agentic workflow patterns across tools such as
-> Claude Code, OpenCode, and Copilot within a continuously iterated development workflow.
-> tools and methodologies: shared contracts, independent deployments, cost trade-offs,
-> and the infrastructure plumbing that holds it all together.
+> **Practice project, not a production system.** The domain is deliberately simple; the infrastructure is the point. It is a hands-on study of running several languages and runtimes on Kubernetes: shared contracts, independent deployments, cost trade-offs, and an agent-assisted development workflow. It re-designs the domain of the Udemy course [Microservices with Node JS and React](https://www.udemy.com/course/microservices-with-node-js-and-react/) with a completely different architecture.
 
----
+## Features
 
-## Table of Contents
+- **Ticketing:** events, ticket types with quotas, venues and seating plans, seat holds, orders that expire if unpaid, Stripe payments, QR-based attendance check-in.
+- **Order saga:** order-service coordinates ticket-service and venue-service over gRPC (reserve, finalize, release) and reacts to payment and expiration events from Kafka, using a transactional outbox.
+- **Edge security:** Kong verifies RS256 JWTs (JWKS from auth-service), enforces OAuth scopes, rate limits and CSRF handling.
+- **Search:** OpenSearch read model fed by Kafka (CQRS), with automatic fallback to MongoDB.
+- **GraphQL:** Apollo Router federates the subgraphs for the web client.
+- **Virtual waiting room:** a separate .NET service that meters onsale surges into the buy path.
+- **AI agents (MCP):** an OAuth 2.1 resource server gives agents such as Claude Code twelve scoped, revocable ticketing tools. See [`services/mcp-service`](services/mcp-service/README.md).
+- **Operations:** Docker Compose and minikube for local work, Helm umbrella chart, Terraform modules, OpenTelemetry traces and metrics, k6 load tests, Trivy-gated CI.
 
-1. [Purpose](#1-purpose)
-2. [Architecture](#2-architecture)
-3. [Services](#3-services)
-4. [Technology Decisions](#4-technology-decisions)
-5. [Repository Structure](#5-repository-structure)
-6. [Code Style & Conventions](#6-code-style--conventions)
-7. [Operations](#7-operations)
-   - [Local Development (Docker Compose)](#71-local-development-docker-compose)
-   - [Local Kubernetes (minikube)](#72-local-kubernetes-minikube)
-   - [Protobuf / gRPC Code Generation](#73-protobuf--grpc-code-generation)
-   - [Running Tests](#74-running-tests)
-8. [Status](#8-status)
-9. [Roadmap & Todos](#9-roadmap--todos)
+## Quick start
 
----
+```bash
+cp .env.example .env              # set RSA_PRIVATE_KEY and STRIPE_SECRET_KEY (or STRIPE_SECRET_KEY=test_mock)
+docker compose up --build --detach
+```
 
-## 1. Purpose
+Everything the browser talks to goes through Kong at **http://localhost:8000**. See [Local development](#local-development) for the web client, Kubernetes, protobuf and tests.
 
-### What this is
+To connect an AI agent: `docker compose --profile mcp up -d --build`, then `claude mcp add --transport http ticketing http://localhost:8000/mcp` ([MCP guide](docs/ticketing/mcp.md)).
 
-A ticketing/event marketplace where users can list tickets for sale, other users can
-purchase them, and orders expire after a configurable window if payment is not received.
-
-The domain is intentionally simple. The infrastructure is not.
-Each architectural decision was chosen to mirror a real-world challenge:
-
-| Challenge | What it forces you to confront |
-|---|---|
-| Four different languages/runtimes | Shared contracts via protobuf; per-language testing conventions; independent CI pipelines |
-| gRPC between Go and Java | Proto3 versioning; deadline propagation; stub generation workflow |
-| Kafka for event fan-out | Idempotent consumers; transactional outbox; DLQ handling; consumer group isolation |
-| Kong API Gateway | Centralised JWT verification; CSRF handling behind a reverse proxy; declarative config |
-| Separate DB per service | Data ownership boundaries; eventual consistency; local read replicas |
-| Helm umbrella chart | Multi-service deployment; environment-specific overrides; secret injection |
-| Terraform across 3 environments | Module reuse; remote state; cost-tiered resource sizing |
-
-### What this is not
-
-- A production system. Shortcuts are documented (stubbed Stripe, dev RSA key in compose, no CI yet).
-- A showcase of business logic. The domain is a vehicle for the infrastructure patterns.
-- Complete. CI/CD pipelines, EKS deployment, and AWS-managed observability are still pending.
-
----
-
-## 2. Architecture
-
-### Architecture diagrams
-
-For the best viewing experience, open the deployed static site and see the same diagrams rendered in full size:
-
-https://emmilcheung.github.io/k8s-multi-language-gRPC-microservice/
-
-The embedded SVGs below are the local thumbnails from `docs/diagrams/`, but the GitHub Pages site is the recommended way to inspect the diagrams in greater detail.
-
-![AWS infrastructure diagram](docs/diagrams/01-aws-infrastructure.svg)
-
-![Data model diagram](docs/diagrams/02-data-model.svg)
+## Architecture
 
 ![AWS architecture diagram](docs/diagrams/08-aws-architecture.svg)
 
+All diagrams (infrastructure, data model, reservation and payment saga, auth flows, waiting room, search) are generated from source in [`docs/diagrams/`](docs/diagrams/) and published at https://emmilcheung.github.io/k8s-multi-language-gRPC-microservice/.
+
 ![Data flow sequence diagram](docs/diagrams/04-data-flow-sequence.svg)
 
-![Auth flows diagram](docs/diagrams/05-auth-flows.svg)
+**Request flow**
 
-![Virtual waiting room diagram](docs/diagrams/06-waiting-room-flow.svg)
+1. The browser sends HTTPS to the load balancer, which forwards to **Kong**.
+2. Kong validates the RS256 JWT, injects the `X-User-Id` header, applies rate limiting and routes by path prefix.
+3. Services trust the forwarded identity header; they never re-verify the token.
 
-![Search dataflow diagram](docs/diagrams/07-search-dataflow.svg)
+**Service-to-service**
 
-> Open `docs/diagrams/index.html` for a browser-based diagram landing page.
+- **Synchronous (gRPC):** order-service runs a multi-step saga: `ReserveQuota` plus `ReserveHeldSeats` / `AutoAssignAndReserve` on create, `FinalizeReservation` plus `FinalizeSeatReservation` on payment, `ReleaseReservation` plus `ReleaseSeatReservation` on expiry (5 s deadline per call). Contracts: [`proto/tickets/v1`](proto/tickets/v1/tickets.proto) and [`proto/venue/v1`](proto/venue/v1/venue.proto).
+- **Asynchronous (Kafka):** all cross-service event fan-out, with a dead-letter topic (`.dlq`) per consumed topic.
 
-
-**Request flow:**
-
-1. Browser sends HTTPS → AWS ALB terminates TLS.
-2. ALB forwards to **Kong**. Kong validates the RS256 JWT (JWKS from auth-service),
-   injects `X-User-Id` header, applies rate limiting.
-3. Kong routes by path prefix to the correct service.
-4. Services trust the forwarded identity header — they never re-verify the token.
-
-**Service-to-service:**
-
-- **Synchronous:** gRPC — order-service orchestrates a multi-step saga: `ReserveQuota` +
-  `ReserveHeldSeats`/`AutoAssignAndReserve` on create, `FinalizeReservation` +
-  `FinalizeSeatReservation` on payment, `ReleaseReservation` + `ReleaseSeatReservation`
-  on expiry (5 s deadline per call).
-- **Asynchronous:** Kafka — all cross-service event fan-out (order created/cancelled,
-  ticket created/updated, payment captured, expiration complete).
+| Topic | Producer |
+|---|---|
+| `tickets.ticket.created`, `tickets.ticket.updated` | ticket-service |
+| `orders.order.created`, `orders.order.cancelled`, `orders.order.completed` | order-service (outbox) |
+| `payments.payment.initiated`, `payments.payment.captured`, `payments.payment.failed` | payment-service (outbox) |
+| `expiration.order.expiration_complete` | expiration-service |
 
 ### Virtual waiting room (onsale surge gate)
 
@@ -169,559 +116,172 @@ Design, plans, and the security/reliability remediation report live under
 
 ---
 
-## 3. Services
+## Services
 
-| Service | Language | Framework | Port | Database | Responsibility |
-|---|---|---|---|---|---|
-| **auth-service** | TypeScript / Node.js 24 | NestJS 10 | 3000 | PostgreSQL 16 | Signup · signin · signout · RS256 JWT issuance · JWKS endpoint |
-| **ticket-service** | Go 1.23+ | Echo v4 | 8080 / **50051** gRPC | MongoDB 7 + OpenSearch (opt-in read model) | Ticket CRUD · Kafka producer · gRPC server · OpenSearch-backed search (CQRS read model, flag-gated) |
-| **order-service** | Java 21 | Spring Boot 4 | 8080 | PostgreSQL 16 | Order lifecycle · gRPC client · transactional outbox |
-| **payment-service** | TypeScript / Node.js 24 | NestJS 10 | 3000 | PostgreSQL 16 | Payment creation · Stripe (stubbed Phase 1) · Kafka |
-| **expiration-service** | Go 1.23+ | — (worker) | 8080 (health) | Redis | Delayed job queue · publishes expiration events |
-| **user-service** | TypeScript / Node.js 24 | NestJS 10 | 3004 | PostgreSQL 16 | Profile · preferences · billing address · GraphQL subgraph |
-| **venue-service** | Go 1.23+ | Echo v4 | 3003 / **50052** gRPC | PostgreSQL 16 + Redis | Venue · seating plans · seat holds (Redis hot path) · SSE live updates · Kafka consumer |
-| **client** | TypeScript | Next.js 16 | 4000 | — | App Router SSR frontend · Server Actions · shadcn/ui |
-| **apollo-router** | — | Apollo Router v2.1 | 4000 | — | GraphQL Federation v2 supergraph gateway (6 subgraphs) |
-| **kong-gateway** | — | Kong 3.9 | 8000 / 8443 | — (DB-less) | JWT auth · routing · rate-limiting · CSRF fix |
-| **queue-service** † | C# / .NET 10 | ASP.NET Core (Razor + Minimal API) | 8080 (own subdomain) | Redis (own) | **Separate** virtual waiting room — meters onsale surge into the buy path; disarmed by default |
+| Service | Stack | Host port | Data | Responsibility |
+|---|---|---|---|---|
+| [auth-service](services/auth-service/README.md) | TypeScript · NestJS 11 | 3000 | PostgreSQL | Sign-up and sign-in, RS256 JWTs and JWKS, OAuth 2.1 authorization server (PKCE, consent, token exchange, dynamic client registration, client metadata documents) |
+| [ticket-service](services/ticket-service/README.md) | Go · Echo | 3001 (gRPC 50051) | MongoDB, OpenSearch | Tickets and quotas, gRPC server, search indexer |
+| [order-service](services/order-service/README.md) | Java 21 · Spring Boot 4 | 8082 | PostgreSQL | Order lifecycle, saga orchestration, transactional outbox |
+| [payment-service](services/payment-service/README.md) | TypeScript · NestJS 11 | 3002 | PostgreSQL | Stripe PaymentIntents, webhooks, outbox |
+| [expiration-service](services/expiration-service/README.md) | Go worker | 8083 | Redis | Delayed jobs that expire unpaid orders |
+| [venue-service](services/venue-service) | Go · Echo | 3003 (gRPC 50052) | PostgreSQL, Redis | Venues, seating plans, seat holds, live seat updates |
+| [user-service](services/user-service/README.md) | TypeScript · NestJS 11 | 3004 | PostgreSQL | Profile, preferences, billing, saved payment methods |
+| [attendance-service](services/attendance-service/README.md) | Go | 3007 | PostgreSQL | QR admission credentials and scan check-in |
+| [mcp-service](services/mcp-service/README.md) | TypeScript · MCP SDK | 3010 (opt-in) | none | MCP resource server: agent tools over OAuth 2.1 |
+| [client](services/client/README.md) | Next.js 16 | 4000 | none | App Router web app with Server Actions |
+| [apollo-router](services/apollo-router) | Apollo Router | 4001 | none | GraphQL Federation supergraph |
+| [kong-gateway](services/kong-gateway/README.md) | Kong (DB-less) | 8000 | none | JWT and scope enforcement, routing, rate limiting |
+| [queue-service](services/queue-service) † | C# · .NET 10 | 4100 | Redis (own) | Virtual waiting room, deployed separately |
 
-† Standalone subsystem, deployed **apart** from the platform (own domain, pods, and Redis; own Helm chart `infra/queue-system/`). See [Virtual waiting room](#virtual-waiting-room-onsale-surge-gate).
+† Standalone subsystem with its own domain, pods and Redis; see below.
 
-### Kafka event topology
 
-```
-tickets.ticket.created               ← ticket-service produces
-tickets.ticket.updated               ← ticket-service produces
-orders.order.created                  ← order-service produces (outbox)
-orders.order.cancelled                ← order-service produces (outbox)
-orders.order.completed                ← order-service produces (outbox)
-payments.payment.succeeded            ← payment-service produces
-expiration.order.expiration_complete  ← expiration-service produces
-venue.seat.reserved                   ← venue-service produces
-venue.seat.released                   ← venue-service produces
-```
+## Local development
 
-Every topic has a corresponding `.dlq` (dead letter queue) for failed consumer messages.
+Full reference, including every port, fresh-environment checks and troubleshooting: [`docs/development.md`](docs/development.md).
 
-### gRPC contracts
+### Docker Compose
 
-Defined in `proto/tickets/v1/tickets.proto` (proto3).
-
-```protobuf
-service TicketService {
-  rpc GetTicket                  (GetTicketRequest)              returns (GetTicketResponse);
-  rpc ValidateTicketAvailability (ValidateTicketRequest)         returns (ValidateTicketResponse);
-  rpc ReserveQuota               (ReserveQuotaRequest)           returns (ReserveQuotaResponse);
-  rpc ReleaseReservation         (ReleaseReservationRequest)     returns (ReleaseReservationResponse);
-  rpc FinalizeReservation        (FinalizeReservationRequest)    returns (FinalizeReservationResponse);
-}
+```bash
+docker compose up --build --detach     # all services and infrastructure
+docker compose logs -f                 # tail logs
+docker compose down                    # stop (add -v to drop volumes)
 ```
 
-Defined in `proto/venue/v1/venue.proto` (proto3).
+| Service | Host port | | Service | Host port |
+|---|---|---|---|---|
+| **Kong (all browser traffic)** | **8000** | | venue-service | 3003 |
+| auth-service | 3000 | | user-service | 3004 |
+| ticket-service | 3001 | | attendance-service | 3007 |
+| payment-service | 3002 | | order-service | 8082 |
+| mcp-service (`--profile mcp`) | 3010 | | OpenSearch (`--profile search`) | 9200 |
 
-```protobuf
-service VenueService {
-  rpc ReserveHeldSeats       (ReserveHeldSeatsRequest)       returns (ReserveHeldSeatsResponse);
-  rpc AutoAssignAndReserve   (AutoAssignAndReserveRequest)   returns (AutoAssignAndReserveResponse);
-  rpc ReleaseSeatReservation (ReleaseSeatReservationRequest) returns (ReleaseSeatReservationResponse);
-  rpc FinalizeSeatReservation(FinalizeSeatReservationRequest)returns (FinalizeSeatReservationResponse);
-  rpc GetSeatingPlan         (GetSeatingPlanRequest)         returns (GetSeatingPlanResponse);
-}
+Opt-in profiles: `mcp` (MCP server), `search` (OpenSearch; also set `SEARCH_BACKEND=opensearch` on ticket-service, backfill with `go run ./cmd/reindex` in `services/ticket-service`). Traces and metrics run from a separate Compose file; see [`observability/local/README.md`](observability/local/README.md). The waiting room has its own: `docker compose -f docker-compose.queue.yml up`.
+
+### Local Kubernetes (minikube)
+
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out infra/local/rsa_local.pem
+cp infra/local/secrets.env.example infra/local/secrets.env    # fill in RSA_PRIVATE_KEY, STRIPE_SECRET_KEY
+make -C infra/local up        # start minikube, build and load images, create secrets, helm install
+make -C infra/local tunnel    # expose Kong (8000) and Kafka (9093); keep running in another terminal
 ```
 
-Generated stubs live in `libs/grpc-stubs/go/` (Go — ticket-service and venue-service server side).
-Java (order-service) generates stubs at Maven build time via the `protobuf-maven-plugin`.
+Day to day: `make -C infra/local help` lists targets; the common ones are `deploy` (re-apply config and Helm, no rebuild), `build` (rebuild images), `status`, `logs SVC=<name>`, `restart SVC=<name>`, `down` and `clean`.
 
----
+### Protobuf / gRPC
 
-## 4. Technology Decisions
+Contracts live in `proto/`; generated Go stubs are committed in `libs/grpc-stubs/go/` (Java stubs are generated by Maven).
 
-| Concern | Choice | Notes |
+```bash
+brew install bufbuild/buf/buf
+buf lint && buf breaking --against .git    # style and breaking-change checks (also run in CI)
+buf generate                               # regenerate stubs; commit them with the .proto change
+```
+
+Never make a breaking change (removing or renumbering a field) without a new version package (`v1` → `v2`).
+
+### Tests
+
+| Service | Unit | Integration (needs Docker) |
 |---|---|---|
-| **Messaging** | Apache Kafka (KRaft, no ZooKeeper) | Durable, replayable fan-out. Replaces deprecated NATS Streaming from the legacy system. Phase 1: Strimzi in-cluster; Phase 2: AWS MSK. |
-| **API Gateway** | Kong 3.9 (DB-less declarative) | Centralised JWT, rate-limiting, correlation ID. No click-ops — config is a YAML file rendered by a build script. |
-| **JWT** | RS256 asymmetric | Private key stays in auth-service / Secrets Manager. Public key distributed via JWKS — Kong never holds the signing key. |
-| **Inter-service sync** | gRPC (proto3) | Type-safe binary contracts. Used only where an immediate response is required (order validation). REST is never used between internal services. |
-| **Auth/Payments DB** | PostgreSQL 16 (RDS) | ACID guarantees required for user records and financial data. Flyway / Drizzle migrations; UUID PKs throughout. |
-| **Tickets DB** | MongoDB 7 | Flexible document model; high read throughput; OCC via `version` field. |
-| **Expiration store** | Redis 7 (ElastiCache) | `asynq` delayed job queue; also used by Kong rate-limit plugin. |
-| **Container registry** | Amazon ECR | One repo per service; image tag = Git SHA (never `latest`) in non-local environments. |
-| **IaC** | Terraform | EKS, VPC, RDS ×3, ElastiCache, MSK (Phase 2), ECR, IAM, Secrets Manager. Remote state: S3 + DynamoDB lock. |
-| **Secrets** | AWS Secrets Manager + External Secrets Operator | Never committed to Git. ESO syncs to K8s Secrets at pod startup. IRSA per service for least-privilege. |
-| **Observability** | OTel Collector → AMP + AMG + AWS X-Ray | Fully managed — no self-hosted Prometheus/Grafana pods. Deferred to Milestone 7. |
-| **Stripe** | Phase 1 stubbed · Phase 2 Payment Intents | Phase 1 always succeeds to keep scope tight. Real Stripe integration (Elements + webhooks) is Phase 2. |
-| **Cost consideration** | Phase 1 Strimzi (free) → Phase 2 MSK | Kafka on EKS costs ~$0 extra vs MSK ~$200/mo. Config is written to be MSK-compatible so migration is a broker URL swap. MongoDB self-hosted on EKS rather than Atlas for the same reason. |
-| **Search** | OpenSearch (self-hosted, Apache-2.0) | CQRS read model fed by Kafka — ticket-service search-indexer upserts a slim doc on every ticket create/update. Flag-gated via `SEARCH_BACKEND` (default `mongo`; set `opensearch` to enable); falls back to Mongo regex on outage. Same engine planned for logs (EFK) later. |
+| NestJS services (auth, payment, user) | `pnpm test` | `pnpm test:integration` |
+| mcp-service | `pnpm test` | none (covered by the Playwright E2E spec) |
+| ticket-service (Go) | `go test ./...` | `go test ./... -tags integration` |
+| venue-service (Go) | `go test ./...` | none tagged |
+| order-service (Java) | `mvn test` | `mvn verify -P integration-test` |
+
+End-to-end (Playwright) against the Compose stack or minikube:
+
+```bash
+docker compose up --build --detach
+cd services/client && pnpm dev --port 4000       # terminal 1
+pnpm exec playwright test                        # terminal 2
+```
 
 ---
 
-## 5. Repository Structure
+## Technology decisions
+
+| Concern | Choice | Why |
+|---|---|---|
+| Messaging | Apache Kafka (KRaft) | Durable, replayable fan-out; idempotent consumers and DLQs. Strimzi in-cluster, MSK-compatible config. |
+| API gateway | Kong, DB-less declarative config | Central JWT and scope checks, rate limiting; config is a YAML template rendered per environment. |
+| Tokens | RS256 with JWKS | The private key stays in auth-service; Kong and mcp-service only hold the public key set. |
+| Service-to-service | gRPC (proto3) for synchronous calls, Kafka for events | Typed contracts checked by `buf` lint and breaking-change CI; no REST between internal services. |
+| Data | PostgreSQL per service, MongoDB for tickets, Redis for holds, queues and caches | Each service owns its data; no shared databases. |
+| Search | OpenSearch, Kafka-fed CQRS index | Flag-gated (`SEARCH_BACKEND`), falls back to MongoDB regex. |
+| Payments | Stripe PaymentIntents with webhooks | `STRIPE_SECRET_KEY=test_mock` gives deterministic local and CI behavior. |
+| Packaging | Helm umbrella chart, one sub-chart per service | Environment overrides in values files; External Secrets Operator for secrets. |
+| Infrastructure as code | Terraform modules (vpc, eks, rds, elasticache, msk, kong, cloudfront) | Dev, staging and prod environments; remote state. |
+| Observability | OpenTelemetry to Prometheus, Jaeger and Grafana | Local Compose stack and an in-cluster Helm chart. |
+| CI | GitHub Actions, path-filtered per service | Lint, unit, integration, build and Trivy scan; proto and Terraform checks; deploy jobs run only when AWS credentials are configured. |
+
+Rationale and the engineering standards behind them are in [`docs/`](docs/) (index: [`AGENTS.md`](AGENTS.md)).
+
+## Repository structure
 
 ```
 /
 ├── services/
-│   ├── auth-service/           TypeScript · NestJS · PostgreSQL
-│   ├── ticket-service/         Go · Echo · MongoDB · gRPC server · OpenSearch search indexer
-│   │   ├── internal/search/    client, indexer, query, reindex (CQRS read model)
-│   │   └── cmd/reindex/        backfill CLI — upserts all tickets into OpenSearch
-│   ├── order-service/          Java · Spring Boot · PostgreSQL · gRPC client
-│   ├── payment-service/        TypeScript · NestJS · PostgreSQL
+│   ├── auth-service/           NestJS · PostgreSQL · OAuth 2.1 authorization server
+│   ├── ticket-service/         Go · MongoDB · gRPC server · OpenSearch indexer
+│   ├── order-service/          Spring Boot · PostgreSQL · gRPC client · outbox
+│   ├── payment-service/        NestJS · PostgreSQL · Stripe
 │   ├── expiration-service/     Go worker · Redis · Kafka
-│   ├── user-service/           TypeScript · NestJS · PostgreSQL · profile/prefs/billing
-│   ├── venue-service/          Go · Echo · PostgreSQL + Redis · gRPC server · Kafka consumer
-│   ├── client/                 Next.js 16 App Router
-│   ├── apollo-router/          Apollo Router v2.1 — GraphQL Federation supergraph
-│   └── kong-gateway/
-│       ├── config/kong.base.yml    declarative Kong config (template)
-│       ├── values/minikube.yml     per-env variable overrides
-│       └── scripts/build.sh        renders kong.yml from template + env values
-│
-├── proto/
-│   ├── tickets/v1/tickets.proto   gRPC contract — ticket quota lifecycle
-│   └── venue/v1/venue.proto       gRPC contract — seat reservation lifecycle
-│
-├── libs/
-│   └── grpc-stubs/go/             generated Go stubs (committed; regenerate with buf generate)
-│
+│   ├── venue-service/          Go · PostgreSQL + Redis · gRPC server
+│   ├── user-service/           NestJS · PostgreSQL
+│   ├── attendance-service/     Go · PostgreSQL · QR check-in
+│   ├── mcp-service/            MCP resource server (OAuth 2.1, token exchange)
+│   ├── queue-service/          .NET 10 virtual waiting room (separate deployment)
+│   ├── client/                 Next.js 16 web app + Playwright E2E tests
+│   ├── apollo-router/          GraphQL Federation supergraph
+│   └── kong-gateway/           Kong config template, per-env values, custom Lua plugins
+├── proto/                      gRPC contracts (tickets, venue); buf lint and breaking checks
+├── libs/grpc-stubs/go/         Generated Go stubs (committed)
 ├── infra/
-│   ├── helm/                       umbrella Helm chart
-│   │   ├── Chart.yaml              declares all sub-chart dependencies
-│   │   ├── values.yaml             production defaults
-│   │   ├── values-local.yaml       minikube overrides (1 replica, small resources)
-│   │   ├── charts/cp-kafka/        custom Confluent cp-kafka sub-chart
-│   │   └── charts/opensearch/      opt-in OpenSearch subchart (StatefulSet + PVC; plugin-off + NetworkPolicy)
-│   ├── local/
-│   │   ├── Makefile                day-to-day minikube commands (make up, make deploy, …)
-│   │   ├── setup.sh                idempotent 7-step bootstrap script
-│   │   └── secrets.env.example     template — copy to secrets.env and fill in
-│   └── terraform/
-│       ├── modules/{vpc,eks,rds,elasticache,msk,kong}/
-│       └── environments/{dev,staging,prod}/
-│
-├── packages/
-│   └── ticketing-mcp-server/       legacy stdio MCP server (deprecated, retirement planned)
-├── buf.yaml                        buf lint + breaking-change config
-├── buf.gen.yaml                    code generation config (buf generate)
-├── docker-compose.yml              all services + infra for local dev (no K8s)
-├── AGENTS.md                       engineering standards + agent workflow rules
-├── PLAN.md                         full architecture plan and decision log
-└── STATUS.md                       build status and milestone tracker
+│   ├── helm/                   Umbrella chart and per-service sub-charts
+│   ├── queue-system/           Standalone Helm chart for the waiting room
+│   ├── local/                  minikube bootstrap and Makefile
+│   ├── terraform/              Modules and dev/staging/prod environments
+│   └── scripts/
+├── observability/local/        OTel Collector, Prometheus, Jaeger, Grafana (Compose)
+├── load/k6/                    Load tests (onsale read and queue)
+├── packages/                   Legacy stdio MCP server (deprecated)
+├── docs/                       Standards, guides, diagrams, specs (see below)
+├── docker-compose.yml          Full local stack (no Kubernetes)
+├── AGENTS.md · CLAUDE.md       Doc index and AI-agent contract
+└── CONTRIBUTING.md             Branching, commits and PR rules
 ```
 
----
+## Documentation
 
-## 6. Code Style & Conventions
-
-Engineering standards live in [`AGENTS.md`](AGENTS.md), which indexes the standards in [`docs/01-*.md` through `docs/14-*.md`](docs/). Agents load these on demand; humans should browse the index to find what they need.
-
----
-
-## 7. Operations
-
-### Agent-driven MCP Operations
-
-`mcp-service` is an OAuth 2.1 resource server that exposes twelve ticketing tools to MCP hosts such as Claude Code over Streamable HTTP at `http://localhost:8000/mcp` (through Kong). Hosts discover the authorization server from the 401 challenge, register dynamically (or, with `OAUTH_CIMD_ENABLED`, which is on only in local compose and values-local, identify themselves by a client metadata document URL), and the user grants scopes on a consent screen; the host's token is audience-bound to `/mcp` and exchanged per call for a short-lived API token.
-
-```bash
-docker compose --profile mcp up -d --build      # needs the exchange secrets in .env, see the guide
-claude mcp add --transport http ticketing http://localhost:8000/mcp
-```
-
-Full guide (architecture, tools and scopes, setup, troubleshooting, manual verification): [`docs/ticketing/mcp.md`](docs/ticketing/mcp.md). Threat model: [`docs/06-security.md`](docs/06-security.md).
-
-### 7.1 Local Development (Docker Compose)
-
-The fastest way to run everything — no Kubernetes required.
-
-```bash
-# Start all services and infrastructure
-docker compose up --build --detach
-
-# Tail logs for all services
-docker compose logs -f
-
-# Stop the stack
-docker compose down
-```
-
-**Service ports:**
-
-| Service | Port |
+| Topic | Where |
 |---|---|
-| auth-service | 3000 |
-| ticket-service | 3001 |
-| payment-service | 3002 |
-| venue-service | 3003 |
-| user-service | 3004 |
-| order-service | 8082 |
-| Kong (API gateway) | **8000** |
-| Kafka (host access for E2E) | 9093 |
-| MongoDB | 27017 |
-| PostgreSQL (auth) | 5432 |
-| PostgreSQL (orders) | 5433 |
-| PostgreSQL (payments) | 5434 |
-| PostgreSQL (venue) | 5435 |
-| PostgreSQL (users) | 5436 |
-| Redis | 6379 |
-| Schema Registry | 8081 |
-| **OpenSearch** (opt-in, `--profile search`) | **9200** |
-| Prometheus (separate observability compose) | 9090 |
-| Jaeger (separate observability compose) | 16686 |
-| Grafana (separate observability compose) | 3004 |
-| OTel Collector (gRPC, separate observability compose) | 4317 |
-| OTel Collector (HTTP, separate observability compose) | 4318 |
-
-#### Enable indexed search (OpenSearch)
-
-Start the single-node OpenSearch container (adds it to the compose network on `:9200`):
-
-```bash
-docker compose --profile search up -d opensearch
-```
-
-Set the following env vars on ticket-service (see `.env.example` for the entries):
-
-```
-SEARCH_BACKEND=opensearch
-OPENSEARCH_URL=http://opensearch:9200
-OPENSEARCH_INDEX=tickets
-```
-
-The search-indexer starts automatically and creates the index + begins consuming Kafka `tickets.ticket.{created,updated}`. Backfill existing tickets:
-
-```bash
-cd services/ticket-service
-go run ./cmd/reindex
-# requires OPENSEARCH_URL and MONGO_URI to be set; or use the gated Helm reindex Job
-```
-
-If OpenSearch is down or `SEARCH_BACKEND` is unset, search degrades automatically to the Mongo regex path — the service never hard-fails.
-
-All traffic from the browser goes through Kong on port **8000**.
-
-To run E2E locally:
-
-```bash
-cd services/client
-pnpm dev --port 4000
-```
-
-In a second terminal:
-
-```bash
-pnpm exec playwright test
-```
-
-If you want to execute a command inside a running service container:
-
-```bash
-docker compose exec auth-service pnpm test
-```
-
-#### Fresh environment verification
-
-Use this flow to verify the settings release on a clean machine or clean volumes. No manual SQL should be required.
-
-```bash
-# 1. Clean volumes and start the stack
-docker compose down -v
-docker compose up --build --detach
-
-# 2. Confirm the settings dependencies are ready
-curl -fsS http://localhost:3002/healthz/ready
-curl -fsS http://localhost:3004/healthz/ready
-
-# 3. Run only the settings E2E subset
-cd services/client
-pnpm exec playwright test tests/e2e/ticketing.spec.ts --grep settings
-```
-
-Service-level verification commands for the current settings hardening gate:
-
-```bash
-cd services/payment-service
-pnpm test
-pnpm lint
-pnpm exec tsc --noEmit
-pnpm build
-pnpm test:integration -- test/payments.integration.spec.ts
-
-cd ../user-service
-pnpm test
-pnpm test:integration
-pnpm lint
-pnpm exec tsc --noEmit
-pnpm build
-
-cd ../client
-pnpm lint
-pnpm exec tsc --noEmit
-pnpm build
-```
-
-#### Local observability
-
-The local observability stack for traces and metrics runs from `observability/local/docker-compose.observability.yml`:
-
-- OpenTelemetry Collector receives OTLP traces from the services.
-- Jaeger stores and visualizes trace spans.
-- Prometheus scrapes `/metrics` and `/actuator/prometheus` endpoints.
-- Grafana provisions a starter dashboard from the repository.
-
-See [observability/local/README.md](observability/local/README.md) for the
-trace walkthrough, connectivity checks, and host-run client instructions.
-
----
-
-### 7.2 Local Kubernetes (minikube)
-
-#### First-time setup
-
-```bash
-# 1. Install prerequisites: minikube, helm, kubectl, docker
-
-# 2. Generate an RSA key pair for local dev
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 \
-  -out infra/local/rsa_local.pem
-
-# 3. Create and fill in secrets.env
-cp infra/local/secrets.env.example infra/local/secrets.env
-# Edit secrets.env — paste RSA_PRIVATE_KEY (single-line \n format) and STRIPE_SECRET_KEY
-
-# 4. Bootstrap everything
-make -C infra/local up
-```
-
-`make up` does in order:
-1. Checks required tools are installed
-2. Starts minikube (`--cpus=4 --memory=7168 --driver=docker`)
-3. Pulls and loads Bitnami / Kong / Kafka images into minikube's image store
-   _(Bitnami doesn't publish pinned tags on Docker Hub — images are pulled as `:latest`,
-   retagged to the exact version the Helm chart expects, then loaded locally)_
-4. Builds all 7 service images and loads them into minikube
-5. Creates the `ticketing` namespace + Linkerd skip-port annotation
-6. Creates all Kubernetes secrets from `secrets.env`
-7. Runs `helm upgrade --install` with the umbrella chart
-
-#### Day-to-day commands
-
-```bash
-make -C infra/local help          # list all targets
-
-make -C infra/local deploy        # re-apply secrets + kong config + helm (no image rebuild)
-make -C infra/local build         # rebuild + reload all service images
-make -C infra/local helm-upgrade  # helm upgrade only (fastest after a config change)
-make -C infra/local kong-config   # re-render kong.yml from kong.base.yml template
-
-make -C infra/local tunnel        # expose Kong (8000) and Kafka (9093) on localhost
-                                  # keep this running in a separate terminal
-
-make -C infra/local status        # kubectl get pods -n ticketing
-make -C infra/local logs SVC=auth-service    # tail logs for a service
-make -C infra/local restart SVC=client       # rolling restart a deployment
-
-make -C infra/local down          # uninstall Helm release + delete namespace
-make -C infra/local clean         # down + stop minikube
-```
-
-#### Incremental rebuild (single service)
-
-```bash
-docker build -t auth-service:latest services/auth-service/ --quiet
-minikube image load auth-service:latest
-make -C infra/local restart SVC=auth-service
-```
-
-#### In-cluster service DNS (namespace: `ticketing`)
-
-| Resource | Hostname |
-|---|---|
-| PostgreSQL (auth) | `ticketing-postgres-auth:5432` |
-| PostgreSQL (orders) | `ticketing-postgres-orders:5432` |
-| PostgreSQL (payments) | `ticketing-postgres-payments:5432` |
-| PostgreSQL (venue) | `ticketing-postgres-venue:5432` |
-| MongoDB | `ticketing-mongodb-0.ticketing-mongodb-headless:27017` (single-member replica set `rs0`; no ClusterIP Service in replicaset mode) |
-| Redis | `ticketing-redis-master:6379` |
-| Kafka (internal) | `ticketing-cp-kafka:9092` |
-| Kong proxy | `localhost:8000` (via `minikube tunnel`) |
-
----
-
-### 7.3 Protobuf / gRPC Code Generation
-
-The proto source of truth lives in `proto/tickets/v1/tickets.proto`.
-Generated stubs are committed to `libs/grpc-stubs/` so services don't need `buf` installed at runtime.
-
-#### Prerequisites (install once)
-
-```bash
-brew install bufbuild/buf/buf
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-```
-
-#### Regenerate stubs after a `.proto` change
-
-```bash
-buf generate
-```
-
-Output lands in `libs/grpc-stubs/go/` — commit the result alongside the `.proto` change.
-
-Java stubs (order-service) are generated automatically by the `protobuf-maven-plugin`
-during `mvn package` — no manual step required.
-
-#### Lint and breaking-change check
-
-```bash
-buf lint                    # lint proto files
-buf breaking --against .git  # check for breaking changes vs HEAD
-```
-
-Breaking changes (removing a field, renaming a field, changing a field number) must
-never be introduced without a version bump (`v1` → `v2` package and directory).
-CI will enforce this with `buf breaking` on every PR (once pipelines are written).
-
-#### Modifying the contract
-
-1. Edit `proto/tickets/v1/tickets.proto`.
-2. Run `buf lint` — fix any style violations.
-3. Run `buf breaking --against .git` — confirm no breaking changes (or bump the version).
-4. Run `buf generate` — regenerate Go stubs.
-5. Update the service implementations on both the server (ticket-service) and client (order-service).
-6. Commit the `.proto` file, generated stubs, and service changes together in one PR.
-
----
-
-### 7.4 Running Tests
-
-#### auth-service (TypeScript / Vitest)
-
-```bash
-cd services/auth-service
-pnpm test           # unit tests (no external deps)
-pnpm test:integration  # integration tests (Testcontainers spins up PostgreSQL)
-```
-
-#### ticket-service (Go / testify + testcontainers-go)
-
-```bash
-cd services/ticket-service
-go test ./...                          # unit tests
-go test ./... -tags integration        # integration tests (requires Docker)
-```
-
-#### order-service (Java / JUnit 5 + Testcontainers)
-
-```bash
-cd services/order-service
-mvn test                              # unit tests
-mvn verify -P integration-test        # integration tests (requires Docker)
-```
-
-#### payment-service (TypeScript / Vitest)
-
-```bash
-cd services/payment-service
-pnpm test
-pnpm test:integration
-```
-
-#### E2E (Playwright — runs against Docker Compose or minikube)
-
-```bash
-# Against Docker Compose:
-docker compose up --build --detach
-cd services/client
-pnpm dev --port 4000
-```
-
-In a second terminal:
-
-```bash
-pnpm exec playwright test
-```
-
-#### Against minikube (requires 'make -C infra/local tunnel' running):
-
-```bash
-cd services/client
-pnpm exec playwright test
-```
-
----
-
-## 8. Status
-
-> **Overall: ~75% complete.** All services built and E2E tested. EKS and CI/CD are pending.
-
-| Component | Status | Notes |
-|---|---|---|
-| auth-service | ✅ Complete | 28 tests passing |
-| ticket-service | ✅ Complete | 29 tests passing |
-| order-service | ✅ Complete | Flyway, gRPC client, outbox pattern |
-| payment-service | ✅ Complete | 25 tests passing; Stripe stubbed |
-| expiration-service | ✅ Complete | asynq + Redis + Kafka |
-| venue-service | ✅ Complete | Go/Echo; seat inventory; gRPC server (port 50052); Kafka consumer |
-| client (Next.js) | ✅ Complete | All pages, Server Actions |
-| Kong API Gateway | ✅ Complete | RS256 JWT; CSRF fix for Server Actions behind proxy |
-| E2E Playwright tests | ✅ 18/18 passing | Auth, tickets, orders, payment |
-| Docker Compose (local dev) | ✅ Running | `docker compose up --build` |
-| Local Kubernetes (minikube) | ✅ Running | `make -C infra/local up`; 13/13 pods Running |
-| Helm umbrella chart | ✅ Complete | Bitnami sub-charts + custom cp-kafka + venue-service subchart |
-| Indexed search (OpenSearch CQRS read model) | ✅ Complete | Flag-gated (`SEARCH_BACKEND=opensearch`); Kafka-fed indexer; Mongo-regex fallback; opt-in Helm subchart |
-| Terraform modules | ✅ Scaffolded | vpc, eks, rds, elasticache, msk, kong; **not applied to real AWS** |
-| CI/CD pipelines | ⏳ Pending | `.github/workflows/` is empty |
-| EKS deployment | ⏳ Pending | Terraform apply deferred; local minikube is the active env |
-| Observability (local compose) | ✅ Available | OTel Collector + Prometheus + Jaeger + Grafana |
-| Observability (AWS-managed) | ⏳ Pending | AMP / AMG / X-Ray wiring still deferred |
-
-### Known shortcuts and tech debt
-
-| Item | Severity | Detail |
-|---|---|---|
-| RSA private key in `docker-compose.yml` | Medium | Dev-only convenience; must move to a gitignored `.env` before any CI or shared use |
-| Stripe stubbed | Low | Phase 1 always returns success; real Payment Intents are Phase 2 |
-| Kafka disabled locally in K8s | Low | `bitnami/kafka` has no Docker Hub tags; replaced by custom `cp-kafka` sub-chart; services log broker errors on startup (acceptable for local dev) |
-| No CI pipelines | Medium | Manual testing only; `.github/workflows/` intentionally left empty until Milestone 8 |
-
----
-
-## 9. Roadmap & Todos
-
-### Milestone 7 — Observability & hardening
-- [ ] Fluent Bit DaemonSet → CloudWatch Logs
-- [ ] OTel Collector sidecar → AMP (metrics) + AWS X-Ray (traces)
-- [ ] Amazon Managed Grafana dashboards (RED method per service, Kafka consumer lag)
-- [ ] Dead letter queue handlers fully wired in all consumers
-- [ ] HPA + PDB for all services
-- [ ] NetworkPolicy enforcement (restrict ingress/egress per service)
-- [ ] `trivy` image scan on every build
-- [ ] Resource requests/limits reviewed and tuned
-
-### Milestone 8 — CI/CD pipelines
-- [ ] Per-service GitHub Actions workflows: lint → unit test → integration test → build → scan → push to ECR
-- [ ] `ci-proto.yaml`: buf lint + breaking check + stub regeneration on `.proto` change
-- [ ] `ci-terraform.yaml`: `fmt` + `validate` + `plan` on PR; `apply` on merge to `main`
-- [ ] GitHub OIDC → IAM role assumption (no long-lived AWS keys in secrets)
-- [ ] Image tag = Git SHA; push to ECR; Helm chart updated automatically
-
-### Milestone 9 — EKS deployment & staging
-- [ ] `infra/scripts/bootstrap-state.sh` — provision S3 bucket + DynamoDB table for remote Terraform state
-- [ ] `terraform apply` for dev environment (VPC, EKS, RDS ×3, ElastiCache, Strimzi/MSK, Kong)
-- [ ] Deploy all services to EKS dev via Helm; smoke test with the Playwright suite
-- [ ] Staging environment provisioned and E2E tested
-- [ ] Runbook: production deploy gate, rollback procedure, secret rotation
-
-### Phase 2 — Stripe Payment Intents
-- [ ] Replace stubbed payment with real Stripe Payment Intents + Stripe Elements frontend
-- [ ] Stripe webhook handler with signature verification
-- [ ] `POST /api/payments/create-payment-intent` → returns `clientSecret` to client
-
-### Future / adaptive
-- [ ] Service mesh (Linkerd) installed in cluster — mTLS between all pods (namespace annotation placeholders already in place)
-- [ ] AWS MSK migration — swap Strimzi broker URL; no application code changes required
-- [ ] Schema Registry enforcement — Avro schemas registered and validated on every produce
-- [ ] Multi-region (ap-southeast-1 primary; us-east-1 replica) if traffic warrants it
-- [ ] `expiration-service` unit + integration tests (currently no test suite)
-- [ ] Contract tests (Pact) for the gRPC and REST boundaries between services
+| Run, test and debug locally (Compose, minikube, protobuf, E2E) | [`docs/development.md`](docs/development.md) |
+| Engineering standards (API, messaging, data, security, observability, CI/CD, testing) | [`AGENTS.md`](AGENTS.md) → `docs/01-*.md` … `docs/14-*.md` |
+| MCP server: architecture, data flows, setup | [`services/mcp-service/README.md`](services/mcp-service/README.md), [`docs/ticketing/mcp.md`](docs/ticketing/mcp.md) |
+| Security and threat models | [`docs/06-security.md`](docs/06-security.md) |
+| Architecture diagrams | [`docs/diagrams/`](docs/diagrams/) |
+| Design specs | [`docs/superpowers/specs/`](docs/superpowers/specs/) |
+| SLOs and load testing | [`docs/18-slos-and-load-testing.md`](docs/18-slos-and-load-testing.md) |
+| API contract | [`docs/openapi.yaml`](docs/openapi.yaml) |
+| Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Session history | [`docs/16-session-progress-log.md`](docs/16-session-progress-log.md) |
+| Observability walkthrough | [`observability/local/README.md`](observability/local/README.md) |
+
+## Status
+
+All services are built and covered by unit and integration tests, with Playwright E2E tests for the main user journeys. The platform runs end to end on Docker Compose and on minikube through the Helm umbrella chart, and CI runs lint, tests, image builds and Trivy scans per service.
+
+Not done yet:
+
+- **No cloud deployment.** Terraform modules and deploy jobs exist but have not been applied to a real AWS account; the Helm chart has not been verified on EKS.
+- **MCP:** CIMD (client metadata documents) is enabled only for local Compose and `values-local`; running it in a cluster needs an owner-reviewed egress rule first. The legacy stdio MCP package is deprecated and awaiting removal.
+- **AWS-managed observability** (AMP, Grafana, X-Ray) is not wired; the local stack is.
+- Local defaults in `docker-compose.yml` are for development only; secrets come from a git-ignored `.env`.
+
+## License
+
+[MIT](LICENSE)
