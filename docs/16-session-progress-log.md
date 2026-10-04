@@ -22,11 +22,17 @@ enforced the ticket's `maxPerUser` in ticket-service.
   the limit is stored in venue). Every seat the buyer has on the plan is counted once:
   live holds, the seats asked for, and seats in RESERVED or SOLD reservations. Same-buyer
   requests on a plan are serialised with a transaction advisory lock taken before the seat
-  row locks, so parallel requests cannot each pass the count. `maxPerUser <= 0` means no
-  limit. Over the limit: REST hold 409, GraphQL `conflict:`, gRPC `FAILED_PRECONDITION`
-  "per-buyer seat limit reached". If `GetTicket` fails on a hold, the hold is refused (503).
-  Migration `006` adds a partial index `seats (held_by, plan_id) WHERE status = 'HELD'` for
-  the count (checked with EXPLAIN).
+  row locks, so parallel requests cannot each pass the count. ticket-service stores a
+  limit of 0 as 1, so every ticket has a limit. Over the limit: REST hold 409, GraphQL `conflict:`, gRPC `FAILED_PRECONDITION`
+  "per-buyer seat limit reached". Holds keep each ticket's limit for a minute and use the
+  last known one while ticket-service is down; only a ticket never read before refuses the
+  hold (503). Migration `006` adds a partial index `seats (held_by, plan_id) WHERE status =
+  'HELD'` for the count (checked with EXPLAIN; recovery steps in venue `AGENTS.md`). The
+  flag is in the Helm chart, set to `"false"`.
+- **Seats from another plan are refused**: the hold and reserve seat locks now also match
+  `plan_id`. Before, a request naming plan A could hold or reserve plan B's seats, which
+  skipped plan B's checks and, with the limit on, counted zero seats each time. This
+  applies with the flag off too.
 - **order-service**: venue's limit answer maps to 422 "Purchase limit exceeded for this
   ticket", the same message as the GA limit.
 
