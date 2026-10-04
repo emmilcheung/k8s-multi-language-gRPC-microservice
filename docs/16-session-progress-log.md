@@ -1,15 +1,145 @@
 # Session Progress Log
 
 > Append a new entry each session. Newest entry at the top.
-> **Archive policy:** keep the current quarter hot. Move older quarters to `log/archive/<YYYY>-Q<N>.md` at the start of each new quarter. Last archived on **2026-04-17** (2026 Q1 → [`log/archive/2026-Q1.md`](log/archive/2026-Q1.md)).
-
-## Archive index
-
-- [`log/archive/2026-Q1.md`](log/archive/2026-Q1.md) — 2026 Q1 (Jan–Mar) sessions: Kong sandbox fix, CSRF fix, setup.sh hardening, Terraform scaffolding, Kong JWT forwarding + E2E suite.
+> **History policy:** keep the current quarter in full. At the start of each new quarter,
+> condense older entries into [Earlier milestones](#earlier-milestones-condensed): what
+> landed, the decisions and why, the lessons worth keeping, and what is still open. The
+> full original text stays in git history. The last full version before condensing is
+> `git show 9afd4c6:docs/16-session-progress-log.md`; the old 2026 Q1 archive file is
+> `git show a03c72e1^:docs/log/archive/2026-Q1.md`. Last condensed on **2026-10-04**
+> (Q1–Q3 2026).
 
 ---
 
-## Session: 2026-10-02 — feat(mcp): Wave 4 — client metadata documents, end-to-end spec, MCP docs ⏳ IN PR, NOT MERGED
+## Session: 2026-10-04 — Waiting-room pass bound to an account, purchase writes gated ⏳ IN PR (#158)
+
+On `fix/waiting-room-gate-integrity`. While an onsale was armed, Kong's backstop only
+checked the pass signature on the GraphQL reserve mutation. A pass never expired, worked
+for any event, could be copied to another account, and REST order creation was not gated.
+
+- **Kong** (`plugins/queue-gate.lua`): runs after the jwt plugin and checks the pass is
+  unexpired, for `QUEUE_EVENT_ID`, and that its `Sub` is the caller's JWT `sub`. Gated:
+  GraphQL `holdSeats`, `createSeatedOrder`, `createOrder` (the JSON body is parsed, a
+  hash-only persisted query is refused, APQ is off in the router), REST seat holds and
+  `POST /api/orders`. Payment and releasing a hold are never gated. `build.sh` refuses an
+  armed render without `QUEUE_EVENT_ID` or `KONG_SIGNING_KEY`. `scripts/test-queue-gate.sh`
+  runs the Lua against cases in CI.
+- **Redeem through Kong**: new JWT route `POST /api/queue/redeem` → queue-service
+  `/api/redeem` with `X-User-Id` and `X-User-Id-Sig`. The queue page lives on its own host
+  and cannot see the login cookie, so claim stays anonymous and the account is bound at
+  redeem. queue-service verifies the signature (`Web/UserIdSignature.cs`, the same format
+  ticket-service checks), binds the queue place to the first account, and keeps one pass
+  per account per event; a repeat returns the same pass. Pass lifetime is now 900 s.
+- **Client** (`proxy.ts`, `lib/queue/gate.ts`): an admitted visitor who is not logged in
+  goes to `/auth/signin?next=<page with qpass>`; sign-in and sign-up pages are not gated.
+  Only a pass carrying `Sub` counts.
+- **Config**: queue-service needs `Queue__UserIdSigningKey` (= Kong's `KONG_SIGNING_KEY`;
+  compose reads `X_USER_ID_SIGNING_KEY`, the chart `queue.userIdSigningKey`). Kong reaches
+  queue-service through `HOST_QUEUE` (compose maps it to the host; on Kubernetes the chart
+  is assumed installed in the `queue` namespace). The ticket cookie is `Secure` outside
+  Development. Standard recorded in `docs/06-security.md`.
+- **Page loads no longer join the queue**: `GET /wait` only renders; `wait.js` joins
+  through the rate-limited `POST /api/enqueue`, so cookieless GETs cannot fill the queue.
+
+Verified against the running stack with Kong armed: Kong e2e (7), waiting-room e2e (3),
+and the sign-in round trip in a browser. Known gap: the sign-in page's "Create account"
+link drops `?next`, so a brand-new buyer has to reopen the queue link after signing up.
+
+## Session: 2026-10-04 — Refund paid orders that cannot be fulfilled ✅ MERGED (PR #156)
+
+On `fix/unfulfillable-order-refund`. A payment captured after its order expired, or
+after its seats were released, used to leave the order CANCELLED with the money kept.
+Now the buyer is refunded automatically.
+
+- **order-service**: `markComplete` locks the order row and finalizes the reservation
+  *before* marking COMPLETE. When the order is already cancelled, or venue/ticket
+  service reports the reservation released or unknown, the order ends CANCELLED with
+  `cancelReason = UNFULFILLABLE_REFUNDED` and emits `orders.order.unfulfillable`. Any
+  other gRPC failure is rethrown, so Kafka retries and then dead-letters — an outage
+  is never treated as proof the seats are gone. Orders now record why they were
+  cancelled (`cancel_reason`, migration V9), exposed as `Order.cancelReason` in GraphQL.
+- **payment-service**: refunds are a work queue. A refund request writes a REQUESTED
+  row; `RefundExecutorService` claims due rows with `FOR UPDATE SKIP LOCKED`, calls the
+  refund provider with a stable idempotency key, and retries with backoff (5 attempts)
+  before marking FAILED and emitting `payments.refund.failed`. The payment only becomes
+  REFUNDED after the provider confirms. A unique partial index allows one live refund
+  per order, so redelivered events cannot refund twice (migration 007).
+- **Refund provider**: `REFUND_PROVIDER=simulated` (default) moves no money and makes no
+  network call; `stripe` calls `refunds.create`. A live Stripe key is refused at startup
+  unless `REFUND_ALLOW_LIVE=true`.
+- **Topics**: `orders.order.unfulfillable` (+ `.dlq`), `payments.refund.completed` and
+  `payments.refund.failed` added to `infra/helm/files/topics.yaml`. New topics only — no
+  existing topic's settings change.
+
+Known gap: if finalize succeeds and the order's commit then fails for a non-concurrency
+reason, an expiry landing before the Kafka retry leaves the seats sold with no complete
+order; the buyer is still refunded. Customer notification of the refund is out of scope.
+
+---
+
+## Session: 2026-10-04 — Seat-sale correctness in venue-service ✅ MERGED (PR #155)
+
+On `fix/seat-sale-correctness`. First of two ticket-rush PRs (PR #156 above was the second).
+
+- **Expired holds free up immediately.** The Redis hold script treated a seat in the held
+  state as taken even after its hold marker had expired, so abandoned holds blocked seats
+  until the 30 s sweeper ran, and Redis kept refusing them after it. A held or reserved
+  seat now blocks only while its marker key exists; sold seats always block. PostgreSQL
+  `HoldSeats` also takes over holds whose `held_until` has passed.
+- **Redis follows reservations.** `hold.RedisSyncedReservations` wraps the reservation
+  repository: reserve → reserved with a marker that expires with the reservation,
+  finalize → sold, release → free (only when this call actually ended the reservation,
+  so a redelivered release cannot wipe a newer hold). Redis failures are logged, never
+  returned — PostgreSQL stays authoritative. Release can no longer free reserved or sold
+  seats.
+- **Hold ownership on order.** `AtomicReserveAndCreate` accepted any held seat, so one
+  user could order seats another user was holding. It now accepts only seats that are
+  free, held by the ordering user, or held by an expired hold. A refusal reuses the
+  existing seats-unavailable response (order-service maps it to 409); no proto change.
+
+Verified by `test/hold_redis_integration_test.go` (miniredis + Testcontainers PostgreSQL):
+expiry with and without a sweep, 500 concurrent holds → exactly one winner, reserved and
+sold seats stay blocked, another user's held seats cannot be ordered. The expiry and
+ownership tests failed before the fix. Not done: SSE change events on sweeps.
+
+---
+
+## Session: 2026-10-03 — MCP platform review fixes ✅ MERGED (PR #153)
+
+Fixes from the MCP platform review, on `feat/mcp-platform`, with no dependency or
+version change (the Trivy and dependency gates are untouched).
+
+- **Idempotency**: the derived key now includes a 15-minute window, so a cancelled or
+  expired order no longer replays forever; a missing `sub` is an auth failure instead
+  of falling back to the client id.
+- **OAuth**: the session verifier accepts only the session issuer; disconnecting a
+  client records a not-before time that blocks exchange of earlier tokens; mcp-service
+  reuses an exchanged token for at most 60 seconds.
+- **Config**: `API_AUDIENCE` is an explicit optional setting; Helm derives the issuer,
+  resource and audience from `global.publicOrigin`, and the umbrella chart fails the
+  render when mcp-service is enabled without it.
+- **Observability**: Kong logs each audience-less OAuth token it admits;
+  `order.keyed.uncompensated{flow}` counts keyed creates that leave a reservation held.
+- **Contracts**: venue-service pins the "was already released" phrase order-service
+  matches on, as ticket-service already did for its prefix.
+- **Shutdown**: one SIGTERM handler in mcp-service drains connections (20 s), then
+  flushes telemetry (3 s), under the 30 s pod grace period.
+- **Docs**: the V8 migration pre-check and concurrent-build steps are in
+  `docs/11-kubernetes-deployment.md`.
+- **Disconnect and REST access**: a dynamically registered or metadata-document client is
+  now limited to the MCP resource (a missing `resource` means `/mcp`, `/api` is
+  `invalid_target`), because a token minted for `/api` directly bypassed the exchange and
+  stayed valid for up to 15 minutes after Disconnect. The static `ticketing-mcp` client is
+  unchanged and `docs/06-security.md` says so.
+
+Left open on purpose: the queue-gate pass has no expiry or event binding (changing it
+changes what an admission means after 10 minutes and must match the client gate), and
+dynamic client registration still defaults to every scope (read-only defaults would stop
+a client that registers without a scope from ever stepping up to `orders:create`).
+
+---
+
+## Session: 2026-10-02 — feat(mcp): Wave 4 — client metadata documents, end-to-end spec, MCP docs ✅ MERGED (PR #153, 2026-10-03)
 
 **Branch:** `feat/mcp-platform-wave4` — lanes `feat/mcp-w4-{i,m}` merged `--no-ff` (I, then M), then merged `--no-ff` into the integration branch `feat/mcp-platform`. The wave and lane branches were deleted after the merge; the work is on `feat/mcp-platform`, in a PR to `main`.
 
@@ -44,7 +174,7 @@ Ledger: `.superpowers/sdd/2026-10-02-mcp-wave4/` (`exit-gate.md`, per-lane repor
 
 ---
 
-## Session: 2026-10-02 — feat(mcp): Wave 3 — token exchange, MCP tools, consent UI, Kong `/mcp` ⏳ IN PR, NOT MERGED
+## Session: 2026-10-02 — feat(mcp): Wave 3 — token exchange, MCP tools, consent UI, Kong `/mcp` ✅ MERGED (PR #153, 2026-10-03)
 
 **Branch:** `feat/mcp-platform-wave3` — lanes `feat/mcp-w3-{l,h,j,k}` merged `--no-ff` (L → H → J, then K on top), then merged `--no-ff` into the integration branch `feat/mcp-platform`. The wave and lane branches were deleted after the merge.
 
@@ -75,7 +205,7 @@ Ledger: `.superpowers/sdd/2026-10-02-mcp-wave3/` (`exit-gate.md`, per-lane repor
 
 ---
 
-## Session: 2026-10-02 — feat(mcp): Wave 2 — AS metadata, order idempotency, mcp-service scaffold ⏳ IN PR, NOT MERGED
+## Session: 2026-10-02 — feat(mcp): Wave 2 — AS metadata, order idempotency, mcp-service scaffold ✅ MERGED (PR #153, 2026-10-03)
 
 **Branch:** `feat/mcp-platform-wave2` — lanes `feat/mcp-w2-{e,f,g}` merged `--no-ff` (E → F → G), then merged `--no-ff` into the integration branch `feat/mcp-platform`. All MCP branches were rebased onto `main` `04307ee` first (integration with `--rebase-merges`). The wave and lane branches were deleted after the merge.
 
@@ -95,1544 +225,260 @@ Ledger: `.superpowers/sdd/2026-10-02-mcp-wave3/` (`exit-gate.md`, per-lane repor
 - Hard stop #10 review: Kong public route `auth-as-metadata`; mcp-service NetworkPolicy (ingress Kong:3000; egress DNS 53 to any, Kong 8000, auth-service 3000, otel-collector 4317; podSelector-only).
 - Hard stop #9: mcp-service dependencies, incl. `@modelcontextprotocol/client` 2.2.0 (devDependency, test-only).
 - Add `MCP_TOKEN_EXCHANGE_CLIENT_SECRET` to the local `.env`; run the V8 duplicate pre-check in non-local environments.
-- Acknowledge two known P0s the new venue sweep touches (tracked separately, not fixed here): a seat freed by a DB-only release stays un-holdable on the Redis manual-pick path; a seated order paid after its reservation expired now fails to finalize, as GA already does.
+- Acknowledge two known P0s the new venue sweep touches (tracked separately, not fixed here): a seat freed by a DB-only release stays un-holdable on the Redis manual-pick path; a seated order paid after its reservation expired now fails to finalize, as GA already does. *Both since fixed: PR #155 keeps Redis in step with reservations, and PR #156 refunds a paid order that cannot be finalized.*
 
 Ledger: `.superpowers/sdd/2026-09-30-mcp-wave2/`.
 
 ---
 
-## Session: 2026-09-30 — test(e2e): Wave-1 OAuth boundary regressions pin the exit gate ⏳ AWAITING OWNER APPROVAL (Wave 2)
-
-**Branch:** `feat/mcp-platform-wave1` (Task 7, the Wave-1 exit gate; Tasks 1–6 already committed on this branch). Per controller ruling, Task 7 ran and committed on this branch instead of a fresh `test/mcp-wave1-exit-gate` off `main`; the PR/hand-off half of the brief's Step 3 is deferred to a `finishing-a-development-branch` pass with the owner.
-
-**Wave 1 is closed:** F1, F1b, F2, F3, F5, F6, F9, F11, F11b and F12. Appended three regression tests to `services/client/tests/e2e/oauth-agent-boundaries.spec.ts` (`sessions and grants never convert into each other`) pinning the cross-service invariant that OAuth grants and browser sessions never convert into each other:
-
-- `an OAuth access token is not a session at /oauth/authorize (F11b)`
-- `an OAuth refresh token cannot mint a browser session, and survives the attempt (F1)`
-- `a browser refresh token is refused at /oauth/token in RFC shape, and the browser stays signed in (F1b, F9)`
-
-All 13 tests in the spec pass; full Playwright suite 70 passed / 1 skipped-by-design set (queue-gate armed tests) / 1 pre-existing failure unrelated to Wave 1 (see Concerns below); both queue-gate modes (disarmed and armed) verified as in Task 5 Step 6; full client unit suite green (207 passed / 2 skipped); lint + `tsc --noEmit` clean on the touched file.
-
-**Known gap (carried forward, not fixed here):** the queue gate checks the pass HMAC only — it has no `exp`, event or single-use check (`services/kong-gateway/plugins/queue-gate.lua`). Tracked as a Wave 2+ hardening item.
-
-**F1 owner decision (2026-09-30): Option A.** The shipped code (`e36c7b1`) implements Option A's behaviour: a legacy session-scope-marker fallback in `RefreshTokenService.resolveOAuthClientId`. That fallback means a pre-deploy OAuth refresh session idle past 24h is indistinguishable from a browser session until it naturally expires (≤7 days post-deploy). The owner accepted that window and the fallback is removed at deploy + 7 days (tracked as WS-N). Option B (force-logout every untagged session at deploy) was rejected as unacceptable UX.
-
-**Concerns:**
-- The full Playwright suite has one failure, triaged as **PRE-EXISTING** (not caused by this branch): `ticketing.spec.ts:999` ("authenticated user can manage a seated ticket plan lifecycle (Phase 3)") fails at line 1083, `toBeVisible` timeout waiting for "Create Replacement Plan" after clicking "Deactivate Plan" a second time. A `--trace on` rerun's network log shows every response in the flow is 200/304 — zero 403/429/`insufficient_scope`, so Kong's OAuth-deny guards and the queue gate are ruled out, and `local.yml`/the running Kong container were confirmed disarmed and unchanged at the time. The only anomaly is the *prior* step's "Reactivate Plan" POST to `/api/seating-plans/.../activate`, which shows client status `-1` (browser-cancelled) because the test's own `expect.poll` fires `page.reload({ waitUntil: "domcontentloaded" })` ~5ms after the click, before the request settles; the reload itself then finds the plan already reactivated (server processed it anyway) and the poll passes. The actual failing step — the second "Deactivate Plan" click at line 1082 — produces **no network request at all**, consistent with a hydration race: the button is visible right after a `domcontentloaded` reload before React re-attaches its click handler, so the click is a no-op and the subsequent 18s wait for "Create Replacement Plan" times out. This is a timing race in the test's own reload-then-click pattern (`ticketing.spec.ts` lines 1062–1083), not something Task 7 introduced or that Kong/auth reject; Task 7 touched no seating-plan/venue code. Flagging for owner triage (tighten the poll to wait on hydration, e.g. an interactability check, before Wave 2 opens); not fixed here per the no-app-code-changes constraint on this triage.
-- `CreateOrder INTERNAL_ERROR` and similar GraphQL error log lines during the full suite are the known noise from the stale order-service image, not real failures.
-
-Full report: `.superpowers/sdd/2026-09-29-mcp-platform-upgrade/task-7-report.md`.
-
----
-
-## Session: 2026-09-29 — chore(agent): instruction-surface audit against main ⏳ AWAITING REVIEW
-
-Audited the agent instruction surface (`CLAUDE.md`, `AGENTS.md`, service `AGENTS.md`,
-the three project skills, orchestration docs) at `main@d58726c` for rules that had
-drifted from the repo or were written for older models. Service `AGENTS.md` files were
-clean — every prohibition there encodes a real security or business constraint.
-
-Fixed:
-
-- `end-to-end-check` pointed at `services/client/test/**`; the suite lives in `tests/`.
-- `lint-check` claimed CI alignment but omitted `golangci-lint`, `attendance-service`,
-  `queue-service` and `buf lint`; `ci.yml` is now named the source of truth, and a skipped
-  local `golangci-lint` must be reported.
-- `CLAUDE.md` Rule 6 set 4K-per-task / 30K-per-session token limits that every session
-  exceeds at startup; replaced with "keep context lean, say when a task outgrows its size".
-- `AGENTS.md` said `docs/15` has 10 hard stops; it has 12.
-- Orchestration docs pinned model versions (and claimed `Plan` "auto-uses sonnet");
-  now describe roles. Worker templates gain "don't invoke skills or write a plan" —
-  Haiku workers were observed detouring into planning skills.
-- Audit prompt: dropped the hardcoded service list and the "prefer deletion" framing.
-
-**Left open (flag only):** `SUBAGENT_ORCHESTRATION.md` still carries the April WS2–WS9H
-batch history as if current; `CLAUDE.md` Rule 5 addresses LLM calls this repo doesn't
-make; `AGENTS.md` "Last Updated" date is stale. None of the changes were behaviour-probed.
-
----
-
-## Session: 2026-09-23 — feat(scalability): M3 continued — zone spread, a metrics source, and SSE that survives a scale-in ⏳ NOT DEPLOY-VERIFIED
-
-**Branch:** `feat/scalability-m3` (unmerged, no PR). Continues the entry below; same branch, six more commits. M3 is now C1, C2, E1, E2, E3, E5, E6 done and C3, E4 open — but **M3's exit criterion is "HPA scales on real metrics; pool budget holds at HPA max with no connection refusals", which needs a cluster.** M3 cannot close here no matter what else lands.
-
-### C1 follow-up — make the Node pool defaults match the budget (`c07d75c`)
-
-The charts set `DB_POOL_MAX`, and the three NestJS services do read it — so the budget took effect. But their own defaults contradicted it, which meant a missing or misspelled chart value would silently restore an over-budget pool instead of failing:
-
-| Service | zod default | pool factory | now |
-|---|---|---|---|
-| auth | 20 | `config.get('DB_POOL_MAX', 40)` — dead, and 40 × 6 = 240 vs a ceiling of 80 | `default(12)` + `getOrThrow` |
-| user | 20 | `config.get('DB_POOL_MAX', 20)` | `default(12)` + `getOrThrow` |
-| payment | 20 | `config.get('DB_POOL_MAX', 20)` | `default(12)` + `getOrThrow` |
-
-### E3 / SR-12 — spread pods across zones in staging and prod (`7d61bce`)
-
-The `topologySpreadConstraints` templates already existed in all ten charts. They had never been enabled in any overlay, so the feature was present and inert. Staging and prod now set `enabled: true` and `minReplicas: 3` per service; attendance-service uses `replicaCount: 3` instead, because its `autoscaling.enabled` is `false` and `minReplicas` is inert there; expiration-service gets spread only.
-
-**Written into both overlays, not just this log:** `whenUnsatisfiable: DoNotSchedule` is a real constraint, not a hint. If a zone has no room, HPA scale-out pods stay `Pending` rather than landing somewhere suboptimal. That is only safe once E1 gives the HPAs a metrics source and E2 gives the cluster a node autoscaler.
-
-### E1 / SR-09 — install metrics-server so the HPAs have a signal (`e2b6340`)
-
-Every workload chart ships an HPA. Nothing in the repo installed a metrics source. Every one of them would have reported `<unknown>/70%` and never scaled — in any environment, including the local one.
-
-- EKS: added as the managed `metrics-server` addon in `infra/terraform/modules/eks/main.tf`. No IRSA role, no Helm release.
-- Local: `minikube addons enable metrics-server` in both entrypoints — `infra/local/setup.sh` and `infra/local/Makefile`.
-
-`terraform validate` **could not run**: the configuration requires Terraform `>= 1.7.0` and the binary here is 1.5.4. `required_version` was deliberately *not* loosened to make the check pass. `terraform fmt -check` passed. Karpenter is still open, so SR-09 is not fully closed.
-
-### E5 / SR-27 — release SSE streams gracefully on scale-in (`663475b`)
-
-An SSE stream never completes. `e.Shutdown(ctx)` waits for in-flight requests to finish, so it had nothing that would ever finish: it blocked for its whole timeout and then cut every live seat-availability stream mid-frame. This happened on every scale-in, every rolling deploy and every node drain.
-
-**Server** (`internal/sse/broadcaster.go`, `internal/handler/sse_handler.go`, `cmd/server/main.go`):
-
-- `Drain()` / `Draining()` / `IsDraining()` — a closed-channel signal, idempotent (`sync.Once`), never blocking. Publishing still works after a drain: the handler stops reading, the broadcaster does not stop delivering.
-- The handler selects on `Draining()` and ends the stream after writing `retry: N`, jittered over 500–5000 ms. Ending the stream is what makes an SSE client reconnect; the `retry:` field is the only thing that stops all of them reconnecting at the same instant, onto fewer pods than before.
-- A client arriving mid-drain gets `503` + `Retry-After: 1`, not a stream that is about to close.
-- `main.go` drains before `e.Shutdown`, so the graceful shutdown has something that actually finishes to wait for.
-
-**Chart** (`infra/helm/charts/venue-service/`):
-
-- `lifecycle.preStopSleepSeconds: 5`. kubelet runs `preStop` and the endpoint removal concurrently and only sends SIGTERM once `preStop` returns, so the sleep keeps the pod serving until the removal has reached every kube-proxy and Kong. Charged against the existing 30 s `terminationGracePeriodSeconds`.
-- HPA `behavior.scaleDown`: a 600 s stabilization window and one pod per 120 s. The Kubernetes defaults would remove up to the whole fleet in one step after 300 s, and every removed pod's clients land on what is left.
-
-6 new tests (3 broadcaster, 3 handler) asserting the reconnect delay exists, is in range, and is actually spread across 25 clients. `go test -short ./...` green; `go test -race` green on both new packages.
-
-### E5 / SR-27, second half — a version cursor and a resync rule (`d5521dd`)
-
-The drain half told a client *when* to reconnect. This tells it *what to do* when it gets there.
-
-Nothing replays SSE events — there is no event log — so a client that has missed anything cannot be caught up with deltas. Until now it was never told. It reconnected onto a different pod and carried on applying changes to a seat map with a hole in it, showing seats as free that were already held. The 64-message client buffer failed the same way, dropping silently.
-
-- **Every change is numbered.** `INCR venue:{planId}:version` — cluster-safe via the existing hash tag, and shared across pods, which is the whole point: a reconnecting client lands on a pod that never served it. Without Redis it falls back to a per-plan in-process counter, which is sound because that path is single-pod by construction. A failed `INCR` yields version 0 and the change is still delivered — a delta the client may re-apply beats a seat change it never sees.
-- **`AvailabilitySnapshot.Version` is read before the section walk, never after.** A version taken afterwards could include a change that landed mid-walk and is therefore already missing from the map the client is about to trust. Taken first, the worst case is a harmless re-apply.
-- **Change frames carry `id: <version>`.** A browser `EventSource` stores the last id it saw and replays it as `Last-Event-ID` on reconnect, so the cursor costs the client no code.
-- **`Last-Event-ID` present → `event: resync`.** The server cannot replay, so it says so. A client with no cursor does *not* get one, because it is about to read the snapshot anyway — telling it to resync would cost every new viewer of an on-sale page an extra availability read, which is the read this path exists to avoid.
-- **A dropped message sets a gap flag** on the client; the handler emits `event: resync` *before* writing the next delta, so the client discards the stale map instead of building on it.
-
-8 new tests: version monotonicity, per-plan independence, a 50-goroutine uniqueness check, frame formatting with and without a version, the buffer-overflow flag, and the three handler resync cases. The gap case injects the gap directly rather than racing the handler's reader, which is not reproducible — the recorder drains faster than a test can fill.
-
-**E5 is now complete.** Still open in SR-27: the per-section / per-seat N+1 read in `hold/manager.go:229-248`. Also worth knowing: `services/client` has **no SSE consumer at all** yet, so the client half of the cursor contract is unexercised by anything.
-
-### E2 / SR-09 — install Karpenter so the cluster can add nodes (`05b60e0`)
-
-The cluster carried `karpenter.sh/discovery` tags and no Karpenter. The only thing that could add capacity was the managed node group's `desired_size`, which nothing changes automatically — so an HPA wanting more pods than the nodes can hold left them Pending.
-
-This is a hard prerequisite for E3, not an optimisation. E3 made the charts spread with `whenUnsatisfiable: DoNotSchedule`, which means a pod with no room in its zone does *not* fall back to another zone: it waits for a node. Without a node autoscaler that wait never ends.
-
-- **`terraform-aws-modules/eks//modules/karpenter`** — v1 permissions, EKS Pod Identity rather than IRSA (no OIDC trust policy and no service-account annotation to keep in sync with the Helm values), node IAM role plus SSM, and the interruption SQS queue that carries spot reclaims and scheduled maintenance. The submodule creates its own EKS access entry by default, so the node role can join the cluster without a dependency cycle back through the cluster module.
-- **`helm_release` for the controller** — pinned version (repo rule I-04; a controller that silently upgrades itself can start terminating nodes differently after an unrelated apply) and pinned to the managed node group via `nodeSelector`. Karpenter must not run on nodes Karpenter manages. The managed node group stays for exactly this reason: a cluster whose only capacity comes from a controller running on that capacity cannot start.
-- **NodePool + EC2NodeClass as a small local chart**, not `kubernetes_manifest`. `kubernetes_manifest` reads a CRD's schema during *plan*, which cannot work on the apply that installs the CRDs. On-demand only (spot is a cost decision that wants a soak, not a default), c/m/r gen>3, nothing smaller than `medium`, a **200 vCPU ceiling** as the blast-radius limit against a runaway HPA, consolidation with a **one-node** disruption budget, **30-day expiry** so AMI patches land, and a **5m termination grace** that clears the fleet's longest `terminationGracePeriodSeconds` (30 s) with a wide margin — consolidation must not cut venue-service's SSE streams, which is the thing E5 exists to prevent.
-- **VPC: `karpenter.sh/discovery` on the private subnets.** Without it the EC2NodeClass discovers no subnets and provisions nothing, which presents exactly like a full cluster — Pending pods and no error anywhere.
-
-**A verification finding worth keeping:** `terraform init -backend=false` inside `infra/terraform/modules/eks` works, and `terraform validate` passes there, even though the *environments* declare `required_version >= 1.7.0` and the local binary is 1.5.4. Module directories carry no `required_version`, so they can be validated standalone. That is how this change got a real syntax-and-schema check — including that every argument passed to the Karpenter submodule and every output read from it actually exists. (The 797 MB `.terraform` directory it downloads was removed afterwards.)
-
-**Two caveats are written into the code rather than left implicit:** the EKS module applies its module-level tags to both the cluster and node security groups, so `securityGroupSelectorTerms` may match two — check on first apply; and Helm installs a chart's `crds/` on first install but never on upgrade, so bumping the Karpenter version across an API change needs the CRDs applied out of band first.
-
-### Verification
-
-| Check | Result |
-|---|---|
-| `go build ./...`, `go vet ./...` (venue-service) | pass |
-| `go test -short ./...` (venue-service) | pass |
-| `go test -race -short ./internal/...` (venue-service) | pass |
-| `gofmt -l internal/ cmd/` (venue-service) | clean — note `test/graphql_resolver_test.go` is unformatted and was left alone, pre-existing |
-| `helm lint` — default, staging, prod | pass |
-| `helm template` — staging, prod | pass, values confirmed in the rendered output |
-| `helm template` — default overlay | **fails**, pre-existing Bitnami redis image-verification error; reproduced with the change stashed |
-| `kubeconform` | **not run** — not installed locally; CI runs it |
-| `terraform fmt -check -recursive infra/terraform/` | pass |
-| `terraform validate` (`modules/eks`, standalone init) | **pass** — see the E2 section; the *environments* still cannot be validated locally (1.5.4 vs ≥ 1.7.0) |
-| `helm lint` / `helm template` — karpenter-nodepool chart | pass, rendered manifests parse as YAML |
-| `terraform plan` against AWS | **not run** — no credentials, no account, and apply is an owner-only hard stop |
-| Anything against a cluster | **not run** — there is no cluster |
-
-### Not done
-
-- **Nothing here is deploy-verified.** The preStop/endpoint-removal timing, the HPA `behavior` block, the zone spread and metrics-server have all been reasoned about and rendered, never observed.
-- **C3 (PgBouncer) deliberately deferred.** It needs `DATABASE_URL` split into discrete host/user/password across `setup.sh`, the `Makefile`, ExternalSecrets and Secrets Manager, plus a new 6×-aliased subchart and a PgBouncer auth decision (`auth_query` vs userlist under SCRAM) — none of it verifiable without a cluster. Note that plan decision #4 (one shared RDS instance) makes C3 a **prerequisite** for A3, not an optimisation: 380 fleet-wide connections need `max_connections` ≥ 475, which constrains the instance class.
-- **E4 (KEDA)** deferred by plan decision #3.
-- `infra/helm/Chart.lock` is still deliberately dirty and wants its own commit.
-- No PR opened; no merge to main.
-
----
-
-## Session: 2026-09-23 — feat(scalability): M3 opened — one Mongo client, a sane HPA signal, and a real connection budget ⏳ NOT DEPLOY-VERIFIED
-
-**Branch:** `feat/scalability-m3` (cut from `main` at `3e66626`) · commits `63f22c4`, `cebf3ae`, `3a54f91` · **no PR opened**
-
-Three of the M3 items that need neither a cloud apply nor an open owner decision.
-Everything here is verified by unit tests, an integration suite and chart renders.
-**Nothing has met a running cluster** — minikube and the images were torn down at the
-end of the previous session and were not rebuilt, so no claim below rests on a live
-Postgres, Mongo or broker.
-
-### C2 / SR-21 — one Mongo client, majority writes, a sized pool (`63f22c4`)
-
-ticket-service opened two `mongo.Client`s per pod. Each client carries its own pool,
-so the driver default of 100 meant 200 connections per pod from a service nobody had
-budgeted connections for. There is now one client per process, built by a new
-`repository.MongoClientOptions`, which also states the two things that were being
-inherited silently: `writeconcern.Majority()` and `readpref.Primary()`.
-
-`ApplyURI` runs before the explicit setters, so a `w=` in the connection string cannot
-quietly downgrade the write concern. That is the kind of thing that holds until
-someone edits a Secret, so there is a test asserting it directly
-(`TestMongoClientOptions_URICannotDowngradeWriteConcern`).
-
-- **Verified:** 4 new unit tests, ticket-service unit suite green, integration suite
-  green in **196.6s** against a real `mongo:7` replica-set container.
-
-### E6 / SR-09 (half) — drop the JVM memory trigger from the order-service HPA (`cebf3ae`)
-
-A JVM reserves heap up front and releases it lazily, so container RSS tracks
-high-water usage rather than current load. As an HPA signal it does the opposite of
-what is wanted: it blocks scale-in after any spike, and it rises under GC pressure —
-scaling out a service whose real problem is that it is collecting garbage. The metric
-is now behind `autoscaling.targetMemoryUtilizationPercentage`, commented out for
-order-service only; every other chart keeps its memory trigger.
-
-- **Verified:** the prod render shows `ticketing-order-service: ['cpu']` and every
-  other HPA still at `['cpu','memory']`.
-- **Still open:** SR-09 also covers metrics-server and Karpenter. Neither is done, so
-  **the HPAs in this repo still have no metrics source**. This commit fixes the signal,
-  not the plumbing.
-
-### C1 / SR-20 — state every pool explicitly, and budget them (`3a54f91`)
-
-No service chose its pool size; every one inherited a driver default. Those defaults
-also move on their own — pgx uses `max(4, GOMAXPROCS)`, so changing a CPU limit
-silently resizes the pool, and the Mongo driver's 100 is per *client*, not per process.
-
-Each service now reads `DB_POOL_MAX` and sets the pool explicitly: venue and
-attendance via `pgxpool.ParseConfig` → `MaxConns` → `NewWithConfig`, order via
-`spring.datasource.hikari.maximum-pool-size`. user-service's value lives in its
-Secret, so the chart documents the ceiling instead of setting it and `infra/local`
-was lowered 20 → 12.
-
-The sizes come from arithmetic, now written down in a new **Connection Budget**
-section in [`docs/05-data-conventions.md`](05-data-conventions.md). No chart sets
-`max_connections`, so PostgreSQL's default of 100 applies and the per-instance budget
-is 80 at the 80% rule. Two services were over it:
-
-| Service | Was | Now | maxReplicas | Peak | Budget |
-|---|---|---|---|---|---|
-| auth-service | 40 | **12** | 6 | 72 | 80 |
-| payment-service | 20 | **12** | 6 | 72 | 80 |
-| order-service | 10 | **8** | 8 | 64 | 80 |
-| venue-service | 10 | 10 | 6 | 60 | 80 |
-| attendance-service | 10 | 10 | 4 | 40 | 80 |
-| user-service | 20 | **12** | 6 | 72 | 80 |
-
-auth was provisioned for 240 connections against a 100-connection server. The failure
-mode is worth naming: the pods that fall over are the ones that just scaled up to
-handle the load.
-
-**A correction to that section, made before commit.** The first draft said MongoDB
-"has no fixed analogue of `max_connections`". It does — `net.maxIncomingConnections`,
-default 65536, further capped at 80% of the soft `RLIMIT_NOFILE`. Neither binds here;
-memory does. The Bitnami mongodb chart is `enabled: false` in both staging and prod,
-so it only ever runs locally at `replicaCount: 1` under a **512Mi** limit, where ~1MB
-per connection on top of WiredTiger's 256MB cache floor means ~300 connections would
-OOMKill the pod well before any connection cap refused them. The `50 × 6 = 300` figure
-is sized for the **managed** cluster behind staging/prod and is **provisional** until
-that tier is chosen — the 80% rule needs a tier allowing ≥ 375.
-
-### Umbrella render was nondeterministic — found and fixed
-
-Rendering the same overlay twice produced different `DB_POOL_MAX` values. Cause:
-stale first-party `*.tgz` packages sitting beside their own source directories in
-`infra/helm/charts/`, produced by a `helm dependency update` earlier in this work and
-frozen at the pre-right-sizing numbers (auth 40, payment 20, order 10). Helm loads
-both the directory and the package and which one wins is not stable across runs.
-
-All 13 first-party packages were deleted — they are gitignored build artifacts. The
-five genuine third-party dependency packages (postgresql, mongodb, redis, kafka,
-kong) were kept. After that, all three overlays render the budgeted values on every
-run and `helm lint` is clean on each.
-
-This is worth remembering: any `helm template` result taken while those files existed
-was not trustworthy.
-
-### Verification
-
-| Check | Result |
-|---|---|
-| ticket-service unit tests | pass |
-| ticket-service integration suite | pass — 196.6s, real `mongo:7` replica set |
-| venue-service `go build` / `vet` / `go test ./internal/...` | pass |
-| attendance-service `go build` / `vet` / `go test ./internal/...` | pass |
-| order-service `mvn compile` | pass |
-| `helm template` — local / staging / prod | render clean, values stable across runs |
-| `helm lint` — local / staging / prod | 0 failed |
-| Live cluster / E2E | **not run** |
-
-### Not done
-
-- **`infra/helm/Chart.lock` is left dirty on purpose** — a digest-and-timestamp
-  regeneration from that `helm dependency update`, unrelated to C1. It wants its own
-  commit rather than being swept into this one.
-- **No PR for `feat/scalability-m3`.**
-- Remaining M3 items untouched: C3 (PgBouncer), E1 (metrics-server), E2 (Karpenter,
-  cloud), E3 (topologySpreadConstraints), E4 (KEDA), E5 (SSE graceful scale-in).
-- Carried over and still open: the leaked `X_USER_ID_SIGNING_KEY` is **unrotated**;
-  the clean-install proof that Kafka topics come up at their declared partition counts;
-  the E2E suite against the k8s stack.
-
----
-
-## Session: 2026-09-22 — feat(kong,helm): M2 agent half — topics, an unloadable gateway, a meshed broker port, external secrets, a Mongo replica set ⏳ PARTLY DEPLOY-VERIFIED (E2E not run)
-
-**Branch:** `feat/scalability-m2` (cut from `fix/local-cluster-bringup`, which is still unmerged and holds the chart fixes this depends on) · commits `dac1dec`, `f1c2f97`, `f321cd9`, `ceefb4a`, `4b95bc9`, `4f54974`, `44a167d`
-
-Five workstream items landed — D4, D3, D5, A5's chart half and A4's local half, the
-whole agent-executable set for M2. All are render-verified only — the owner asked for
-deploy and smoke verification to be batched into one later run, so nothing here has
-met a live cluster, a live broker or a live Redis. Said plainly because it matters:
-the previous session found twelve deploy-blocking defects that `helm template` and
-`helm lint` could not see.
-
-**Kafka topics are now declared, not assumed.** All 20 topics live in
-`infra/helm/files/topics.yaml` and are created by a Helm hook Job. The hook is
-`post-install,post-upgrade` rather than `pre-*` because locally the broker ships
-inside the same release: a `pre-install` hook would block forever waiting for a
-StatefulSet Helm has not created yet, gating the very install that would satisfy it.
-In prod the broker is MSK and always reachable, so one annotation serves both.
-Partition counts are sized to the largest consuming group at that service's HPA
-`maxReplicas`, and the Job reports drift rather than correcting it — raising a
-partition count rehashes keys and breaks per-key ordering, and lowering one is not
-possible at all. Topics were derived by reading call sites, not by grepping strings:
-eight candidates turned out to be OpenTelemetry span names and structured-log fields,
-and stayed out of the declaration.
-
-**The Kong staging and prod configs do not load.** `kong config parse` exits 1 on
-both. Kong's rate-limiting schema makes `redis.host` conditionally required when the
-policy is `redis`; two route plugins omitted it, and Kong refuses to load a
-declarative config it cannot validate, so the gateway would not have started at all.
-This had been recorded as a degraded rate limit counting per node. It is not — the
-difference is between an N-times-too-loose limit and no gateway — and it is
-reclassified P0.
-
-It survived because the CI job rendered and validated only the `local` environment,
-where the policy is `local` and the condition never fires. The job now loops all five
-environments. That guard, not the config change, is the durable part.
-
-Carried along in the same fix, all previously invisible for the same reason:
-`HOST_USERS` and `HOST_ATTENDANCE` were absent from dev/staging/prod (and
-`HOST_ATTENDANCE` from minikube), each silently falling back to a docker-compose bare
-hostname that does not resolve in Kubernetes, making `/api/users` and
-`/api/attendance` 502s; the rate limiter pointed at an in-cluster Redis that staging
-and prod do not deploy, and now takes the ElastiCache endpoint from
-`KONG_RATE_LIMIT_REDIS_HOST` at render time with `build.sh` refusing to render
-without it; `redis_ssl` is on, because the ElastiCache module enables transit
-encryption and a plaintext connection fails silently into no limiting at all; and the
-namespace is declared once per values file instead of copy-pasted into nine entries,
-which is how two of them went missing unnoticed.
-
-**Two things the owner should weigh in on.** The anonymous per-IP rate limit was
-raised from 60/min to 600/min: at 60 a single active browser was throttled, since the
-Next.js catch-all route means page navigations and `/_next/*` assets all count, and a
-carrier-NAT address puts hundreds of people in one bucket. It is still a deliberate
-loosening of a production control. Separately, `fault_tolerant: false` now applies to
-the two auth endpoints only, so a Redis outage cannot quietly switch off the
-brute-force control, while every other route keeps failing open and stays available.
-
-**Caught by verification, worth recording:** the first pass at that change left
-duplicate `fault_tolerant` keys in the same YAML block. Last-wins would have kept
-`true`, and `kong config parse` accepts duplicate keys without complaint, so it would
-have shipped looking right and doing nothing.
-
-**Verified:** all five Kong environments render and parse against both
-`kong:3.7-ubuntu` and the `kong:3.9` the chart actually runs, staging and prod moving
-exit 1 → exit 0; all three Helm overlays template and lint, with staging and prod
-byte-identical to baseline. **Not verified:** anything requiring a running cluster.
-
-**Linkerd was meshing the wrong Kafka port.** `skipOutboundPorts` lived once in
-`values.yaml` at 9092 — the in-cluster cp-kafka PLAINTEXT listener — and staging and
-prod inherited it, although neither runs that broker. MSK listens on 9098 for
-SASL/IAM over TLS, so the proxy skipped a port nothing connects to while staying in
-the path of the real traffic. The value now lives per overlay, which is where a value
-that has to move with the broker belongs. The diff is four lines and proves something
-useful on its own: a `global:` block in an overlay deep-merges into the chart default
-rather than replacing it, so the sibling mesh settings survive.
-
-**But the client half of that item is blocked, and the block is not small.** MSK is
-provisioned IAM-only, and no service in the repo can speak IAM: all six default to
-`PLAINTEXT` and every SASL path they have validates only username-and-password
-mechanisms. `AWS_MSK_IAM` is a Java login module — librdkafka does not implement it,
-so the four Go services would need OAUTHBEARER plus an MSK IAM signer, and
-queue-service (.NET) has no first-party option at all. The realistic alternative is to
-enable SASL/SCRAM on MSK and keep every existing code path, which is a Terraform
-change plus six secrets and no application code. That is an owner decision about
-authentication posture, not a mechanical edit, so it was written up in full and left
-alone. Related and also left alone: the MSK security group opens 9094 for SASL/SCRAM
-that the cluster never enables — an open port with no auth mechanism behind it, and a
-security-group change is a reviewed change.
-
-**Secrets can now come from a store instead of a shell script.** Each of the eight
-service charts renders an `ExternalSecret` that populates the Secret it already names
-in `secretRef`, so no Deployment changed; `dataFrom.extract` copies every key of the
-remote secret rather than listing them, which is the right shape for an `envFrom`
-consumer and stops the template drifting as a service's env contract grows. It is off
-everywhere and must stay off: the operator install is cluster-wide and the IRSA role
-is Terraform, and enabling it before those exist replaces a working Secret with no
-Secret and puts every pod in `CreateContainerConfigError` — worse than the manual step
-it removes. The staging and prod overlays carry the store name and key prefix already
-filled in so the switch is one line later. Remote keys are namespace-scoped, so
-staging and prod cannot read each other's credentials. This does **not** close the
-regenerating prod Secret (SR-38): that one comes from a Bitnami subchart and still
-needs an owner call on where the credential originates.
-
-**Local MongoDB is a replica set now.** A single member, which is a legitimate replica
-set — it elects itself, `majority` is 1, the oplog exists — and it is what makes write
-concern `majority`, transactions and change streams available at all; a standalone
-mongod rejects all three. It buys correct semantics, not availability. Two things had
-to move with it and both would have been failures rather than warnings: the chart's
-default arbiter had to be disabled, because one data node plus an arbiter is two
-voting members with only one able to acknowledge a `majority` write; and the
-`updateStrategy: Recreate` added last session had to go, because replicaset mode
-renders a StatefulSet and `Recreate` is not a valid StatefulSet strategy — the API
-server rejects the object. The deadlock that setting worked around goes with it.
-`MONGO_URI` also had to be re-pointed: replicaset mode renders only a headless
-Service, so the seed is the pod FQDN spelled exactly as the chart advertises it, plus
-`replicaSet=rs0`.
-
-**Two new findings, and one of them first produced a wrong measurement of my own
-work.** CI renders every subchart standalone and never renders the umbrella chart with
-any overlay — `values-prod.yaml` appears nowhere in the workflow — so no deployable
-artifact is validated and an off-by-default feature can never be exercised. That is
-the same shape as the Kong finding above and was registered rather than fixed, because
-the step needs a dependency fetch over OCI and would redden CI on network flakes.
-Separately, the gitignored `*.tgz` archives sitting beside the chart directories
-shadow them: one `helm template` run resolved four of eight service charts from stale
-archives and four from the edited sources, so the first verification of the new
-ExternalSecrets reported four of eight and looked like a template bug. A bare
-`helm template` can measure stale templates and report success.
-
-**A process failure, recorded because the result would have been a false pass.** A
-stray `git stash` inside a verification loop stashed the tracked values-file edits
-mid-run, so three "renders clean" results were produced against the baseline rather
-than against the change. Caught by checking `git stash list`, restored with
-`git stash pop`, and every render re-run. Nothing was lost and no pre-restore result
-was kept.
-
-**Owner decisions still open:** the MSK client auth mechanism, described above and
-the one blocking a P0; the 60 → 600 anonymous limit; the prod namespace,
-where the only two sources disagree and no cloud deploy has ever run to settle it;
-merge approval for `fix/local-cluster-bringup` (11 commits, unpushed, no PR) and
-later this branch; and the Apollo Router GraphOS licence versus dropping operation
-limits. **Still outstanding from the previous session:** the leaked
-`X_USER_ID_SIGNING_KEY` is unrotated — the rotation was denied by the sandbox — and
-the grouped smoke run now needs a full local rebuild first, since minikube and the
-build cache were torn down.
-
-### Grouped smoke run — partly done
-
-A fresh `make -C infra/local up` failed once, at `secrets`. My A4 comment sat
-inside a recipe that runs as one continued shell command, so it cut the command
-short and left an unmatched quote. That happened after all nine images had built.
-Fixed in `4f54974` by moving the comment above the target. After that the release
-reached `deployed` with **24/24 pods Running**, and ticket-service became Ready
-against the replica-set URI, so **A4 is verified live.**
-
-**The live run found a D4 defect that no render can show.** The topics Job
-succeeded, but 7 of the 20 topics existed with **1 partition** instead of their
-declared 12, 8 or 6. The cp-kafka chart hardcoded
-`KAFKA_AUTO_CREATE_TOPICS_ENABLE=true`, so services that touched a topic before the
-`post-install` hook ran got it auto-created at the broker default. The Job then
-reports that drift but does not fix it. `44a167d` adds an `autoCreateTopics` value
-that defaults to false. The local render differs only in that value, and staging
-and prod are byte-identical. After `helm upgrade` the live broker reads `false`.
-**Not verified:** that a clean install now gets the declared partitions. The 7 live
-topics are still at 1 partition, because deleting them was denied by the sandbox.
-
-**The E2E suite was not run.** Right after that denial, a read-only
-`kubectl get svc` was also denied, so the port-forwards the suite needs could not
-be set up.
-
----
-
-## Session: 2026-09-21 — ci(m1): PR #139 opened, CI diagnosed and green ⏳ AWAITING MERGE APPROVAL
-
-**Branch:** `feat/scalability-m1` → PR #139 (38 commits, 0 behind `main`)
-
-M1 opened as a PR after the owner's testability scenario was checked and upheld:
-replica count is deployment configuration, and the correctness it affects is still
-pinned by CI because Postgres row locks and advisory locks are *session*-scoped, not
-process-scoped — a second pooled connection is indistinguishable from a second pod to
-the database. `OutboxRelayConcurrencyTest` opens two genuinely overlapping
-transactions; `hold_sweeper_leader_test.go` takes `pg_advisory_lock` on a separate
-pooled connection. Both were read, not taken on the strength of their names.
-
-### CI: red, then green — diagnosed, not dismissed
-
-Run `35575341302` first failed on `ticket-service` → *Integration tests
-(Testcontainers — MongoDB + Kafka)* with `panic: test timed out after 5m0s`. That is
-a timeout, not an assertion. Re-running the failed job passed, with every other job
-green — including *Helm rendered-manifest validation*, which closes the
-`kubeconform -strict` gap previously logged as locally unverified (no binary on this
-machine). It has now run in CI and passed.
-
-The branch is excluded as a cause by the import graph rather than by assertion: M1's
-entire `ticket-service` diff is `cmd/server/main.go` (2 lines) plus
-`internal/reconciler/quota_reconciler{,_test}.go`; `services/ticket-service/test/`
-references neither `reconciler` nor `cmd`, so that package is byte-identical to
-`main`'s. The reconciler change runs in the *Unit tests* step, which passed even on
-the failing attempt.
-
-Durations, same commit and same tree: **301s (capped, failed)** → **207s (passed)**,
-against **168s** on `main`. A 94s swing across identical trees is the runner. The
-goroutine dump put the hang in `tcmongo.Run` → `initiateReplicaSet` →
-`WaitUntilReady` — container startup — and the log carried rdkafka
-`Coordinator load in progress: retrying` noise consistent with a contended runner.
-
-### Known fragility — NOT fixed, out of M1's scope
-
-`services/ticket-service/test/` has 90 test functions, **23 of which each start their
-own `mongo:7` replica-set container** via `newRepoForReservationTests`. Go's
-`-timeout` is cumulative per *package*, so all 23 startups are charged to one 300s
-budget — which is also why the panic named
-`TestFinalizeReservation_ShouldBeIdempotent_WhenAlreadySold (2s)`: it only held the
-baton when the alarm fired. At 207s there is ~31% headroom, so any PR can go red here
-without touching ticket-service. Remedy is a suite-scoped container or a raised
-package timeout. Deliberately not added to this PR.
-
-### Finding carried into the PR body, not treated as a blocker
-
-**SR-08 buys failover but not throughput until SR-02 lands.** expiration-service is a
-Kafka consumer-group member, so a second replica is safe by construction — but SR-02
-is still `open`, nothing provisions topics, and the broker default is
-`num.partitions=1`, so the second consumer is assigned no partitions and idles.
-Secondary: `OutboxCleanupJob` has no leader election and fires on every replica;
-batched deletes are idempotent so this is safe, but replicas contend on row locks.
-
-**Owner decisions still open**: merge approval for PR #139 (no auto-merge to main);
-the staging soak — every service at 3 replicas for 24h — which is M1's real exit
-criterion and an owner action; SR-02 topic provisioning; triage of the ticket-service
-integration-suite timeout budget; and the prod-render Secret `ticketing-postgres-users`,
-whose literal password is regenerated on every render, so a real `helm upgrade` would
-rotate the credential out from under the running database.
-
-
-## Session: 2026-09-21 — merge(main): integrate PR #122 into feat/scalability-m1 ⏳ NOT MERGED TO MAIN
-
-**Branch:** `feat/scalability-m1` ← `origin/main` (merge `f1d79e6`)
-
-PR #122 merged to `main` (`ded09a8`), so M1 was brought up to date. #122 and M1 had
-independently implemented the same outbox claim fix, which produced seven conflicts.
-
-### How the conflicts were resolved
-
-All six code conflicts went to `main`'s side, because #122's version is a superset, not
-an alternative. Both branches hold the `FOR UPDATE SKIP LOCKED` claim inside a
-transaction, so both are correct on isolation — but #122 additionally **stops the batch
-at a failing row** instead of skipping it (skipping let a later event for the same
-partition key overtake an earlier one still being retried, defeating the point of keying
-by `orderId` at all, AGENTS.md §3.4) and **bounds the broker wait**
-(`OUTBOX_RELAY_PUBLISH_TIMEOUT_MS`, default 10 s), which matters precisely because the
-claim now spans a whole batch rather than one row. Taking `main` wholesale closed both
-defects in M1's code without patching either.
-
-M1's unique half was re-applied on top: order-service cleanup batching
-(`deletePublishedBatch`, `@Transactional` per batch so each commits on its own,
-`OutboxCleanupJob`, `outbox.cleanup.*`) and `V6__add_outbox_published_index.sql`. V6 was
-free on `main`, so the append-only migration rule is not violated.
-
-`OutboxRelayConcurrencyTest` was rewritten rather than deleted: it now proves SKIP LOCKED
-against `@Lock(PESSIMISTIC_WRITE)` + `QueryHint lock.timeout = -2` instead of against a
-native query. It passes — which is the first actual test evidence that the annotation
-form emits `for update skip locked`, a property #122 asserted in javadoc only.
-
-### Verification
-
-- order-service `mvn -o test` — **68/68, 0 skipped**, including both Testcontainers suites.
-- payment-service — **95 unit + 21 integration, 0 skipped**; `pnpm test` alone does NOT
-  run the concurrency spec (it lives in `test/`, covered by `test:integration`), so it
-  was run explicitly.
-- ticket-service, venue-service — `go build`, `go vet`, `go test ./...` clean on top of
-  `main`'s Go 1.26 toolchain.
-- Helm — all 13 service charts render; prod and staging render with **0 StatefulSets**
-  vs local's 8, re-confirming SR-01 after the merge.
-
-### Not done
-
-- **`kubeconform -strict` did not run** — not installed on this machine. Only the render
-  half of that CI step was reproduced locally; the schema validation runs first in CI.
-- Nothing is pushed and no PR is open for `feat/scalability-m1`. M1's exit criterion
-  (3 replicas in staging for 24 h) is a deploy, which is an owner action.
-
----
-
-## Session: 2026-09-17 — fix(order): outbox cleanup batching + M1 branch audit ⏳ AUDITED, NOT MERGED
-
-**Branch:** `feat/scalability-m1` (integration) ← `fix/scale-b8-outbox-cleanup-batching`
-
-Fourth and final orchestrated wave for M1, plus the overall review and audit the owner asked for before anything reaches `main`.
-
-### What was done
-
-- **Outbox cleanup batching (SR-06, second half).** `OutboxCleanupJob.purgePublished()` issued one unbounded `DELETE` inside one transaction. Over a backlog — the state left by any Kafka outage — that holds row locks and pins the vacuum horizon for the whole run, and on timeout it makes *no* progress, so the next run retries the same doomed statement forever. It now deletes `outbox.cleanup.batch-size` rows (default 500) per iteration, up to `outbox.cleanup.max-batches` (default 100) per invocation, leaving the remainder to the next schedule.
-- **`@Transactional` moved off the job and onto the repository method.** This is the whole point of the change: on `OutboxRepository.deletePublishedBatch` each batch commits on its own, so a failure part-way keeps the progress already made. On the job it would wrap every batch in one outer transaction and roll all of them back — the exact behaviour being removed.
-- **`V6__add_outbox_published_index.sql`.** The cleanup `DELETE` had no usable index. `V1`'s `idx_outbox_unpublished` is partial on `WHERE published = false`, which is the *relay's* filter. Without the mirror-image index on `(created_at) WHERE published = true`, batching would have turned one sequential scan into one scan per batch — strictly worse than the unbounded delete it replaces. Plain `CREATE INDEX`, not `CONCURRENTLY`, because Flyway wraps each migration in a transaction and `CONCURRENTLY` cannot run inside one.
-- **A false RED recipe corrected.** `OutboxRelayConcurrencyTest.java:106` told a reviewer to swap the claim call to `findUnpublished()` to reproduce the red — but the same SR-06 change deleted that method. Repointed at the `LIMIT … FOR UPDATE SKIP LOCKED` clause that actually has to be removed. Comment only.
-
-### Verification
-
-- Full `mvn test` on the merged tree: **61 tests, 0 failures, 0 errors, 0 skipped, EXIT=0**, with the exit code captured directly rather than through a pipe.
-- **Both reds reproduced here, not taken on report.** Dropping the `LIMIT` from `deletePublishedBatch` fails `deletePublishedBatchRespectsItsLimit` (`expected: 100 but was: 250`) *and* `eachBatchCommitsSoAFailurePartWayKeepsItsProgress` (`expected: 50L but was: 0L`) — the worker had reported only the first. Adding `@Transactional` back to `purgePublished()` fails `cleanupJobMustNotBeTransactional` (`expected: null but was: @Transactional(...)`). Both files restored and confirmed byte-identical to `53f84a4`.
-- Branch audit: 24 changed files, all traceable to a register item; no secret values; no dependency manifest, migration outside `V6`, client, supergraph, port, NetworkPolicy or securityContext change; every code change merged `--no-ff` from its own `fix/scale-*` branch.
-- **A2 backward compatibility verified rather than assumed.** Disabling the in-cluster Postgres/Mongo/Redis subcharts in staging and prod breaks no service because no chart template references those values — services read connection strings from a Kubernetes Secret via `envFrom.secretRef`.
-
-### A sanity check that could not fail — this time the manager's
-
-The ticket specified: "restore `@Transactional` on `purgePublished()` → test C must fail." It cannot. The test constructs the job with `new`, and a hand-constructed object has no Spring AOP proxy, so `@Transactional` on it is completely inert. Confirmed by running it: with the annotation restored, the behavioural test still passes.
-
-This was caught before the worker committed, and fixed by adding `cleanupJobMustNotBeTransactional` — a reflection guard that asserts the annotation is absent and carries the reason in its failure message. It is the property that matters, because in production the job *is* a Spring bean and the annotation *would* take effect there.
-
-That makes four defects of the same shape across this milestone — a check written so that it cannot fail — three from workers and two now from the manager's own tickets. The pattern is specific enough to name: **whenever a fix is verified by reverting it, the revert must be executed, not predicted, and the revert must be shown to produce a failure the test is actually capable of reporting.**
-
-### A bug chased and cleared
-
-`OutboxMessagePublisher.publishOne` carries `@Transactional` with `REQUIRED` propagation and, since SR-06, joins the relay's claim transaction. If a Kafka failure escaped it, the transaction proxy would call `setRollbackOnly()` and the relay's commit would throw `UnexpectedRollbackException`, discarding every mark-published in the batch and re-sending all of them on the next tick — a duplicate storm from a single bad row. It does not happen: the `catch` sits inside the method body, so nothing propagates through the proxy. Recorded because the failure mode is non-obvious and the next person to touch that method needs to know why the `catch` cannot be moved out.
-
-### A conflict between the plan and the register
-
-Plan item `B3` asks for advisory-lock leader election on "venue sweeper **and order cleanup**"; SR-15's register row names only the venue sweeper and the ticket reconciler. Order-service's `OutboxCleanupJob` does run on every pod every 10 minutes, so the plan is not wrong to mention it.
-
-**Dropped deliberately rather than deferred**, because the two designs are mutually exclusive. A per-batch advisory lock does not serialize the job — another pod simply interleaves batches, and each batch is independently correct. A job-wide lock requires one transaction spanning every batch, which is precisely what this change exists to eliminate. Concurrent cleanup pods produce brief lock waits and `deleted = 0`, not incorrectness, on a table bounded by the 24-hour retention the job itself enforces.
-
-### Branch cleanup — the rejected SR-35 attempt was deleted
-
-`fix/scale-b6b-venue-provision-advisory-lock` (`5dc169f4`) was `B6b`'s rejected first attempt: it held `pg_advisory_xact_lock` on a dedicated transaction while still inserting through `r.pool`, so every caller needed two pooled connections and four concurrent provisions exhausted the pool unconditionally, with no lock contention required.
-
-It never merged, so none of its code was ever on this branch and SR-35's status rests solely on `fix/scale-b6b2-venue-provision-tx`. But it was ambiguous at a glance — **two branches carrying `SR-35` in their subject and touching the same two files**, with nothing in either name marking one as superseded, and it was the only unmerged branch of the eight. Deleted on owner instruction, which supersedes the earlier standing "keep the small branch for record" for this branch only. It was never pushed, so `docs/scalability-review.md` now carries its full SHA and the reason it failed as the only remaining record. Seven `fix/scale-*` branches remain, all merged.
-
-### Not done
-
-- **`main` is untouched at `f565089`, and stays that way pending owner approval.** No auto-merge (CLAUDE.md core rule 6).
-- M1's exit criterion is not code and cannot be met from here: "every service at 3 replicas in staging for 24h with no duplicate events and no stuck reservations" needs a staging deploy, which is an owner action.
-- SR-01 remains half-complete by design: the Helm half landed, the Terraform half (RDS for venue/user/attendance, managed Mongo) is untouched, and `terraform apply` is an owner action under `docs/15-agent-hard-stops.md`.
-- Every register item stays `in-progress` rather than `done`; the done-count moves only after merge to `main`.
-
----
-
-## Session: 2026-09-17 — fix(scale): sweeper leader election, expiration replicas, outbox claim contract ⏳ INTEGRATED, NOT MERGED
-
-**Branch:** `feat/scalability-m1` (integration) ← `fix/scale-b5-expiration-replicas`, `fix/scale-b3a-venue-sweeper-leader`
-
-Third orchestrated wave. Two workers, one manager-written change, and one more worker report that did not survive independent verification — this time not a vacuous test, but a **red that could not have been produced by the test that was committed**.
-
-### What was done
-
-- **Venue hold sweeper leader election (SR-15, first half).** `SweepExpiredHolds` used to run its full-table `UPDATE seats ... WHERE status='HELD' AND held_until < now()` on every replica every 30 seconds. It now opens a transaction, takes `pg_try_advisory_xact_lock(hashtext('venue-hold-sweeper'))`, and returns `(0, nil)` without sweeping when another pod already holds it. The **transaction-scoped** variant is required rather than the session-scoped `pg_try_advisory_lock` the review originally suggested: a session lock would be released back into the pgxpool connection still held, and would then permanently disable the sweeper on that pod. The only caller is the 30s ticker in `internal/hold/sweeper.go`, so no request path can observe the non-leader no-op.
-- **expiration-service replicas (SR-08).** `values.yaml` now sets `replicaCount: 2`, and so does the subchart default. A single replica behind a PDB with `minAvailable: 1` can never be evicted, so it was both a SPOF and a permanent blocker for node drains. `values-local.yaml` already pinned 1 and still does, so local is unchanged. No code change was needed: the asynq workers dedupe on `TaskID(orderID)`.
-- **Outbox relay claim contract (`docs/04-asynchronous-messaging.md`).** Three services claim outbox rows with `FOR UPDATE SKIP LOCKED` and one uses a Mongo `claimToken`/`leaseUntil` lease, but the standard said only that "a relay process publishes to Kafka" — nothing required a claim at all, so a relay written to that spec would publish every event once per replica. The new section states the contract, both mechanisms, why per-batch commit is accepted rather than fixed, and the test trap below.
-
-### Verification
-
-- **The sweeper red was reproduced here, not taken on report.** With `section_repo.go` reverted to `9bc7357`, the new test fails in 6.5s at `hold_sweeper_leader_test.go:124` — `expected: 0, actual: 3`, "a non-leader pod must not sweep while another pod holds the leader lock". Restored, `go build ./...`, `go vet ./...` and the full `go test ./...` all exit 0, and the working tree is byte-identical to the commit.
-- The test simulates the other pod with a session-scoped `pg_advisory_lock` on a second pooled connection. That works because session and transaction advisory locks share one lock space — a session lock taken by the test genuinely blocks the production code's `pg_try_advisory_xact_lock`.
-- **All three Helm overlays render on the merged tree**, exit 0 with zero stderr: expiration-service is 1 replica locally and 2 in staging and prod, PDB `minAvailable: 1` throughout, and wave 2's externalization still holds at 0 StatefulSets in staging and prod against 8 locally.
-- `git diff --name-only main..feat/scalability-m1` is 18 files. `main` remains untouched at `f565089`.
-
-### A red that never happened
-
-The sweeper worker reported a textbook sanity check: revert the fix, watch the assertion fail with `expected: 0 / actual: 3`. Reverting it here produced something else — the test hung and died on Go's 10-minute default timeout, and the string `actual` appeared **zero times** in the output. The cause was in the test, not the fix: it acquired the simulated-leader connection with `pool.Acquire` and released it only at step 4, so when `require.Equal` called `FailNow` at step 2 the release was skipped and the deferred `pool.Close()` blocked forever on the outstanding connection.
-
-So the assertion was right, the production code was right, and the test still could not report its own failure — it could only hang for ten minutes with no diagnostic. It was rejected and reissued for a `defer leaderConn.Release()`; the red now lands in 6.5 seconds with the message attached. The lesson is narrower than wave 2's but worth the same weight: **a sanity check verifies the test's failure path as much as the fix**, and a quoted red is not evidence unless the failure path can actually print it.
-
-### Not done
-
-- Nothing else from M1's dispatched work is outstanding. SR-15 is now complete on the branch: the ticket-service quota reconciler takes a Redis `SET NX` lease at `ticket-service:reconciler:leader` with TTL = the 5-minute interval, so one replica per tick paginates Mongo and rewrites Redis instead of all of them. It is deliberately not released on success, because releasing it would let the next replica's offset ticker start a second redundant pass inside the same interval; a failed pass does release it. Verified by deleting the election guard and watching both assertions fail, then re-running the full `go test ./...` — including the 201-second testcontainers package the worker stopped short of.
-- The order-service outbox cleanup `DELETE` batching split out of SR-06 is still open.
-- Nothing has merged to `main`. The overall review and audit of `feat/scalability-m1` is still pending.
-
----
-
-## Session: 2026-09-16 — fix(scale): prod/staging externalization, outbox SKIP LOCKED, single-transaction venue provisioning ⏳ INTEGRATED, NOT MERGED
-
-**Branch:** `feat/scalability-m1` (integration) ← `fix/scale-a2-overlay-disable-backing-services`, `fix/scale-b6b2-venue-provision-tx`, `fix/scale-b2-payment-outbox-skip-locked`
-
-Second orchestrated wave. Same division of labour as wave 1 — workers implement, the manager verifies every claim independently — and this wave is the case for that division: **two of three workers reported success on tests that could not fail.** Both were caught, reworked and re-verified, and one of the two defective tests was caused by a defective ticket, which is recorded below rather than quietly fixed.
-
-### What was done
-
-- **Prod and staging externalization** — `values-prod.yaml` and `values-staging.yaml` now set `enabled: false` on all eight Bitnami database subcharts. Wave 1 added the toggles; until now nothing exercised them, so the overlays still stood up in-cluster Postgres/Mongo/Redis in both environments.
-- **Single-transaction venue provisioning** — `ProvisionFromVenue` runs the advisory lock, the idempotency `COUNT`, the template fetch and the whole clone loop on one `pgx.Tx`, committing at the end. This closes two separate defects with one change: the check-then-act race between concurrent provisions, and the half-built plan that a mid-loop failure used to leave committed, which the `COUNT` guard then read as "already provisioned" forever.
-- **payment-service outbox claim** — the relay now runs inside `db.transaction`, claims rows with `.for('update', { skipLocked: true })` and marks them published on that same transaction, so concurrent replicas cannot publish the same outbox row twice. Its test was rejected twice before landing (see below).
-- **Interface preserved** — threading the transaction went through an unexported `querier` (`QueryRow` + `SendBatch` + `Query`, satisfied by both `*pgxpool.Pool` and `pgx.Tx`) plus free functions, matching the pattern already used at `section_repo.go:275,345`. The exported `CreateSection`/`BulkInsertSeats` signatures are unchanged, so the six existing stub implementations across the handler, gRPC and GraphQL tests needed no edit.
-
-### Verification
-
-- **The venue deadlock was reproduced before the fix was accepted.** With the test pool pinned to 4 connections, reverting the two inserts to `r.pool` fails all 8 concurrent provisions with `context deadline exceeded` and 0 sections created, after the full 30s timeout; restoring the transaction passes in 1.4s. The production file was confirmed byte-identical afterwards.
-- venue-service `go build ./...`, `go vet ./...` and the full `go test ./...` are green on the merged tree, against real PostgreSQL via Testcontainers.
-- Prod renders exit 0, zero stderr, **0 StatefulSets**, and **0 references to the `ticketing-postgres-users` Secret**. Staging 0 StatefulSets; local unchanged at exit 0 / 8 StatefulSets.
-- **The payment double-publish bug was also reproduced before acceptance.** With `.for('update', { skipLocked: true })` removed from the service, the integration suite exits 1 and relay B claims all 3 rows relay A is holding (`expected 3 to be +0`); restored, exit 0, and the production file is byte-identical. payment-service lint, `tsc --noEmit`, 92 unit tests and 21 integration tests all exit 0 on the merged tree.
-- `git diff --name-only main..feat/scalability-m1` is exactly the 15 intended files, no strays. `main` remains at `f565089`.
-
-### Two tests that could not fail
-
-The payment-service relay test never imported, constructed or called `OutboxRelayService` — it opened its own pg client and re-implemented the relay's query in raw SQL, so it verified PostgreSQL's `SKIP LOCKED` rather than ours. The worker's own sanity check demonstrated exactly that and misread it as success: deleting `SKIP LOCKED` from the production service left all 21 tests green, reported as "ALL STEPS PASSED". It was reissued to drive two real relay instances concurrently, with relay A holding its transaction open inside a fake producer, and to require an observed red.
-
-### A defective ticket, and what it cost
-
-The provisioning fix was rejected once and reworked; the rework's mandatory sanity check then **failed to reproduce the bug**, because the ticket told the worker to use pgxpool's default pool size. The default is `max(4, numCPU)`, so on this 10-core machine the pool held 10 connections and the 8 concurrent callers could never exhaust it. The worker honestly reported that reverting the fix still passed — and then asserted the fix was correct anyway, predicting the failure "would manifest on a 4-core system". That prediction was not accepted as verification.
-
-The instrument was fixed rather than the claim believed: `MaxConns` is now pinned explicitly to 4 via `pgxpool.ParseConfig`, which is host-independent and equal to the pool a small production pod actually gets, since `cmd/server/main.go:79` calls `pgxpool.New` with no override. **A concurrency test that takes its pool size from the host cannot be a regression guard** — that is the reusable lesson here.
-
-### Not done
-
-- **New Helm finding, filed not fixed.** `global.imageRegistry` points at a first-party registry, and the Bitnami subcharts honour that global, so they resolve images it does not host; Bitnami redis's `NOTES.txt` guard catches the substitution and aborts the *entire* `helm template` run. `helm template .` with no overlay exits 1, and so did `main`'s prod overlay — `values-local.yaml` renders only because it resets the global to `""`. Prod and staging render after this wave solely because the affected subcharts are now switched off; the misconfiguration itself is untouched and returns the moment anyone re-enables one or writes a new overlay from the defaults.
-
-## Session: 2026-09-16 — fix(scale): helm subchart toggles + outbox SKIP LOCKED claim ⏳ INTEGRATED, NOT MERGED
-
-**Branch:** `feat/scalability-m1` (integration) ← `fix/sr-01-helm-conditions`, `fix/sr-06-order-outbox-claim`
-
-First wave of a scalability remediation effort, run orchestrated: workers implemented, the manager verified every claim independently. Tracked against a local (untracked) review register as items SR-01 and SR-06.
-
-### What was done
-
-- **Helm subchart toggles** — `condition:` added to all eight Bitnami backing subcharts in `infra/helm/Chart.yaml` (postgres-auth/orders/payments/venue/attendance/users, mongodb, redis), with matching `enabled: true` defaults in `values.yaml`. This is the portability contract: overlays disable in-cluster backing stores by toggle rather than by deleting dependencies, which is the precondition for pointing prod at managed databases.
-- **order-service outbox claim** — `OutboxRepository.findUnpublished()` replaced with a native `SELECT ... ORDER BY created_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED` (JPQL cannot express `SKIP LOCKED`). `OutboxRelay.relay()` is now `@Transactional`, with batch size from `OUTBOX_RELAY_BATCH_SIZE` (default 100). Previously every replica read every unpublished row with no limit and no lock — N× duplicate publishes, and an unbounded heap load after a Kafka outage.
-- **New test** — `OutboxRelayConcurrencyTest` runs two genuinely overlapping transactions (the second `PROPAGATION_REQUIRES_NEW` while the first is still uncommitted) against real PostgreSQL via Testcontainers, and asserts the two claims are disjoint. `@DataJpaTest` is not on this project's classpath, so the JPA slice is wired by hand via `@ImportAutoConfiguration` rather than adding a Maven dependency.
-
-### Verification
-
-- All three Helm overlays render at exit 0 with zero stderr: local 187343 B / 8 StatefulSets, staging and prod 213207 B / 7 StatefulSets each. Local is byte-identical to the pre-change baseline; staging/prod differ only in Bitnami's per-render random `postgres-password`.
-- order-service: **57 tests, 0 failures, 0 errors, 0 skipped**, read directly from `target/surefire-reports/*.txt` — a piped `mvn | tail` reports tail's exit status, not Maven's. `mvn checkstyle:check` exit 0.
-- Red→green reproduced independently of the worker: the committed test, run against pre-change `main` with its claim pointed back at the old `findUnpublished()`, fails on the disjointness assertion; on the branch it passes.
-- `git diff --name-only main..feat/scalability-m1` is exactly the 7 intended files.
-
-### Known tradeoff (affects future outbox work)
-
-Mark-published now commits **per batch**, not per message. Failure containment regressed — one failing row can poison the shared persistence context for the rest of the batch — and the claim transaction holds row locks across up to 100 blocking Kafka sends. Consumers must be idempotent (AGENTS.md §3.5).
-
-**Decided: accept, and copy this pattern to other relays rather than "fixing" it.** Per-message commit is structurally incompatible with holding a `FOR UPDATE SKIP LOCKED` claim open — an inner `REQUIRES_NEW` transaction updating a row the outer transaction has locked blocks on the outer, while the outer synchronously waits for that inner call to return. Postgres cannot detect this (it sees only the inner session waiting on the outer's lock), so it stalls to `lock_timeout` rather than aborting. Per-message commit therefore means abandoning `SKIP LOCKED` for claim-by-`UPDATE`, costing a migration plus a lease column and a stuck-claim reaper — speculative complexity (Rule 2) with no measured need. Revisit on evidence: an observed duplicate-publish rate or a long-transaction alert. Batch size is env-tunable in the meantime.
-
-### Not done
-
-- Outbox cleanup `DELETE` batching — part of the same register item, split to its own ticket.
-- A third task (venue-service lock ordering) was **stopped and reverted, not shipped**: the suspected deadlock did not reproduce in 90+ runs across three configurations, and all three `FOR UPDATE` sites use a single-statement `WHERE id = ANY($1)`, which locks in scan order rather than caller-supplied order, making lock-order inversion structurally impossible. Shipping a test that passes both before and after would have been a false green. **Since closed as deferred** — a defensive `ORDER BY s.id` would be a change no test can fail on (Rule 9), and in Postgres an `ORDER BY` above a `FOR UPDATE` does not reliably dictate lock acquisition order anyway. Reopen only if a real SQLSTATE 40P01 is observed on a venue seat path.
-- **Not merged to `main`** (CLAUDE.md core rule 6). `main` is unmoved at `f565089`.
-
-### Integration audit
-
-Audited before proceeding. The diff is clean, and one real gap was found and closed: the Helm work had only been verified on the `enabled: true` path — that everything still rendered unchanged — while the actual point of the ticket, that `enabled: false` *removes* a subchart, was never exercised. Now tested: prod rendered with `postgres-venue`, `postgres-attendance` and `redis` off gives exit 0, zero stderr, 213207→172261 bytes, StatefulSets 7→4, and zero occurrences of all three release names. A suspected second gap (that the `kafka` dependency carried no `condition:`) was **wrong** — it does, as do `cp-kafka`, `opensearch` and `observability`; only `kong` and the first-party service subcharts lack toggles, which is out of scope here.
-
-### Follow-up found while verifying
-
-The prod render emits Secret `ticketing-postgres-users` with a literal password that is **regenerated on every render**, so a real `helm upgrade` would rotate the password out from under the running database and the StatefulSet would fail to authenticate. `infra/helm/templates/` contains no `kind: Secret`, so every other `existingSecret` reference is provisioned out-of-band — `postgres-users` is the one block that never got the same treatment. Now tracked as its own P0 register item. It stays open rather than being fixed inline: the remedy depends on where the credential should come from (out-of-band `existingSecret` like the other five, or External Secrets/SSM), which is an infrastructure choice, not a mechanical edit.
-## Session: 2026-08-05 — fix(outbox): indexing, retention, claim isolation across all four outboxes ✅ MERGED (PR #122, 2026-09-21, merge ded09a8)
-
-**Branch:** `fix/outbox-polling-and-retention`
-
-### What was done
-
-Hardened the transactional outbox in ticket-service (Mongo), payment-service (Drizzle/PG), attendance-service (pgx/PG) and order-service (JPA/PG), so that relay cost tracks **backlog depth** rather than total table/collection size.
-
-- **ticket-service** — added the multikey index `idx_outbox_pending` on `outbox.nextAttemptAt` (the claim was a COLLSCAN of the whole `tickets` collection ~2×/s per replica). Relay now backs off exponentially on empty polls (500 ms → 5 s cap), resetting the moment work appears. New env-gated `explain()` test proves the planner selects the index.
-- **payment-service** — added `FOR UPDATE SKIP LOCKED` claim isolation (runs 2–6 replicas) and a 24 h/10 min retention purge in bounded batches.
-- **attendance-service** — added the same 24 h/10 min retention purge (`internal/service/outbox_cleanup.go`, wired in `cmd/server/main.go`), plus **migration 008** adding `outbox.published_at`, a column `MarkPublishedTx` had always written but no migration ever created. A partial publish failure now commits the rows already on the topic instead of rolling the batch back.
-- **order-service** — `findUnpublished` is now bounded (`Pageable`, default 50 via `OUTBOX_RELAY_BATCH_SIZE`) and claims with `FOR UPDATE SKIP LOCKED`; the relay is `@Transactional` so the claim survives the publish loop.
-
-### Standards / doc changes
-
-- **`services/ticket-service/AGENTS.md`** — the outbox section claimed the ticket + event write "requires a multi-document transaction". It does not: the event is an element of the embedded `outbox` array, so both are written by one single-document update (`$set` + `$push`), which is atomic in MongoDB and strictly stronger than a transaction. Corrected the doc; the code was already right.
-
-### Verification
-
-Local Postgres 16.4 and MongoDB 7.0.14 were run standalone (Docker is unavailable on this machine, so Testcontainers suites could not run). Migration 008 was applied twice against a real database to confirm it is additive and idempotent.
-
-### Follow-ups completed 2026-08-11 (same branch)
-
-- **`fix(order)`** — order-service publish-failure semantics contradicted the other three services: `publishOne` swallowed a failed send and the relay continued, letting a later event for the same `partitionKey` overtake an earlier one still being retried. It now stops at the failing row and commits the progress made, matching payment-service and attendance-service. Also bounded `kafkaTemplate.send(...).get()` via `OUTBOX_RELAY_PUBLISH_TIMEOUT_MS` (default 10 s) — once `relay()` became `@Transactional` an unbounded wait pinned the whole claimed batch for `delivery.timeout.ms`, not just one row.
-- **`ci`** — attendance-service had **no CI job at all** and `TEST_DATABASE_URL` was set nowhere in the workflow, so every Postgres-backed test in the service skipped itself while the suite reported `ok`. Added the job (postgres:16-alpine service container) and wired the service into the changes filter, the `ci` gate and `e2e`'s needs. `requireTestPool` now applies `internal/migrations` rather than each test creating its own approximation of the schema — that second source of truth is what allowed the `id LIKE`-against-UUID bug to be written.
-
-- **`fix(attendance)`** — cleared the lint and formatting debt that adding CI exposed, so attendance-service now runs the same `golangci-lint` step as every other Go service. 10 errcheck findings (9 × unchecked `os.Unsetenv` in `config_test.go`, 1 × `resp.Body.Close` in `user_lookup.go`) and 3 unused symbols (`runLoopUntilDrained`, `stubCredentialRepoWithList` and its method — all dead, no callers). 7 files were also not `gofmt`-clean; the diff was pure field alignment.
-
-  Note for future runs: `golangci-lint` caps duplicate findings at 3 by default (`max-same-issues`), so its headline count understates the work. Use `--max-same-issues=0 --max-issues-per-linter=0` to see the true set.
-
-### Known gaps (not addressed)
-
-- No Testcontainers suite has run anywhere — Docker is unavailable on this machine. `services/*/test/...`, `mvn verify -Pfailsafe` and `pnpm test:integration` will execute for the first time in CI.
-- Migration 008 has been applied only to a local throwaway database. Deploying attendance-service requires it (hard stop #3).
-
----
-
-## Session: 2026-06-24 — feat(search): metrics, opt-in OpenSearch Helm subchart, docs ✅ COMPLETE
-
-**Branch:** `feat/opensearch-ticket-search`
-
-### What was done
-
-Completed Task 8 (rollout hardening) of the OpenSearch search feature in ticket-service.
-
-#### Summary
-
-- **New dependency:** `github.com/prometheus/client_golang v1.23.2` promoted from indirect to direct in `go.mod` (already present as a transitive dep of `echo-contrib`).
-- **New search dependency (Tasks 1–7):** `github.com/opensearch-project/opensearch-go/v4 v4.6.0` — added in earlier tasks; no new deps added this session.
-- **New package:** `internal/metrics/` — `SearchMetrics` struct with five Prometheus instruments registered on a caller-supplied registry (testable without the global default).
-- **Metric wiring:**
-  - `search_query_duration_seconds{backend}`: observed on the OpenSearch path (wraps entire refill loop) and the Mongo fallback path in `schema.resolvers.go`.
-  - `search_fallback_total`: incremented in the `TicketsConnection` resolver when an OpenSearch error triggers the Mongo fallback.
-  - `search_refill_iterations`: observed at the end of each resolver refill loop.
-  - `search_indexer_lag_seconds`: observed in `search.Indexer.processWithRetry` after a successful decode, measuring `now - event.CreatedAt`.
-  - `reindex_progress`: set as a gauge in `search.Reindex` after each page is upserted.
-- **Helm subchart:** `infra/helm/charts/opensearch/` — single-node Deployment (`discovery.type=single-node`, `DISABLE_SECURITY_PLUGIN=true`, 512Mi req / 1Gi limit), ClusterIP Service on 9200. Declared in umbrella `Chart.yaml` with `condition: opensearch.enabled`. Disabled locally (`values-local.yaml`), documented in `values.yaml`.
-- **Docs:** `docs/08-observability.md` (soft-dep exception + search metrics table), `README.md` (port 9200 + `docker compose --profile search`).
-- **Test:** `TestSearchMetrics_Registered` in `internal/metrics/search_test.go` — no external deps, verifies all five instruments register and Counter increments correctly.
-
-#### Commits on this branch (this session)
-
-| Commit | Scope | Summary |
-|---|---|---|
-| `60962ec` | feat(search) | search metrics, opt-in opensearch helm subchart, docs |
-
----
-
-## Session: 2026-05-22 — runbook(graphql): add explicit migration revert sequence ✅ COMPLETE
-
-**Branch:** `feat/client-graphql-foundation`
-
-### Rollback command sequence (dry-run ready)
-
-Use a throwaway branch, then run the migration-range revert exactly in this order:
-
-```bash
-git checkout -b chore/graphql-revert-dry-run
-git revert --no-commit 09bea9e^..cbf61f1
-```
-
-If the dry-run is only for rehearsing rollback mechanics, discard local changes:
-
-```bash
-git restore --staged .
-git restore .
-```
-
-### Post-revert smoke check
-
-After a real revert commit, run:
-
-```bash
-docker compose up -d --build --wait
-curl -fsS http://localhost:8000/healthz/live
-curl -fsS http://localhost:8001/status
-```
-
-Expected: compose healthy, gateway liveness 200, Kong status 200.
-
----
-
-## Session: 2026-05-22 — feat(client): complete GraphQL Phase 4 migration ✅ COMPLETE
-
-**Branch:** `feat/client-graphql-foundation`
-
-### What was done
-
-Completed the full GraphQL-first migration for the `services/client` Next.js app across Phases 4.1–4.7 plus cleanup (Stage 5).
-
-#### Commits on this branch (newest first)
-
-| Commit | Scope | Summary |
-|---|---|---|
-| Stage 5 | cleanup | Narrow `lib/api.ts`; add AGENTS.md data-fetching section; update docs |
-| `4430489` | Phase 4.6 | Browser urql seat selection (HoldSeats, ReleaseSeats, 5s polling) |
-| `fd2ed10` | Phase 4.7 | Attendance + scan pages → GraphQL |
-| `9391482` | Phase 4.4 | Payment-method registration milestone |
-| `e2baa49` | Phase 4.3 | Orders, cancel, payment → GraphQL |
-| `3ebf238` | Phase 4.2 | Ticket browse + detail → GraphQL |
-| `12a13ca` | Phase 4.1 | Settings page → GraphQL |
-| `25c0a42` | infra | Apollo Router cookie propagation + attendance routing |
-
-#### Key outcomes
-
-- All app screens now use `executeQuery` / `executeMutation` from `lib/graphql/execute.ts` (server) or urql hooks (browser, seat map only).
-- `lib/api.ts` narrowed to `serverApi` + `ApiError`; all domain REST wrappers removed.
-- REST keep-list documented in `services/client/AGENTS.md §Data Fetching`.
-- Schema gaps (SeatingPlan.name, AvailabilitySnapshot.counts) kept as REST; reasons documented.
-- Hard stops 11–12 added to `docs/15-agent-hard-stops.md`: no SDL copying into client, no inline gql strings.
-- `docs/03-api-design.md` updated with Phase 4 migration outcome.
-
-### Verification (pre-commit)
-
-| Check | Result |
-|---|---|
-| `pnpm tsc --noEmit` | ✅ 0 errors |
-| `pnpm lint` | ✅ clean |
-| `pnpm test` | ✅ 143/143 |
-| Inline-gql grep | ✅ OK (0 matches) |
-| REST keeplist grep | ✅ OK (0 violations) |
-
----
-
-## Session: 2026-05-07 — docs(qr-attendance): register repo-grounded superpowers plan ✅ COMPLETE
-
-**Branch:** `main`
-
-### What was done
-
-Registered a new superpowers-compatible implementation plan for QR-code attendance that is grounded in the current microservices repo instead of the earlier generic enterprise assumptions, then updated the API standard to reflect the repository's GraphQL-plus-REST model.
-
-1. **`docs/superpowers/plans/2026-05-07-qr-attendance.md`** — added a continuation-friendly execution plan in the same style as the existing superpowers plans.
-   The plan is explicitly scoped to the current platform and distinguishes:
-   - net-new `attendance-service`
-   - targeted modifications to `client`, `kong-gateway`, Helm, and only minimal existing backend surfaces
-   - deferred email delivery because the repo does not currently contain a notification/email service
-
-2. Enriched the same attendance plan with explicit implementation recommendations and a required test plan so future agent sessions do not skip the service-boundary, protocol-split, security, or regression requirements.
-
-3. **`docs/03-api-design.md`** — updated the API standard so REST and GraphQL are both documented as first-class external API styles with different target consumers:
-   - GraphQL for app-facing composed client flows
-   - REST + OpenAPI for third-party integrations, MCP/agent tooling, and command-style operational endpoints
-
-4. The plan is intentionally structured for follow-up agent sessions:
-   - goal / out-of-scope / architecture / tech stack
-   - explicit file map
-   - checkbox workstreams
-   - recommended execution order
-   - release gate
-
-5. No application code was changed in this session.
-
-### Outcome
-
-The repository now contains a superpowers-compatible QR attendance plan plus an updated API standard, so future agentic implementation work can follow the intended GraphQL/REST split, test strategy, and service-boundary decisions without re-deriving them from chat history.
-
----
-
-## Session: 2026-04-30 — ops(observability): rehearse CriticalServiceDown alert ✅ COMPLETE
-
-**Branch:** `feat/observability-release-gate`
-
-### What was done
-
-Finished the last remaining release-gate step for the pre-production observability plan.
-
-1. Created a dedicated branch, `feat/observability-release-gate`, from the current working tree so the final validation work is isolated from `main`.
-2. Performed a controlled local outage by stopping `user-service`, which is one of the critical scrape targets covered by the repo-managed `CriticalServiceDown` rule.
-3. Verified Prometheus transitioned the target to `up=0` and fired `CriticalServiceDown` for `job="user-service"`.
-4. Restored `user-service` with Docker Compose and verified Prometheus returned the target to `health: up` and cleared the alert.
-
-### Verification
-
-- `curl http://localhost:9090/api/v1/query?query=up{job="user-service"}` before outage returned `1` ✅
-- `curl http://localhost:9090/api/v1/query?query=ALERTS{alertname="CriticalServiceDown"}` before outage returned no active alert ✅
-- `docker compose stop user-service` triggered a real local scrape failure ✅
-- Prometheus query for `ALERTS{alertname="CriticalServiceDown",alertstate="firing",job="user-service"}` returned a firing alert with `severity="critical"` ✅
-- Prometheus query for `up{job="user-service"}` during outage returned `0` ✅
-- `docker compose up -d user-service` restored the service ✅
-- Post-recovery Prometheus queries showed `up{job="user-service"} == 1` and no remaining `CriticalServiceDown` alert for `user-service` ✅
-
-### Outcome
-
-The final release gate is now closed: the repository does not just define alert rules, it has a verified local rehearsal showing that a real critical scrape outage produces the expected repo-managed alert and clears again after recovery.
-
----
-
-## Session: 2026-04-30 — feat(observability): wire alerts, telemetry coverage, and payment lookup resilience ✅ COMPLETE
-
-**Branch:** `main`
-
-### What was done
-
-Implemented the critical pre-production observability and reliability backlog, excluding deployment/CD work.
-
-1. **Alerting and Prometheus rule wiring**
-- Added repo-managed Prometheus rule loading for the local stack and Helm chart.
-- Added core platform alerts for service-down, 5xx, and latency conditions plus an async-path placeholder rule file that explicitly documents missing backlog and DLQ instrumentation.
-- Updated the local observability README with the alert response loop and initial operator workflow.
-
-2. **Apollo Router and user-service telemetry coverage**
-- Added an OTel Collector metrics pipeline with a Prometheus exporter so Apollo Router OTLP metrics become queryable in Prometheus.
-- Added user-service RED metrics via a Nest Prometheus module and middleware pattern aligned with the existing platform metric names.
-- Updated Prometheus scrape configuration in local and Helm values to include Apollo Router and user-service.
-- Repaired and extended the Grafana dashboards so platform and RED views now include Apollo Router request rate, error rate, and p95 latency panels.
-
-3. **Payment-service synchronous dependency hardening**
-- Hardened `OrderServiceClient` with timeout-aware retry, exponential backoff with jitter, an in-process circuit breaker, and Prometheus metrics for failures, retries, and breaker-open state.
-- Added focused unit coverage for retry and breaker behavior and added a degraded-path integration assertion that returns 503 when order lookup is unavailable.
-- Documented the new resilience configuration in the payment-service README and example env file.
-
-4. **Operator-first dashboards and investigation workflow**
-- Extended the local Grafana dashboards with payment-path panels for create success/failure rate, lookup failures, retries, and circuit-breaker state, while keeping Apollo Router panels aligned to the collector-exported metric names.
-- Updated the local observability README with a fixed first-response workflow: targets first, then RED, then dependency-specific panels, then Jaeger, then logs.
-- Updated the synthetic observability report to use the corrected Grafana port, verify both provisioned dashboards, sample payment and router Prometheus signals, capture refreshed screenshots, and assert async propagation from Kafka publish/process trace evidence.
-- Refreshed `observability/local/docs/observability-report.json` and `observability/local/docs/observability-report.md` from a passing end-to-end run.
-
-### Verification
-
-- `docker compose -f observability/local/docker-compose.observability.yml config --services` ✅
-- `helm template observability ./infra/helm/charts/observability` ✅
-- `node -e "JSON.parse(require('fs').readFileSync('observability/local/grafana/dashboards/platform-overview.json','utf8'))"` ✅
-- `node -e "JSON.parse(require('fs').readFileSync('observability/local/grafana/dashboards/services-red.json','utf8'))"` ✅
-- `pnpm tsc --noEmit` in `services/user-service` ✅
-- `curl -i http://localhost:3004/metrics` after rebuilding `services/user-service` ✅
-- `curl http://localhost:9090/api/v1/targets` showed `apollo-router` and `user-service` scrape targets `up` ✅
-- `curl -u admin:admin http://localhost:3005/api/search` confirmed Grafana dashboard provisioning on the corrected host port ✅
-- `curl http://localhost:9090/api/v1/query?query=sum(rate(apollo_router_operations_total[5m]))` returned router traffic ✅
-- `curl http://localhost:9090/api/v1/query?query=histogram_quantile(0.95,sum(apollo_router_query_planning_total_duration_bucket) by (le))` returned router planning latency ✅
-- `pnpm test:observability-report` in `services/client` ✅
-- `pnpm lint && pnpm tsc --noEmit` in `services/client` ✅
-- `pnpm vitest run src/modules/payments/order-service.client.spec.ts` in `services/payment-service` ✅
-- `pnpm vitest run --config vitest.integration.config.ts test/payments.integration.spec.ts --testNamePattern "order lookup is unavailable"` in `services/payment-service` ✅
-- `pnpm tsc --noEmit` in `services/payment-service` ✅
-- `pnpm build` in `services/payment-service` ✅
-
-### Outcome
-
-- The repository now has active alert evaluation, broader edge and service telemetry coverage, repaired operator dashboards, and a hardened synchronous payment lookup path.
-- Follow-up fixes discovered during live validation are now included too: the local Grafana host port no longer collides with `user-service`, `user-service` exposes `/metrics` via an explicit controller, the Apollo Router dashboard queries now match the actual exported metric names, and the synthetic observability report now proves dashboard availability, payment-path metrics, router metrics, and Kafka async trace continuity from a passing golden flow.
-
----
-
-## Session: 2026-04-30 — docs(interview): add backend interview knowledge graph and pressure-question bank ✅ COMPLETE
-
-**Branch:** `main`
-
-### What was done
-
-Created a living interview-prep document that turns the purchase-flow architecture into a reusable knowledge graph plus question bank for senior backend interviews.
-
-1. **`docs/interview.md`** — added a durable interview-prep document.
-It includes a Mermaid knowledge graph, core invariants, senior-level pressure questions, direct repository evidence, and a discovery backlog for later expansion.
-
-2. Expanded the same document with a dedicated payment-system deep-dive layer:
-It now includes a second Mermaid graph focused on charge initiation, webhook races, outbox semantics, payment-domain gaps, and a concrete hardening path toward more payment-company-grade capabilities such as refunds, reconciliation, processed-event ledgers, and richer lifecycle modeling.
-
-3. **`AGENTS.md`** — added the new document to the documentation index so it can be loaded on demand in future sessions.
-
-4. No application code changes were made in this session.
-
-### Outcome
-
-The repository now contains a persistent interview-prep knowledge base that can be incrementally extended as new questions, failure modes, and design trade-offs are discovered.
-
----
-
-## Session: 2026-04-30 — docs(reliability): add pre-production observability and resilience backlog ✅ COMPLETE
-
-**Branch:** `main`
-
-### What was done
-
-Created a concrete pre-production readiness backlog focused only on the critical non-deployment gaps that should be closed before real deployment.
-
-1. **`docs/superpowers/plans/2026-04-30-preprod-reliability-observability.md`** — added a dated implementation plan covering four workstreams:
-  - active alerting and Prometheus rule groups
-  - Apollo Router and user-service telemetry coverage
-  - payment-service order lookup resilience hardening
-  - operator-first dashboards and investigation workflow
-
-2. Explicitly scoped out AWS environment preparation, deploy automation, and other CD concerns so the plan stays actionable even while client infrastructure is not ready.
-
-3. No application code changes were made in this session.
-
-### Outcome
-
-The repository now contains a concrete backlog for the critical observability and reliability work that should be completed before the platform is treated as deployment-ready.
-
----
-
-## Session: 2026-04-23 — docs(graphql-federation): document order-service Spring GraphQL deviation ✅ COMPLETE
-
-**Branch:** `feature/graphql-federation`
-
-### What was done
-
-Updated spec and plan docs to reflect the actual implementation of the order-service GraphQL subgraph.
-
-1. **`docs/superpowers/specs/2026-04-20-graphql-federation-design.md`** — replaced all Netflix DGS references in order-service context with Spring GraphQL; updated the architecture diagram label, subgraph assignments table, implementation pattern section (dependencies, file structure), DataLoader table, and rollout step 4; added a rationale note: order-service uses Spring GraphQL (`@Controller` + `@QueryMapping`/`@SchemaMapping`) instead of Netflix DGS — Spring-native, zero additional dependency, sufficient for federation via `@apollographql/federation-jvm`.
-
-2. **`docs/superpowers/plans/2026-04-20-graphql-federation.md`** — updated Tech Stack line (Netflix DGS → Spring GraphQL), added a one-line deviation note pointing to the spec, updated File Map table (DGS-named files → actual Spring GraphQL filenames), updated Task 16 title and pom.xml dependency block, updated Task 17 title, test class, and implementation code to reflect `@Controller`-based approach.
-
-3. No code changes were made.
-
-### Outcome
-
-Spec and plan now accurately reflect the implemented Spring GraphQL approach. Rationale is captured in the spec. No functional changes.
-
----
-
-## Session: 2026-04-15 — Settings release hardening + clean bootstrap gate ✅ COMPLETE
-
-**Branch:** `main`
-
-### What was done
-
-1. **User-service startup path hardened**
-- Added a runtime SQL migration runner for `services/user-service` that applies `migrations/*.sql` in sorted order and records filename checksums in `schema_migrations`.
-- Kept fail-loud startup behavior so checksum drift or SQL failures stop the container before Nest starts.
-- Preserved schema-aware readiness and startup verification for `user_profiles`, `user_preferences`, and `billing_addresses`.
-
-2. **Payment-service startup path hardened**
-- Replaced the metadata-dependent runtime migrator with the same explicit SQL migration runner strategy in `services/payment-service`.
-- Ensured clean boot now creates the saved-payment schema required by readiness: `payment_customers` and `saved_payment_methods`.
-- Kept `/healthz/ready` as the compose health target so missing schema fails fast.
-
-3. **Production-parity validation retained and extended**
-- `pnpm migrate` in both TypeScript services now uses the same code path as container startup instead of a separate `drizzle-kit migrate` path.
-- Client settings action unit coverage remained in place for session-auth routing.
-- Existing settings Playwright coverage was rerun against the rebuilt stack.
-
-4. **Clean environment proof completed**
-- Rebuilt the full stack from empty volumes with `docker compose down -v && docker compose up --build --detach`.
-- Verified both `payment-service` and `user-service` passed readiness from the fresh bootstrap.
-- Ran the settings-focused Playwright flow successfully against the clean stack.
-
-### Verification
-
-- `pnpm lint && pnpm build` in `services/payment-service` ✅
-- `pnpm lint && pnpm build` in `services/user-service` ✅
-- `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:1/<db> pnpm migrate` in both services reached the new migration entrypoint and failed only on the expected connection refusal ✅
-- `docker compose down -v && docker compose up --build --detach` from repo root ✅
-- `curl -fsS http://localhost:3002/healthz/ready` ✅
-- `curl -fsS http://localhost:3004/healthz/ready` ✅
-- `pnpm exec playwright test tests/e2e/ticketing.spec.ts --grep settings` in `services/client` ✅ (3/3 passed)
-
-### Outcome
-
-- The settings release-hardening path now proves the audit requirement that a fresh local bootstrap does not require manual SQL.
-- The clean-stack verification for saved payment methods and session/settings flows is passing end to end.
-
----
-
-## Session: 2026-04-09 — Linkerd gRPC transport hardening + ticket outbox relay tests ✅ COMPLETE
-
-**Branch:** `copilot/worktree-2026-04-08T16-22-48`
-
-### What was done
-
-1. **Ticket-service outbox relay test coverage added**
-- Added focused package tests in `services/ticket-service/internal/outbox/relay_test.go`.
-- Covered publish routing, success ack flow, failed publish requeue flow, payload mapping, and retry backoff capping.
-- Refactored `internal/outbox/relay.go` to depend on narrow repo/producer interfaces so the relay is directly testable without concrete Mongo/Kafka implementations.
-
-2. **Mongo-backed outbox integration tests added**
-- Added `services/ticket-service/test/outbox_relay_integration_test.go` using the existing Testcontainers Mongo fixture.
-- Covered claim leasing, ack removal, requeue state updates, expired-lease reclaim, and wrong-token rejection.
-
-3. **Internal gRPC transport moved onto a Linkerd mesh story in Kubernetes**
-- Added global Helm values for service-mesh configuration in `infra/helm/values.yaml` and `infra/helm/values-local.yaml`.
-- Injected the gRPC participants into Linkerd via pod annotations in:
-   - `infra/helm/charts/ticket-service/templates/deployment.yaml`
-   - `infra/helm/charts/venue-service/templates/deployment.yaml`
-   - `infra/helm/charts/order-service/templates/deployment.yaml`
-- Added port-scoped Linkerd `Server` + `ServerAuthorization` resources for the ticket-service and venue-service gRPC ports so HTTP ingress via Kong is not blocked.
-
-4. **Local Kubernetes bootstrap updated**
-- `infra/local/setup.sh` now requires the `linkerd` CLI and installs or upgrades the Linkerd control plane before Helm deploy.
-- Existing Kafka skip-port behavior remains in place for Linkerd.
-
-### Verification
-
-- `go test ./internal/outbox ./test -run 'Outbox|Relay|Claim|Acknowledge|Requeue'` in `services/ticket-service` ✅
-- `go test ./... && go vet ./...` in `services/ticket-service` ✅
-- `helm dependency build ./infra/helm` ✅
-- `helm template ticketing ./infra/helm -f ./infra/helm/values-local.yaml` ✅
-
-### Follow-up
-
-- A full local Kubernetes run of `./infra/local/setup.sh` was not executed in this session, so live cluster verification of Linkerd-enforced traffic remains the next operational check.
-
----
-
-## Session: 2026-04-01 — Quota & Seating Plan Design: Open Questions Resolved ✅ READY FOR IMPLEMENTATION
-
-**Branch:** N/A (design documents only)
-
-### What was done
-
-1. **Comprehensive codebase exploration** of all 5 existing services — architecture, models, handlers, Kafka events, gRPC, database schemas.
-
-2. **GA Quota Design Document** written at `docs/quota-reservation-design.md`:
-   - 9 sections covering model changes, Redis Lua scripts, phased implementation (11 phases), breaking changes, migration strategy, 30+ unit tests, 5 load test scenarios, risk analysis.
-
-3. **Venue Seating Plan Design Document** written at `docs/venue-seating-plan-design.md`:
-   - 20 sections covering new venue-service architecture, seat state machine, hold mechanism (Redis Lua scripts), reservation flows (4 flows), auto-assign algorithm, SSE real-time, cross-service integration, order model changes, PostgreSQL schema, gRPC proto definitions, template system, 14 implementation phases.
-
-4. **All critical open questions resolved** via stakeholder Q&A:
-
-| Decision | Resolution |
-|---|---|
-| Sold counter | Option A: Separate `sold` field. `available = quota - reserved - sold`. |
-| Multi-quantity V1 | Yes — support from V1. `CreateOrderRequest.quantity` defaults to 1. |
-| Redisson lock | Keep as fallback safety net with reduced TTL (2s). Primary atomicity from Lua scripts. |
-| `orders.order.completed` topic | Add new Kafka topic. Producer: order-service. Consumers: venue-service + ticket-service. |
-
-5. **Both design documents updated** with all resolved decisions:
-   - Status changed from DRAFT to APPROVED
-   - Open questions section updated with resolutions
-   - Ticket model includes `sold` field throughout
-   - Reservation flow updated with Redisson fallback
-   - New `MarkSold` method added to QuotaManager, TicketRepository interfaces
-   - `orders.order.completed` event schema documented
-   - Kafka consumer updated with `handleOrderCompleted` handler
-
-### Next steps
-
-1. **Begin implementation** starting with proto changes (Phase 1 in quota doc / Phase 0 in seating doc)
-2. Implementation order: proto → ticket-service quota → order-service changes → venue-service scaffold
-3. Non-blocking design questions (seat labels, rendering tech, template sharing) deferred to relevant implementation phases
-
----
-
-## Session: 2026-04-01 — Post-audit lint/type hardening: PR #16 ⏳ AWAITING REVIEW
-
-**Branch:** `fix/audit-typescript-errors` → PR #16 (open, awaiting owner review).
-
-### What was done
-
-Completed a full lint and type-check pass across all six services, discovering and fixing post-audit regressions not captured by the AUDIT-TODO checklist.
-
-**1. auth-service — TypeScript errors in integration test (9 → 0)**
-- File: `test/auth.integration.spec.ts`
-- Root cause A: Audit fix O-04 refactored `GlobalExceptionFilter` to require DI-injected `Logger`; the integration test still called `new GlobalExceptionFilter()` with no argument → TS2554.
-  Fix: added `import { Logger } from 'nestjs-pino'`; changed instantiation to `new GlobalExceptionFilter(moduleRef.get(Logger))`.
-- Root cause B: supertest v7.2.2 + `@types/supertest ^6.0.3` type mismatch — v7 types the `set-cookie` response header as `string`, but the test code cast to `string[]` → 8× TS2352.
-  Fix: inserted `unknown` intermediary: `as unknown as string[] | undefined`.
-
-**2. client — TypeScript errors in unit test (2 → 0)**
-- File: `__tests__/pages.test.tsx`
-- Root cause: `vi.fn<() => Promise<TicketPage>>()` is typed as a no-argument function; spreading `unknown[]` into it fails TS2556.
-  Fix: `mockFn(...args as Parameters<typeof mockFn>)` at both call sites.
-
-**3. order-service — Checkstyle configuration and import hygiene**
-- AGENTS.md mandates `mvn -q checkstyle:check` but no plugin existed; the
-  default Sun checks produced 676 violations and Google checks produced 817 (all on
-  4-space indentation the project doesn't use).
-- Created `services/order-service/checkstyle.xml` — project-tuned rules:
-  `AvoidStarImport`, `UnusedImports`, `RedundantImport`, `IllegalImport`,
-  naming conventions (TypeName, MemberName, ParameterName, LocalVariableName,
-  MethodName, PackageName), `ConstantName` with SLF4J `log`/`logger` exception,
-  `EmptyCatchBlock`, `FallThrough`, `MultipleVariableDeclarations`, `UpperEll`,
-  `ArrayTypeStyle`, `ModifierOrder`.
-- Updated `pom.xml` to reference `checkstyle.xml` instead of `google_checks.xml`.
-- Fixed 4 star-import violations:
-  - `Order.java`: `jakarta.persistence.*` → 12 explicit imports
-  - `OutboxMessage.java`: `jakarta.persistence.*` → 7 explicit imports
-  - `OrderTicket.java`: `jakarta.persistence.*` → 7 explicit imports
-  - `OrderController.java`: `org.springframework.web.bind.annotation.*` → 8 explicit imports
-- Removed stale unused `KafkaTemplate` import from `OutboxRelay.java`.
-
-### Verification Matrix
-
-| Service | Command | Result |
-|---|---|---|
-| auth-service | `pnpm tsc --noEmit` | ✅ 0 errors |
-| client | `pnpm tsc --noEmit` | ✅ 0 errors |
-| payment-service | `pnpm tsc --noEmit` | ✅ 0 errors |
-| ticket-service | `go vet ./...` | ✅ clean |
-| expiration-service | `go vet ./...` | ✅ clean |
-| order-service | `mvn -q checkstyle:check` | ✅ 0 violations |
-
-### PR Summary
-
-**PR #16**: fix: post-audit lint and type hardening
-- **Branch**: `fix/audit-typescript-errors`
-- **Status**: ⏳ AWAITING OWNER REVIEW
-- **Commits**: 1
-- **Files Changed**: 9 (+115 / -17 lines)
-- **Breaking Changes**: None
-
----
-
-## 2026-09-21 — PR #122 CI remediation: Trivy gate sweep
-
-**Branch**: `fix/outbox-polling-and-retention` (PR #122) — head `f4a04e84`
-
-### Root cause of the repo-wide red
-
-`aquasecurity/trivy-action` with `format: sarif` leaves `limit-severities-for-sarif`
-at its default (`false`). The `severity: HIGH,CRITICAL` input therefore only shapes
-the report — the scan itself covers **all** severities, and `exit-code: "1"` fires on
-**any** fixable finding, including LOW and MEDIUM. Every per-service gate in
-`.github/workflows/ci.yml` is affected. With `ignore-unfixed: true`, every blocking
-finding has a published upstream fix.
-
-### Changes landed
-
-| Commit | Change | Effect |
-|---|---|---|
-| `663b51f` (merged via `42231e8b`) | CVE sweep: 18 HIGH/CRITICAL version bumps | order-service → green |
-| `fad48e7` | Add required `fullUrl` to the queue-gate integration test | client `Build image` → green |
-| `f4a04e8` | `qs` override → 6.16.0 (auth, user, payment, client) | those 3 node services → green |
-
-`43a4b585` had added the required `fullUrl` field to `GateInput` without updating the
-integration test. `pnpm lint` and `pnpm test` stayed green, but `pnpm build` inside the
-client Dockerfile type-checks, so CI's `Build image` step failed.
-
-### Verification Matrix
-
-| Service | Command | Result |
-|---|---|---|
-| client | `tsc --noEmit` / `pnpm build` / `pnpm test` | ✅ 0 errors / rc=0 / 207 passed, 2 skipped |
-| auth-service | `pnpm test` | ✅ 99 passed |
-| user-service | `pnpm test` | ✅ 43 passed |
-| payment-service | `pnpm test` | ✅ 95 passed |
-| order-service | `mvn test` (online) | ✅ 63 passed |
-
-### CI result — run `35538462381`
-
-✅ auth-service, client, payment-service, user-service, order-service, kong-gateway,
-proto, GraphQL schema check, Helm validation
-❌ ticket-service, venue-service, expiration-service, attendance-service, queue-service
-
-### Remaining blockers — OWNER DECISION REQUIRED
-
-Both are outside the remit of a dependency sweep.
-
-**1. Four Go services — blocked on a repo-wide Go 1.25 → 1.26 toolchain upgrade.**
-Image scans of `ticket-service` and `attendance-service` show an identical residual set
-(the other two confirmed by module parity — same `x/crypto v0.55.0`, same `otel/sdk v1.44.0`):
-
-- MEDIUM `golang.org/x/crypto` 0.55.0 → 0.56.0 (CVE-2026-78662)
-- LOW ×3 `go.opentelemetry.io/otel/*` 1.43/1.44 → 1.45.0 (CVE-2026-81870)
-
-Both fixes declare `go 1.26.0` upstream (verified in the published `.mod` files), which
-raises each service's `go` directive to 1.26 and breaks the digest-pinned
-`golang:1.25-bookworm@sha256:3b4a11…` builder with
-`go.mod requires go >= 1.26.0 (running go 1.25.14; GOTOOLCHAIN=local)`.
-Upgrading means 4 Dockerfile digests + 4 `go-version: "1.25"` entries in `ci.yml`.
-
-*Not* blockers: `x/mod`, `docker/docker` and `moby/go-archive` appear in a `trivy fs`
-scan of `go.mod` but are test-only and never reach the scanned binary — confirmed by
-image scan. Bumping them does not move the gate.
-
-**2. queue-service — 6 MEDIUM in `libc6` 2.39-0ubuntu8.8 → 2.39-0ubuntu8.9.**
-Base image is `mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled`. Chiseled images
-carry no package manager and no shell, so this **cannot** be patched with `apt-get
-upgrade` in the Dockerfile. It clears only when Microsoft publishes a refreshed tag.
-
-### Options for the owner
-
-1. Upgrade the toolchain to Go 1.26 repo-wide (unblocks the 4 Go services; queue-service still red).
-2. Set `limit-severities-for-sarif: true` so the gate enforces the `HIGH,CRITICAL`
-   it already declares. This matches the workflow's evident intent, but it **narrows the
-   gate** and is explicitly owner-sign-off territory. PR #109 separately proposes changes
-   to this gate and should be decided alongside.
-3. Accept a red queue-service until the upstream base image refreshes.
-
-No change was made to the Trivy severity configuration.
-
-### Addendum — Go 1.26 toolchain upgrade (commit `de8a22f`, local, UNPUSHED)
-
-Owner directed "the 5 red one first". Narrowing the Trivy gate was not signed off,
-so the remediation took the real-fix path: upgrade the toolchain.
-
-`golang:1.25-bookworm@sha256:3b4a1151…` → `golang:1.26-bookworm@sha256:a688600c…` (1.26.8)
-in 4 Dockerfiles, `go-version: "1.25"` → `"1.26"` in 4 `ci.yml` entries, plus the module
-bumps that required it: `x/crypto` 0.56.0, `otel/*` 1.45.0, and
-`gorilla/websocket` 1.5.3 (attendance only). These cannot be split — the module bumps
-raise each `go.mod` directive to 1.26.0, which the 1.25 builder rejects.
-
-| Service | build | vet | unit tests | image build | Trivy (all sev, fixable) |
-|---|---|---|---|---|---|
-| ticket-service | ✅ | ✅ | ✅ 10 pkgs | ✅ | ✅ 0 findings |
-| venue-service | ✅ | ✅ | ✅ 6 pkgs | ✅ | ✅ 0 findings |
-| expiration-service | ✅ | ✅ | ✅ 4 pkgs | ✅ | ✅ 0 findings |
-| attendance-service | ✅ | ✅ | ✅ 6 pkgs | ✅ | ✅ 0 findings |
-
-**Correction to the previous entry.** It stated `gorilla/websocket` was test-only and did
-not move the gate. That was wrong — it was reverted alongside `x/mod`, but the image scan
-shows it *is* linked into attendance-service's binary. `x/mod`, `docker/docker` and
-`moby/go-archive` remain correctly classified as test-only.
-
-**queue-service — confirmed unfixable in-repo.** Freshly pulled
-`aspnet:10.0-noble-chiseled` still ships `libc6 2.39-0ubuntu8.8`; CVE-2026-80489 needs
-`8.9`. The `10.0-resolute-chiseled` variant (Ubuntu 25.10) carries the **same** CVE at
-`2.43-2ubuntu2.3 → 2.4`, so switching distro does not help, and chiseled images have no
-package manager to patch with. This clears only when Microsoft rebuilds. Remaining
-options are owner calls: wait for the upstream rebuild, or sign off on the gate change.
-
-Still not done: `de8a22f` is committed locally but **unpushed** — the push was blocked
-because the commit modifies `.github/workflows/ci.yml`. CI has not yet run against it,
-so the four green results above are local evidence only.
-
-### CI result — run `35541697068` (`de8a22f4`, pushed 2026-09-21)
-
-The Go 1.26 upgrade is confirmed by CI, matching local verification exactly.
-
-**15 of 16 jobs green**, including **Playwright E2E (full stack)** — which had been
-skipped on every prior run because upstream jobs failed, so this is its first green
-on this branch.
-
-✅ ticket-service, venue-service, expiration-service, attendance-service (all four
-previously red on Trivy), auth, user, payment, client, order, kong-gateway, proto,
-GraphQL schema check, Helm validation, Detect changed paths, Playwright E2E
-❌ queue-service — failing step verified as `Scan image with Trivy`, exit 1,
-`[ubuntu] os_version="24.04" pkg_num=8`, consistent with the local scan's single
-fixable finding (`libc6` CVE-2026-80489).
-
-Unrelated observation, not gating: the queue-service **test** project warns NU1903 on
-`SSH.NET` 2025.1.0 (two HIGH advisories, GHSA-mggc-4xg6-vcxf and GHSA-q939-rpr3-3284).
-Test-only, so it never reaches the scanned image, but worth a follow-up. Tests pass 62/62.
-
-**PR #122 is now blocked on exactly one thing**, and it is not a code change: the
-queue-service gate failure has no in-repo fix. Owner decides between waiting for the
-Microsoft base-image rebuild and signing off on the Trivy gate configuration.
-
-### queue-service — time-boxed CVE suppression (commit `fef8ae2`)
-
-Owner signed off explicitly after being shown that no in-repo remediation exists.
-
-The image carries six MEDIUM glibc CVEs — CVE-2026-6368, -6791, -19499, -19542,
--77117, -80489 — all in `libc6 2.39-0ubuntu8.8`, all fixed only by `2.39-0ubuntu8.9`.
-
-Why nothing else was possible:
-- `aspnet:10.0-noble-chiseled` is chiseled: no package manager, no shell, so the
-  Dockerfile cannot upgrade the package.
-- `10.0-resolute-chiseled` (Ubuntu 25.10) carries the **same** unfixed CVEs at
-  `libc6 2.43-2ubuntu2.3` — switching distro is not a fix.
-- Dropping to a non-chiseled base to gain `apt` would enlarge the attack surface to
-  remove six MEDIUMs: a net loss.
-
-**This is a suppression, not a fix.** The CVEs remain in the running image. It is the
-narrowest available form: scoped to the queue-service job via `trivyignores`, listing
-six specific CVE IDs rather than a severity class, expiring **2026-12-21**. The severity
-gate is unchanged here and in every other service.
-
-Verified locally, all three states:
-
-| condition | exit code |
-|---|---|
-| no ignore file | 1 (six findings) |
-| ignore file, expiry in future | 0 |
-| ignore file, expiry moved to past | 1 |
-
-The third case matters: it proves the time-box genuinely re-arms the gate rather than
-being decorative.
-
-**On expiry**: re-scan the base image. If Microsoft has rebuilt, delete the file. If not,
-extend the date deliberately and record why.
-
----
-
-## 2026-09-21 — PR #122 CI fully green
-
-Run **35565629002** on `fef8ae29` (`fix/outbox-polling-and-retention`) concluded
-**success**. All 18 jobs green: the 15 service jobs, `proto`, `GraphQL schema check`,
-`Helm rendered-manifest validation`, and `Playwright E2E (full stack)`.
-
-Starting point this session was 6 green / 10 red. The sequence that closed it:
-
-1. Root cause — `trivy-action` with `format: sarif` scans **all** severities
-   (`limit-severities-for-sarif` defaults to `false`), so `exit-code: "1"` fired on
-   fixable LOW/MEDIUM findings. `severity: HIGH,CRITICAL` only shapes the report.
-2. CVE sweep across the Node/Go services; `qs` override to 6.16.0; `fullUrl` added to
-   the client queue-gate integration test.
-3. Go 1.25 → 1.26 toolchain upgrade — four digest-pinned builder images plus four
-   `go-version` entries in `ci.yml`, moved in one commit with `x/crypto` 0.56.0,
-   `otel` 1.45.0 and `gorilla/websocket` 1.5.3, because those modules raise `go.mod`
-   to `1.26.0` and cannot be split from the toolchain bump.
-4. queue-service — six unfixable glibc CVEs in the chiseled base, closed by an
-   owner-approved, job-scoped, time-boxed ignore (see the entry above).
-
-The Trivy severity gate was not narrowed at any point, for any service.
-
-**Owner decisions still open**: merge approval for #122 (no auto-merge to main);
-whether to split the Go 1.26 platform commit `de8a22f` out of an outbox PR;
-review of migration 008 (attendance outbox schema, so far only exercised against a
-throwaway local DB); the redundant `chore/cve-sweep-2026-09` branch, whose contents
-now live in #122; and the non-gating `SSH.NET` 2025.1.0 HIGH advisories in
-queue-service's **test** project.
-
----
-
-## 2026-10-03 — PR #153 audit fixes
-
-Fixes from the MCP platform review, on `feat/mcp-platform`, with no dependency or
-version change (the Trivy and dependency gates are untouched).
-
-- **Idempotency**: the derived key now includes a 15-minute window, so a cancelled or
-  expired order no longer replays forever; a missing `sub` is an auth failure instead
-  of falling back to the client id.
-- **OAuth**: the session verifier accepts only the session issuer; disconnecting a
-  client records a not-before time that blocks exchange of earlier tokens; mcp-service
-  reuses an exchanged token for at most 60 seconds.
-- **Config**: `API_AUDIENCE` is an explicit optional setting; Helm derives the issuer,
-  resource and audience from `global.publicOrigin`, and the umbrella chart fails the
-  render when mcp-service is enabled without it.
-- **Observability**: Kong logs each audience-less OAuth token it admits;
-  `order.keyed.uncompensated{flow}` counts keyed creates that leave a reservation held.
-- **Contracts**: venue-service pins the "was already released" phrase order-service
-  matches on, as ticket-service already did for its prefix.
-- **Shutdown**: one SIGTERM handler in mcp-service drains connections (20 s), then
-  flushes telemetry (3 s), under the 30 s pod grace period.
-- **Docs**: the V8 migration pre-check and concurrent-build steps are in
-  `docs/11-kubernetes-deployment.md`.
-- **Disconnect and REST access**: a dynamically registered or metadata-document client is
-  now limited to the MCP resource (a missing `resource` means `/mcp`, `/api` is
-  `invalid_target`), because a token minted for `/api` directly bypassed the exchange and
-  stayed valid for up to 15 minutes after Disconnect. The static `ticketing-mcp` client is
-  unchanged and `docs/06-security.md` says so.
-
-Left open on purpose: the queue-gate pass has no expiry or event binding (changing it
-changes what an admission means after 10 minutes and must match the client gate), and
-dynamic client registration still defaults to every scope (read-only defaults would stop
-a client that registers without a scope from ever stepping up to `orders:create`).
-
-## 2026-10-04 — Refund paid orders that cannot be fulfilled
-
-On `fix/unfulfillable-order-refund`. A payment captured after its order expired, or
-after its seats were released, used to leave the order CANCELLED with the money kept.
-Now the buyer is refunded automatically.
-
-- **order-service**: `markComplete` locks the order row and finalizes the reservation
-  *before* marking COMPLETE. When the order is already cancelled, or venue/ticket
-  service reports the reservation released or unknown, the order ends CANCELLED with
-  `cancelReason = UNFULFILLABLE_REFUNDED` and emits `orders.order.unfulfillable`. Any
-  other gRPC failure is rethrown, so Kafka retries and then dead-letters — an outage
-  is never treated as proof the seats are gone. Orders now record why they were
-  cancelled (`cancel_reason`, migration V9), exposed as `Order.cancelReason` in GraphQL.
-- **payment-service**: refunds are a work queue. A refund request writes a REQUESTED
-  row; `RefundExecutorService` claims due rows with `FOR UPDATE SKIP LOCKED`, calls the
-  refund provider with a stable idempotency key, and retries with backoff (5 attempts)
-  before marking FAILED and emitting `payments.refund.failed`. The payment only becomes
-  REFUNDED after the provider confirms. A unique partial index allows one live refund
-  per order, so redelivered events cannot refund twice (migration 007).
-- **Refund provider**: `REFUND_PROVIDER=simulated` (default) moves no money and makes no
-  network call; `stripe` calls `refunds.create`. A live Stripe key is refused at startup
-  unless `REFUND_ALLOW_LIVE=true`.
-- **Topics**: `orders.order.unfulfillable` (+ `.dlq`), `payments.refund.completed` and
-  `payments.refund.failed` added to `infra/helm/files/topics.yaml`. New topics only — no
-  existing topic's settings change.
-
-Known gap: if finalize succeeds and the order's commit then fails for a non-concurrency
-reason, an expiry landing before the Kafka retry leaves the seats sold with no complete
-order; the buyer is still refunded. Customer notification of the refund is out of scope.
-
-## 2026-10-04 — Waiting-room pass bound to an account, purchase writes gated
-
-On `fix/waiting-room-gate-integrity`. While an onsale was armed, Kong's backstop only
-checked the pass signature on the GraphQL reserve mutation. A pass never expired, worked
-for any event, could be copied to another account, and REST order creation was not gated.
-
-- **Kong** (`plugins/queue-gate.lua`): runs after the jwt plugin and checks the pass is
-  unexpired, for `QUEUE_EVENT_ID`, and that its `Sub` is the caller's JWT `sub`. Gated:
-  GraphQL `holdSeats`, `createSeatedOrder`, `createOrder` (the JSON body is parsed, a
-  hash-only persisted query is refused, APQ is off in the router), REST seat holds and
-  `POST /api/orders`. Payment and releasing a hold are never gated. `build.sh` refuses an
-  armed render without `QUEUE_EVENT_ID` or `KONG_SIGNING_KEY`. `scripts/test-queue-gate.sh`
-  runs the Lua against cases in CI.
-- **Redeem through Kong**: new JWT route `POST /api/queue/redeem` → queue-service
-  `/api/redeem` with `X-User-Id` and `X-User-Id-Sig`. The queue page lives on its own host
-  and cannot see the login cookie, so claim stays anonymous and the account is bound at
-  redeem. queue-service verifies the signature (`Web/UserIdSignature.cs`, the same format
-  ticket-service checks), binds the queue place to the first account, and keeps one pass
-  per account per event; a repeat returns the same pass. Pass lifetime is now 900 s.
-- **Client** (`proxy.ts`, `lib/queue/gate.ts`): an admitted visitor who is not logged in
-  goes to `/auth/signin?next=<page with qpass>`; sign-in and sign-up pages are not gated.
-  Only a pass carrying `Sub` counts.
-- **Config**: queue-service needs `Queue__UserIdSigningKey` (= Kong's `KONG_SIGNING_KEY`;
-  compose reads `X_USER_ID_SIGNING_KEY`, the chart `queue.userIdSigningKey`). Kong reaches
-  queue-service through `HOST_QUEUE` (compose maps it to the host; on Kubernetes the chart
-  is assumed installed in the `queue` namespace). The ticket cookie is `Secure` outside
-  Development. Standard recorded in `docs/06-security.md`.
-- **Page loads no longer join the queue**: `GET /wait` only renders; `wait.js` joins
-  through the rate-limited `POST /api/enqueue`, so cookieless GETs cannot fill the queue.
-
-Verified against the running stack with Kong armed: Kong e2e (7), waiting-room e2e (3),
-and the sign-in round trip in a browser. Known gap: the sign-in page's "Create account"
-link drops `?next`, so a brand-new buyer has to reopen the queue link after signing up.
+## Earlier milestones (condensed)
+
+Short versions of the 2026 Q1–Q3 entries. They are grouped by theme, newest first. Each
+one keeps what landed, why, the lessons worth reusing, and what was still open. Items in
+the "Still open" lists were open when the work ended. Check the code or the open PRs
+before you rely on one.
+
+### 2026 Q3 (Jul–Sep)
+
+#### MCP platform, Wave 1 — OAuth boundaries (2026-09-29/30, shipped in PR #153)
+
+- **Invariant pinned:** OAuth grants and browser sessions never turn into each other.
+  Three regression tests in `services/client/tests/e2e/oauth-agent-boundaries.spec.ts`
+  check this. An OAuth access token is not a session at `/oauth/authorize`. An OAuth
+  refresh token cannot mint a browser session. A browser refresh token is refused at
+  `/oauth/token` in RFC error shape.
+- **Owner decision (legacy refresh sessions):** a refresh session from before the deploy
+  falls back on a legacy scope marker (`RefreshTokenService.resolveOAuthClientId`). For
+  up to 7 days after deploy it can look like a browser session. The owner accepted that
+  window. The fallback is to be removed at deploy + 7 days, as part of the stdio
+  retirement. Force-logging-out every untagged session was rejected as bad UX.
+- **Still open:** the queue-gate pass is checked by HMAC only, with no expiry, event or
+  single-use binding (`services/kong-gateway/plugins/queue-gate.lua`). The ticket-rush
+  plan's login-to-claim bound pass covers this. The seating-plan lifecycle E2E
+  (`ticketing.spec.ts`, "Deactivate Plan") is flaky. The test clicks right after a
+  `domcontentloaded` reload, before hydration, so the click does nothing.
+
+#### Agent instruction-surface audit (2026-09-29)
+
+- Fixed drift in the agent docs:
+  - the `end-to-end-check` skill path is now `tests/`;
+  - `lint-check` now names `ci.yml` as its source of truth and includes golangci-lint, attendance, queue and buf;
+  - CLAUDE.md Rule 6's token limits, which nothing could meet, became "keep context lean";
+  - the hard-stop count is corrected;
+  - orchestration docs describe roles rather than pinned model versions;
+  - worker templates forbid invoking skills and writing plans.
+- **Still open:**
+  - `SUBAGENT_ORCHESTRATION.md` still carries the April batch history as if it were current;
+  - CLAUDE.md Rule 5 talks about LLM calls this repo does not make;
+  - the `AGENTS.md` "Last Updated" date is stale.
+
+#### Scalability follow-ups — registry, queue keys, order expiry backstop (2026-09-29, PRs #145–#148)
+
+- **Image registry:** first-party charts read `global.serviceImageRegistry`, and
+  `global.imageRegistry` is pinned to `""`. Bitnami subcharts therefore keep pulling
+  from docker.io. Before this, the placeholder registry broke the whole
+  `helm template` run as soon as any Bitnami subchart was enabled.
+- **queue-service Redis keys:**
+  - Every Redis key for an event shares the `{eventId}` hash tag, so multi-key scripts are Redis Cluster safe. A CRC16 oracle test pins this.
+  - Images are pinned, and the no-`latest` CI guard covers `infra/queue-system`.
+  - The single-writer Redis uses `Recreate`.
+  - **Rollout note:** the key rename orphans queue state already in Redis, so do not deploy it during an on-sale.
+- **Order expiry backstop:**
+  - `OrderExpirySweepJob` expires `CREATED`/`AWAITING_PAYMENT` orders past `expires_at` plus a grace period, for orders whose expiration-service job was lost.
+  - Defaults: 300 s grace, 200 per batch, every 60 s, set with `ORDER_EXPIRY_SWEEP_*`.
+  - It uses one transaction per order. `@Version` makes races between replicas safe.
+  - `V7` adds a partial index, and an EXPLAIN test pins its use. A plain `CREATE INDEX` takes a SHARE lock, so apply V7 outside an on-sale.
+- **CI lesson (#148):** the GHA buildx cache keys on the FROM digest plus the RUN text.
+  An `apt-get upgrade` layer therefore stays stale until the base digest is bumped.
+  Fresh Debian openssl/tzdata fixes did not reach the image until the `bookworm-slim`
+  digests were bumped.
+- **Still open:** a daily cache-bust build-arg. None of these three items is deploy-verified.
+- PR #149 recorded these merges separately. Its content now lives here.
+
+#### Scalability M3 — connection budget, HPA signals, zone spread, SSE scale-in (2026-09-23, PR #150, partial)
+
+- **Connection budget:**
+  - Every service sets its pool explicitly from `DB_POOL_MAX`. The arithmetic is in the Connection Budget section of [`docs/05-data-conventions.md`](05-data-conventions.md): PostgreSQL's default of 100, an 80 % rule, and pool size × HPA `maxReplicas`.
+  - auth was sized for 240 connections against a 100-connection server. The pods that fall over in that case are the ones that just scaled up.
+  - The Node services default to 12 and read the value with `getOrThrow`, so a missing chart value cannot silently restore an over-budget pool.
+- **One Mongo client per process** in ticket-service. The pool is sized, with
+  `writeconcern.Majority()` and `readpref.Primary()`. A `w=` in the URI cannot downgrade
+  the write concern, and a test checks this.
+- **HPA signals:**
+  - order-service's HPA no longer scales on memory. JVM RSS tracks high-water heap, not load.
+  - metrics-server is installed (EKS managed addon; `minikube addons enable metrics-server` locally). Before this, every HPA reported `<unknown>` and never scaled.
+- **Capacity:**
+  - Staging and prod spread pods across zones with `whenUnsatisfiable: DoNotSchedule`, which is a hard constraint, so it needs a node autoscaler.
+  - Karpenter was added in Terraform:
+    - EKS Pod Identity;
+    - the controller is pinned to the managed node group, because Karpenter must not run on nodes it manages;
+    - on-demand only, with a 200 vCPU ceiling;
+    - a one-node disruption budget and 30-day node expiry;
+    - private subnets tagged `karpenter.sh/discovery`. Without the tag it provisions nothing and looks like a full cluster.
+- **SSE survives scale-in (venue-service):**
+  - A stream never completes, so `e.Shutdown` used to block and then cut every stream.
+  - Now `Drain()` ends each stream with a jittered `retry:` (500–5000 ms) so clients do not reconnect all at once. New clients get 503 during a drain.
+  - `preStop` sleeps 5 s.
+  - HPA scale-down is limited to 600 s stabilisation and one pod per 120 s.
+  - Every change is numbered (`INCR venue:{planId}:version`) and sent as the SSE `id`. A reconnect with `Last-Event-ID`, or a dropped buffer message, gets `event: resync`, because there is no replay log. The snapshot version is read *before* the section walk.
+- **Lessons:**
+  - Stale first-party `*.tgz` files next to their chart directories make umbrella renders nondeterministic. Delete them and keep only the third-party packages.
+  - `terraform init -backend=false && terraform validate` works inside `infra/terraform/modules/<name>` even though the local Terraform (1.5.4) cannot validate the environments.
+- **Still open:**
+  - PgBouncer. It is a prerequisite for one shared RDS instance, because 380 fleet-wide connections need `max_connections` ≥ 475.
+  - KEDA.
+  - The N+1 read in `hold/manager.go`.
+  - The client has no SSE consumer yet.
+  - Nothing in M3 is deploy-verified. Its exit criterion (HPA scaling on real metrics with no connection refusals at max) needs a cluster.
+
+#### Scalability M2 chart half — topics as code, loadable gateways, external secrets, Mongo replica set (2026-09-22, PR #142)
+
+- **Kafka topics:**
+  - Declared in `infra/helm/files/topics.yaml` and created by a `post-install,post-upgrade` hook Job. It is not `pre-*`, because locally the broker is in the same release.
+  - Partition counts are sized to the largest consumer group at HPA max.
+  - The Job reports drift and never corrects it. Raising partitions rehashes keys, and lowering them is impossible.
+  - `autoCreateTopics` defaults to false. Auto-create had made 7 topics with 1 partition before the hook ran.
+- **Kong staging/prod configs did not load at all.**
+  - The `redis` rate-limit policy requires `redis.host`.
+  - CI only rendered `local`. It now builds and validates all five environments, and that guard is the durable fix.
+  - Fixed at the same time: missing `HOST_USERS`/`HOST_ATTENDANCE`; the ElastiCache host from `KONG_RATE_LIMIT_REDIS_HOST` (render fails without it); `redis_ssl` on.
+  - Only the auth endpoints set `fault_tolerant: false`, so a Redis outage cannot switch off the brute-force limit. Every other route fails open.
+  - The anonymous per-IP limit went from 60 to 600/min, because Next.js page and asset requests share the bucket. This loosens a production control and is an owner call.
+- **Linkerd:** `skipOutboundPorts` is now per overlay. Staging and prod had inherited the
+  local broker port 9092 while MSK listens on 9098. An overlay's `global:` block
+  deep-merges into the chart default.
+- **ExternalSecrets:** each chart can render one into the Secret it already names. It is
+  off everywhere until the operator and its IAM role exist; turning it on early leaves pods
+  with no Secret.
+- **Local MongoDB is a single-member replica set**, so majority writes, transactions and change
+  streams work. The arbiter is disabled, `Recreate` is removed (not valid for a
+  StatefulSet), and the URI uses the pod FQDN plus `replicaSet=rs0`.
+- **Lessons:**
+  - `kong config parse` accepts duplicate YAML keys, and the last one wins.
+  - A stray `git stash` inside a verification loop gave three false "renders clean" results. Check `git stash list`.
+- **Still open (owner):**
+  - **MSK client auth.** MSK is IAM-only, and no service can speak IAM: librdkafka lacks it and .NET has no option. The realistic path is SASL/SCRAM on MSK. Related: the MSK security group opens 9094 with no mechanism behind it.
+  - The prod `ticketing-postgres-users` Secret is regenerated on every render, so a real `helm upgrade` would rotate the password.
+  - CI never renders the umbrella chart with an overlay.
+  - The leaked `X_USER_ID_SIGNING_KEY` is unrotated.
+  - Apollo Router GraphOS licence vs. dropping operation limits.
+  - The prod namespace.
+
+#### Scalability M1 — safe horizontal scale-out (2026-09-16 → 09-21, PR #139)
+
+- **Backing stores:** every Bitnami subchart has an `enabled` toggle. Staging and prod
+  turn them all off (0 StatefulSets) and read connection strings from Secrets.
+- **Outbox claims:** every relay claims rows with `FOR UPDATE SKIP LOCKED` (order,
+  payment) or a Mongo lease (ticket). The contract is in
+  [`docs/04-asynchronous-messaging.md`](04-asynchronous-messaging.md).
+- **Decision: mark-published commits per batch.** Per-message commit inside a held
+  `SKIP LOCKED` claim deadlocks invisibly: the inner transaction waits on the outer
+  one's lock. So the per-batch trade-off is accepted and copied to the other relays.
+  Revisit only on evidence: a measured duplicate rate or a long-transaction alert.
+  `OutboxMessagePublisher.publishOne` must keep its `catch` inside the method. A
+  Kafka failure escaping the proxy would mark the batch rollback-only and re-send all of
+  it.
+- **Outbox cleanup:** order-service deletes in batches (500 × up to 100 per run).
+  `@Transactional` is on the repository method, so each batch commits. `V6` adds the
+  mirror partial index on `published = true`.
+- **Venue:** `ProvisionFromVenue` runs on one transaction, which closes a check-then-act
+  race and the half-built plan a mid-loop failure used to leave. The hold sweeper takes
+  `pg_try_advisory_xact_lock`, the transaction-scoped one, because a session lock
+  would stick to a pooled connection.
+- **Other replicas:** the ticket-service quota reconciler takes a Redis `SET NX` lease.
+  expiration-service runs 2 replicas.
+- **Lessons:**
+  - Four tests in this milestone could not fail. A fix verified by reverting it must have the revert *executed*, and the test must be able to report the failure.
+  - A concurrency test must pin its pool size (`MaxConns`), not take it from the host CPU count.
+  - A test that holds a pooled connection must `defer Release()`, or a failed assertion hangs the run instead of reporting.
+  - `@Transactional` on a hand-constructed object does nothing. Guard such a property with a reflection test.
+- **Decided, not done:**
+  - Venue lock ordering. No deadlock reproduced, and single-statement `= ANY($1)` locks in scan order. Reopen only on a real `40P01`.
+  - A job-wide advisory lock for order cleanup. It would need one transaction across all batches.
+- **Still open:**
+  - The 24 h staging soak at 3 replicas, which is M1's real exit criterion.
+  - The ticket-service integration package starts 23 Mongo containers against one 300 s `-timeout` budget, so it can go red on a slow runner.
+
+#### Transactional outbox hardening + CI Trivy remediation (2026-08-05 → 09-21, PR #122)
+
+- **All four outboxes:** relay cost now tracks backlog depth, not table size.
+  - ticket-service: index `idx_outbox_pending`, plus empty-poll backoff (500 ms → 5 s).
+  - payment-service: `SKIP LOCKED` plus a 24 h retention purge.
+  - attendance-service: retention, plus migration 008 adding `outbox.published_at`, which the code had always written.
+  - order-service: a bounded claim. It stops at the first failing row so a later event for the same key cannot overtake it. `OUTBOX_RELAY_PUBLISH_TIMEOUT_MS` (10 s) bounds the broker wait.
+- **attendance-service had no CI job.** Its Postgres tests had silently skipped. It now has
+  one, and `requireTestPool` applies the real migrations. Tip: run golangci-lint with
+  `--max-same-issues=0 --max-issues-per-linter=0` to see every finding.
+- **Trivy gate root cause:**
+  - `trivy-action` with `format: sarif` scans every severity, so `exit-code: 1` fired on LOW/MEDIUM findings too.
+  - Fixed with a CVE sweep and Go 1.25 → 1.26. The toolchain and the `x/crypto`/`otel` bumps cannot be split, because those modules require `go 1.26`.
+  - queue-service's six unfixable glibc CVEs in the chiseled .NET base get an owner-approved, job-scoped `trivyignores`. It **expires 2026-12-21**. On expiry, re-scan; delete the file if Microsoft has rebuilt the image, otherwise extend it and record why.
+  - The severity gate was never narrowed.
+- **Still open:** the `SSH.NET` HIGH advisories in queue-service's test project (test-only).
+
+### 2026 Q2 (Apr–Jun)
+
+- **Search (2026-06-24):** ticket-service OpenSearch search gained Prometheus metrics in
+  `internal/metrics/`: query duration by backend, fallback count, refill iterations,
+  indexer lag and reindex progress. It also gained an opt-in single-node OpenSearch Helm
+  subchart (security plugin off). Dependencies: `opensearch-go/v4`, plus
+  `prometheus/client_golang` promoted to direct. The posture decision is in
+  `docs/06-security.md`.
+- **Client GraphQL-first (2026-05-22):** every screen uses `executeQuery` /
+  `executeMutation` (server) or urql (browser seat map only). `lib/api.ts` is narrowed to
+  `serverApi` + `ApiError`, and the REST keep-list is in `services/client/AGENTS.md`. Hard
+  stops 11–12 ban copying SDL into the client and inline gql strings. Rollback is
+  `git revert --no-commit 09bea9e^..cbf61f1`, then a compose smoke test.
+- **API style split (2026-05-07):** `docs/03-api-design.md` treats GraphQL as the app-facing API
+  and REST + OpenAPI as the API for integrations, MCP and operational commands. The QR attendance
+  plan lives in `docs/superpowers/plans/2026-05-07-qr-attendance.md`.
+- **Observability (2026-04-30):**
+  - Repo-managed Prometheus rules and alerts.
+  - An OTel Collector metrics pipeline that makes Apollo Router metrics queryable.
+  - user-service RED metrics.
+  - Operator dashboards and a first-response workflow in the observability README.
+  - payment-service's `OrderServiceClient` gained timeout-aware retry, jittered backoff and a circuit breaker; an unavailable lookup returns 503.
+  - `CriticalServiceDown` was rehearsed live by stopping user-service; it fired, then cleared.
+  - `docs/interview.md` holds the architecture knowledge graph and question bank.
+- **order-service GraphQL (2026-04-23):** uses Spring GraphQL (`@Controller` +
+  `@QueryMapping`), not Netflix DGS. It is Spring-native and needs no extra dependency.
+  The spec and plan were updated to match.
+- **Clean bootstrap (2026-04-15):** user-service and payment-service apply `migrations/*.sql`
+  through one explicit runner that records checksums. `pnpm migrate` and container
+  startup share it. Startup fails loudly on drift. A fresh `docker compose down -v && up`
+  needs no manual SQL.
+- **Linkerd for gRPC (2026-04-09):** ticket, venue and order are meshed. Port-scoped
+  `Server` + `ServerAuthorization` cover the gRPC ports only, so Kong HTTP ingress is not
+  blocked. `infra/local/setup.sh` installs the control plane. The ticket outbox relay is
+  behind narrow interfaces with unit and Mongo integration tests.
+- **Quota & seating designs approved (2026-04-01):** `docs/quota-reservation-design.md`
+  and `docs/venue-seating-plan-design.md`. Decisions:
+  - a separate `sold` counter (`available = quota − reserved − sold`);
+  - multi-quantity from V1;
+  - the Redisson lock kept as a 2 s fallback behind Lua atomicity;
+  - a new `orders.order.completed` topic.
+- **Lint/type hardening (PR #16, merged 2026-03-31):** auth, client and order-service
+  type errors fixed. order-service has a project-tuned `checkstyle.xml`; the stock Sun and
+  Google checks flagged 600–800 indentation-only issues.
+
+### 2026 Q1 (Jan–Mar)
+
+- **Audit remediation (PRs #8, #12):** the M8 audit's P2 set (34 items) and the resilience and
+  observability set. Highlights:
+  - OTel on every service, with trace ids in logs;
+  - real readiness probes;
+  - a circuit breaker on the order → ticket gRPC client;
+  - Stripe webhook verification and idempotency keys;
+  - proto prices as `string`;
+  - ISO 4217 validation and unknown-field rejection;
+  - Helm RollingUpdate, NetworkPolicy, HPA and topology spread.
+- **Kong sandbox:** `cjson.safe` is not allow-listed. Use `cjson` with `pcall`
+  (`jwt-sub.lua`).
+- **Next.js Server Actions CSRF behind Kong:** Next compares `Origin` with
+  `X-Forwarded-Host`, which Kong overwrites from `$upstream_x_forwarded_host`. Only
+  setting `ngx.var.upstream_x_forwarded_host` in a `post-function` on the client route
+  works. The client pod also needs `INTERNAL_API_URL`.
+- **Local Kubernetes and Terraform:**
+  - `infra/local/setup.sh` is the single-command minikube bootstrap (kubectl + helm, no Terraform locally). It fixed the ticket gRPC port 50051, annotated Linkerd skip-ports and pinned the Mongo `existingSecret`.
+  - Terraform scaffolding covers the Kong module and the dev/staging/prod environments.
+- **Kong JWT forwarding, startup migrations and the first Playwright E2E suite.**
