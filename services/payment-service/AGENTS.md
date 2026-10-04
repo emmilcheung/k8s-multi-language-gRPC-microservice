@@ -91,13 +91,13 @@ Same base conventions as all NestJS services — see [auth-service AGENTS.md](..
 
 ### Consumer
 
-- Consumes: `orders.order.created` (and `orders.order.cancelled` for refund flows if applicable).
+- Consumes: `orders.order.created`, and `orders.order.unfulfillable` (order-service captured a payment for an order it could not fulfil; the payment is refunded).
 - Consumer group ID: `payment-service`.
 - In real mode, `orders.order.created` is observational only. The single authoritative payment-initiation path is `POST /api/payments`.
 - In mock mode, `orders.order.created` may auto-complete payments to keep local and integration flows fully automated.
 - **Idempotency is mandatory.** The same event can be delivered more than once — check whether a payment record already exists for the `orderId` before processing.
 - Commit offsets **after** successful processing (not before).
-- On failure: retry with exponential back-off (max 3 attempts), then route to DLT `orders.order.created.dlq`. Never discard a message silently.
+- On failure: retry with exponential back-off (max 3 attempts), then route to the topic's DLT (`<topic>.dlq`). Never discard a message silently.
 - Separate Kafka polling/offset management from business logic handler functions.
 
 ### Producer (via outbox relay)
@@ -177,6 +177,8 @@ Validated at startup via Zod — service refuses to start if any required var is
 | `ORDER_SERVICE_TIMEOUT_MS` | Order lookup timeout in milliseconds (default `5000`) |
 | `STRIPE_SECRET_KEY` | Stripe secret API key |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (required in production) |
+| `REFUND_PROVIDER` | `simulated` (default — no money moves, no network call) or `stripe` (calls `refunds.create`) |
+| `REFUND_ALLOW_LIVE` | `true` to allow `REFUND_PROVIDER=stripe` with an `sk_live_` key; startup fails without it (default `false`) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTel Collector endpoint |
 | `NODE_ENV` | `development` \| `production` \| `test` |
 

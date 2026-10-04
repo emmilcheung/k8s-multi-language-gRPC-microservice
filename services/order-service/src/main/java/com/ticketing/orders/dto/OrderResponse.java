@@ -1,5 +1,6 @@
 package com.ticketing.orders.dto;
 
+import com.ticketing.orders.entity.CancelReason;
 import com.ticketing.orders.entity.Order;
 import com.ticketing.orders.entity.OrderSeat;
 import com.ticketing.orders.entity.OrderStatus;
@@ -18,6 +19,7 @@ public class OrderResponse {
     private UUID id;
     private UUID userId;
     private OrderStatus status;
+    private CancelReason cancelReason;
     private OffsetDateTime expiresAt;
     private TicketSummary ticket;
     private UUID reservationId;
@@ -52,6 +54,7 @@ public class OrderResponse {
         r.id = order.getId();
         r.userId = order.getUserId();
         r.status = order.getStatus();
+        r.cancelReason = order.getCancelReason();
         r.expiresAt = order.getExpiresAt();
         r.reservationId = order.getReservationId();
         r.quantity = order.getQuantity();
@@ -142,6 +145,7 @@ public class OrderResponse {
     public UUID getId() { return id; }
     public UUID getUserId() { return userId; }
     public OrderStatus getStatus() { return status; }
+    public CancelReason getCancelReason() { return cancelReason; }
     public OffsetDateTime getExpiresAt() { return expiresAt; }
     public TicketSummary getTicket() { return ticket; }
     public UUID getReservationId() { return reservationId; }

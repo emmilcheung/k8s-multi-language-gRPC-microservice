@@ -4,10 +4,12 @@ import tools.jackson.databind.ObjectMapper;
 import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
 import com.ticketing.orders.dto.RefundEligibilityResponse;
+import com.ticketing.orders.entity.CancelReason;
 import com.ticketing.orders.entity.Order;
 import com.ticketing.orders.entity.OrderStatus;
 import com.ticketing.orders.entity.OrderTicket;
 import com.ticketing.orders.entity.OrderType;
+import com.ticketing.orders.entity.OutboxMessage;
 import com.ticketing.orders.exception.BadRequestException;
 import com.ticketing.orders.exception.ConflictException;
 import com.ticketing.orders.exception.ForbiddenException;
@@ -23,6 +25,8 @@ import com.ticketing.orders.repository.OrderRepository;
 import com.ticketing.orders.repository.OrderSeatRepository;
 import com.ticketing.orders.repository.OrderTicketRepository;
 import com.ticketing.orders.repository.OutboxRepository;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,8 +53,10 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -423,29 +429,149 @@ class OrderServiceTest {
 
     // ── markComplete ──────────────────────────────────────────────────────────
 
-    @Test
-    void markComplete_should_set_COMPLETE_and_write_completed_outbox_event() {
-        Order order = new Order(userId, OrderStatus.AWAITING_PAYMENT,
-                OffsetDateTime.now().plusMinutes(5), ticket);
-        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+    private Order seatedOrder(OrderStatus status) {
+        return new Order(userId, status, OffsetDateTime.now().plusMinutes(5), ticket,
+                UUID.randomUUID(), 2, OrderType.MANUAL_SEATED, UUID.randomUUID(), null);
+    }
+
+    private Order gaOrder(OrderStatus status) {
+        return new Order(userId, status, OffsetDateTime.now().plusMinutes(5), ticket,
+                UUID.randomUUID(), 1);
+    }
+
+    private void lockReturns(Order order) {
+        when(orderRepository.findByIdWithTicketForUpdate(orderId)).thenReturn(Optional.of(order));
         when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    private List<String> outboxTopics() {
+        ArgumentCaptor<OutboxMessage> captor = ArgumentCaptor.forClass(OutboxMessage.class);
+        verify(outboxRepository, atLeastOnce()).save(captor.capture());
+        return captor.getAllValues().stream().map(OutboxMessage::getTopic).toList();
+    }
+
+    @Test
+    void markComplete_shouldCompleteAfterFinalizingSeats_whenReservationIsStillHeld() {
+        Order order = seatedOrder(OrderStatus.AWAITING_PAYMENT);
+        lockReturns(order);
+        when(venueServiceClient.finalizeSeatReservation(eq(order.getReservationId()), anyString()))
+                .thenReturn(true);
 
         orderService.markComplete(orderId);
 
         assertThat(order.getStatus()).isEqualTo(OrderStatus.COMPLETE);
-        // orders.order.completed must be written to the outbox
-        verify(outboxRepository).save(any());
+        assertThat(order.getCancelReason()).isNull();
+        assertThat(outboxTopics()).containsExactly("orders.order.completed");
     }
 
     @Test
-    void markComplete_should_be_noop_when_order_is_not_awaiting_payment() {
-        Order order = new Order(userId, OrderStatus.CANCELLED,
-                OffsetDateTime.now().minusMinutes(5), ticket);
-        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+    void markComplete_shouldCompleteAfterFinalizingQuota_whenGaReservationIsStillHeld() {
+        Order order = gaOrder(OrderStatus.CREATED);
+        lockReturns(order);
+        when(ticketServiceClient.finalizeReservation(eq(order.getReservationId()), anyString()))
+                .thenReturn(true);
 
         orderService.markComplete(orderId);
 
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.COMPLETE);
+        verify(venueServiceClient, never()).finalizeSeatReservation(any(), anyString());
+        assertThat(outboxTopics()).containsExactly("orders.order.completed");
+    }
+
+    // The buyer paid but their seats were released and may now belong to someone
+    // else: completing would sell a ticket that doesn't exist, and doing nothing
+    // would keep their money. Cancel and ask payment-service to refund.
+    @Test
+    void markComplete_shouldCancelAndRequestRefund_whenSeatReservationWasReleased() {
+        Order order = seatedOrder(OrderStatus.AWAITING_PAYMENT);
+        lockReturns(order);
+        when(venueServiceClient.finalizeSeatReservation(eq(order.getReservationId()), anyString()))
+                .thenReturn(false);
+
+        orderService.markComplete(orderId);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(order.getCancelReason()).isEqualTo(CancelReason.UNFULFILLABLE_REFUNDED);
+        assertThat(outboxTopics())
+                .containsExactly("orders.order.cancelled", "orders.order.unfulfillable");
+    }
+
+    @Test
+    void markComplete_shouldCancelAndRequestRefund_whenGaReservationWasReleased() {
+        Order order = gaOrder(OrderStatus.AWAITING_PAYMENT);
+        lockReturns(order);
+        when(ticketServiceClient.finalizeReservation(eq(order.getReservationId()), anyString()))
+                .thenReturn(false);
+
+        orderService.markComplete(orderId);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(order.getCancelReason()).isEqualTo(CancelReason.UNFULFILLABLE_REFUNDED);
+        assertThat(outboxTopics())
+                .containsExactly("orders.order.cancelled", "orders.order.unfulfillable");
+    }
+
+    // Payment landed after the order had expired: the money must go back.
+    @Test
+    void markComplete_shouldRequestRefundWithoutFinalizing_whenOrderIsAlreadyCancelled() {
+        Order order = seatedOrder(OrderStatus.CANCELLED);
+        order.setCancelReason(CancelReason.EXPIRED);
+        lockReturns(order);
+
+        orderService.markComplete(orderId);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(order.getCancelReason()).isEqualTo(CancelReason.UNFULFILLABLE_REFUNDED);
+        verify(venueServiceClient, never()).finalizeSeatReservation(any(), anyString());
+        assertThat(outboxTopics()).containsExactly("orders.order.unfulfillable");
+    }
+
+    // An outage says nothing about the seats. Refunding here would cancel orders
+    // that are still fulfillable, so the failure must reach Kafka's retry instead.
+    @Test
+    void markComplete_shouldThrowAndLeaveOrderPayable_whenVenueIsUnavailable() {
+        Order order = seatedOrder(OrderStatus.AWAITING_PAYMENT);
+        lockReturns(order);
+        when(venueServiceClient.finalizeSeatReservation(eq(order.getReservationId()), anyString()))
+                .thenThrow(new StatusRuntimeException(Status.UNAVAILABLE));
+
+        assertThatThrownBy(() -> orderService.markComplete(orderId))
+                .isInstanceOf(StatusRuntimeException.class);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.AWAITING_PAYMENT);
+        assertThat(order.getCancelReason()).isNull();
         verify(outboxRepository, never()).save(any());
+    }
+
+    // Kafka delivers at least once; a redelivered capture must not sell, finalize
+    // or emit twice.
+    @Test
+    void markComplete_shouldFinalizeAndEmitOnce_whenCaptureIsDeliveredFiveTimes() {
+        Order order = seatedOrder(OrderStatus.AWAITING_PAYMENT);
+        lockReturns(order);
+        when(venueServiceClient.finalizeSeatReservation(eq(order.getReservationId()), anyString()))
+                .thenReturn(true);
+
+        for (int i = 0; i < 5; i++) {
+            orderService.markComplete(orderId);
+        }
+
+        verify(venueServiceClient, times(1))
+                .finalizeSeatReservation(any(), anyString());
+        assertThat(outboxTopics()).containsExactly("orders.order.completed");
+    }
+
+    // Each unfulfillable event asks for a refund; repeats must not ask again.
+    @Test
+    void markComplete_shouldRequestRefundOnce_whenCaptureForCancelledOrderIsDeliveredFiveTimes() {
+        Order order = seatedOrder(OrderStatus.CANCELLED);
+        lockReturns(order);
+
+        for (int i = 0; i < 5; i++) {
+            orderService.markComplete(orderId);
+        }
+
+        assertThat(outboxTopics()).containsExactly("orders.order.unfulfillable");
     }
 
         @Test

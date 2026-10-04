@@ -11,6 +11,7 @@ import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { OrdersConsumer } from './kafka/orders.consumer';
 import { PaymentGraphQLModule } from './graphql/graphql.module';
+import { refundConfigIssue } from './modules/payments/refund-provider';
 
 const envSchema = z
   .object({
@@ -38,8 +39,22 @@ const envSchema = z
     KAFKA_SASL_USERNAME: z.string().optional(),
     KAFKA_SASL_PASSWORD: z.string().optional(),
     X_USER_ID_SIGNING_KEY: z.string().optional().default(''),
+    REFUND_PROVIDER: z.enum(['simulated', 'stripe']).default('simulated'),
+    REFUND_ALLOW_LIVE: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
   })
   .superRefine((config, ctx) => {
+    const refundIssue = refundConfigIssue(config);
+    if (refundIssue) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['REFUND_PROVIDER'],
+        message: refundIssue,
+      });
+    }
+
     if (
       config.NODE_ENV === 'production' &&
       (!config.X_USER_ID_SIGNING_KEY || config.X_USER_ID_SIGNING_KEY.length < 32)

@@ -110,7 +110,7 @@ src/
 ### Producer (via transactional outbox)
 
 - **Do not produce to Kafka directly inside a `@Transactional` method.** Instead, write to the `outbox` table in the same transaction; a `@Scheduled` relay reads and publishes.
-- Topics produced: `orders.order.created`, `orders.order.cancelled`.
+- Topics produced: `orders.order.created`, `orders.order.cancelled`, `orders.order.unfulfillable` (payment captured for an order that was already cancelled or whose reservation was released — payment-service refunds it).
 - Partition key = `orderId`.
 - Producer: `acks=all`, `enable.idempotence=true`.
 - CloudEvents v1.0 envelope on every message.

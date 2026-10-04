@@ -2,7 +2,9 @@ package com.ticketing.orders.repository;
 
 import com.ticketing.orders.entity.Order;
 import com.ticketing.orders.entity.OrderStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
@@ -19,6 +21,15 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     @Query("SELECT o FROM Order o JOIN FETCH o.ticket WHERE o.id = :id")
     Optional<Order> findByIdWithTicket(UUID id);
+
+    /**
+     * Like {@link #findByIdWithTicket} but row-locks the order until the transaction
+     * ends, so an expiry or cancel can't commit while payment capture is deciding
+     * the order's outcome.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT o FROM Order o JOIN FETCH o.ticket WHERE o.id = :id")
+    Optional<Order> findByIdWithTicketForUpdate(UUID id);
 
     /**
      * idempotent-retry lookup. reservation_id is derived from (userId, key), so the

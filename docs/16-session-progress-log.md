@@ -1572,3 +1572,33 @@ Left open on purpose: the queue-gate pass has no expiry or event binding (changi
 changes what an admission means after 10 minutes and must match the client gate), and
 dynamic client registration still defaults to every scope (read-only defaults would stop
 a client that registers without a scope from ever stepping up to `orders:create`).
+
+## 2026-10-04 — Refund paid orders that cannot be fulfilled
+
+On `fix/unfulfillable-order-refund`. A payment captured after its order expired, or
+after its seats were released, used to leave the order CANCELLED with the money kept.
+Now the buyer is refunded automatically.
+
+- **order-service**: `markComplete` locks the order row and finalizes the reservation
+  *before* marking COMPLETE. When the order is already cancelled, or venue/ticket
+  service reports the reservation released or unknown, the order ends CANCELLED with
+  `cancelReason = UNFULFILLABLE_REFUNDED` and emits `orders.order.unfulfillable`. Any
+  other gRPC failure is rethrown, so Kafka retries and then dead-letters — an outage
+  is never treated as proof the seats are gone. Orders now record why they were
+  cancelled (`cancel_reason`, migration V9), exposed as `Order.cancelReason` in GraphQL.
+- **payment-service**: refunds are a work queue. A refund request writes a REQUESTED
+  row; `RefundExecutorService` claims due rows with `FOR UPDATE SKIP LOCKED`, calls the
+  refund provider with a stable idempotency key, and retries with backoff (5 attempts)
+  before marking FAILED and emitting `payments.refund.failed`. The payment only becomes
+  REFUNDED after the provider confirms. A unique partial index allows one live refund
+  per order, so redelivered events cannot refund twice (migration 007).
+- **Refund provider**: `REFUND_PROVIDER=simulated` (default) moves no money and makes no
+  network call; `stripe` calls `refunds.create`. A live Stripe key is refused at startup
+  unless `REFUND_ALLOW_LIVE=true`.
+- **Topics**: `orders.order.unfulfillable` (+ `.dlq`), `payments.refund.completed` and
+  `payments.refund.failed` added to `infra/helm/files/topics.yaml`. New topics only — no
+  existing topic's settings change.
+
+Known gap: if finalize succeeds and the order's commit then fails for a non-concurrency
+reason, an expiry landing before the Kafka retry leaves the seats sold with no complete
+order; the buyer is still refunded. Customer notification of the refund is out of scope.

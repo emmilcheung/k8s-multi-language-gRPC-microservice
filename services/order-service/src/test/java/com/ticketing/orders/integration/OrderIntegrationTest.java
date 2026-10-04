@@ -4,6 +4,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import com.ticketing.orders.entity.OrderStatus;
 import com.ticketing.orders.entity.OrderTicket;
+import com.ticketing.orders.grpc.FinalizeReservationRequest;
+import com.ticketing.orders.grpc.FinalizeReservationResponse;
 import com.ticketing.orders.grpc.ReleaseReservationRequest;
 import com.ticketing.orders.grpc.ReleaseReservationResponse;
 import com.ticketing.orders.grpc.ReserveQuotaRequest;
@@ -33,6 +35,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.KafkaContainer;
@@ -52,6 +55,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -132,6 +136,7 @@ class OrderIntegrationTest {
         /** how many ReserveQuota / ReleaseReservation calls reached ticket-service. */
         final AtomicInteger reserveCalls = new AtomicInteger();
         final AtomicInteger releaseCalls = new AtomicInteger();
+        final AtomicInteger finalizeCalls = new AtomicInteger();
 
         /**
          * when set, ReserveQuota behaves like the real ticket-service for a repeated
@@ -146,6 +151,7 @@ class OrderIntegrationTest {
             reservedOnce.set(false);
             reserveCalls.set(0);
             releaseCalls.set(0);
+            finalizeCalls.set(0);
             reserveBarrier = null;
             idempotentReserve = false;
         }
@@ -207,6 +213,15 @@ class OrderIntegrationTest {
         }
 
         @Override
+        public void finalizeReservation(
+                FinalizeReservationRequest request,
+                StreamObserver<FinalizeReservationResponse> responseObserver) {
+            finalizeCalls.incrementAndGet();
+            responseObserver.onNext(FinalizeReservationResponse.newBuilder().build());
+            responseObserver.onCompleted();
+        }
+
+        @Override
         public void validateTicketAvailability(
                 ValidateTicketRequest request,
                 StreamObserver<ValidateTicketResponse> responseObserver) {
@@ -255,6 +270,7 @@ class OrderIntegrationTest {
     @Autowired OrderRepository orderRepository;
     @Autowired OrderService orderService;
     @Autowired KafkaTemplate<String, String> kafkaTemplate;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     private final UUID userId = UUID.randomUUID();
     private UUID ticketId;
@@ -630,6 +646,41 @@ class OrderIntegrationTest {
 
         publish("payments.payment.captured", event);
         awaitOrderStatus(orderId, OrderStatus.COMPLETE);
+    }
+
+    // Kafka redelivers, and redeliveries can land on different consumers at once.
+    // The order row lock must make exactly one of them sell the reservation and
+    // announce completion; the rest must see COMPLETE and do nothing.
+    @Test
+    void markComplete_shouldFinalizeAndEmitOnce_whenCaptureIsHandledFiveTimesConcurrently() throws Exception {
+        UUID orderId = createOrderAndReturnId(ticketId, userId);
+        orderService.markAwaitingPayment(orderId);
+
+        ExecutorService pool = Executors.newFixedThreadPool(5);
+        try {
+            CyclicBarrier start = new CyclicBarrier(5);
+            List<Future<?>> calls = new ArrayList<>();
+            for (int i = 0; i < 5; i++) {
+                calls.add(pool.submit(() -> {
+                    start.await();
+                    orderService.markComplete(orderId);
+                    return null;
+                }));
+            }
+            for (Future<?> call : calls) {
+                call.get(20, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertThat(orderRepository.findById(orderId).orElseThrow().getStatus())
+                .isEqualTo(OrderStatus.COMPLETE);
+        assertThat(stubTicketService.finalizeCalls.get()).isEqualTo(1);
+        Integer completedEvents = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM outbox WHERE partition_key = ? AND topic = 'orders.order.completed'",
+                Integer.class, orderId.toString());
+        assertThat(completedEvents).isEqualTo(1);
     }
 
     @Test

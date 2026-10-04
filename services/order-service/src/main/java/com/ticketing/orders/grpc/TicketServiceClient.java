@@ -145,6 +145,38 @@ public class TicketServiceClient {
         }
     }
 
+    /**
+     * Marks a GA reservation as finalized (SOLD) after payment is captured.
+     * Idempotent: an already-sold reservation counts as finalized.
+     *
+     * @param reservationId the reservation to finalize
+     * @param orderId       the completed order ID
+     * @return {@code false} when the reservation was released or expired, so the
+     *         quantity can never be sold to this order
+     * @throws StatusRuntimeException for any other failure (ticket-service down,
+     *         timeout); that says nothing about the reservation, so the caller must retry
+     */
+    public boolean finalizeReservation(UUID reservationId, String orderId) {
+        FinalizeReservationRequest request = FinalizeReservationRequest.newBuilder()
+                .setReservationId(reservationId.toString())
+                .setOrderId(orderId)
+                .build();
+        try {
+            stub.withDeadlineAfter(WRITE_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .finalizeReservation(request);
+        } catch (StatusRuntimeException e) {
+            Status.Code code = e.getStatus().getCode();
+            if (code == Status.Code.FAILED_PRECONDITION || code == Status.Code.NOT_FOUND) {
+                log.warn("Ticket reservation can no longer be finalized reservationId={} orderId={} gRPC status={}",
+                        reservationId, orderId, e.getStatus());
+                return false;
+            }
+            throw e;
+        }
+        log.info("Ticket reservation finalized reservationId={} orderId={}", reservationId, orderId);
+        return true;
+    }
+
     // ── gRPC status code mapping ───────────────────────────────────────────────
 
     /**

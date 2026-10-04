@@ -25,6 +25,8 @@ import { STRIPE_CLIENT } from '../src/modules/payments/stripe.constants';
 
 const TOPIC = 'orders.order.created';
 const DLQ_TOPIC = `${TOPIC}.dlq`;
+const UNFULFILLABLE_TOPIC = 'orders.order.unfulfillable';
+const UNFULFILLABLE_DLQ_TOPIC = `${UNFULFILLABLE_TOPIC}.dlq`;
 
 let pgContainer: StartedPostgreSqlContainer;
 let kafkaContainer: Awaited<ReturnType<GenericContainer['start']>>;
@@ -75,26 +77,13 @@ beforeAll(async () => {
   process.env['NODE_ENV'] = 'test';
 
   pool = new Pool({ connectionString: databaseUrl });
-  const migration1Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/001_init_payments.sql'),
-    'utf-8',
-  );
-  const migration2Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/002_add_outbox.sql'),
-    'utf-8',
-  );
-  const migration4Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/004_add_saved_payment_methods.sql'),
-    'utf-8',
-  );
-  const migration5Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/005_harden_saved_payment_methods.sql'),
-    'utf-8',
-  );
-  await pool.query(migration1Sql);
-  await pool.query(migration2Sql);
-  await pool.query(migration4Sql);
-  await pool.query(migration5Sql);
+  const migrationsDir = path.join(__dirname, '../migrations');
+  for (const file of fs
+    .readdirSync(migrationsDir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort()) {
+    await pool.query(fs.readFileSync(path.join(migrationsDir, file), 'utf-8'));
+  }
 
   const kafka = new Kafka({
     clientId: 'payments-consumer-it-admin',
@@ -107,6 +96,8 @@ beforeAll(async () => {
     topics: [
       { topic: TOPIC, numPartitions: 1, replicationFactor: 1 },
       { topic: DLQ_TOPIC, numPartitions: 1, replicationFactor: 1 },
+      { topic: UNFULFILLABLE_TOPIC, numPartitions: 1, replicationFactor: 1 },
+      { topic: UNFULFILLABLE_DLQ_TOPIC, numPartitions: 1, replicationFactor: 1 },
     ],
   });
   await admin.disconnect();
@@ -161,6 +152,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await pool.query('DELETE FROM outbox');
+  await pool.query('DELETE FROM refunds');
   await pool.query('DELETE FROM payments');
   await pool.query('DELETE FROM saved_payment_methods');
   await pool.query('DELETE FROM payment_customers');
@@ -281,6 +273,50 @@ describe('OrdersConsumer integration', () => {
     await publish(TOPIC, { bad: 'payload' });
 
     const dlqMessage = await consumeOne(DLQ_TOPIC);
+    expect(dlqMessage).toBeTruthy();
+  });
+
+  it('orders consumer should refund once when the unfulfillable event is delivered five times', async () => {
+    const orderId = randomId();
+    await pool.query(
+      `INSERT INTO payments (order_id, user_id, amount, currency, status)
+       VALUES ($1, $2, 4200, 'usd', 'completed')`,
+      [orderId, randomId()],
+    );
+    const event = {
+      specversion: '1.0',
+      type: UNFULFILLABLE_TOPIC,
+      source: 'order-service',
+      id: randomId(),
+      time: new Date().toISOString(),
+      datacontenttype: 'application/json',
+      data: { orderId, userId: randomId(), reason: 'RESERVATION_RELEASED' },
+    };
+    for (let i = 0; i < 5; i++) {
+      await publish(UNFULFILLABLE_TOPIC, event);
+    }
+
+    // Wait for the first refund, then give the remaining deliveries (same
+    // partition, consumed in order) time to hit the one-live-refund index.
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const { rowCount } = await pool.query('SELECT 1 FROM refunds WHERE order_id = $1', [orderId]);
+      if ((rowCount ?? 0) > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+    const { rows } = await pool.query('SELECT reason FROM refunds WHERE order_id = $1', [orderId]);
+    expect(rows).toEqual([{ reason: 'Order could not be fulfilled (RESERVATION_RELEASED)' }]);
+  });
+
+  it('orders consumer should dead-letter an unfulfillable event when no payment exists for the order', async () => {
+    await publish(UNFULFILLABLE_TOPIC, {
+      data: { orderId: randomId(), reason: 'ORDER_CANCELLED' },
+    });
+
+    // Retried with back-off (1s + 2s) before it is dead-lettered.
+    const dlqMessage = await consumeOne(UNFULFILLABLE_DLQ_TOPIC, 15_000);
     expect(dlqMessage).toBeTruthy();
   });
 });

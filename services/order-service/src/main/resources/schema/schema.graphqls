@@ -7,6 +7,8 @@ type Order @key(fields: "id") {
   ticket: OrderTicket!
   quantity: Int!
   status: OrderStatus!
+  # Why the order was cancelled; null unless status is CANCELLED.
+  cancelReason: OrderCancelReason
   expiresAt: String
   createdAt: String!
   # Reserved seats for seated orders; empty for GA orders.
@@ -58,6 +60,14 @@ enum OrderStatus {
   AWAITING_PAYMENT
   COMPLETE
   CANCELLED
+}
+
+enum OrderCancelReason {
+  EXPIRED
+  PAYMENT_FAILED
+  CANCELLED_BY_USER
+  # Payment was captured after the order could no longer be fulfilled; it is being refunded.
+  UNFULFILLABLE_REFUNDED
 }
 
 type Query {

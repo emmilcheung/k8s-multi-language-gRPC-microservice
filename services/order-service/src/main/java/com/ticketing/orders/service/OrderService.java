@@ -5,6 +5,7 @@ import tools.jackson.databind.ObjectMapper;
 import com.ticketing.orders.dto.CreateOrderRequest;
 import com.ticketing.orders.dto.OrderResponse;
 import com.ticketing.orders.dto.RefundEligibilityResponse;
+import com.ticketing.orders.entity.CancelReason;
 import com.ticketing.orders.entity.Order;
 import com.ticketing.orders.entity.OrderSeat;
 import com.ticketing.orders.entity.OrderStatus;
@@ -12,6 +13,7 @@ import com.ticketing.orders.entity.OrderType;
 import com.ticketing.orders.entity.OutboxMessage;
 import com.ticketing.orders.event.OrderCancelledEvent;
 import com.ticketing.orders.event.OrderCompletedEvent;
+import com.ticketing.orders.event.OrderUnfulfillableEvent;
 import com.ticketing.orders.exception.BadRequestException;
 import com.ticketing.orders.exception.ConflictException;
 import com.ticketing.orders.exception.ForbiddenException;
@@ -497,6 +499,7 @@ public class OrderService {
         }
 
         order.setStatus(OrderStatus.CANCELLED);
+        order.setCancelReason(CancelReason.CANCELLED_BY_USER);
         orderRepository.save(order);
 
         List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
@@ -525,46 +528,88 @@ public class OrderService {
     }
 
     /**
-     * Mark an order as COMPLETE after payment captured.
+     * Settle an order after its payment was captured.
      *
-     * <p>Emits {@code orders.order.completed} so ticket-service can finalize the GA
-     * reservation (RESERVED → SOLD). For seated orders, also calls venue-service's
-     * {@code FinalizeSeatReservation} directly (best-effort, does not affect the TX).
+     * <p>A payable order is completed only once its reservation is finalized (SOLD),
+     * so a paid order is never COMPLETE without its tickets. When it can't be
+     * fulfilled — it was already cancelled, or its reservation was released — the
+     * order ends CANCELLED with {@link CancelReason#UNFULFILLABLE_REFUNDED} and
+     * {@code orders.order.unfulfillable} is emitted so payment-service refunds the
+     * charge. A failed finalize call (service down, timeout) is thrown so the Kafka
+     * retry handles it: being unreachable is not proof the reservation is gone, and
+     * refunding on it would cancel orders that could still be fulfilled.
+     *
+     * <p>The order row is locked for the whole decision so an expiry can't cancel
+     * it after the reservation is finalized. Idempotent: a COMPLETE order, or one
+     * already marked unfulfillable, is left alone.
      */
     @Transactional
     public void markComplete(UUID orderId) {
-        orderRepository.findByIdWithTicket(orderId).ifPresent(order -> {
-            if (order.isAwaitingPayment()) {
-                order.setStatus(OrderStatus.COMPLETE);
-                orderRepository.save(order);
-
-                List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
-                List<String> seatIds = seats.stream()
-                        .map(s -> s.getSeatId().toString())
-                        .collect(Collectors.toList());
-
-                writeOutbox("orders.order.completed", order.getId().toString(),
-                        new OrderCompletedEvent(
-                                order.getId().toString(),
-                                order.getUserId().toString(),
-                                order.getTicket().getId().toString(),
-                                order.getReservationId() != null ? order.getReservationId().toString() : null,
-                                order.getQuantity(),
-                                order.getVersion(),
-                                seatIds.isEmpty() ? null : seatIds
-                        ));
-
-                // For seated orders, proactively call venue-service to finalize the reservation
-                // without waiting for the Kafka consumer on the venue side.
-                if (order.getOrderType() != OrderType.GA && order.getReservationId() != null) {
-                    venueServiceClient.finalizeSeatReservation(
-                            order.getReservationId(), order.getId().toString());
-                }
-
-                log.info("Order completed orderId={} reservationId={} orderType={}",
-                        orderId, order.getReservationId(), order.getOrderType());
+        orderRepository.findByIdWithTicketForUpdate(orderId).ifPresent(order -> {
+            if (order.getStatus() == OrderStatus.COMPLETE
+                    || order.getCancelReason() == CancelReason.UNFULFILLABLE_REFUNDED) {
+                return;
             }
+            if (!order.isAwaitingPayment()) {
+                markUnfulfillable(order, "ORDER_CANCELLED");
+                return;
+            }
+            if (!finalizeReservation(order)) {
+                order.setStatus(OrderStatus.CANCELLED);
+                List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
+                writeOutbox("orders.order.cancelled", order.getId().toString(),
+                        buildCancelledEventWithSeats(order, seats));
+                markUnfulfillable(order, "RESERVATION_RELEASED");
+                return;
+            }
+
+            order.setStatus(OrderStatus.COMPLETE);
+            orderRepository.save(order);
+
+            List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
+            List<String> seatIds = seats.stream()
+                    .map(s -> s.getSeatId().toString())
+                    .collect(Collectors.toList());
+
+            writeOutbox("orders.order.completed", order.getId().toString(),
+                    new OrderCompletedEvent(
+                            order.getId().toString(),
+                            order.getUserId().toString(),
+                            order.getTicket().getId().toString(),
+                            order.getReservationId() != null ? order.getReservationId().toString() : null,
+                            order.getQuantity(),
+                            order.getVersion(),
+                            seatIds.isEmpty() ? null : seatIds
+                    ));
+
+            log.info("Order completed orderId={} reservationId={} orderType={}",
+                    orderId, order.getReservationId(), order.getOrderType());
         });
+    }
+
+    /**
+     * Finalizes the order's reservation with its owner (venue-service for seats,
+     * ticket-service for GA). Returns false when the reservation is gone. Orders
+     * without a reservation predate reservations and have nothing to finalize.
+     */
+    private boolean finalizeReservation(Order order) {
+        if (order.getReservationId() == null) {
+            return true;
+        }
+        String id = order.getId().toString();
+        return order.getOrderType() == OrderType.GA
+                ? ticketServiceClient.finalizeReservation(order.getReservationId(), id)
+                : venueServiceClient.finalizeSeatReservation(order.getReservationId(), id);
+    }
+
+    private void markUnfulfillable(Order order, String reason) {
+        order.setCancelReason(CancelReason.UNFULFILLABLE_REFUNDED);
+        orderRepository.save(order);
+        writeOutbox("orders.order.unfulfillable", order.getId().toString(),
+                new OrderUnfulfillableEvent(
+                        order.getId().toString(), order.getUserId().toString(), reason));
+        log.warn("Payment captured for an order that cannot be fulfilled orderId={} reason={}",
+                order.getId(), reason);
     }
 
     /**
@@ -578,6 +623,7 @@ public class OrderService {
         orderRepository.findByIdWithTicket(orderId).ifPresent(order -> {
             if (order.isAwaitingPayment() && !order.isTerminal()) {
                 order.setStatus(OrderStatus.CANCELLED);
+                order.setCancelReason(CancelReason.PAYMENT_FAILED);
                 orderRepository.save(order);
 
                 List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
@@ -599,6 +645,7 @@ public class OrderService {
         orderRepository.findByIdWithTicket(orderId).ifPresent(order -> {
             if (!order.isTerminal()) {
                 order.setStatus(OrderStatus.CANCELLED);
+                order.setCancelReason(CancelReason.EXPIRED);
                 orderRepository.save(order);
 
                 List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);

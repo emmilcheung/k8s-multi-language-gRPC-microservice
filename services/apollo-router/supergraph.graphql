@@ -288,6 +288,7 @@ type Order
   ticket: OrderTicket!
   quantity: Int!
   status: OrderStatus!
+  cancelReason: OrderCancelReason
   expiresAt: String
   createdAt: String!
   seats: [OrderSeat!]!
@@ -297,6 +298,15 @@ type Order
   tax: String!
   total: String!
   payment: Payment
+}
+
+enum OrderCancelReason
+  @join__type(graph: ORDERS)
+{
+  EXPIRED @join__enumValue(graph: ORDERS)
+  PAYMENT_FAILED @join__enumValue(graph: ORDERS)
+  CANCELLED_BY_USER @join__enumValue(graph: ORDERS)
+  UNFULFILLABLE_REFUNDED @join__enumValue(graph: ORDERS)
 }
 
 type OrderSeat

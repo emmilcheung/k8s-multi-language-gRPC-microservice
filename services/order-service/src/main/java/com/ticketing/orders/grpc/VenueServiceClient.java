@@ -174,27 +174,34 @@ public class VenueServiceClient {
 
     /**
      * Marks a seat reservation as finalized (SOLD) after payment is captured.
-     * Best-effort: swallows all exceptions and logs at WARN.
+     * Idempotent: an already-sold reservation counts as finalized.
      *
      * @param reservationId the reservation to finalize
      * @param orderId       the completed order ID
+     * @return {@code false} when the reservation was released or expired, so the
+     *         seats can never be sold to this order
+     * @throws StatusRuntimeException for any other failure (venue down, timeout);
+     *         that says nothing about the seats, so the caller must retry
      */
-    public void finalizeSeatReservation(UUID reservationId, String orderId) {
+    public boolean finalizeSeatReservation(UUID reservationId, String orderId) {
+        FinalizeSeatReservationRequest request = FinalizeSeatReservationRequest.newBuilder()
+                .setReservationId(reservationId.toString())
+                .setOrderId(orderId)
+                .build();
         try {
-            FinalizeSeatReservationRequest request = FinalizeSeatReservationRequest.newBuilder()
-                    .setReservationId(reservationId.toString())
-                    .setOrderId(orderId)
-                    .build();
             stub.withDeadlineAfter(WRITE_DEADLINE_SECONDS, TimeUnit.SECONDS)
                     .finalizeSeatReservation(request);
-            log.info("Venue seat reservation finalized reservationId={} orderId={}", reservationId, orderId);
         } catch (StatusRuntimeException e) {
-            log.warn("Venue finalizeSeatReservation failed reservationId={} orderId={} gRPC status={}",
-                    reservationId, orderId, e.getStatus(), e);
-        } catch (Exception e) {
-            log.warn("Venue finalizeSeatReservation failed reservationId={} orderId={}: {}",
-                    reservationId, orderId, e.getMessage(), e);
+            Status.Code code = e.getStatus().getCode();
+            if (code == Status.Code.FAILED_PRECONDITION || code == Status.Code.NOT_FOUND) {
+                log.warn("Venue seat reservation can no longer be finalized reservationId={} orderId={} gRPC status={}",
+                        reservationId, orderId, e.getStatus());
+                return false;
+            }
+            throw e;
         }
+        log.info("Venue seat reservation finalized reservationId={} orderId={}", reservationId, orderId);
+        return true;
     }
 
     // ── gRPC status code mapping ───────────────────────────────────────────────

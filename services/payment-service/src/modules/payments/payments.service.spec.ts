@@ -31,8 +31,6 @@ type RepoMock = Pick<
   | 'createSavedPaymentMethod'
   | 'setDefaultSavedPaymentMethod'
   | 'softDeleteSavedPaymentMethod'
-  | 'createRefund'
-  | 'findActiveRefundByOrderId'
 >;
 type OrderServiceClientMock = Pick<OrderServiceClient, 'getOrderSnapshot'>;
 type LoggerMock = Pick<PinoLogger, 'info' | 'warn' | 'error' | 'debug'>;
@@ -99,8 +97,6 @@ function makeRepo() {
     createSavedPaymentMethod: vi.fn(),
     setDefaultSavedPaymentMethod: vi.fn(),
     softDeleteSavedPaymentMethod: vi.fn(),
-    createRefund: vi.fn(),
-    findActiveRefundByOrderId: vi.fn(),
   };
 }
 
@@ -203,6 +199,7 @@ function makeConfig(key = 'sk_test_real') {
 function makeDb(txInsertReturn: Payment | null = null) {
   const insertChain = {
     values: vi.fn().mockReturnThis(),
+    onConflictDoNothing: vi.fn().mockReturnThis(),
     returning: vi.fn().mockResolvedValue(txInsertReturn ? [txInsertReturn] : [{ id: 'outbox-id' }]),
   };
   const updateChain = {
@@ -219,8 +216,8 @@ function makeDb(txInsertReturn: Payment | null = null) {
 
   return {
     // Execute the callback synchronously with the mock tx
-    transaction: vi.fn().mockImplementation(async (cb: (tx: MockTx) => Promise<void>) => {
-      await cb(tx);
+    transaction: vi.fn().mockImplementation(async (cb: (tx: MockTx) => Promise<unknown>) => {
+      return cb(tx);
     }),
     _tx: tx,
     _insertChain: insertChain,
@@ -819,15 +816,7 @@ describe('PaymentsService.requestRefund', () => {
     });
   });
 
-  it('creates a refund and marks payment as refunded', async () => {
-    const payment = makePayment({
-      id: 'pay-ref-1',
-      orderId: '11111111-1111-4111-8111-111111111111',
-      userId: '22222222-2222-4222-8222-222222222222',
-      status: PAYMENT_STATUS.COMPLETED,
-      amount: 3700,
-    });
-    const updatedPayment = { ...payment, status: PAYMENT_STATUS.REFUNDED };
+  function refundableOrder(payment: Payment) {
     orderServiceClient.getOrderSnapshot.mockResolvedValue(
       makeOrderSnapshot({
         orderId: payment.orderId,
@@ -837,19 +826,21 @@ describe('PaymentsService.requestRefund', () => {
       }),
     );
     repo.findByOrderId.mockResolvedValue(payment);
-    repo.findActiveRefundByOrderId.mockResolvedValue(null);
-    repo.createRefund.mockResolvedValue({
-      id: 'ref-1',
-      paymentId: payment.id,
-      orderId: payment.orderId,
-      amount: payment.amount,
-      reason: 'Cannot attend',
-      status: 'requested',
-      stripeRefundId: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+  }
+
+  // The money has not moved yet: showing the payment as refunded before the
+  // provider confirms would tell the customer they were paid back when they
+  // might never be.
+  it('requestRefund should queue the refund and leave the payment completed when the request is valid', async () => {
+    const payment = makePayment({
+      id: 'pay-ref-1',
+      orderId: '11111111-1111-4111-8111-111111111111',
+      userId: '22222222-2222-4222-8222-222222222222',
+      status: PAYMENT_STATUS.COMPLETED,
+      amount: 3700,
     });
-    repo.updateStatus.mockResolvedValue(updatedPayment);
+    refundableOrder(payment);
+    db._insertChain.returning.mockResolvedValueOnce([{ id: 'ref-1' }]);
 
     const result = await service.requestRefund({
       orderId: payment.orderId,
@@ -857,7 +848,7 @@ describe('PaymentsService.requestRefund', () => {
       userId: payment.userId,
     });
 
-    expect(repo.createRefund).toHaveBeenCalledWith(
+    expect(db._insertChain.values).toHaveBeenCalledWith(
       expect.objectContaining({
         paymentId: payment.id,
         orderId: payment.orderId,
@@ -865,9 +856,34 @@ describe('PaymentsService.requestRefund', () => {
         status: 'requested',
       }),
     );
-    expect(repo.updateStatus).toHaveBeenCalledWith(payment.id, PAYMENT_STATUS.REFUNDED);
+    expect(db._insertChain.values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        topic: 'payments.refund.requested',
+        partitionKey: payment.orderId,
+      }),
+    );
+    expect(repo.updateStatus).not.toHaveBeenCalled();
     expect(result.refundId).toBe('ref-1');
-    expect(result.payment.status).toBe(PAYMENT_STATUS.REFUNDED);
+    expect(result.payment.status).toBe(PAYMENT_STATUS.COMPLETED);
+  });
+
+  // A second refund for the same order would pay the customer back twice.
+  it('requestRefund should reject with a conflict when the order already has a live refund', async () => {
+    const payment = makePayment({ status: PAYMENT_STATUS.COMPLETED });
+    refundableOrder(payment);
+    // The unique index on live refunds per order swallowed the insert.
+    db._insertChain.returning.mockResolvedValueOnce([]);
+
+    await expect(
+      service.requestRefund({
+        orderId: payment.orderId,
+        reason: 'Cannot attend',
+        userId: payment.userId,
+      }),
+    ).rejects.toThrow(ConflictException);
+    expect(db._insertChain.values).not.toHaveBeenCalledWith(
+      expect.objectContaining({ topic: 'payments.refund.requested' }),
+    );
   });
 
   it('rejects refund when order is not complete', async () => {
@@ -918,6 +934,79 @@ describe('PaymentsService.findById', () => {
   it('should throw NotFoundException when payment does not exist', async () => {
     repo.findById.mockResolvedValue(null);
     await expect(service.findById('non-existent')).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('PaymentsService.processOrderUnfulfillableEvent', () => {
+  let repo: ReturnType<typeof makeRepo>;
+  let service: PaymentsService;
+
+  beforeEach(() => {
+    repo = makeRepo();
+    service = createService({
+      logger: makeLogger(),
+      repo,
+      orderServiceClient: makeOrderServiceClient(),
+      stripe: makeStripe(),
+      paymentVaultProvider: makePaymentVaultProvider(),
+      config: makeConfig(),
+      db: makeDb(),
+    });
+  });
+
+  it('processOrderUnfulfillableEvent should queue a refund when the payment was captured', async () => {
+    const payment = makePayment({ status: PAYMENT_STATUS.COMPLETED });
+    repo.findByOrderId.mockResolvedValue(payment);
+    const enqueue = vi.spyOn(service, 'enqueueRefund').mockResolvedValue({ id: 'refund-1' });
+
+    await service.processOrderUnfulfillableEvent({
+      orderId: payment.orderId,
+      reason: 'RESERVATION_RELEASED',
+    });
+
+    expect(enqueue).toHaveBeenCalledWith(
+      payment,
+      'Order could not be fulfilled (RESERVATION_RELEASED)',
+    );
+  });
+
+  it('processOrderUnfulfillableEvent should succeed without a second refund when the event is redelivered', async () => {
+    repo.findByOrderId.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.COMPLETED }));
+    // enqueueRefund reports an existing live refund as null.
+    vi.spyOn(service, 'enqueueRefund').mockResolvedValue(null);
+
+    await expect(
+      service.processOrderUnfulfillableEvent({
+        orderId: 'order-uuid-1',
+        reason: 'ORDER_CANCELLED',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('processOrderUnfulfillableEvent should not refund when no money was taken', async () => {
+    repo.findByOrderId.mockResolvedValue(makePayment({ status: PAYMENT_STATUS.FAILED }));
+    const enqueue = vi.spyOn(service, 'enqueueRefund');
+
+    await service.processOrderUnfulfillableEvent({
+      orderId: 'order-uuid-1',
+      reason: 'ORDER_CANCELLED',
+    });
+
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('processOrderUnfulfillableEvent should throw when the payment is unknown so the event is dead-lettered', async () => {
+    // The buyer may have been charged; dropping the event would keep their money silently.
+    repo.findByOrderId.mockResolvedValue(null);
+    const enqueue = vi.spyOn(service, 'enqueueRefund');
+
+    await expect(
+      service.processOrderUnfulfillableEvent({
+        orderId: 'order-uuid-1',
+        reason: 'ORDER_CANCELLED',
+      }),
+    ).rejects.toThrow('No payment found');
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });
 

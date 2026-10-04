@@ -10,12 +10,13 @@ import { ConfigService } from '@nestjs/config';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import Stripe from 'stripe';
 import { and, eq } from 'drizzle-orm';
-import { createHash, randomUUID } from 'crypto';
+import { createHash } from 'crypto';
 import { RegisterSavedPaymentMethodDto } from './payments.dto';
 import { PAYMENT_VAULT_PROVIDER, type PaymentVaultProvider } from './payment-vault.provider';
 import { PaymentsRepository } from './payments.repository';
 import { OrderServiceClient } from './order-service.client';
 import { STRIPE_CLIENT } from './stripe.constants';
+import { buildOutboxRow } from './outbox-row';
 import {
   type Payment,
   type SavedPaymentMethod,
@@ -23,9 +24,9 @@ import {
   REFUND_STATUS,
   outbox,
   payments,
+  refunds,
 } from '../../database/schema';
 import { DRIZZLE_DB, type DrizzleDB } from '../../database/database.module';
-import { captureTraceHeaders } from '../../kafka/trace-context';
 
 interface RegisterSavedPaymentMethodContext {
   source: string;
@@ -346,7 +347,7 @@ export class PaymentsService {
     // Publish payment.initiated event to notify order-service to transition to AWAITING_PAYMENT
     await this.db.transaction(async (tx) => {
       await tx.insert(outbox).values(
-        this.buildOutboxRow('payments.payment.initiated', order.orderId, {
+        buildOutboxRow('payments.payment.initiated', order.orderId, {
           orderId: order.orderId,
           paymentId: payment.id,
           userId: order.userId,
@@ -474,8 +475,10 @@ export class PaymentsService {
       });
     }
 
-    const existingRefund = await this.paymentsRepo.findActiveRefundByOrderId(dto.orderId);
-    if (existingRefund) {
+    // The payment stays COMPLETED until the refund executor gets confirmation
+    // from the refund provider; only then does it become REFUNDED.
+    const refund = await this.enqueueRefund(payment, reason);
+    if (!refund) {
       throw new ConflictException({
         error: {
           code: 'REFUND_ALREADY_EXISTS',
@@ -483,32 +486,6 @@ export class PaymentsService {
         },
       });
     }
-
-    const refund = await this.paymentsRepo.createRefund({
-      paymentId: payment.id,
-      orderId: payment.orderId,
-      amount: payment.amount,
-      reason,
-      status: REFUND_STATUS.REQUESTED,
-    });
-
-    const updatedPayment = await this.paymentsRepo.updateStatus(
-      payment.id,
-      PAYMENT_STATUS.REFUNDED,
-    );
-
-    await this.db.transaction(async (tx) => {
-      await tx.insert(outbox).values(
-        this.buildOutboxRow('payments.refund.requested', payment.orderId, {
-          orderId: payment.orderId,
-          paymentId: payment.id,
-          refundId: refund.id,
-          userId: payment.userId,
-          amount: payment.amount,
-          reason,
-        }),
-      );
-    });
 
     this.auditInfo('payment.refund.requested', {
       orderId: payment.orderId,
@@ -519,10 +496,88 @@ export class PaymentsService {
     });
 
     return {
-      payment: updatedPayment,
+      payment,
       refundId: refund.id,
       status: 'REQUESTED',
     };
+  }
+
+  /**
+   * Queues a refund for the executor and records `payments.refund.requested`,
+   * in one transaction. Returns null when the order already has a live refund:
+   * the unique index on live refunds per order makes this safe under
+   * concurrent requests and redelivered events.
+   */
+  async enqueueRefund(
+    payment: Pick<Payment, 'id' | 'orderId' | 'userId' | 'amount'>,
+    reason: string,
+  ): Promise<{ id: string } | null> {
+    return this.db.transaction(async (tx) => {
+      const [refund] = await tx
+        .insert(refunds)
+        .values({
+          paymentId: payment.id,
+          orderId: payment.orderId,
+          amount: payment.amount,
+          reason,
+          status: REFUND_STATUS.REQUESTED,
+        })
+        .onConflictDoNothing()
+        .returning({ id: refunds.id });
+      if (!refund) return null;
+
+      await tx.insert(outbox).values(
+        buildOutboxRow('payments.refund.requested', payment.orderId, {
+          orderId: payment.orderId,
+          paymentId: payment.id,
+          refundId: refund.id,
+          userId: payment.userId,
+          amount: payment.amount,
+          reason,
+        }),
+      );
+      return refund;
+    });
+  }
+
+  /**
+   * Refunds a payment that order-service captured for an order it could not
+   * fulfil (the order had already been cancelled, or its seats were released).
+   *
+   * Redelivery is safe: enqueueRefund allows one live refund per order. A
+   * missing payment throws so the event is retried and then dead-lettered —
+   * the buyer may have been charged, so it must not be dropped silently.
+   */
+  async processOrderUnfulfillableEvent(event: { orderId: string; reason: string }): Promise<void> {
+    const payment = await this.paymentsRepo.findByOrderId(event.orderId);
+    if (!payment) {
+      throw new Error(`No payment found for unfulfillable order ${event.orderId}`);
+    }
+
+    if (payment.status !== PAYMENT_STATUS.COMPLETED) {
+      // Nothing was taken (or it has already been given back), so nothing to refund.
+      this.auditInfo('payment.unfulfillable.ignored', {
+        orderId: event.orderId,
+        paymentId: payment.id,
+        paymentStatus: payment.status,
+        reason: event.reason,
+      });
+      return;
+    }
+
+    const refund = await this.enqueueRefund(
+      payment,
+      `Order could not be fulfilled (${event.reason})`,
+    );
+    this.auditInfo(
+      refund ? 'payment.unfulfillable.refund_queued' : 'payment.unfulfillable.refund_exists',
+      {
+        orderId: event.orderId,
+        paymentId: payment.id,
+        refundId: refund?.id,
+        reason: event.reason,
+      },
+    );
   }
 
   async registerSavedPaymentMethod(
@@ -937,7 +992,7 @@ export class PaymentsService {
       transitionApplied = true;
 
       await tx.insert(outbox).values(
-        this.buildOutboxRow('payments.payment.failed', payment.orderId, {
+        buildOutboxRow('payments.payment.failed', payment.orderId, {
           orderId: payment.orderId,
           paymentId,
           userId: payment.userId,
@@ -1092,7 +1147,7 @@ export class PaymentsService {
       payment = inserted;
 
       await tx.insert(outbox).values(
-        this.buildOutboxRow('payments.payment.captured', orderId, {
+        buildOutboxRow('payments.payment.captured', orderId, {
           orderId,
           paymentId: inserted.id,
           userId,
@@ -1358,7 +1413,7 @@ export class PaymentsService {
       payment = inserted;
 
       await tx.insert(outbox).values(
-        this.buildOutboxRow('payments.payment.failed', orderId, {
+        buildOutboxRow('payments.payment.failed', orderId, {
           orderId,
           paymentId: inserted.id,
           userId,
@@ -1418,7 +1473,7 @@ export class PaymentsService {
       updated = row;
 
       await tx.insert(outbox).values(
-        this.buildOutboxRow('payments.payment.captured', orderId, {
+        buildOutboxRow('payments.payment.captured', orderId, {
           orderId,
           paymentId,
           userId,
@@ -1465,7 +1520,7 @@ export class PaymentsService {
       updated = row;
 
       await tx.insert(outbox).values(
-        this.buildOutboxRow('payments.payment.failed', orderId, {
+        buildOutboxRow('payments.payment.failed', orderId, {
           orderId,
           paymentId,
           userId,
@@ -1482,23 +1537,6 @@ export class PaymentsService {
 
     this.logger.warn({ paymentId, stripeIntentId }, 'Payment failed — outbox entry written');
     return updated;
-  }
-
-  private buildOutboxRow(topic: string, partitionKey: string, data: Record<string, unknown>) {
-    return {
-      topic,
-      partitionKey,
-      traceHeaders: captureTraceHeaders(),
-      payload: {
-        specversion: '1.0',
-        type: topic,
-        source: 'payment-service',
-        id: randomUUID(),
-        time: new Date().toISOString(),
-        datacontenttype: 'application/json',
-        data,
-      },
-    };
   }
 
   private hasMismatchedStripeIntentId(
