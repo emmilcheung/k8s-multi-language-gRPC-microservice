@@ -338,7 +338,12 @@ func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []
 		       s.section_id,
 		       s.seat_label,
 		       s.status,
-		       COALESCE(seat_pt.price::text, section_pt.price::text, $2) AS price
+		       COALESCE(seat_pt.price::text, section_pt.price::text, $2) AS price,
+		       -- held_by is a user ID only while the seat is HELD; once RESERVED
+		       -- it holds the reservation ID. Compare it only in the HELD case.
+		       (s.status = 'AVAILABLE'
+		        OR (s.status = 'HELD'
+		            AND (s.held_by::text = $3 OR COALESCE(s.held_until < now(), false)))) AS reservable
 		FROM   seats s
 		LEFT JOIN price_tiers seat_pt ON seat_pt.id = s.price_tier_id
 		LEFT JOIN sections sec ON sec.id = s.section_id
@@ -347,21 +352,22 @@ func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []
 		FOR UPDATE OF s`
 
 	type seatRow struct {
-		id        string
-		sectionID string
-		seatLabel string
-		status    string
-		price     string
+		id         string
+		sectionID  string
+		seatLabel  string
+		status     string
+		price      string
+		reservable bool
 	}
 
-	rows, err := tx.Query(ctx, lockQ, seatIDs, ticketBasePrice)
+	rows, err := tx.Query(ctx, lockQ, seatIDs, ticketBasePrice, res.UserID)
 	if err != nil {
 		return err
 	}
 	locked := make(map[string]seatRow, len(seatIDs))
 	for rows.Next() {
 		var sr seatRow
-		if err := rows.Scan(&sr.id, &sr.sectionID, &sr.seatLabel, &sr.status, &sr.price); err != nil {
+		if err := rows.Scan(&sr.id, &sr.sectionID, &sr.seatLabel, &sr.status, &sr.price, &sr.reservable); err != nil {
 			rows.Close()
 			return err
 		}
@@ -372,13 +378,12 @@ func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []
 		return err
 	}
 
-	// 2. Validate all requested seats exist and are in a reservable state.
+	// 2. Validate all requested seats exist and are reservable by this user:
+	//    AVAILABLE, held by the same user, or held by a hold whose time is up.
+	//    Seats another user is still holding are refused.
 	for _, id := range seatIDs {
 		sr, ok := locked[id]
-		if !ok {
-			return repository.ErrSeatNotAvailable
-		}
-		if sr.status != string(repository.SeatStatusHeld) && sr.status != string(repository.SeatStatusAvailable) {
+		if !ok || !sr.reservable {
 			return repository.ErrSeatNotAvailable
 		}
 	}

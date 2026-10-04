@@ -301,6 +301,12 @@ func (m *Manager) SweepExpiredHolds(ctx context.Context) (int64, error) {
 // ARGV[6..N]: pairs of (seatId, holdMetaKey)
 //
 // Returns "ok" on success or "conflict:<seatId>" if any seat is not AVAILABLE.
+//
+// A held ('1') or reserved ('2') seat blocks only while its marker key exists;
+// the key's TTL is the hold or reservation expiry. Once it is gone the seat is
+// treated as free and PostgreSQL, the source of truth, makes the final call.
+// Expiry is therefore lazy: no sweep has to run before a seat can be taken again.
+// A sold ('3') seat always blocks.
 var luaHold = redis.NewScript(`
 local seatsHash = KEYS[1]
 local userId    = ARGV[1]
@@ -313,12 +319,15 @@ local meta = '{"userId":"' .. userId .. '","sessionId":"' .. sessionId .. '","he
 local argLen = #ARGV
 local n = (argLen - 5) / 2
 
--- Phase 1: validate all seats are AVAILABLE (field absent or '0')
+-- Phase 1: validate all seats are free (absent, '0', or a lapsed hold/reservation)
 for i = 1, n do
-    local seatId = ARGV[5 + (i-1)*2 + 1]
-    local state  = redis.call('HGET', seatsHash, seatId)
+    local seatId  = ARGV[5 + (i-1)*2 + 1]
+    local metaKey = ARGV[5 + (i-1)*2 + 2]
+    local state   = redis.call('HGET', seatsHash, seatId)
     if state ~= false and state ~= '0' then
-        return 'conflict:' .. seatId
+        if state == '3' or redis.call('EXISTS', metaKey) == 1 then
+            return 'conflict:' .. seatId
+        end
     end
 end
 
@@ -339,7 +348,8 @@ return 'ok'
 // ARGV[1]: userID
 // ARGV[2..N]: pairs of (seatId, holdMetaKey)
 //
-// Seats whose hold metadata belongs to a different user are skipped.
+// Seats whose hold metadata belongs to a different user are skipped, and so are
+// seats that are no longer held (reserved or sold seats are never released here).
 var luaRelease = redis.NewScript(`
 local seatsHash = KEYS[1]
 local userId    = ARGV[1]
@@ -350,15 +360,17 @@ local n = (argLen - 1) / 2
 for i = 1, n do
     local seatId  = ARGV[1 + (i-1)*2 + 1]
     local metaKey = ARGV[1 + (i-1)*2 + 2]
-    local raw = redis.call('GET', metaKey)
-    if raw ~= false then
-        if string.find(raw, '"userId":"' .. userId .. '"', 1, true) then
+    if redis.call('HGET', seatsHash, seatId) == '1' then
+        local raw = redis.call('GET', metaKey)
+        if raw ~= false then
+            if string.find(raw, '"userId":"' .. userId .. '"', 1, true) then
+                redis.call('HSET', seatsHash, seatId, '0')
+                redis.call('DEL', metaKey)
+            end
+        else
+            -- Hold TTL already expired — safe to mark available
             redis.call('HSET', seatsHash, seatId, '0')
-            redis.call('DEL', metaKey)
         end
-    else
-        -- Hold TTL already expired — safe to mark available
-        redis.call('HSET', seatsHash, seatId, '0')
     end
 end
 return 'ok'
