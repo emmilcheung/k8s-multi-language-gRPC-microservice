@@ -31,6 +31,7 @@ public class StartupValidationTests
             b.UseEnvironment("Production");
             b.UseSetting("Queue:RedisConnection", "localhost:6379");
             b.UseSetting("Queue:HmacSecret", QueueOptions.PlaceholderSecret);
+            b.UseSetting("Queue:UserIdSigningKey", new string('s', 32)); // only the secret is wrong
         });
         var ex = Record.Exception(() => factory.Services.GetService<object>());
         Assert.NotNull(ex);
@@ -44,9 +45,25 @@ public class StartupValidationTests
             b.UseEnvironment("Development");
             b.UseSetting("Queue:RedisConnection", "localhost:6379");
             b.UseSetting("Queue:HmacSecret", QueueOptions.PlaceholderSecret);
+            b.UseSetting("Queue:UserIdSigningKey", new string('s', 32));
         });
         var ex = Record.Exception(() => factory.Services.GetService<object>());
         Assert.Null(ex); // local dev still works with the placeholder
+    }
+
+    // Without the key no redeem can ever succeed, so a sale would stall at the
+    // first admitted buyer; refuse to start instead.
+    [Fact]
+    public void Startup_throws_when_user_id_signing_key_missing()
+    {
+        var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
+        {
+            b.UseEnvironment("Development");
+            b.UseSetting("Queue:RedisConnection", "localhost:6379");
+            b.UseSetting("Queue:HmacSecret", QueueOptions.PlaceholderSecret);
+        });
+        var ex = Record.Exception(() => factory.Services.GetService<object>());
+        Assert.NotNull(ex);
     }
 }
 
@@ -57,6 +74,7 @@ public class QueueApiTests(RedisFixture fx)
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseSetting("Queue:HmacSecret", new string('k', 32));
+            b.UseSetting("Queue:UserIdSigningKey", SigningKey);
             b.UseSetting("Queue:RedisConnection", "unused"); // overridden by DI below
             b.ConfigureServices(s =>
             {
@@ -131,6 +149,7 @@ public class QueueApiTests(RedisFixture fx)
         await using var f = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseSetting("Queue:HmacSecret", new string('k', 32));
+            b.UseSetting("Queue:UserIdSigningKey", SigningKey);
             b.UseSetting("Queue:RedisConnection", "unused");
             b.UseSetting("Queue:EnqueuePerMinutePerIp", "3");
             b.ConfigureServices(s =>
@@ -180,30 +199,83 @@ public class QueueApiTests(RedisFixture fx)
         Assert.Equal(425, (int)res.StatusCode);
     }
 
+    // Redeem is reached through Kong, which proves the caller's account with a
+    // signed X-User-Id. The queue host is also public, so an unsigned or
+    // badly signed identity must never get a pass.
     [Fact]
-    public async Task Redeem_admission_token_is_single_use()
+    public async Task Redeem_without_a_signed_identity_is_unauthorized()
     {
         await using var f = Factory();
         var eid = await SeedEvent(f, openSecondsAgo: 5, rate: 100);
         var client = f.CreateClient();
-        await client.PostAsync($"/api/enqueue?e={eid}", null);
-        var claim = await client.PostAsync($"/api/claim?e={eid}", null);
-        var token = (await claim.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString();
+        var token = await ClaimToken(client, eid);
 
-        var first = await client.PostAsJsonAsync("/api/redeem", new { token });
-        var second = await client.PostAsJsonAsync("/api/redeem", new { token });
+        var unsigned = await client.PostAsJsonAsync("/api/redeem", new { token });
+        var forged = await client.SendAsync(Redeem(token, "user-a", signature: "Zm9yZ2Vk"));
 
-        Assert.Equal(HttpStatusCode.OK, first.StatusCode);        // first use accepted
-        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode); // replay rejected
+        Assert.Equal(HttpStatusCode.Unauthorized, unsigned.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, forged.StatusCode);
+    }
+
+    [Fact]
+    public async Task Redeem_returns_one_pass_per_account_and_refuses_another_account()
+    {
+        await using var f = Factory();
+        var eid = await SeedEvent(f, openSecondsAgo: 5, rate: 100);
+        var client = f.CreateClient();
+        var token = await ClaimToken(client, eid);
+
+        var first = await client.SendAsync(Redeem(token, "user-a"));
+        var again = await client.SendAsync(Redeem(token, "user-a"));
+        var other = await client.SendAsync(Redeem(token, "user-b"));
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode); // a refresh keeps the place
+        Assert.Equal(await PassOf(first), await PassOf(again));
+        Assert.Equal(HttpStatusCode.Forbidden, other.StatusCode);
     }
 
     [Fact]
     public async Task Redeem_rejects_forged_token()
     {
         await using var f = Factory();
-        var res = await f.CreateClient().PostAsJsonAsync("/api/redeem", new { token = "forged.deadbeef" });
-        Assert.Equal(HttpStatusCode.Unauthorized, res.StatusCode);
+        var res = await f.CreateClient().SendAsync(Redeem("forged.deadbeef", "user-a"));
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
     }
+
+    // The ticket cookie carries the queue place; over plain http it could be
+    // read off the wire and replayed, so only local development may drop Secure.
+    [Fact]
+    public async Task Ticket_cookie_is_secure_outside_development()
+    {
+        await using var f = Factory().WithWebHostBuilder(b => b.UseEnvironment("Production"));
+        var eid = await SeedEvent(f, openSecondsAgo: 5, rate: 100);
+        var res = await f.CreateClient().PostAsync($"/api/enqueue?e={eid}", null);
+        Assert.Contains(res.Headers.GetValues("Set-Cookie"),
+            c => c.StartsWith("qq_ticket=") && c.Contains("secure", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private const string SigningKey = "user-id-signing-key-0123456789abcdef";
+
+    private static HttpRequestMessage Redeem(string token, string userId, string? signature = null)
+    {
+        var req = new HttpRequestMessage(HttpMethod.Post, "/api/redeem") { Content = JsonContent.Create(new { token }) };
+        var minute = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60;
+        req.Headers.Add("X-User-Id", userId);
+        req.Headers.Add("X-User-Id-Sig", signature ?? Convert.ToBase64String(System.Security.Cryptography.HMACSHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(SigningKey), System.Text.Encoding.UTF8.GetBytes($"{userId}|{minute}"))));
+        return req;
+    }
+
+    private static async Task<string> ClaimToken(HttpClient client, string eid)
+    {
+        await client.PostAsync($"/api/enqueue?e={eid}", null);
+        var claim = await client.PostAsync($"/api/claim?e={eid}", null);
+        return (await claim.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
+    }
+
+    private static async Task<string?> PassOf(HttpResponseMessage res) =>
+        (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("pass").GetString();
 
     private static async Task<string> SeedEvent(WebApplicationFactory<Program> f, int openSecondsAgo, double rate)
     {

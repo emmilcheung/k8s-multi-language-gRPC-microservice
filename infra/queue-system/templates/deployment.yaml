@@ -35,6 +35,11 @@ spec:
                 secretKeyRef:
                   name: queue-secret
                   key: hmac-secret
+            - name: Queue__UserIdSigningKey
+              valueFrom:
+                secretKeyRef:
+                  name: queue-secret
+                  key: user-id-signing-key
           readinessProbe:
             httpGet:
               path: /readyz          # Redis-aware: NotReady if Redis is unreachable

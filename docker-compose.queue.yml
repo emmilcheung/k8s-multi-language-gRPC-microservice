@@ -17,6 +17,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: "Development"   # local only — allows the placeholder secret
       Queue__HmacSecret: "dev-secret-change-me-32-chars-minimum"
+      # Same key Kong signs X-User-Id with; redeem needs it (from .env).
+      Queue__UserIdSigningKey: "${X_USER_ID_SIGNING_KEY:?set X_USER_ID_SIGNING_KEY in .env}"
       Queue__RedisConnection: "queue-redis:6379"
       Queue__AllowedTargetOrigins__0: "http://localhost:4000"
     depends_on:
