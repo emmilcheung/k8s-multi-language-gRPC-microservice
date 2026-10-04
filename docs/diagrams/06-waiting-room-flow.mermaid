@@ -17,11 +17,17 @@ sequenceDiagram
         Q-->>B: serving = floor(rate * (now - T0))
     end
     B->>Q: POST /claim
-    Q-->>B: signed admission token (HMAC, single-use nonce)
+    Q-->>B: signed admission token (HMAC, single-use nonce, no account yet)
     B->>C: 302 to /tickets/123?qpass={token}
-    C->>Q: POST /redeem (consume nonce once)
-    Q-->>C: 200 (first use only)
+    opt not logged in
+        C-->>B: 302 to /auth/signin?next=/tickets/123?qpass={token}
+        B->>C: sign in, back to /tickets/123?qpass={token}
+    end
+    C->>K: POST /api/queue/redeem (login token)
+    K->>Q: /api/redeem + X-User-Id and its HMAC signature
+    Note over Q: binds the queue place to the first account, one pass per account per event
+    Q-->>C: pass (Sub = account, 15 min), the same pass again on a repeat
     C-->>B: set qq_pass cookie, 302 /tickets/123 (clean URL)
-    B->>K: reserve mutation (qq_pass cookie)
-    Note over K: Kong backstop re-validates qq_pass HMAC
-    K-->>B: reserved
+    B->>K: hold seats / create order (qq_pass cookie)
+    Note over K: Kong re-checks signature, expiry, event and Sub = caller
+    K-->>B: held

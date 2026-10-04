@@ -15,7 +15,7 @@ P = [
 ]
 s = Sequence(
     "Virtual waiting room for an onsale surge",
-    "A fair draw, then admission by pure time-math, then a single-use pass that Kong re-checks",
+    "A fair draw, then admission by pure time-math, then a pass bound to one account that Kong re-checks",
     P,
     zones=[("Client", 0, 0, "amber"), ("Front door (EKS)", 1, 1, "blue"), ("Queue subsystem (own domain + Redis)", 2, 3, "pink"),
            ("Buy path", 4, 4, "teal")],
@@ -34,21 +34,27 @@ s.branch("loop", "until position < serving")
 s.m("B", "Q", "GET /serving (cacheable, pure time-math)")
 s.m("Q", "B", "serving = floor(rate * (now - T0))", ret=True)
 
-s.phase("Phase 3  -  Admission: single-use signed pass", "green")
+s.phase("Phase 3  -  Admission: a pass bound to one account", "green")
 s.m("B", "Q", "POST /claim")
-s.m("Q", "B", "signed admission token (HMAC, single-use nonce)", ret=True)
+s.m("Q", "B", "signed admission token (HMAC, single-use nonce, no account yet)", ret=True)
 s.m("B", "C", "302 to /tickets/123?qpass={token}")
-s.m("C", "Q", "POST /redeem (consume nonce once)")
-s.m("Q", "C", "200 (first use only)", ret=True)
+s.branch("alt", "not logged in")
+s.m("C", "B", "302 to /auth/signin?next=/tickets/123?qpass={token}", ret=True)
+s.m("B", "C", "sign in, back to /tickets/123?qpass={token}")
+s.m("C", "K", "POST /api/queue/redeem (login token)")
+s.m("K", "Q", "/api/redeem + X-User-Id and its HMAC signature")
+s.note("Q", "binds the queue place to the first account; one pass per account per event", "right")
+s.m("Q", "C", "pass (Sub = account, 15 min); the same pass again on a repeat", ret=True)
 s.m("C", "B", "set qq_pass cookie, 302 /tickets/123 (clean URL)", ret=True)
 
-s.phase("Phase 4  -  Buy path with a second check", "teal")
-s.m("B", "K", "reserve mutation (qq_pass cookie)")
-s.note("K", "Kong backstop re-validates the qq_pass HMAC, so a bypassed connector still cannot reserve.", "right")
-s.m("K", "B", "reserved", ret=True)
+s.phase("Phase 4  -  Purchase writes with a second check", "teal")
+s.m("B", "K", "hold seats / create order (qq_pass cookie)")
+s.note("K", "Kong re-checks the pass: signature, expiry, event, and that its Sub is the caller. Payment and release are never gated.", "right")
+s.m("K", "B", "held", ret=True)
 
 s.footer = ("Production takeaway",
             "The queue is a standalone subsystem on its own domain and Redis, so a traffic surge on the queue cannot starve the "
             "order path. /serving is pure arithmetic on time and rate, so it is cacheable at the CDN and needs no per-user "
-            "state. The pass is single-use and HMAC-signed, and it is checked twice: at the connector and again at Kong.")
+            "state. The pass is HMAC-signed and bound to the account that redeemed it, so it cannot be resold or shared, and "
+            "it is checked twice: at the connector and again at Kong.")
 s.save("06-waiting-room-flow")

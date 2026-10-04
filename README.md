@@ -61,7 +61,9 @@ A **separate, opt-in subsystem** (`services/queue-service`, .NET 10) that meters
 into the buy path during a high-demand onsale. It runs on its **own domain, own pods, and
 own Redis** — isolated so a surge never competes with the platform for resources — and is
 **disarmed by default** (zero effect until an onsale is armed). The read path stays fully
-cached; only the scarce write path (reservation) is gated.
+cached; only the purchase writes (holding seats and creating an order, over GraphQL or REST)
+are gated. Paying for and releasing a hold never are, so a pass that expires mid-checkout
+does not strand a buyer.
 
 How a buyer flows through it when armed:
 
@@ -85,30 +87,41 @@ sequenceDiagram
         Q-->>B: serving = ⌊rate·(now−T0)⌋
     end
     B->>Q: POST /claim
-    Q-->>B: signed admission token (HMAC, single-use nonce)
+    Q-->>B: signed admission token (HMAC, single-use nonce, no account yet)
     B->>C: 302 → /tickets/123?qpass={token}
-    C->>Q: POST /redeem   (consume nonce once)
-    Q-->>C: 200 (first use only)
+    opt not logged in
+        C-->>B: 302 → /auth/signin?next=/tickets/123?qpass={token}
+        B->>C: sign in, back to /tickets/123?qpass={token}
+    end
+    C->>K: POST /api/queue/redeem (login token)
+    K->>Q: /api/redeem + X-User-Id and its HMAC signature
+    Note over Q: binds the queue place to the first account, one pass per account per event
+    Q-->>C: pass (Sub = account, 15 min), the same pass again on a repeat
     C-->>B: set qq_pass cookie → 302 /tickets/123 (clean URL)
-    B->>K: reserve mutation (qq_pass cookie)
-    Note over K: Kong backstop re-validates qq_pass HMAC
-    K-->>B: reserved
+    B->>K: hold seats / create order (qq_pass cookie)
+    Note over K: Kong re-checks signature, expiry, event and Sub = caller
+    K-->>B: held
 ```
 
 **Admission is pure calculation** — `serving(t) = ⌊rate·(t − T0)⌋` — so the hot `/serving`
 endpoint does no Redis work and stays flat under load (measured: p95 **19.5 ms at 500 VUs /
 ~31k req/s, 0 failures**). Fairness uses a pre-queue **randomized draw** at sale start, then
-FIFO; admission tokens are HMAC-signed and **single-use** (replay-proof).
+FIFO; admission tokens are HMAC-signed and **single-use** (replay-proof). Redeeming one
+needs a login and binds the place to that account: one pass per account per event, valid
+15 minutes, which Kong refuses for anyone else, so a pass cannot be resold or shared.
 
 **Setup:**
 
 - **Local:** `docker compose -f docker-compose.queue.yml up` — own Redis on `:6390`, waiting
   page + API on `:4100`. Arm the client gate via env (see `services/client/.env.example`):
   `QUEUE_GATE_ARMED=true QUEUE_EVENT_ID=<id> QUEUE_URL=http://localhost:4100 QUEUE_HMAC_SECRET=<32+ chars>`.
+  The compose file needs `X_USER_ID_SIGNING_KEY` in `.env` (the key Kong signs `X-User-Id` with).
 - **Kubernetes:** standalone chart `infra/queue-system/` (own namespace + Redis, HPA, PDB,
-  Ingress on the queue subdomain): `helm install queue infra/queue-system --set image.tag=<tag> --set queue.hmacSecret=<secret>`.
-- **Arm/disarm:** flip `QUEUE_GATE_ARMED` on the connector and the event config — the gate and
-  the Kong reserve-mutation backstop are inert until armed.
+  Ingress on the queue subdomain): `helm install queue infra/queue-system -n queue --create-namespace --set image.tag=<tag> --set queue.hmacSecret=<secret> --set queue.userIdSigningKey=<Kong's KONG_SIGNING_KEY>`.
+  Kong reaches it at `queue-service.queue.svc.cluster.local` (`HOST_QUEUE`).
+- **Arm/disarm:** flip `QUEUE_GATE_ARMED` on the connector and on Kong (with `QUEUE_EVENT_ID`,
+  `QUEUE_HMAC_SECRET` and `KONG_SIGNING_KEY` set), plus the event config. The gate and the
+  Kong purchase backstop are inert until armed.
 
 Design, plans, and the security/reliability remediation report live under
 [`docs/superpowers/specs/`](docs/superpowers/specs/) (`2026-06-16-virtual-waiting-room-design.md`,
