@@ -45,6 +45,7 @@ describe("gateDecision", () => {
     fullUrl: "http://app:4000/tickets/123",
     pathWithQuery: "/tickets/123", qpass: null as string | null,
     passCookie: null as string | null, nowSec: 2000, loggedIn: true,
+    admitCookie: null as string | null,
   };
 
   it("passes through when the gate is disarmed", async () => {
@@ -69,14 +70,43 @@ describe("gateDecision", () => {
     }
   });
   // The pass is bound to an account when it is redeemed, so the buyer must be
-  // logged in first. The admission link rides along in ?next so signing in
-  // brings them straight back to redeem it, instead of back to the queue.
-  it("sends a visitor who is not logged in to sign in, keeping the admission link", async () => {
+  // logged in first. The admission token is handed back for a cookie, not kept
+  // in ?next: the sign-in page renders, and its URL ends up in history, access
+  // logs and the Referer of everything it loads.
+  it("sends a visitor who is not logged in to sign in without the token in the URL", async () => {
     const t = await sign(payload());
     const d = await gateDecision({ ...base, pathWithQuery: "/tickets/123?qpass=" + t, qpass: t, loggedIn: false });
     expect(d.kind).toBe("login");
     if (d.kind === "login") {
-      expect(d.location).toBe("/auth/signin?next=" + encodeURIComponent("/tickets/123?qpass=" + t));
+      expect(d.location).toBe("/auth/signin?next=" + encodeURIComponent("/tickets/123"));
+      expect(d.token).toBe(t);
+      expect(d.expSec).toBe(payload().Exp);
+    }
+  });
+  // Back from sign-in, the kept token is redeemed so the buyer does not queue again.
+  it("redeems the kept admission token once the visitor has signed in", async () => {
+    const t = await sign(payload());
+    const d = await gateDecision({ ...base, admitCookie: t });
+    expect(d).toEqual({ kind: "accept", cleanUrl: "/tickets/123", token: t });
+  });
+  it("ignores a kept admission token until the visitor has signed in", async () => {
+    const t = await sign(payload());
+    expect((await gateDecision({ ...base, admitCookie: t, loggedIn: false })).kind).toBe("redirect-queue");
+  });
+  it("ignores a kept admission token that has expired or is forged", async () => {
+    const expired = await sign(payload({ Exp: 1500 }));
+    expect((await gateDecision({ ...base, admitCookie: expired })).kind).toBe("redirect-queue");
+    expect((await gateDecision({ ...base, admitCookie: "a.b" })).kind).toBe("redirect-queue");
+  });
+  // A token that failed to verify must not be carried to the queue page either.
+  it("drops an unusable qpass from the queue page's return target", async () => {
+    const d = await gateDecision({
+      ...base, fullUrl: "http://app:4000/tickets/123?x=1&qpass=junk", pathWithQuery: "/tickets/123?x=1&qpass=junk", qpass: "junk",
+    });
+    expect(d.kind).toBe("redirect-queue");
+    if (d.kind === "redirect-queue") {
+      expect(d.location).not.toContain("qpass");
+      expect(d.location).toContain(encodeURIComponent("http://app:4000/tickets/123?x=1"));
     }
   });
   // Every page is gated while armed; if sign-in were too, the visitor sent

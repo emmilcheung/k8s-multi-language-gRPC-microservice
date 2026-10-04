@@ -22,7 +22,7 @@ describe.skipIf(!TOKEN)("real .NET token interop", () => {
     const d = await gateDecision({
       armed: true, eventId: EVENT, secret: SECRET, queueUrl: "http://q:4100",
       fullUrl: "http://app:4000/tickets/1?qpass=" + TOKEN!,
-      pathWithQuery: "/tickets/1?qpass=" + TOKEN!, qpass: TOKEN!, passCookie: null,
+      pathWithQuery: "/tickets/1?qpass=" + TOKEN!, qpass: TOKEN!, passCookie: null, admitCookie: null,
       nowSec: Math.floor(Date.now() / 1000), loggedIn: true,
     });
     expect(d.kind).toBe("accept");

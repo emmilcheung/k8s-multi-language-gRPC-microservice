@@ -8,7 +8,7 @@ export interface AdmissionPayload { Eid: string; Mid: string; Iat: number; Exp: 
 export type Decision =
   | { kind: "pass" }
   | { kind: "redirect-queue"; location: string }
-  | { kind: "login"; location: string }
+  | { kind: "login"; location: string; token: string; expSec: number }
   | { kind: "accept"; cleanUrl: string; token: string };
 
 export interface GateInput {
@@ -17,6 +17,9 @@ export interface GateInput {
    *  so the queue page can cross-domain redirect back to the main site. */
   fullUrl: string;
   pathWithQuery: string; qpass: string | null; passCookie: string | null; nowSec: number;
+  /** Admission token kept in a cookie while the visitor signs in, so it never
+   *  sits in the sign-in page's URL (history, logs, Referer). */
+  admitCookie: string | null;
   /** Whether the visitor has a login cookie; redeeming binds the pass to that account. */
   loggedIn: boolean;
 }
@@ -71,12 +74,21 @@ export async function gateDecision(i: GateInput): Promise<Decision> {
 
   if (i.qpass) {
     const p = await verifyAdmission(i.qpass, i.secret);
-    if (valid(p, i.eventId, i.nowSec)) {
+    if (p && valid(p, i.eventId, i.nowSec)) {
+      const cleanUrl = stripQpass(i.pathWithQuery);
       if (!i.loggedIn) {
-        return { kind: "login", location: `/auth/signin?next=${encodeURIComponent(i.pathWithQuery)}` };
+        return {
+          kind: "login", location: `/auth/signin?next=${encodeURIComponent(cleanUrl)}`,
+          token: i.qpass, expSec: p.Exp,
+        };
       }
-      return { kind: "accept", cleanUrl: stripQpass(i.pathWithQuery), token: i.qpass };
+      return { kind: "accept", cleanUrl, token: i.qpass };
     }
+  }
+
+  if (i.admitCookie && i.loggedIn) {
+    const p = await verifyAdmission(i.admitCookie, i.secret);
+    if (valid(p, i.eventId, i.nowSec)) return { kind: "accept", cleanUrl: i.pathWithQuery, token: i.admitCookie };
   }
 
   if (i.passCookie) {
@@ -84,7 +96,7 @@ export async function gateDecision(i: GateInput): Promise<Decision> {
     if (valid(p, i.eventId, i.nowSec) && typeof p?.Sub === "string" && p.Sub) return { kind: "pass" };
   }
 
-  const target = encodeURIComponent(i.fullUrl);
+  const target = encodeURIComponent(stripQpass(i.fullUrl));
   return { kind: "redirect-queue", location: `${i.queueUrl}/wait?e=${i.eventId}&target=${target}` };
 }
 

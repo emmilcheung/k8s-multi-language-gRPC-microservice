@@ -13,11 +13,34 @@ import {
 import { gateDecision, redeemAdmission } from "@/lib/queue/gate";
 
 const QUEUE_PASS_COOKIE = process.env.QUEUE_PASS_COOKIE || "qq_pass";
+// Holds the admission token while the visitor signs in (see gateDecision).
+const QUEUE_ADMIT_COOKIE = "qq_admit";
+
+// Every gate response is a redirect, and the URLs around it can carry an
+// admission token; never pass them on as a Referer.
+function noReferrer(res: NextResponse): NextResponse {
+  res.headers.set("Referrer-Policy", "no-referrer");
+  return res;
+}
 
 // Virtual waiting room gate. Returns a response when the gate intercepts
 // (redirect to the waiting room or to sign-in, or redeem a qpass), or null to
 // pass through (gate disarmed, misconfigured, or visitor already admitted).
+function keepAdmission(res: NextResponse, token: string, maxAge?: number): NextResponse {
+  res.cookies.set(QUEUE_ADMIT_COOKIE, token, {
+    httpOnly: true, sameSite: "lax", path: "/",
+    secure: process.env.NODE_ENV === "production",
+    ...(maxAge === undefined ? {} : { maxAge }),
+  });
+  return res;
+}
+
 async function applyQueueGate(request: NextRequest): Promise<NextResponse | null> {
+  const res = await queueGate(request);
+  return res && noReferrer(res);
+}
+
+async function queueGate(request: NextRequest): Promise<NextResponse | null> {
   if (process.env.QUEUE_GATE_ARMED !== "true") return null;
 
   const eventId = process.env.QUEUE_EVENT_ID || "";
@@ -33,6 +56,7 @@ async function applyQueueGate(request: NextRequest): Promise<NextResponse | null
     pathWithQuery: url.pathname + url.search,
     qpass: url.searchParams.get("qpass"),
     passCookie: request.cookies.get(QUEUE_PASS_COOKIE)?.value ?? null,
+    admitCookie: request.cookies.get(QUEUE_ADMIT_COOKIE)?.value ?? null,
     nowSec: Math.floor(Date.now() / 1000),
     loggedIn: Boolean(accessToken),
   });
@@ -42,21 +66,29 @@ async function applyQueueGate(request: NextRequest): Promise<NextResponse | null
       return null;
     case "redirect-queue":
       return NextResponse.redirect(decision.location, 302);
-    case "login":
-      return NextResponse.redirect(new URL(decision.location, request.url), 302);
+    case "login": {
+      const res = NextResponse.redirect(new URL(decision.location, request.url), 302);
+      return keepAdmission(res, decision.token,
+        Math.max(0, decision.expSec - Math.floor(Date.now() / 1000)));
+    }
     case "accept": {
       // The admission token becomes a pass bound to this account. A repeat by
       // the same account (refresh, second tab) gets the same pass back.
       const redeemed = await redeemAdmission(getApiBase(), decision.token, accessToken ?? "");
       if (redeemed.kind === "login") {
-        const next = encodeURIComponent(url.pathname + url.search);
-        return NextResponse.redirect(new URL(`/auth/signin?next=${next}`, request.url), 302);
+        // The stale session cannot redeem; keep the token in its cookie and sign in again.
+        const res = NextResponse.redirect(
+          new URL(`/auth/signin?next=${encodeURIComponent(decision.cleanUrl)}`, request.url), 302);
+        return keepAdmission(res, decision.token);
       }
       if (redeemed.kind === "failed") {
-        const target = encodeURIComponent(url.pathname + url.search);
-        return NextResponse.redirect(`${queueUrl}/wait?e=${eventId}&target=${target}`, 302);
+        const target = encodeURIComponent(decision.cleanUrl);
+        const res = NextResponse.redirect(`${queueUrl}/wait?e=${eventId}&target=${target}`, 302);
+        res.cookies.delete(QUEUE_ADMIT_COOKIE);
+        return res;
       }
       const res = NextResponse.redirect(new URL(decision.cleanUrl, request.url), 302);
+      res.cookies.delete(QUEUE_ADMIT_COOKIE);
       res.cookies.set(QUEUE_PASS_COOKIE, redeemed.pass, {
         httpOnly: true, sameSite: "lax", path: "/",
         secure: process.env.NODE_ENV === "production",
