@@ -286,9 +286,10 @@ func (r *SectionRepo) GetAvailableSeatsInSection(ctx context.Context, sectionID 
 	return r.scanSeats(ctx, q, sectionID)
 }
 
-// HoldSeats atomically transitions seats AVAILABLE → HELD for the given user.
+// HoldSeats atomically transitions seats AVAILABLE (or HELD with an expired
+// hold) → HELD for the given user.
 // Uses a FOR UPDATE lock to prevent concurrent hold races.
-// Returns ErrSeatNotAvailable if any seat is not AVAILABLE.
+// Returns ErrSeatNotAvailable if any seat is not free.
 func (r *SectionRepo) HoldSeats(ctx context.Context, seatIDs []string, userID string, expiresAt time.Time) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -298,29 +299,32 @@ func (r *SectionRepo) HoldSeats(ctx context.Context, seatIDs []string, userID st
 
 	// Lock all target seats for update.
 	const lockQ = `
-		SELECT id, status FROM seats WHERE id = ANY($1) FOR UPDATE`
+		SELECT id, status, COALESCE(status = 'HELD' AND held_until < now(), false) AS lapsed
+		FROM seats WHERE id = ANY($1) FOR UPDATE`
 	rows, err := tx.Query(ctx, lockQ, seatIDs)
 	if err != nil {
 		return err
 	}
-	locked := make(map[string]string, len(seatIDs))
+	free := make(map[string]bool, len(seatIDs))
 	for rows.Next() {
 		var id, status string
-		if err := rows.Scan(&id, &status); err != nil {
+		var lapsed bool
+		if err := rows.Scan(&id, &status, &lapsed); err != nil {
 			rows.Close()
 			return err
 		}
-		locked[id] = status
+		free[id] = status == string(repository.SeatStatusAvailable) || lapsed
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
 
-	// Verify all seats exist and are AVAILABLE.
+	// Verify all seats exist and are AVAILABLE, or HELD by a hold whose time
+	// has run out. Taking over a lapsed hold here means a seat goes back on
+	// sale the moment its hold expires, not when the sweeper next runs.
 	for _, id := range seatIDs {
-		st, ok := locked[id]
-		if !ok || st != string(repository.SeatStatusAvailable) {
+		if !free[id] {
 			return repository.ErrSeatNotAvailable
 		}
 	}

@@ -279,8 +279,8 @@ type ReservationRepository interface {
 	// ticketBasePrice is the ticket's base price (decimal string, e.g. "25.50"),
 	// used as the final fallback if no seat or section price tier is assigned.
 	//
-	// Returns ErrSeatNotAvailable if any seat cannot be reserved (wrong status or
-	// not found).  Returns ErrReservationAlreadyDone if r.ID already exists in the
+	// Returns ErrSeatNotAvailable if any seat cannot be reserved (wrong status,
+	// still held by a different user than r.UserID, or not found).  Returns ErrReservationAlreadyDone if r.ID already exists in the
 	// ledger (idempotency guard under concurrent retries).
 	AtomicReserveAndCreate(ctx context.Context, seatIDs []string, r *SeatReservation, ticketBasePrice string) error
 

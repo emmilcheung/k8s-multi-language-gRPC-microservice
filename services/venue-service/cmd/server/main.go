@@ -145,15 +145,19 @@ func main() {
 	planRepo := pgrepo.NewPlanRepo(pool)
 	sectionRepo := pgrepo.NewSectionRepo(pool)
 	priceTierRepo := pgrepo.NewPriceTierRepo(pool)
-	reservationRepo := pgrepo.NewReservationRepo(pool)
-
-	// Business logic service (implements OrderEventHandler for Kafka consumer).
-	svc := service.NewVenueService(reservationRepo, sectionRepo, log)
 
 	// Hold manager — Redis hot path + PostgreSQL fallback.
 	// holdTTL determines how long seats are reserved during the hold phase.
 	holdTTL := time.Duration(cfg.HoldTTLSec) * time.Second
 	holdMgr := hold.NewManager(redisClient, sectionRepo, planRepo, holdTTL, log)
+
+	// Reservation changes also update the Redis seat state, so the hold path
+	// sees reserved, sold and released seats without waiting for a hold to expire.
+	pgReservationRepo := pgrepo.NewReservationRepo(pool)
+	reservationRepo := hold.NewRedisSyncedReservations(pgReservationRepo, holdMgr)
+
+	// Business logic service (implements OrderEventHandler for Kafka consumer).
+	svc := service.NewVenueService(reservationRepo, sectionRepo, log)
 
 	// SSE broadcaster — real-time seat state fan-out to connected clients.
 	// Uses Redis pub/sub when Redis is available; falls through to in-process fan-out.
@@ -174,8 +178,9 @@ func main() {
 	go sweeper.Start(sweeperCtx)
 
 	// Reservation sweeper — expires RESERVED reservations past expires_at every
-	// 5 minutes (same cadence as ticket-service's quota reconciler).
-	resSweeper := hold.NewReservationSweeper(reservationRepo, 5*time.Minute, log)
+	// 5 minutes (same cadence as ticket-service's quota reconciler). It needs no
+	// Redis sync: a reserved seat's Redis marker expires with the reservation.
+	resSweeper := hold.NewReservationSweeper(pgReservationRepo, 5*time.Minute, log)
 	resSweeperCtx, resSweeperCancel := context.WithCancel(context.Background())
 	defer resSweeperCancel()
 	go resSweeper.Start(resSweeperCtx)
