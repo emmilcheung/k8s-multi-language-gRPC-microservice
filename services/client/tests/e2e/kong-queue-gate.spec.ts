@@ -45,11 +45,28 @@ const createOrder = (qqPass?: string) =>
     body: "{}",
   });
 
+// The plan does not need to exist: the gate answers before venue-service does.
+const seats = (action: "hold" | "release", qqPass?: string) =>
+  fetch(`${KONG_URL}/api/seating-plans/00000000-0000-0000-0000-000000000000/seats/${action}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: `token=${session}` + (qqPass ? `; qq_pass=${qqPass}` : ""),
+    },
+    body: JSON.stringify({ seatIds: ["00000000-0000-0000-0000-000000000001"] }),
+  });
+
 test.describe("disarmed gate", () => {
   test.skip(ARMED, "runs against the default (disarmed) gateway");
 
   test("REST order creation needs no pass", async () => {
     const res = await createOrder();
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBeLessThan(500);
+  });
+
+  test("REST seat holds need no pass", async () => {
+    const res = await seats("hold");
     expect(res.status).not.toBe(403);
     expect(res.status).toBeLessThan(500);
   });
@@ -99,6 +116,27 @@ test.describe("armed gate", () => {
     });
     expect(res.status).toBeLessThan(500);
     expect(res.status).not.toBe(403);
+  });
+
+  // A broader venue route matches the hold path too and has no gate; this
+  // fails if the gated route stops winning.
+  test("a REST seat hold without a pass is sent to the waiting room", async () => {
+    const res = await seats("hold");
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ message: "waiting room: pass required" });
+  });
+
+  test("a REST seat hold with a genuine pass is admitted", async () => {
+    const res = await seats("hold", pass(sub));
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBeLessThan(500);
+  });
+
+  // Seats must be returnable after the pass expires.
+  test("releasing seats needs no pass", async () => {
+    const res = await seats("release");
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBeLessThan(500);
   });
 
   test("REST order reads stay open while armed", async () => {

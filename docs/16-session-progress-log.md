@@ -11,7 +11,15 @@
 
 ---
 
-## Session: 2026-10-04 — Per-buyer seat limit for seated events, behind a flag ⏳ IN PR (#159)
+## Session: 2026-10-05 — Waiting-room review follow-ups ⏳ IN PR (#160)
+
+On `fix/waiting-room-review-followups`. These are fixes for three findings from the review of #158.
+
+- **Seat-hold route priority (Kong).** `venue-seating-plans-nested-write` also matches `POST /api/seating-plans/{id}/seats/hold`, and it has no queue gate. The gated `venue-seats-buyer-hold` route was winning only because of Kong's path-length ordering. It now sets `regex_priority: 10`. `kong-queue-gate.spec.ts` covers REST holds in both modes. Armed, a hold without a pass is refused and one with a valid pass is let through. Disarmed, no pass is needed. Releasing seats never needs a pass.
+- **Signing key delivery (queue-system chart).** queue-service holds the platform-wide `X_USER_ID_SIGNING_KEY`, which can sign any user id. Until now it arrived only through plain Helm values. The chart now takes `secretRef` (an out-of-band Secret) or `externalSecrets` (an ExternalSecret, same shape as the infra/helm charts). The plain-values Secret is rendered only when neither is set, and is meant for local clusters. [06](06-security.md) records the rule for every holder of the key.
+- **Admission token in URLs (client).** A visitor who wasn't signed in was sent to `/auth/signin?next=…?qpass=<token>`. That put the token into a rendered page's URL, and from there into history, logs and the Referer header. The token now waits in a short-lived httpOnly `qq_admit` cookie, and `next` is clean. Once the visitor has signed in, the gate redeems it and then clears it. A qpass that fails to verify is no longer copied into the queue page's return target. Gate responses send `Referrer-Policy: no-referrer`.
+
+## Session: 2026-10-04 — Per-buyer seat limit for seated events, behind a flag ✅ MERGED (PR #159)
 
 On `feat/seated-per-user-cap`. A seated plan had no per-buyer limit: one account could hold
 or reserve every seat by splitting the purchase over several calls. The GA path already

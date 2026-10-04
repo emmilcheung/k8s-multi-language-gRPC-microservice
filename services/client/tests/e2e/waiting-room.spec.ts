@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { signupViaApi } from "./_helpers/oauth";
+import { KONG_URL, signupViaApi } from "./_helpers/oauth";
+import { PASSWORD, uniqueEmail } from "./_helpers/flows";
 
 // Requires the full stack + queue group, and the client started with the gate
 // armed against a seeded, already-open, high-rate event. See the run recipe in
@@ -22,11 +23,30 @@ test.describe("virtual waiting room", () => {
   });
 
   // The pass is bound to an account when redeemed, so an admitted visitor who
-  // is not logged in is sent to sign in, with the admission link kept in ?next.
-  test("an admitted visitor who is not logged in is sent to sign in", async ({ page }) => {
+  // is not logged in is sent to sign in. The admission token waits in a cookie,
+  // not in the sign-in URL (history, logs, Referer), and signing in brings them
+  // back to redeem it instead of back to the queue.
+  test("an admitted visitor who is not logged in signs in and comes back with a pass", async ({ page, context }) => {
+    const email = uniqueEmail("waiting-room");
+    const signup = await fetch(`${KONG_URL}/api/users/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: PASSWORD }),
+    });
+    expect(signup.status).toBe(201);
+
     await page.goto(`/tickets/${TICKET}`);
-    await page.waitForURL(/\/auth\/signin\?next=.*qpass/, { timeout: 15000 });
-    await expect(page.locator("form")).toBeVisible();
+    await page.waitForURL(/\/auth\/signin\?next=/, { timeout: 15000 });
+    expect(page.url()).not.toContain("qpass");
+    expect((await context.cookies()).some((c) => c.name === "qq_admit")).toBe(true);
+
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.waitForURL((u) => u.pathname === `/tickets/${TICKET}` && !u.searchParams.has("qpass"), { timeout: 15000 });
+    const cookies = await context.cookies();
+    expect(cookies.some((c) => c.name === "qq_pass")).toBe(true);
+    expect(cookies.some((c) => c.name === "qq_admit")).toBe(false);
   });
 
   test("a logged-in admitted visitor reaches the ticket page with a pass bound to them", async ({ page, context, baseURL }) => {

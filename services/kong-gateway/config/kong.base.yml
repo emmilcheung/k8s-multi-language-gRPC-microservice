@@ -696,10 +696,13 @@ services:
                 - |
                   {{JWT_SUB_LUA}}
 
-      # Protected: buyer seat hold — JWT required; waiting-room pass required while armed
+      # Protected: buyer seat hold — JWT required; waiting-room pass required while armed.
+      # venue-seating-plans-nested-write also matches this path without the gate,
+      # so the priority is set explicitly rather than left to path-length ordering.
       - name: venue-seats-buyer-hold
         paths:
           - ~/api/seating-plans/[^/]+/seats/hold$
+        regex_priority: 10
         methods: [POST]
         strip_path: false
         plugins:
