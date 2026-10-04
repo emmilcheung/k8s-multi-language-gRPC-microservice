@@ -134,6 +134,30 @@ public class QueueApiTests(RedisFixture fx)
         Assert.Contains(eid, html);
     }
 
+    // Joining the queue is a rate-limited POST from the page's script. If a page
+    // load joined, anyone could fill the queue (and push real fans back) with
+    // plain cookieless GETs, which the enqueue limit never sees.
+    [Theory]
+    [InlineData(-120)] // before the sale: would join the pre-queue draw
+    [InlineData(5)]    // after it opens: would take a late place
+    public async Task Loading_the_wait_page_does_not_join_the_queue(int openSecondsAgo)
+    {
+        await using var f = Factory();
+        var eid = await SeedEvent(f, openSecondsAgo, rate: 50);
+        var client = f.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
+
+        for (var i = 0; i < 20; i++)
+        {
+            var res = await client.GetAsync($"/wait?e={eid}&target=%2Ftickets%2F123");
+            Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+            Assert.False(res.Headers.Contains("Set-Cookie"));
+        }
+
+        var db = fx.Mux.GetDatabase();
+        Assert.Equal(0, await db.SortedSetLengthAsync($"q:{{{eid}}}:prequeue"));
+        Assert.False(await db.KeyExistsAsync($"q:{{{eid}}}:late"));
+    }
+
     [Fact]
     public async Task Health_and_readiness_endpoints_ok_when_redis_up()
     {

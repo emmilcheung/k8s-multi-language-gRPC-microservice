@@ -1630,6 +1630,8 @@ for any event, could be copied to another account, and REST order creation was n
   queue-service through `HOST_QUEUE` (compose maps it to the host; on Kubernetes the chart
   is assumed installed in the `queue` namespace). The ticket cookie is `Secure` outside
   Development. Standard recorded in `docs/06-security.md`.
+- **Page loads no longer join the queue**: `GET /wait` only renders; `wait.js` joins
+  through the rate-limited `POST /api/enqueue`, so cookieless GETs cannot fill the queue.
 
 Verified against the running stack with Kong armed: Kong e2e (7), waiting-room e2e (3),
 and the sign-in round trip in a browser. Known gap: the sign-in page's "Create account"

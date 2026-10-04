@@ -79,9 +79,10 @@ sequenceDiagram
     Note over C: onsale armed (QUEUE_GATE_ARMED=true)
     B->>C: GET /tickets/123
     C-->>B: 302 → queue/wait?e=E&target=/tickets/123  (no valid pass)
-    B->>Q: GET /wait  (pre-queue)
+    B->>Q: GET /wait  (page only, joins nothing)
+    B->>Q: POST /api/enqueue  (from the page script, rate-limited per IP)
     Q->>R: ZADD prequeue (random score — fair draw)
-    Q-->>B: countdown page, polls /serving
+    Q-->>B: ticket cookie, the page counts down and polls
     loop until position < serving
         B->>Q: GET /serving   (cacheable, pure time-math)
         Q-->>B: serving = ⌊rate·(now−T0)⌋
