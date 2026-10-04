@@ -11,7 +11,7 @@
 
 ---
 
-## Session: 2026-10-05 — Waiting-room review follow-ups ⏳ IN PR
+## Session: 2026-10-05 — Waiting-room review follow-ups ⏳ IN PR (#160)
 
 On `fix/waiting-room-review-followups`. These are fixes for three findings from the review of #158.
 
