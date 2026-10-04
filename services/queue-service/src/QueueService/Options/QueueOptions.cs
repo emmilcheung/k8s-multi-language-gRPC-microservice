@@ -16,8 +16,15 @@ public sealed class QueueOptions
     [Required]
     public string RedisConnection { get; set; } = string.Empty;
 
+    /// Signs X-User-Id on requests Kong forwards (KONG_SIGNING_KEY there,
+    /// X_USER_ID_SIGNING_KEY in .env). Redeem needs it to know the account.
+    [Required, MinLength(32)]
+    public string UserIdSigningKey { get; set; } = string.Empty;
+
+    /// Lifetime of both the admission token and the purchase pass: long enough
+    /// to pick seats and check out.
     [Range(1, 86400)]
-    public int AdmissionTtlSeconds { get; set; } = 600;
+    public int AdmissionTtlSeconds { get; set; } = 900;
 
     [Range(1, 3600)]
     public int SlidingGraceSeconds { get; set; } = 60;

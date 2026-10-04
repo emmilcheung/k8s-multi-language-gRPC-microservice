@@ -535,6 +535,9 @@ kong:
     log_level: info
     # queue-gate.lua needs resty.openssl.hmac; everything else stays sandboxed.
     untrusted_lua_sandbox_requires: resty.openssl.hmac
+    # queue-gate.lua refuses a GraphQL body it cannot read while armed; keep
+    # bodies up to 64k in memory (nginx default 8k). Same as the gateway image.
+    nginx_http_client_body_buffer_size: 64k
   ingressController:
     enabled: false
   proxy:

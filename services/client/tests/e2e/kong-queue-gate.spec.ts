@@ -2,8 +2,10 @@
  * kong-queue-gate.spec.ts: the waiting room covers every way to reserve.
  *
  * When armed, REST order creation (the path agents use) needs a qq_pass just
- * like the GraphQL reserve mutation, and a genuine pass must be admitted
- * rather than crash the gateway. When disarmed, the gate must be inert.
+ * like the GraphQL purchase mutations, and a genuine pass must be admitted
+ * rather than crash the gateway. A pass works only for the account it was
+ * redeemed by, so one buyer's pass cannot be handed to another. When disarmed,
+ * the gate must be inert.
  * The armed block runs only with E2E_KONG_QUEUE_ARMED=1 against a gateway
  * rendered with QUEUE_GATE_ARMED: "true".
  */
@@ -13,15 +15,24 @@ import { KONG_URL, signupViaApi } from "./_helpers/oauth";
 
 const ARMED = process.env.E2E_KONG_QUEUE_ARMED === "1";
 const SECRET = process.env.E2E_QUEUE_HMAC_SECRET ?? "dev-secret-change-me-32-chars-minimum";
+const EVENT = process.env.E2E_QUEUE_EVENT_ID ?? "E2E";
 
-function pass(secret = SECRET): string {
-  const b64 = Buffer.from(JSON.stringify({ e: "e2e" })).toString("base64url");
+const subOf = (jwt: string): string =>
+  JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString()).sub;
+
+// Shaped like the pass queue-service returns from redeem.
+function pass(sub: string, secret = SECRET): string {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = { Eid: EVENT, Mid: "m", Iat: now, Exp: now + 900, Nonce: "n", Sub: sub };
+  const b64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${b64}.${createHmac("sha256", secret).update(b64).digest("base64url")}`;
 }
 
 let session: string;
+let sub: string;
 test.beforeAll(async () => {
   session = (await signupViaApi()).accessToken;
+  sub = subOf(session);
 });
 
 const createOrder = (qqPass?: string) =>
@@ -54,22 +65,37 @@ test.describe("armed gate", () => {
   });
 
   test("a forged pass is refused", async () => {
-    const res = await createOrder(pass("not-the-secret-not-the-secret-000"));
+    const res = await createOrder(pass(sub, "not-the-secret-not-the-secret-000"));
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ message: "waiting room: invalid pass" });
   });
 
   test("a genuine pass is admitted instead of crashing the gateway", async () => {
-    const res = await createOrder(pass());
+    const res = await createOrder(pass(sub));
     expect(res.status).not.toBe(403);
     expect(res.status).toBeLessThan(500);
   });
 
-  test("GraphQL reserve with a genuine pass is admitted", async () => {
+  test("a pass redeemed by another account is refused", async () => {
+    const res = await createOrder(pass(subOf((await signupViaApi()).accessToken)));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ message: "waiting room: pass belongs to another account" });
+  });
+
+  test("a GraphQL purchase without a pass is sent to the waiting room", async () => {
     const res = await fetch(`${KONG_URL}/graphql`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: `token=${session}; qq_pass=${pass()}` },
-      body: JSON.stringify({ query: "mutation { reserve }" }),
+      headers: { "Content-Type": "application/json", Cookie: `token=${session}` },
+      body: JSON.stringify({ query: 'mutation { createOrder(ticketId: "x") { id } }' }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test("GraphQL purchase with a genuine pass is admitted", async () => {
+    const res = await fetch(`${KONG_URL}/graphql`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `token=${session}; qq_pass=${pass(sub)}` },
+      body: JSON.stringify({ query: 'mutation { createOrder(ticketId: "x") { id } }' }),
     });
     expect(res.status).toBeLessThan(500);
     expect(res.status).not.toBe(403);

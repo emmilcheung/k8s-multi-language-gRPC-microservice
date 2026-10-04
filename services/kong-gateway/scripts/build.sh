@@ -36,6 +36,8 @@
 #     bare origin, or is not https outside local/minikube
 #   - RATE_LIMIT_POLICY is `redis` but no Redis host resolves
 #   - QUEUE_GATE_ARMED is `true` but QUEUE_HMAC_SECRET is empty
+#   - QUEUE_GATE_ARMED is `true` but QUEUE_EVENT_ID is empty or not a plain id
+#   - QUEUE_GATE_ARMED is `true` but KONG_SIGNING_KEY is empty
 #   - QUEUE_GATE_ARMED is `true`, <env> is not local/minikube, and the effective
 #     QUEUE_HMAC_SECRET is the committed _defaults.yml dev value (or empty)
 #   - any placeholder remains unresolved after substitution
@@ -282,6 +284,24 @@ if (values.get('QUEUE_GATE_ARMED') == 'true'
     print('  queue-service Queue__HmacSecret); never commit it to a values file.', file=sys.stderr)
     sys.exit(1)
 
+# ── Validate: an armed gate needs the armed event's id ────────────────────────
+# queue-gate.lua refuses a pass whose Eid is not this value, so an armed gate
+# with no event id would refuse every buyer. The id is substituted into a Lua
+# string literal, so it is restricted to the characters an event id uses.
+if values.get('QUEUE_GATE_ARMED') == 'true' and not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', values.get('QUEUE_EVENT_ID', '')):
+    print('ERROR: QUEUE_GATE_ARMED is "true" but QUEUE_EVENT_ID is empty or not a plain id ([A-Za-z0-9_-], max 64).', file=sys.stderr)
+    print('  Set QUEUE_EVENT_ID to the armed event (the same value as the client QUEUE_EVENT_ID).', file=sys.stderr)
+    sys.exit(1)
+
+# ── Validate: an armed gate needs the user-id signing key ─────────────────────
+# Buyers get their purchase pass from queue-service through the queue-redeem
+# route, and queue-service only trusts the account in X-User-Id-Sig. Without
+# the key no signature is sent, every redeem is refused and nobody can buy.
+if values.get('QUEUE_GATE_ARMED') == 'true' and not signing_key:
+    print('ERROR: QUEUE_GATE_ARMED is "true" but KONG_SIGNING_KEY is empty.', file=sys.stderr)
+    print('  Set KONG_SIGNING_KEY (X_USER_ID_SIGNING_KEY); queue-service needs the signed user id to issue passes.', file=sys.stderr)
+    sys.exit(1)
+
 # ── Load and indent jwt-sub.lua ───────────────────────────────────────────────
 # The {{JWT_SUB_LUA}} placeholder sits at 18 spaces of indentation inside a
 # YAML literal block scalar (`- |`).  Every line of the Lua file must be
@@ -374,9 +394,9 @@ with open(deny_lua_path) as f:
 content = re.sub(r'[ \t]*\{\{OAUTH_DENY_LUA\}\}', lambda m: deny_lua_block, content)
 
 # ── Substitute {{QUEUE_GATE_LUA:<mode>}} ─────────────────────────────────────
-# Modes: graphql-reserve (gate bodies containing "reserve") and always (gate
-# every request). The Lua keeps its {{QUEUE_*}} scalars; the pass below fills them.
-QUEUE_GATE_MODES = ('graphql-reserve', 'always')
+# Modes: graphql-purchase (gate bodies naming a purchase mutation) and always
+# (gate every request). The Lua keeps its {{QUEUE_*}} scalars; the pass below fills them.
+QUEUE_GATE_MODES = ('graphql-purchase', 'always')
 
 with open(queue_lua_path) as f:
     queue_lua_content = f.read()

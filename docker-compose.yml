@@ -263,6 +263,8 @@ services:
     # so Kong can proxy / requests to http://client:4000 on the host.
     extra_hosts:
       - "client:host-gateway"
+      # The waiting room is a separate compose project (docker-compose.queue.yml, :4100).
+      - "queue-service:host-gateway"
     depends_on:
       schema-registry:
         condition: service_healthy

@@ -14,7 +14,12 @@ queue:
   # Empty by default so a deploy can never ship a known/placeholder signing key;
   # the service refuses to start in Production with the shipped placeholder.
   hmacSecret: ""
-  admissionTtlSeconds: 600
+  # REQUIRED: the platform's X_USER_ID_SIGNING_KEY (Kong's KONG_SIGNING_KEY, min 32
+  # chars). Redeem binds the purchase pass to the account Kong signed; the
+  # service refuses to start without it.
+  userIdSigningKey: ""
+  # Lifetime of the admission token and of the purchase pass (15 minutes).
+  admissionTtlSeconds: 900
   slidingGraceSeconds: 60
 
 # Stateless app — admission is pure time-math, safe to scale horizontally.

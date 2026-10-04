@@ -1,5 +1,6 @@
 using QueueService.Queue;
 using QueueService.Tokens;
+using QueueService.Web;
 
 namespace QueueService.Endpoints;
 
@@ -48,14 +49,23 @@ public static class QueueEndpoints
                 : Results.StatusCode(425); // Too Early — admitted boundary not reached
         });
 
-        app.MapPost("/api/redeem", async (RedeemRequest body, QueueCoordinator coord) =>
+        // Reached through Kong's /api/queue/redeem route, which validates the
+        // login JWT and adds a signed X-User-Id. The queue host is public too,
+        // so the signature, not the header, is what identifies the account.
+        app.MapPost("/api/redeem", async (RedeemRequest body, HttpRequest req,
+            QueueCoordinator coord, UserIdSignature userIds) =>
         {
-            var outcome = await coord.RedeemAsync(body.Token ?? "");
-            return outcome switch
+            var sub = req.Headers["X-User-Id"].ToString();
+            if (!userIds.IsValid(sub, req.Headers["X-User-Id-Sig"].ToString()))
+                return Results.Unauthorized();
+            var r = await coord.RedeemAsync(body.Token ?? "", sub);
+            return r.Outcome switch
             {
-                RedeemOutcome.Ok => Results.Ok(new { ok = true }),
+                RedeemOutcome.Ok => Results.Ok(new { pass = r.Pass }),
                 RedeemOutcome.AlreadyUsed => Results.Conflict(new { error = "token already used" }),
-                _ => Results.Unauthorized(),
+                RedeemOutcome.OtherAccount => Results.Json(
+                    new { error = "this queue place belongs to another account" }, statusCode: 403),
+                _ => Results.BadRequest(new { error = "invalid admission token" }),
             };
         });
 
@@ -73,7 +83,8 @@ public static class QueueEndpoints
     private static void WriteTicket(HttpResponse res, TokenService tokens, PreQueueTicket ticket)
         => res.Cookies.Append(TicketCookie, tokens.Sign(ticket), new CookieOptions
         {
-            HttpOnly = true, IsEssential = true,
-            SameSite = SameSiteMode.Lax, Secure = false // Secure=true behind TLS in real deploys
+            HttpOnly = true, IsEssential = true, SameSite = SameSiteMode.Lax,
+            // Local development serves the waiting page over plain http.
+            Secure = !res.HttpContext.RequestServices.GetRequiredService<IWebHostEnvironment>().IsDevelopment()
         });
 }

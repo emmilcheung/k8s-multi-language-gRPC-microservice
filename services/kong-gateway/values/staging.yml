@@ -28,6 +28,8 @@ HOST_CLIENT: ticketing-client.{{NAMESPACE}}.svc.cluster.local:4000
 HOST_VENUE: ticketing-venue-service.{{NAMESPACE}}.svc.cluster.local:3003
 HOST_APOLLO_ROUTER: ticketing-apollo-router.{{NAMESPACE}}.svc.cluster.local:4001
 HOST_MCP: ticketing-mcp-service.{{NAMESPACE}}.svc.cluster.local:3000
+# infra/queue-system is installed on its own, into the `queue` namespace (README).
+HOST_QUEUE: queue-service.queue.svc.cluster.local:80
 
 READ_TIMEOUT_MS: 30000
 WRITE_TIMEOUT_MS: 30000

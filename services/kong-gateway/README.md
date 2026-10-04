@@ -90,6 +90,11 @@ export KONG_RSA_PUBLIC_KEY="$(cat /path/to/public.pem)"
 | `HOST_MCP` | `mcp-service:3000` | mcp-service upstream (`/mcp`, protected-resource metadata) |
 | `RATE_LIMIT_MCP_PER_MINUTE` | `600` | `/mcp` per-IP rate limit (requests/min) |
 | `KONG_RSA_PUBLIC_KEY` | — | **Env var only.** RSA public key PEM. |
+| `HOST_QUEUE` | `queue-service:4100` | queue-service upstream for `/api/queue/redeem` (`queue-service.queue.svc.cluster.local:80` on Kubernetes) |
+| `QUEUE_GATE_ARMED` | `"false"` | Arms the waiting-room gate on purchase writes |
+| `QUEUE_EVENT_ID` | `""` | The armed event; a pass for another event is refused. Required when armed |
+| `QUEUE_HMAC_SECRET` | dev value | Must equal queue-service `Queue__HmacSecret`. The env var wins; the dev value is refused when armed outside local/minikube |
+| `KONG_SIGNING_KEY` | — | **Env var only.** Signs `X-User-Id-Sig`. Required when armed, because queue-service verifies it on redeem |
 | `KONG_OAUTH_ISSUER` | `http://localhost:8000` (local, minikube only) | Public origin of the OAuth issuer (same as auth-service `OAUTH_ISSUER`). Keys the second `jwt_secret` and derives the REST audience `<origin>/api`. **Required for dev/staging/prod; the build fails without it.** Must be a bare origin, https outside local/minikube. |
 
 The OAuth issuer must stay in step with auth-service: set `OAUTH_ISSUER_ENABLED=true` only for an
@@ -107,8 +112,9 @@ environment whose Kong was rendered with the matching `KONG_OAUTH_ISSUER` (compo
 | `/api/tickets` | GET | Public |
 | `/api/tickets/:id` | GET | Public |
 | `/api/tickets`, `/api/tickets/:id` | POST, PUT, PATCH, DELETE | JWT required |
-| `/api/orders`, `/api/orders/:id` | GET, POST, DELETE | JWT required |
+| `/api/orders`, `/api/orders/:id` | GET, POST, DELETE | JWT required; POST needs a waiting-room pass while armed |
 | `/api/payments`, `/api/payments/:id` | GET, POST | JWT required |
+| `/api/queue/redeem` | POST | JWT required; to queue-service `/api/redeem` with a signed `X-User-Id`. Exchanges an admission token for a pass bound to the caller. Never gated |
 | `/` (catch-all) | ALL | Public (Next.js SSR) |
 
 ## REST audience rule

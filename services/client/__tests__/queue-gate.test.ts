@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { webcrypto } from "node:crypto";
-import { verifyAdmission, gateDecision, type AdmissionPayload } from "@/lib/queue/gate";
+import { verifyAdmission, gateDecision, redeemAdmission, type AdmissionPayload } from "@/lib/queue/gate";
 
 const SECRET = "k".repeat(32);
 
@@ -15,8 +15,11 @@ async function sign(payload: AdmissionPayload, secret = SECRET): Promise<string>
   const sig = await webcrypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
   return `${body}.${b64url(new Uint8Array(sig))}`;
 }
+// What /api/claim returns: not yet tied to an account.
 const payload = (over: Partial<AdmissionPayload> = {}): AdmissionPayload =>
   ({ Eid: "E1", Mid: "m1", Iat: 1000, Exp: 9999999999, Nonce: "n", ...over });
+// What redeem returns: the purchase pass, bound to the account that redeemed it.
+const bound = (over: Partial<AdmissionPayload> = {}): AdmissionPayload => payload({ Sub: "user-a", ...over });
 
 describe("verifyAdmission", () => {
   it("accepts a correctly signed token and returns the payload", async () => {
@@ -41,7 +44,7 @@ describe("gateDecision", () => {
     armed: true, eventId: "E1", secret: SECRET, queueUrl: "http://q:4100",
     fullUrl: "http://app:4000/tickets/123",
     pathWithQuery: "/tickets/123", qpass: null as string | null,
-    passCookie: null as string | null, nowSec: 2000,
+    passCookie: null as string | null, nowSec: 2000, loggedIn: true,
   };
 
   it("passes through when the gate is disarmed", async () => {
@@ -56,23 +59,82 @@ describe("gateDecision", () => {
       expect(d.location).toContain("target=http%3A%2F%2Fapp%3A4000%2Ftickets%2F123");
     }
   });
-  it("accepts a valid qpass and strips it from the URL", async () => {
+  it("accepts a valid qpass from a logged-in visitor and strips it from the URL", async () => {
     const t = await sign(payload());
     const d = await gateDecision({ ...base, pathWithQuery: "/tickets/123?qpass=" + t, qpass: t });
     expect(d.kind).toBe("accept");
     if (d.kind === "accept") {
       expect(d.cleanUrl).toBe("/tickets/123");
-      expect(d.cookieValue).toBe(t);
+      expect(d.token).toBe(t);
     }
   });
-  it("passes when a valid pass cookie is present", async () => {
+  // The pass is bound to an account when it is redeemed, so the buyer must be
+  // logged in first. The admission link rides along in ?next so signing in
+  // brings them straight back to redeem it, instead of back to the queue.
+  it("sends a visitor who is not logged in to sign in, keeping the admission link", async () => {
     const t = await sign(payload());
+    const d = await gateDecision({ ...base, pathWithQuery: "/tickets/123?qpass=" + t, qpass: t, loggedIn: false });
+    expect(d.kind).toBe("login");
+    if (d.kind === "login") {
+      expect(d.location).toBe("/auth/signin?next=" + encodeURIComponent("/tickets/123?qpass=" + t));
+    }
+  });
+  // Every page is gated while armed; if sign-in were too, the visitor sent
+  // there above would be bounced straight back to the queue.
+  it("does not gate the sign-in and sign-up pages", async () => {
+    for (const path of ["/auth/signin", "/auth/signup", "/auth/signin?next=%2Ftickets%2F123"]) {
+      expect((await gateDecision({ ...base, pathWithQuery: path, loggedIn: false })).kind).toBe("pass");
+    }
+    expect((await gateDecision({ ...base, pathWithQuery: "/auth/signin-elsewhere" })).kind).toBe("redirect-queue");
+  });
+  it("passes when a valid pass cookie is present", async () => {
+    const t = await sign(bound());
     const d = await gateDecision({ ...base, passCookie: t });
     expect(d.kind).toBe("pass");
   });
-  it("redirects to queue when the pass cookie is expired", async () => {
-    const t = await sign(payload({ Exp: 1500 })); // < nowSec 2000
+  // Only a redeemed pass names an account; an admission token copied into the
+  // cookie must not stand in for one.
+  it("does not treat an unredeemed admission token as a pass", async () => {
+    const t = await sign(payload());
     const d = await gateDecision({ ...base, passCookie: t });
     expect(d.kind).toBe("redirect-queue");
+  });
+  it("redirects to queue when the pass cookie is expired", async () => {
+    const t = await sign(bound({ Exp: 1500 })); // < nowSec 2000
+    const d = await gateDecision({ ...base, passCookie: t });
+    expect(d.kind).toBe("redirect-queue");
+  });
+  it("redirects to queue when the pass cookie is for another event", async () => {
+    const t = await sign(bound({ Eid: "E2" }));
+    const d = await gateDecision({ ...base, passCookie: t });
+    expect(d.kind).toBe("redirect-queue");
+  });
+});
+
+// Redeem goes through Kong, not straight to the queue host: Kong validates the
+// login token and signs the user id, which is what binds the pass to the buyer.
+describe("redeemAdmission", () => {
+  const reply = (status: number, body: unknown) =>
+    vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }));
+
+  it("posts the token through the gateway with the access token and returns the bound pass", async () => {
+    const fetchImpl = reply(200, { pass: "bound.pass" });
+    const r = await redeemAdmission("http://kong:8000", "adm.token", "jwt-123", fetchImpl);
+    expect(r).toEqual({ kind: "ok", pass: "bound.pass" });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe("http://kong:8000/api/queue/redeem");
+    expect(init.method).toBe("POST");
+    expect(init.headers.Authorization).toBe("Bearer jwt-123");
+    expect(JSON.parse(init.body)).toEqual({ token: "adm.token" });
+  });
+  it("asks for a login when the gateway does not accept the session", async () => {
+    expect(await redeemAdmission("http://k", "t", "stale", reply(401, {}))).toEqual({ kind: "login" });
+  });
+  it("fails on a refusal, an answer without a pass, or a network error", async () => {
+    expect((await redeemAdmission("http://k", "t", "j", reply(403, { error: "x" }))).kind).toBe("failed");
+    expect((await redeemAdmission("http://k", "t", "j", reply(409, { error: "x" }))).kind).toBe("failed");
+    expect((await redeemAdmission("http://k", "t", "j", reply(200, { ok: true }))).kind).toBe("failed");
+    const down = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+    expect((await redeemAdmission("http://k", "t", "j", down)).kind).toBe("failed");
   });
 });
