@@ -23,8 +23,17 @@ interface OrderCreatedEvent {
   };
 }
 
-const TOPIC = 'orders.order.created';
-const DLQ_TOPIC = `${TOPIC}.dlq`;
+/** Emitted by order-service when a captured payment's order cannot be fulfilled. */
+interface OrderUnfulfillableEvent {
+  data: {
+    orderId: string;
+    reason: string;
+  };
+}
+
+const ORDER_CREATED_TOPIC = 'orders.order.created';
+const ORDER_UNFULFILLABLE_TOPIC = 'orders.order.unfulfillable';
+const TOPICS = [ORDER_CREATED_TOPIC, ORDER_UNFULFILLABLE_TOPIC];
 const MAX_RETRIES = 3;
 
 @Injectable()
@@ -75,20 +84,20 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
     // exponential back-off (max 10 attempts, ~30 s total) rather than crashing.
     for (let attempt = 1; attempt <= 10; attempt++) {
       try {
-        await this.consumer.subscribe({ topic: TOPIC, fromBeginning: false });
+        await this.consumer.subscribe({ topics: TOPICS, fromBeginning: false });
         break;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (attempt === 10) {
           this.logger.error(
-            { err: msg, topic: TOPIC },
+            { err: msg, topics: TOPICS },
             'Kafka subscribe failed after 10 attempts — giving up',
           );
           throw err;
         }
         const delay = Math.min(1000 * 2 ** (attempt - 1), 8000);
         this.logger.warn(
-          { attempt, topic: TOPIC, err: msg },
+          { attempt, topics: TOPICS, err: msg },
           `Kafka subscribe failed — retrying in ${delay}ms`,
         );
         await sleep(delay);
@@ -96,7 +105,7 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
     }
 
     await this.consumer.run({ eachMessage: (payload) => this.handleMessage(payload) });
-    this.logger.info({ topic: TOPIC }, 'Kafka consumer started');
+    this.logger.info({ topics: TOPICS }, 'Kafka consumer started');
   }
 
   async onModuleDestroy() {
@@ -144,30 +153,31 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      let event: OrderCreatedEvent;
+      let parsed: unknown;
       try {
-        event = JSON.parse(raw) as OrderCreatedEvent;
+        parsed = JSON.parse(raw);
       } catch {
-        this.logger.error({ raw }, 'Failed to parse Kafka message — routing to DLQ');
-        await this.sendToDlq(message, 'PARSE_ERROR');
+        this.logger.error({ topic }, 'Failed to parse Kafka message — routing to DLQ');
+        await this.sendToDlq(topic, message, 'PARSE_ERROR');
         return;
       }
 
-      if (!event.data?.orderId || !event.data?.userId || !event.data?.amount) {
-        this.logger.error({ event }, 'Invalid event payload — routing to DLQ');
-        await this.sendToDlq(message, 'INVALID_PAYLOAD');
+      const handle = this.handlerFor(topic, parsed);
+      if (!handle) {
+        this.logger.error({ topic }, 'Invalid event payload — routing to DLQ');
+        await this.sendToDlq(topic, message, 'INVALID_PAYLOAD');
         return;
       }
 
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-          await this.paymentsService.processOrderCreatedEvent(event.data);
+          await handle.run();
           return;
         } catch (err) {
           const delay = Math.min(1000 * 2 ** (attempt - 1), 8000);
           const msg = err instanceof Error ? err.message : 'Unknown';
           this.logger.warn(
-            { attempt, orderId: event.data.orderId, err: msg },
+            { attempt, topic, orderId: handle.orderId, err: msg },
             `Processing failed — retrying in ${delay}ms`,
           );
           if (attempt < MAX_RETRIES) {
@@ -176,17 +186,42 @@ export class OrdersConsumer implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      this.logger.error({ orderId: event.data.orderId }, 'All retries exhausted — routing to DLQ');
-      await this.sendToDlq(message, 'MAX_RETRIES_EXCEEDED');
+      this.logger.error(
+        { topic, orderId: handle.orderId },
+        'All retries exhausted — routing to DLQ',
+      );
+      await this.sendToDlq(topic, message, 'MAX_RETRIES_EXCEEDED');
     });
   }
 
-  private async sendToDlq(message: KafkaMessage, reason: string): Promise<void> {
+  /** Validates the payload for its topic; null means it belongs in the DLQ. */
+  private handlerFor(
+    topic: string,
+    parsed: unknown,
+  ): { orderId: string; run: () => Promise<void> } | null {
+    if (topic === ORDER_UNFULFILLABLE_TOPIC) {
+      const data = (parsed as Partial<OrderUnfulfillableEvent> | null)?.data;
+      if (!data?.orderId || !data?.reason) return null;
+      return {
+        orderId: data.orderId,
+        run: () => this.paymentsService.processOrderUnfulfillableEvent(data),
+      };
+    }
+    const data = (parsed as Partial<OrderCreatedEvent> | null)?.data;
+    if (!data?.orderId || !data?.userId || !data?.amount) return null;
+    return {
+      orderId: data.orderId,
+      run: () => this.paymentsService.processOrderCreatedEvent(data),
+    };
+  }
+
+  private async sendToDlq(topic: string, message: KafkaMessage, reason: string): Promise<void> {
     if (!this.producer) return; // never connected — nothing to do
+    const dlqTopic = `${topic}.dlq`;
     try {
-      await withKafkaProducerSpan(`kafka publish ${DLQ_TOPIC}`, undefined, async (headers) => {
+      await withKafkaProducerSpan(`kafka publish ${dlqTopic}`, undefined, async (headers) => {
         await this.producer!.send({
-          topic: DLQ_TOPIC,
+          topic: dlqTopic,
           messages: [
             {
               key: message.key,
