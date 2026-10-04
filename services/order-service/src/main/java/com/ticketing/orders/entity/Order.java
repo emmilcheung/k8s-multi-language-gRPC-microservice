@@ -78,6 +78,11 @@ public class Order {
     @Column(name = "section_id", nullable = true)
     private UUID sectionId;
 
+    /** Why the order was cancelled; null unless status is CANCELLED. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "cancel_reason", length = 40)
+    private CancelReason cancelReason;
+
     @Version
     @Column(nullable = false)
     private int version;
@@ -143,6 +148,8 @@ public class Order {
     public UUID getUserId() { return userId; }
     public OrderStatus getStatus() { return status; }
     public void setStatus(OrderStatus status) { this.status = status; }
+    public CancelReason getCancelReason() { return cancelReason; }
+    public void setCancelReason(CancelReason cancelReason) { this.cancelReason = cancelReason; }
     public OffsetDateTime getExpiresAt() { return expiresAt; }
     public OrderTicket getTicket() { return ticket; }
     public UUID getReservationId() { return reservationId; }

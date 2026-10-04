@@ -1,6 +1,7 @@
 package com.ticketing.orders.grpc;
 
 import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -74,5 +75,35 @@ class TicketServiceClientTest {
                 throw e.getCause();
             }
         }).isSameAs(signal);
+    }
+
+    private TicketServiceClient finalizeFailingWith(Status status) {
+        var stub = mock(TicketServiceGrpc.TicketServiceBlockingStub.class);
+        when(stub.withDeadlineAfter(anyLong(), any(TimeUnit.class))).thenReturn(stub);
+        when(stub.finalizeReservation(any())).thenThrow(status.asRuntimeException());
+        return new TicketServiceClient(stub);
+    }
+
+    @Test
+    void finalize_reports_a_released_reservation_as_gone_so_the_order_is_refunded() {
+        var client = finalizeFailingWith(Status.FAILED_PRECONDITION
+                .withDescription("reservation no longer active: r is RELEASED"));
+
+        assertThat(client.finalizeReservation(UUID.randomUUID(), "o")).isFalse();
+    }
+
+    @Test
+    void finalize_reports_an_unknown_reservation_as_gone() {
+        var client = finalizeFailingWith(Status.NOT_FOUND);
+
+        assertThat(client.finalizeReservation(UUID.randomUUID(), "o")).isFalse();
+    }
+
+    @Test
+    void finalize_throws_when_ticket_service_is_unavailable_because_an_outage_is_not_proof_the_quota_is_gone() {
+        var client = finalizeFailingWith(Status.UNAVAILABLE);
+
+        assertThatThrownBy(() -> client.finalizeReservation(UUID.randomUUID(), "o"))
+                .isInstanceOf(StatusRuntimeException.class);
     }
 }
