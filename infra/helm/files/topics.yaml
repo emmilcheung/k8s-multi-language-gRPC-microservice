@@ -64,6 +64,17 @@ topics:
     retentionMs: 1209600000
     cleanupPolicy: delete
 
+  # Read by payment-service (6), which refunds a payment captured for an order
+  # that could not be fulfilled.
+  - name: orders.order.unfulfillable
+    partitions: 6
+    retentionMs: 604800000
+    cleanupPolicy: delete
+  - name: orders.order.unfulfillable.dlq
+    partitions: 3
+    retentionMs: 1209600000
+    cleanupPolicy: delete
+
   # ── payments ──────────────────────────────────────────────────────────────
   # All three are read by order-service, HPA max 8.
   - name: payments.payment.initiated
@@ -93,9 +104,18 @@ topics:
     retentionMs: 1209600000
     cleanupPolicy: delete
 
-  # Produced by payment-service's outbox. No consumer group reads it yet, so it
-  # is sized low deliberately rather than speculatively.
+  # Produced by payment-service's outbox as a refund is requested and then
+  # completes or fails. No consumer group reads them yet, so they are sized low
+  # deliberately rather than speculatively.
   - name: payments.refund.requested
+    partitions: 3
+    retentionMs: 604800000
+    cleanupPolicy: delete
+  - name: payments.refund.completed
+    partitions: 3
+    retentionMs: 604800000
+    cleanupPolicy: delete
+  - name: payments.refund.failed
     partitions: 3
     retentionMs: 604800000
     cleanupPolicy: delete
