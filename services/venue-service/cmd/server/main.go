@@ -227,16 +227,17 @@ func main() {
 	grpcSrv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, ticketClient, log)
 
 	// Per-buyer seat limit: the ticket's maxPerUser, read from ticket-service
-	// (the owner of that setting) on every hold and reserve.
+	// (the owner of that setting). Reserves already fetch the ticket; holds
+	// keep each ticket's limit for a minute.
 	if cfg.SeatedCapEnforced {
 		grpcSrv.EnforceSeatLimit()
-		holdMgr.WithSeatLimit(func(ctx context.Context, plan *repository.SeatingPlan) (int, error) {
+		holdMgr.WithSeatLimit(hold.CachedSeatLimit(func(ctx context.Context, plan *repository.SeatingPlan) (int, error) {
 			t, err := ticketClient.GetTicket(ctx, &ticketsv1.GetTicketRequest{TicketId: plan.TicketID})
 			if err != nil {
 				return 0, err
 			}
 			return int(t.MaxPerUser), nil
-		})
+		}, time.Minute))
 		log.Info("per-buyer seat limit enforced for seated holds and reserves")
 	}
 	grpcCtx, grpcCancel := context.WithCancel(context.Background())
