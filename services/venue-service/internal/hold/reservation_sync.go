@@ -49,7 +49,7 @@ func (r *RedisSyncedReservations) AtomicReserveAndCreate(ctx context.Context, se
 // one that moved the reservation out of RESERVED. A redelivered release must
 // not wipe a newer hold on the same seats.
 func (r *RedisSyncedReservations) ReleaseReservation(ctx context.Context, reservationID, reason string) error {
-	before, findErr := r.ReservationRepository.FindReservationByID(ctx, reservationID)
+	before, findErr := r.FindReservationByID(ctx, reservationID)
 	if err := r.ReservationRepository.ReleaseReservation(ctx, reservationID, reason); err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func (r *RedisSyncedReservations) FinalizeReservation(ctx context.Context, reser
 	if err := r.ReservationRepository.FinalizeReservation(ctx, reservationID, orderID); err != nil {
 		return err
 	}
-	res, err := r.ReservationRepository.FindReservationByID(ctx, reservationID)
+	res, err := r.FindReservationByID(ctx, reservationID)
 	if err != nil {
 		r.mgr.log.Warn("could not load finalized reservation to sync redis", zap.Error(err),
 			zap.String("reservationId", reservationID))
