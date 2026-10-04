@@ -108,3 +108,27 @@ func TestLoad_ShouldLoadKafkaSASLConfig(t *testing.T) {
 	assert.Equal(t, "secret", cfg.KafkaSASLPassword)
 	assert.Equal(t, "/etc/ssl/certs/ca.pem", cfg.KafkaSSLCALocation)
 }
+
+// The seated per-buyer limit must stay off unless asked for: ticket-service
+// defaults maxPerUser to 1, so a silent default of "on" would cut existing
+// seated events to one seat per buyer.
+func TestLoad_SeatedCapIsOffByDefault_AndATypoFailsStartup(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/venue_db")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	t.Setenv("TICKET_SERVICE_URL", "localhost:50051")
+	require.NoError(t, os.Unsetenv("SEATED_CAP_ENFORCED"))
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.False(t, cfg.SeatedCapEnforced)
+
+	t.Setenv("SEATED_CAP_ENFORCED", "true")
+	cfg, err = config.Load()
+	require.NoError(t, err)
+	assert.True(t, cfg.SeatedCapEnforced)
+
+	t.Setenv("SEATED_CAP_ENFORCED", "yes please")
+	_, err = config.Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SEATED_CAP_ENFORCED")
+}

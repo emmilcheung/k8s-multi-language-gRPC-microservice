@@ -290,12 +290,16 @@ func (r *SectionRepo) GetAvailableSeatsInSection(ctx context.Context, sectionID 
 // hold) → HELD for the given user.
 // Uses a FOR UPDATE lock to prevent concurrent hold races.
 // Returns ErrSeatNotAvailable if any seat is not free.
-func (r *SectionRepo) HoldSeats(ctx context.Context, seatIDs []string, userID string, expiresAt time.Time) error {
+func (r *SectionRepo) HoldSeats(ctx context.Context, planID string, seatIDs []string, userID string, expiresAt time.Time, maxPerUser int) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := lockBuyerOnPlan(ctx, tx, planID, userID, maxPerUser); err != nil {
+		return err
+	}
 
 	// Lock all target seats for update.
 	const lockQ = `
@@ -329,6 +333,10 @@ func (r *SectionRepo) HoldSeats(ctx context.Context, seatIDs []string, userID st
 		}
 	}
 
+	if err := checkSeatLimit(ctx, tx, planID, userID, seatIDs, maxPerUser); err != nil {
+		return err
+	}
+
 	// Apply transition.
 	const updateQ = `
 		UPDATE seats
@@ -342,6 +350,49 @@ func (r *SectionRepo) HoldSeats(ctx context.Context, seatIDs []string, userID st
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// lockBuyerOnPlan serialises one buyer's holds and reserves on one plan for the
+// rest of the transaction, so two parallel requests can't each count the seats
+// before the other has written its own. It must be taken before any seat row
+// lock: every capped transaction then acquires locks in the same order.
+// maxPerUser <= 0 means no cap, so nothing is locked.
+func lockBuyerOnPlan(ctx context.Context, tx pgx.Tx, planID, userID string, maxPerUser int) error {
+	if maxPerUser <= 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, planID+":"+userID)
+	return err
+}
+
+// checkSeatLimit fails with ErrSeatLimitExceeded when the buyer's seats on the
+// plan — live holds, reserved and sold, plus the requested ones — would exceed
+// maxPerUser. Seats are counted once, so re-holding or reserving a seat the
+// buyer already holds does not count it twice.
+func checkSeatLimit(ctx context.Context, tx pgx.Tx, planID, userID string, seatIDs []string, maxPerUser int) error {
+	if maxPerUser <= 0 {
+		return nil
+	}
+	const q = `
+		SELECT count(*) FROM (
+			SELECT id FROM seats
+			WHERE  plan_id = $1 AND status = 'HELD' AND held_by = $2 AND held_until > now()
+			UNION
+			SELECT unnest($3::uuid[])
+			UNION
+			SELECT i.seat_id
+			FROM   seat_reservations r
+			JOIN   seat_reservation_items i ON i.reservation_id = r.id
+			WHERE  r.plan_id = $1 AND r.user_id = $2 AND r.status IN ('RESERVED', 'SOLD')
+		) AS buyer_seats`
+	var n int
+	if err := tx.QueryRow(ctx, q, planID, userID, seatIDs).Scan(&n); err != nil {
+		return err
+	}
+	if n > maxPerUser {
+		return repository.ErrSeatLimitExceeded
+	}
+	return nil
 }
 
 // ReleaseHold releases HELD seats back to AVAILABLE for the given user.

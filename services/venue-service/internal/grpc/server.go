@@ -25,6 +25,11 @@ import (
 // (VenueServiceClient) to turn the failure into IDEMPOTENCY_KEY_EXHAUSTED.
 const ReservationReleasedSuffix = "was already released"
 
+// SeatLimitExceededMessage is the FailedPrecondition message for a reserve that
+// would take the buyer past the ticket's maxPerUser. order-service matches it
+// (VenueServiceClient) to answer with the same purchase-limit error as GA.
+const SeatLimitExceededMessage = "per-buyer seat limit reached"
+
 // VenueGrpcServer implements the generated VenueServiceServer interface.
 // It implements the seated reservation lifecycle RPCs and AutoAssignAndReserve.
 type VenueGrpcServer struct {
@@ -34,6 +39,23 @@ type VenueGrpcServer struct {
 	planRepo        repository.PlanRepository
 	ticketClient    TicketLookupClient
 	log             *zap.Logger
+
+	// seatLimitEnforced applies the ticket's maxPerUser to seated reserves.
+	seatLimitEnforced bool
+}
+
+// EnforceSeatLimit makes reserves respect the ticket's maxPerUser. It stays off
+// until the seated tickets' limits have been reviewed, because ticket-service
+// defaults maxPerUser to 1.
+func (s *VenueGrpcServer) EnforceSeatLimit() {
+	s.seatLimitEnforced = true
+}
+
+func (s *VenueGrpcServer) seatLimit(ticket *ticketsv1.GetTicketResponse) int {
+	if !s.seatLimitEnforced {
+		return 0
+	}
+	return int(ticket.MaxPerUser)
 }
 
 // NewVenueGrpcServer creates a new gRPC server bound to the given repositories.
@@ -127,8 +149,10 @@ func (s *VenueGrpcServer) ReserveHeldSeats(ctx context.Context, req *venuev1.Res
 
 	// Atomic: lock seats, transition HELD/AVAILABLE → RESERVED, write ledger.
 	// ticketResp.Price is passed for price fallback resolution.
-	if err := s.reservationRepo.AtomicReserveAndCreate(ctx, req.SeatIds, res, ticketResp.Price); err != nil {
+	if err := s.reservationRepo.AtomicReserveAndCreate(ctx, req.SeatIds, res, ticketResp.Price, s.seatLimit(ticketResp)); err != nil {
 		switch err {
+		case repository.ErrSeatLimitExceeded:
+			return nil, status.Error(codes.FailedPrecondition, SeatLimitExceededMessage)
 		case repository.ErrSeatNotAvailable:
 			// Return success=false with the full list so the caller can inspect.
 			return &venuev1.ReserveHeldSeatsResponse{
@@ -265,8 +289,10 @@ func (s *VenueGrpcServer) AutoAssignAndReserve(ctx context.Context, req *venuev1
 
 	// Atomic: lock seats, transition AVAILABLE → RESERVED, write ledger.
 	// ticketResp.Price is passed for price fallback resolution.
-	if err := s.reservationRepo.AtomicReserveAndCreate(ctx, chosenSeatIDs, res, ticketResp.Price); err != nil {
+	if err := s.reservationRepo.AtomicReserveAndCreate(ctx, chosenSeatIDs, res, ticketResp.Price, s.seatLimit(ticketResp)); err != nil {
 		switch err {
+		case repository.ErrSeatLimitExceeded:
+			return nil, status.Error(codes.FailedPrecondition, SeatLimitExceededMessage)
 		case repository.ErrSeatNotAvailable:
 			// Race condition — seats were taken between query and reserve.
 			return &venuev1.AutoAssignAndReserveResponse{

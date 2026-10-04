@@ -144,6 +144,7 @@ This ensures all keys for a plan land on the same Redis Cluster slot.
 | `LOG_LEVEL` | no | info | Zap log level |
 | `APP_ENV` | no | development | Environment tag |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | no | — | OTel collector; no-op if unset |
+| `SEATED_CAP_ENFORCED` | no | false | Enforce the ticket's `maxPerUser` (from ticket-service `GetTicket`) per buyer per seating plan on holds and reserves. ticket-service defaults `maxPerUser` to 1 — audit existing seated tickets before turning it on. When on, a failed `GetTicket` refuses the hold (503) |
 
 ---
 

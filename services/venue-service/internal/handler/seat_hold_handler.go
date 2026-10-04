@@ -152,6 +152,11 @@ func (h *SeatHoldHandler) handleHoldError(c echo.Context, err error, planID stri
 		return c.JSON(http.StatusConflict, errorResponse("seating plan is not active"))
 	case errors.Is(err, repository.ErrSeatNotAvailable):
 		return c.JSON(http.StatusConflict, errorResponse("one or more seats are not available"))
+	case errors.Is(err, repository.ErrSeatLimitExceeded):
+		return c.JSON(http.StatusConflict, errorResponse("per-buyer seat limit reached for this plan"))
+	case errors.Is(err, hold.ErrSeatLimitUnavailable):
+		h.log.Error("seat hold refused: seat limit lookup failed", zap.Error(err), zap.String("planId", planID))
+		return c.JSON(http.StatusServiceUnavailable, errorResponse("seat holds are temporarily unavailable"))
 	default:
 		h.log.Error("seat hold failed", zap.Error(err), zap.String("planId", planID))
 		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))

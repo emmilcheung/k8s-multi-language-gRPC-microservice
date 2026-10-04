@@ -145,7 +145,7 @@ func TestHold_ShouldSweepExpiredHolds(t *testing.T) {
 
 	// Hold with a 1 ms TTL (already expired by the time we call sweep).
 	expiresAt := time.Now().UTC().Add(-1 * time.Millisecond)
-	err := sectionRepo.HoldSeats(ctx, seatIDs[:1], userID, expiresAt)
+	err := sectionRepo.HoldSeats(ctx, planID, seatIDs[:1], userID, expiresAt, 0)
 	require.NoError(t, err)
 
 	// Sweep should release it.

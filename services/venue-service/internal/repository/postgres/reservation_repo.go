@@ -323,12 +323,16 @@ func (r *ReservationRepo) SweepExpiredReservations(ctx context.Context) (int64, 
 //
 // ticketBasePrice is the ticket's base price (decimal string, e.g. "25.50").
 // It is used as the final COALESCE fallback if no seat or section price tier is assigned.
-func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []string, res *repository.SeatReservation, ticketBasePrice string) error {
+func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []string, res *repository.SeatReservation, ticketBasePrice string, maxPerUser int) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := lockBuyerOnPlan(ctx, tx, res.PlanID, res.UserID, maxPerUser); err != nil {
+		return err
+	}
 
 	// 1. Lock seats and fetch status + snapshotted price in one pass.
 	//    FOR UPDATE OF s prevents concurrent reservations for the same seats.
@@ -386,6 +390,10 @@ func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []
 		if !ok || !sr.reservable {
 			return repository.ErrSeatNotAvailable
 		}
+	}
+
+	if err := checkSeatLimit(ctx, tx, res.PlanID, res.UserID, seatIDs, maxPerUser); err != nil {
+		return err
 	}
 
 	// 3. Transition seats → RESERVED.  Store reservationId as held_by so the

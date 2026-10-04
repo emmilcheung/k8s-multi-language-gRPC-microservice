@@ -1602,3 +1602,26 @@ Now the buyer is refunded automatically.
 Known gap: if finalize succeeds and the order's commit then fails for a non-concurrency
 reason, an expiry landing before the Kafka retry leaves the seats sold with no complete
 order; the buyer is still refunded. Customer notification of the refund is out of scope.
+
+## 2026-10-04 — Per-buyer seat limit for seated events, behind a flag
+
+On `feat/seated-per-user-cap`. A seated plan had no per-buyer limit: one account could hold
+or reserve every seat by splitting the purchase over several calls. The GA path already
+enforced the ticket's `maxPerUser` in ticket-service.
+
+- **venue-service**: with `SEATED_CAP_ENFORCED=true`, holds (REST and GraphQL) and both
+  reserve RPCs read the ticket's `maxPerUser` from ticket-service `GetTicket` (no copy of
+  the limit is stored in venue). Every seat the buyer has on the plan is counted once:
+  live holds, the seats asked for, and seats in RESERVED or SOLD reservations. Same-buyer
+  requests on a plan are serialised with a transaction advisory lock taken before the seat
+  row locks, so parallel requests cannot each pass the count. `maxPerUser <= 0` means no
+  limit. Over the limit: REST hold 409, GraphQL `conflict:`, gRPC `FAILED_PRECONDITION`
+  "per-buyer seat limit reached". If `GetTicket` fails on a hold, the hold is refused (503).
+  Migration `006` adds a partial index `seats (held_by, plan_id) WHERE status = 'HELD'` for
+  the count (checked with EXPLAIN).
+- **order-service**: venue's limit answer maps to 422 "Purchase limit exceeded for this
+  ticket", the same message as the GA limit.
+
+Default is off: ticket-service defaults `maxPerUser` to 1, so existing seated tickets must
+be audited before the flag is turned on. `seating_plans.max_seats_per_order` exists but is
+still not enforced anywhere.

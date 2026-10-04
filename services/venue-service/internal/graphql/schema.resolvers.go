@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/acme/venue-service/internal/hold"
 	"github.com/acme/venue-service/internal/repository"
 )
 
@@ -317,6 +318,12 @@ func (r *mutationResolver) HoldSeats(ctx context.Context, planID string, seatIds
 	}
 	result, err := r.HoldMgr.HoldSeats(ctx, planID, userID, "", seatIds)
 	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrSeatLimitExceeded):
+			return nil, fmt.Errorf("conflict: per-buyer seat limit reached for this plan")
+		case errors.Is(err, hold.ErrSeatLimitUnavailable):
+			return nil, fmt.Errorf("unavailable: seat holds are temporarily unavailable")
+		}
 		return nil, err
 	}
 	return holdResultToGQL(result), nil

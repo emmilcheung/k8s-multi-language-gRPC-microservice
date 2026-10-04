@@ -38,7 +38,7 @@ func (s *stubReservationRepo) FindReservationByID(ctx context.Context, id string
 	return nil, repository.ErrReservationNotFound
 }
 
-func (s *stubReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []string, r *repository.SeatReservation, ticketBasePrice string) error {
+func (s *stubReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []string, r *repository.SeatReservation, ticketBasePrice string, maxPerUser int) error {
 	if s.atomicReserveAndFn != nil {
 		return s.atomicReserveAndFn(ctx, seatIDs, r, ticketBasePrice)
 	}
@@ -99,7 +99,7 @@ func (n *nopSectionRepo) GetAvailableSeatsInSection(ctx context.Context, section
 	}
 	return nil, nil
 }
-func (n *nopSectionRepo) HoldSeats(ctx context.Context, seatIDs []string, userID string, expiresAt time.Time) error {
+func (n *nopSectionRepo) HoldSeats(ctx context.Context, planID string, seatIDs []string, userID string, expiresAt time.Time, maxPerUser int) error {
 	return nil
 }
 func (n *nopSectionRepo) ReleaseHold(ctx context.Context, seatIDs []string, userID string) error {
