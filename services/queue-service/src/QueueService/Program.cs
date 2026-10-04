@@ -32,6 +32,9 @@ builder.Services.AddSingleton<QueueStore>();
 builder.Services.AddSingleton<TokenService>(sp =>
     new TokenService(sp.GetRequiredService<IOptions<QueueOptions>>().Value.HmacSecret));
 builder.Services.AddSingleton<QueueCoordinator>();
+builder.Services.AddSingleton(sp => new UserIdSignature(
+    sp.GetRequiredService<IOptions<QueueOptions>>().Value.UserIdSigningKey,
+    sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddRazorPages();
 
 // Observability (audit #12): metrics collected in-process; OTLP export when configured.

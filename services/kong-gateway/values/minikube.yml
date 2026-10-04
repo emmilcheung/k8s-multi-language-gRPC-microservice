@@ -17,6 +17,8 @@ HOST_CLIENT: ticketing-client.ticketing.svc.cluster.local:4000
 HOST_VENUE: ticketing-venue-service.ticketing.svc.cluster.local:3003
 HOST_APOLLO_ROUTER: ticketing-apollo-router.ticketing.svc.cluster.local:4001
 HOST_MCP: ticketing-mcp-service.ticketing.svc.cluster.local:3000
+# infra/queue-system is installed on its own, into the `queue` namespace (README).
+HOST_QUEUE: queue-service.queue.svc.cluster.local:80
 # Dev origin; build.sh lets KONG_OAUTH_ISSUER override it. Matches the auth-service dev OAUTH_ISSUER.
 OAUTH_ISSUER: http://localhost:8000
 

@@ -13,6 +13,9 @@ HOST_CLIENT: client:4000
 HOST_VENUE: venue-service:3003
 HOST_APOLLO_ROUTER: apollo-router:4001
 HOST_MCP: mcp-service:3000
+# The waiting room runs as its own compose project (docker-compose.queue.yml) on
+# host port 4100; the kong service maps queue-service to the host gateway.
+HOST_QUEUE: queue-service:4100
 # Dev origin; build.sh lets KONG_OAUTH_ISSUER override it. Matches the auth-service dev OAUTH_ISSUER.
 OAUTH_ISSUER: http://localhost:8000
 JWT_COOKIE_NAME: token

@@ -76,14 +76,30 @@ public sealed class QueueCoordinator(
         return new ClaimResult(true, tokens.Sign(token), status.Ticket);
     }
 
-    /// Verifies an admission token (HMAC + expiry) and consumes its nonce once.
-    public async Task<RedeemOutcome> RedeemAsync(string token)
+    /// Exchanges an admission token for a purchase pass bound to <paramref name="sub"/>.
+    /// The queue place goes to the first account that redeems it; that account
+    /// gets one pass per event, and the same pass again on a repeat (refresh,
+    /// second tab), so the single-use nonce only stops a token minting twice.
+    public async Task<RedeemResult> RedeemAsync(string token, string sub)
     {
-        if (!tokens.TryVerify<AdmissionToken>(token, out var t) || t is null) return RedeemOutcome.Invalid;
+        if (!tokens.TryVerify<AdmissionToken>(token, out var t) || t is null || t.Sub is not null)
+            return new RedeemResult(RedeemOutcome.Invalid);
         var now = clock.GetUtcNow().ToUnixTimeSeconds();
-        if (t.Exp <= now) return RedeemOutcome.Invalid; // expired
-        var first = await store.TryConsumeNonceAsync(t.Nonce, (int)(t.Exp - now));
-        return first ? RedeemOutcome.Ok : RedeemOutcome.AlreadyUsed;
+        if (t.Exp <= now) return new RedeemResult(RedeemOutcome.Invalid); // expired
+
+        if (await store.BindOwnerAsync(t.Eid, t.Mid, sub, _opt.KeyTtlSeconds) != sub)
+            return new RedeemResult(RedeemOutcome.OtherAccount);
+
+        if (await store.GetPassAsync(t.Eid, sub) is { } existing)
+            return new RedeemResult(RedeemOutcome.Ok, existing);
+
+        if (!await store.TryConsumeNonceAsync(t.Nonce, (int)(t.Exp - now)))
+            return new RedeemResult(RedeemOutcome.AlreadyUsed);
+
+        var pass = tokens.Sign(new AdmissionToken(
+            t.Eid, t.Mid, now, now + _opt.AdmissionTtlSeconds, Guid.NewGuid().ToString("N"), sub));
+        return new RedeemResult(RedeemOutcome.Ok,
+            await store.SetPassOnceAsync(t.Eid, sub, pass, _opt.AdmissionTtlSeconds));
     }
 
     public async Task<long> ServingAsync(string eid)

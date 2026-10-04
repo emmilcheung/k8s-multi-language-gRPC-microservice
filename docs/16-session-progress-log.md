@@ -11,6 +11,40 @@
 
 ---
 
+## Session: 2026-10-04 — Waiting-room pass bound to an account, purchase writes gated ⏳ IN PR (#158)
+
+On `fix/waiting-room-gate-integrity`. While an onsale was armed, Kong's backstop only
+checked the pass signature on the GraphQL reserve mutation. A pass never expired, worked
+for any event, could be copied to another account, and REST order creation was not gated.
+
+- **Kong** (`plugins/queue-gate.lua`): runs after the jwt plugin and checks the pass is
+  unexpired, for `QUEUE_EVENT_ID`, and that its `Sub` is the caller's JWT `sub`. Gated:
+  GraphQL `holdSeats`, `createSeatedOrder`, `createOrder` (the JSON body is parsed, a
+  hash-only persisted query is refused, APQ is off in the router), REST seat holds and
+  `POST /api/orders`. Payment and releasing a hold are never gated. `build.sh` refuses an
+  armed render without `QUEUE_EVENT_ID` or `KONG_SIGNING_KEY`. `scripts/test-queue-gate.sh`
+  runs the Lua against cases in CI.
+- **Redeem through Kong**: new JWT route `POST /api/queue/redeem` → queue-service
+  `/api/redeem` with `X-User-Id` and `X-User-Id-Sig`. The queue page lives on its own host
+  and cannot see the login cookie, so claim stays anonymous and the account is bound at
+  redeem. queue-service verifies the signature (`Web/UserIdSignature.cs`, the same format
+  ticket-service checks), binds the queue place to the first account, and keeps one pass
+  per account per event; a repeat returns the same pass. Pass lifetime is now 900 s.
+- **Client** (`proxy.ts`, `lib/queue/gate.ts`): an admitted visitor who is not logged in
+  goes to `/auth/signin?next=<page with qpass>`; sign-in and sign-up pages are not gated.
+  Only a pass carrying `Sub` counts.
+- **Config**: queue-service needs `Queue__UserIdSigningKey` (= Kong's `KONG_SIGNING_KEY`;
+  compose reads `X_USER_ID_SIGNING_KEY`, the chart `queue.userIdSigningKey`). Kong reaches
+  queue-service through `HOST_QUEUE` (compose maps it to the host; on Kubernetes the chart
+  is assumed installed in the `queue` namespace). The ticket cookie is `Secure` outside
+  Development. Standard recorded in `docs/06-security.md`.
+- **Page loads no longer join the queue**: `GET /wait` only renders; `wait.js` joins
+  through the rate-limited `POST /api/enqueue`, so cookieless GETs cannot fill the queue.
+
+Verified against the running stack with Kong armed: Kong e2e (7), waiting-room e2e (3),
+and the sign-in round trip in a browser. Known gap: the sign-in page's "Create account"
+link drops `?next`, so a brand-new buyer has to reopen the queue link after signing up.
+
 ## Session: 2026-10-04 — Refund paid orders that cannot be fulfilled ✅ MERGED (PR #156)
 
 On `fix/unfulfillable-order-refund`. A payment captured after its order expired, or

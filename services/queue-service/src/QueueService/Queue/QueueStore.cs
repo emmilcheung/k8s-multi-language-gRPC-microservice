@@ -16,6 +16,8 @@ public sealed class QueueStore(IConnectionMultiplexer mux)
     private static string PreQueue(string e) => $"q:{{{e}}}:prequeue";
     private static string LateCtr(string e) => $"q:{{{e}}}:late";
     private static string LatePos(string e) => $"q:{{{e}}}:latepos";
+    private static string Owner(string e, string mid) => $"q:{{{e}}}:owner:{mid}";
+    private static string Pass(string e, string sub) => $"q:{{{e}}}:pass:{sub}";
 
     // Atomic: add to the pre-queue under a hard size cap (NX), then (re)set the
     // key TTL. Returns false iff the cap is reached and the member is not present.
@@ -117,4 +119,24 @@ return tonumber(pos)";
     public Task<bool> TryConsumeNonceAsync(string nonce, int ttlSeconds)
         => Db.StringSetAsync($"q:nonce:{nonce}", "1",
             TimeSpan.FromSeconds(Math.Max(1, ttlSeconds)), When.NotExists);
+
+    /// Binds a queue place to the first account that redeems it and returns
+    /// that account (the caller's own sub when it won).
+    public async Task<string> BindOwnerAsync(string eid, string mid, string sub, int ttlSeconds)
+    {
+        if (await Db.StringSetAsync(Owner(eid, mid), sub, TimeSpan.FromSeconds(ttlSeconds), When.NotExists))
+            return sub;
+        return (string?)await Db.StringGetAsync(Owner(eid, mid)) ?? sub;
+    }
+
+    public async Task<string?> GetPassAsync(string eid, string sub)
+        => await Db.StringGetAsync(Pass(eid, sub));
+
+    /// Stores the account's pass unless one is already there; returns the stored one.
+    public async Task<string> SetPassOnceAsync(string eid, string sub, string pass, int ttlSeconds)
+    {
+        if (await Db.StringSetAsync(Pass(eid, sub), pass, TimeSpan.FromSeconds(ttlSeconds), When.NotExists))
+            return pass;
+        return await GetPassAsync(eid, sub) ?? pass;
+    }
 }
