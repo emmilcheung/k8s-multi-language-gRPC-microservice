@@ -153,7 +153,7 @@ func (r *stubSectionRepo) FindSeatsByIDs(_ context.Context, _ []string) ([]*repo
 func (r *stubSectionRepo) GetAvailableSeatsInSection(_ context.Context, _ string) ([]*repository.Seat, error) {
 	return []*repository.Seat{}, nil
 }
-func (r *stubSectionRepo) HoldSeats(_ context.Context, _ []string, _ string, _ time.Time) error {
+func (r *stubSectionRepo) HoldSeats(_ context.Context, _ string, _ []string, _ string, _ time.Time, _ int) error {
 	return nil
 }
 func (r *stubSectionRepo) ReleaseHold(_ context.Context, _ []string, _ string) error { return nil }

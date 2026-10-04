@@ -11,7 +11,36 @@
 
 ---
 
-## Session: 2026-10-04 — Waiting-room pass bound to an account, purchase writes gated ⏳ IN PR (#158)
+## Session: 2026-10-04 — Per-buyer seat limit for seated events, behind a flag ⏳ IN PR (#159)
+
+On `feat/seated-per-user-cap`. A seated plan had no per-buyer limit: one account could hold
+or reserve every seat by splitting the purchase over several calls. The GA path already
+enforced the ticket's `maxPerUser` in ticket-service.
+
+- **venue-service**: with `SEATED_CAP_ENFORCED=true`, holds (REST and GraphQL) and both
+  reserve RPCs read the ticket's `maxPerUser` from ticket-service `GetTicket` (no copy of
+  the limit is stored in venue). Every seat the buyer has on the plan is counted once:
+  live holds, the seats asked for, and seats in RESERVED or SOLD reservations. Same-buyer
+  requests on a plan are serialised with a transaction advisory lock taken before the seat
+  row locks, so parallel requests cannot each pass the count. ticket-service stores a
+  limit of 0 as 1, so every ticket has a limit. Over the limit: REST hold 409, GraphQL `conflict:`, gRPC `FAILED_PRECONDITION`
+  "per-buyer seat limit reached". Holds keep each ticket's limit for a minute and use the
+  last known one while ticket-service is down; only a ticket never read before refuses the
+  hold (503). Migration `006` adds a partial index `seats (held_by, plan_id) WHERE status =
+  'HELD'` for the count (checked with EXPLAIN; recovery steps in venue `AGENTS.md`). The
+  flag is in the Helm chart, set to `"false"`.
+- **Seats from another plan are refused**: the hold and reserve seat locks now also match
+  `plan_id`. Before, a request naming plan A could hold or reserve plan B's seats, which
+  skipped plan B's checks and, with the limit on, counted zero seats each time. This
+  applies with the flag off too.
+- **order-service**: venue's limit answer maps to 422 "Purchase limit exceeded for this
+  ticket", the same message as the GA limit.
+
+Default is off: ticket-service defaults `maxPerUser` to 1, so existing seated tickets must
+be audited before the flag is turned on. `seating_plans.max_seats_per_order` exists but is
+still not enforced anywhere.
+
+## Session: 2026-10-04 — Waiting-room pass bound to an account, purchase writes gated ✅ MERGED (PR #158)
 
 On `fix/waiting-room-gate-integrity`. While an onsale was armed, Kong's backstop only
 checked the pass signature on the GraphQL reserve mutation. A pass never expired, worked

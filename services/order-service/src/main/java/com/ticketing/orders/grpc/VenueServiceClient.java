@@ -223,10 +223,20 @@ public class VenueServiceClient {
             // venue-service answers a reserve on a RELEASED/EXPIRED reservationId with this
             // exact phrase (venue-service internal/grpc/server.go ReservationReleasedSuffix);
             // order-service turns it into IDEMPOTENCY_KEY_EXHAUSTED.
-            case FAILED_PRECONDITION -> description != null && description.contains("was already released")
-                ? new ReservationReleasedException(description)
-                : new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+            case FAILED_PRECONDITION -> {
+                if (description != null && description.contains("was already released")) {
+                    yield new ReservationReleasedException(description);
+                }
+                // venue-service's per-buyer seat limit (server.go SeatLimitExceededMessage):
+                // answer it the way ticket-service's GA per-user limit is answered, so the
+                // buyer sees one message whichever kind of ticket hit the limit.
+                if (description != null && description.contains("per-buyer seat limit reached")) {
+                    yield new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                            "Purchase limit exceeded for this ticket");
+                }
+                yield new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                         "Seats cannot be reserved in current state");
+            }
             case UNAVAILABLE, DEADLINE_EXCEEDED ->
                 new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                         "Venue service is temporarily unavailable. Please try again shortly.");

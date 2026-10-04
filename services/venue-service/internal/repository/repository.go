@@ -23,6 +23,7 @@ var (
 	ErrPlanHasNoSections      = errors.New("seating plan has no purchasable sections")
 	ErrSeatNotAvailable       = errors.New("one or more seats are not available")
 	ErrSeatNotHeldByUser      = errors.New("seat is not held by the requesting user")
+	ErrSeatLimitExceeded      = errors.New("per-buyer seat limit reached for this plan")
 	ErrReservationConflict    = errors.New("reservation is in a terminal state (SOLD) and cannot be modified")
 	ErrReservationAlreadyDone = errors.New("reservation is already in the requested state (idempotent)")
 	ErrVersionConflict        = errors.New("optimistic concurrency conflict: version mismatch")
@@ -246,7 +247,9 @@ type SectionRepository interface {
 
 	// HoldSeats atomically transitions seats AVAILABLE → HELD for the given user.
 	// Fails with ErrSeatNotAvailable if any seat is not AVAILABLE.
-	HoldSeats(ctx context.Context, seatIDs []string, userID string, expiresAt time.Time) error
+	// maxPerUser > 0 caps the seats the user may have on planID (live holds,
+	// reserved and sold) and fails with ErrSeatLimitExceeded; 0 means no cap.
+	HoldSeats(ctx context.Context, planID string, seatIDs []string, userID string, expiresAt time.Time, maxPerUser int) error
 
 	// ReleaseHold releases any HELD seats back to AVAILABLE if held by userID.
 	ReleaseHold(ctx context.Context, seatIDs []string, userID string) error
@@ -282,7 +285,8 @@ type ReservationRepository interface {
 	// Returns ErrSeatNotAvailable if any seat cannot be reserved (wrong status,
 	// still held by a different user than r.UserID, or not found).  Returns ErrReservationAlreadyDone if r.ID already exists in the
 	// ledger (idempotency guard under concurrent retries).
-	AtomicReserveAndCreate(ctx context.Context, seatIDs []string, r *SeatReservation, ticketBasePrice string) error
+	// maxPerUser applies the same per-buyer cap as HoldSeats.
+	AtomicReserveAndCreate(ctx context.Context, seatIDs []string, r *SeatReservation, ticketBasePrice string, maxPerUser int) error
 
 	// ReleaseReservation transitions RESERVED → RELEASED and restores seats to AVAILABLE.
 	// Idempotent: RELEASED reservations return success.

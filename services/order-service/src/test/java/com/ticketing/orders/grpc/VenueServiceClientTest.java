@@ -49,6 +49,18 @@ class VenueServiceClientTest {
                 .hasMessageContaining("422");
     }
 
+    @Test
+    void the_seated_per_buyer_limit_reads_like_the_general_admission_one() {
+        // A buyer over the limit must be told so, not that the seats are in a bad
+        // state: the fix is to buy fewer, and retrying the same seats will never work.
+        var client = clientFailingWith(Status.FAILED_PRECONDITION.withDescription("per-buyer seat limit reached"));
+
+        assertThatThrownBy(() -> reserve(client))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("422")
+                .hasMessageContaining("Purchase limit exceeded for this ticket");
+    }
+
     private VenueServiceClient finalizeFailingWith(Status status) {
         var stub = mock(VenueServiceGrpc.VenueServiceBlockingStub.class);
         when(stub.withDeadlineAfter(anyLong(), any(TimeUnit.class))).thenReturn(stub);

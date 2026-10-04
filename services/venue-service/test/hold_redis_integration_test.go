@@ -202,7 +202,7 @@ func (f *redisHoldFixture) tryReserve(ctx context.Context, repo repository.Reser
 		Status:    repository.ReservationStatusReserved,
 		ExpiresAt: &expiresAt,
 	}
-	return res.ID, repo.AtomicReserveAndCreate(ctx, seatIDs, res, "50.00")
+	return res.ID, repo.AtomicReserveAndCreate(ctx, seatIDs, res, "50.00", 0)
 }
 
 func uuidFor(userID string) string {

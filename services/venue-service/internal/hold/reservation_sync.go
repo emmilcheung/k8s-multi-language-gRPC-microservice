@@ -37,8 +37,8 @@ func NewRedisSyncedReservations(inner repository.ReservationRepository, mgr *Man
 
 // AtomicReserveAndCreate marks the seats reserved in Redis until the
 // reservation expires, so lapsed reservations become free lazily, like holds.
-func (r *RedisSyncedReservations) AtomicReserveAndCreate(ctx context.Context, seatIDs []string, res *repository.SeatReservation, ticketBasePrice string) error {
-	if err := r.ReservationRepository.AtomicReserveAndCreate(ctx, seatIDs, res, ticketBasePrice); err != nil {
+func (r *RedisSyncedReservations) AtomicReserveAndCreate(ctx context.Context, seatIDs []string, res *repository.SeatReservation, ticketBasePrice string, maxPerUser int) error {
+	if err := r.ReservationRepository.AtomicReserveAndCreate(ctx, seatIDs, res, ticketBasePrice, maxPerUser); err != nil {
 		return err
 	}
 	r.mgr.markReserved(ctx, res.PlanID, res.ID, seatIDs, res.ExpiresAt)

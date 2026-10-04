@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -117,7 +118,7 @@ func (s *stubSectionRepo) FindSeatsByIDs(_ context.Context, _ []string) ([]*repo
 func (s *stubSectionRepo) GetAvailableSeatsInSection(_ context.Context, _ string) ([]*repository.Seat, error) {
 	return nil, nil
 }
-func (s *stubSectionRepo) HoldSeats(_ context.Context, _ []string, _ string, _ time.Time) error {
+func (s *stubSectionRepo) HoldSeats(_ context.Context, _ string, _ []string, _ string, _ time.Time, _ int) error {
 	return nil
 }
 func (s *stubSectionRepo) ReleaseHold(_ context.Context, _ []string, _ string) error  { return nil }
@@ -151,7 +152,7 @@ func (n *nopSectionRepo) FindSeatsByIDs(_ context.Context, _ []string) ([]*repos
 func (n *nopSectionRepo) GetAvailableSeatsInSection(_ context.Context, _ string) ([]*repository.Seat, error) {
 	return nil, nil
 }
-func (n *nopSectionRepo) HoldSeats(_ context.Context, _ []string, _ string, _ time.Time) error {
+func (n *nopSectionRepo) HoldSeats(_ context.Context, _ string, _ []string, _ string, _ time.Time, _ int) error {
 	return nil
 }
 func (n *nopSectionRepo) ReleaseHold(_ context.Context, _ []string, _ string) error  { return nil }
@@ -554,6 +555,42 @@ func TestSeatHoldHandler_HoldSeats_ShouldReturn409_WhenSeatNotAvailable(t *testi
 
 	require.NoError(t, h.HoldSeats(c))
 	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
+// A buyer over the per-buyer limit gets a conflict they can act on (release
+// or buy fewer seats); a failed limit lookup is the service's problem, so it
+// must not look like the buyer's request was wrong.
+func TestSeatHoldHandler_HoldSeats_SeatLimitErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"over the limit", repository.ErrSeatLimitExceeded, http.StatusConflict},
+		{"limit lookup failed", fmt.Errorf("%w: ticket-service down", hold.ErrSeatLimitUnavailable), http.StatusServiceUnavailable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := &stubHoldManager{
+				holdFn: func(_ context.Context, _, _, _ string, _ []string) (*hold.HoldResult, error) {
+					return nil, tc.err
+				},
+			}
+			h := handler.NewSeatHoldHandler(mgr, newSignatureValidator(), zap.NewNop())
+			req := httptest.NewRequest(http.MethodPost, "/api/seating-plans/plan-1/seats/hold",
+				jsonBody(t, map[string]interface{}{"seatIds": []string{"seat-1"}}))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-User-Id", "user-1")
+			rec := httptest.NewRecorder()
+			c := newEcho().NewContext(req, rec)
+			c.SetParamNames("planId")
+			c.SetParamValues("plan-1")
+
+			require.NoError(t, h.HoldSeats(c))
+			assert.Equal(t, tc.want, rec.Code)
+			assert.NotContains(t, rec.Body.String(), "ticket-service", "internal detail must not reach the buyer")
+		})
+	}
 }
 
 func TestSeatHoldHandler_HoldSeats_ShouldReturn409_WhenPlanNotActive(t *testing.T) {

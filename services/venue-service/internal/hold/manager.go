@@ -37,7 +37,14 @@ var (
 	ErrSeatNotAvailable  = repository.ErrSeatNotAvailable
 	ErrSeatNotHeldByUser = repository.ErrSeatNotHeldByUser
 	ErrPlanNotActive     = errors.New("seating plan is not active")
+	// ErrSeatLimitUnavailable means the plan's per-buyer limit could not be
+	// looked up, so the hold is refused rather than taken without a limit.
+	ErrSeatLimitUnavailable = errors.New("per-buyer seat limit is unavailable")
 )
+
+// SeatLimitFunc returns how many seats one buyer may have on the plan; 0 means
+// no limit.
+type SeatLimitFunc func(ctx context.Context, plan *repository.SeatingPlan) (int, error)
 
 // HoldMetadata is stored as JSON in venue:{planId}:hold:{seatId}.
 type HoldMetadata struct {
@@ -96,6 +103,9 @@ type Manager struct {
 	log         *zap.Logger
 	holdTTL     time.Duration
 
+	// seatLimit is set only while the per-buyer limit is enforced.
+	seatLimit SeatLimitFunc
+
 	// broadcaster is used for in-process SSE fan-out when Redis is unavailable.
 	// It may be nil.
 	broadcaster SeatEventPublisher
@@ -135,6 +145,11 @@ func NewManager(
 // When Redis is unavailable, changes are published directly to the broadcaster.
 func (m *Manager) WithBroadcaster(b SeatEventPublisher) {
 	m.broadcaster = b
+}
+
+// WithSeatLimit makes every hold respect the per-buyer limit that f returns.
+func (m *Manager) WithSeatLimit(f SeatLimitFunc) {
+	m.seatLimit = f
 }
 
 // ── Key helpers ───────────────────────────────────────────────────────────────
@@ -178,6 +193,12 @@ func (m *Manager) HoldSeats(ctx context.Context, planID, userID, sessionID strin
 	if plan.Status != repository.PlanStatusActive {
 		return nil, ErrPlanNotActive
 	}
+	maxPerUser := 0
+	if m.seatLimit != nil {
+		if maxPerUser, err = m.seatLimit(ctx, plan); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrSeatLimitUnavailable, err)
+		}
+	}
 
 	ttl := m.holdTTL
 	expiresAt := time.Now().UTC().Add(ttl)
@@ -192,7 +213,7 @@ func (m *Manager) HoldSeats(ctx context.Context, planID, userID, sessionID strin
 				zap.Error(err), zap.String("planId", planID))
 		} else {
 			// Redis hold succeeded — mirror into PostgreSQL.
-			if dbErr := m.sectionRepo.HoldSeats(ctx, seatIDs, userID, expiresAt); dbErr != nil {
+			if dbErr := m.sectionRepo.HoldSeats(ctx, planID, seatIDs, userID, expiresAt, maxPerUser); dbErr != nil {
 				// Roll back the Redis hold so the two stores stay consistent.
 				if rollbackErr := m.redisReleaseHold(ctx, planID, userID, seatIDs); rollbackErr != nil {
 					m.log.Error("failed to rollback redis hold after DB error",
@@ -206,7 +227,7 @@ func (m *Manager) HoldSeats(ctx context.Context, planID, userID, sessionID strin
 	}
 
 	// PostgreSQL-only hold (Redis unavailable or Redis path fell through).
-	if err := m.sectionRepo.HoldSeats(ctx, seatIDs, userID, expiresAt); err != nil {
+	if err := m.sectionRepo.HoldSeats(ctx, planID, seatIDs, userID, expiresAt, maxPerUser); err != nil {
 		return nil, err
 	}
 	return &HoldResult{Held: seatIDs, ExpiresAt: expiresAt}, nil

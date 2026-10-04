@@ -27,6 +27,11 @@ type Config struct {
 	TicketServiceURL      string
 	HoldTTLSec            int
 	UserIDSigningKey      string
+	// SeatedCapEnforced applies each ticket's maxPerUser to seated holds and
+	// reserves. Off by default: ticket-service defaults maxPerUser to 1, so
+	// turning it on before the seated tickets' limits are reviewed would cut
+	// existing events to one seat per buyer.
+	SeatedCapEnforced bool
 }
 
 // Load reads configuration from environment variables and validates all required fields.
@@ -107,6 +112,12 @@ func Load() (*Config, error) {
 
 	userIDSigningKey := getEnv("X_USER_ID_SIGNING_KEY", "")
 
+	seatedCapStr := getEnv("SEATED_CAP_ENFORCED", "false")
+	seatedCapEnforced, err := strconv.ParseBool(seatedCapStr)
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("SEATED_CAP_ENFORCED must be true or false, got %q", seatedCapStr))
+	}
+
 	if len(errs) > 0 {
 		return nil, errors.New(strings.Join(errs, "; "))
 	}
@@ -128,6 +139,7 @@ func Load() (*Config, error) {
 		TicketServiceURL:      ticketServiceURL,
 		HoldTTLSec:            holdTTLSec,
 		UserIDSigningKey:      userIDSigningKey,
+		SeatedCapEnforced:     seatedCapEnforced,
 	}, nil
 }
 

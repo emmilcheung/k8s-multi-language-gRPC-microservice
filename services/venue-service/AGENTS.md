@@ -106,6 +106,25 @@ See [`docs/plan/venue-seating-plan-design.md`](../../docs/plan/venue-seating-pla
 - Optimistic concurrency on `seating_plans` via `version` column.
 - Named columns in all queries — `SELECT *` is forbidden.
 
+### Migration 006 (`idx_seats_held_by_plan`) — deploy and recovery
+
+`006` builds a partial index with `CREATE INDEX CONCURRENTLY` at pod startup, before
+the health endpoint is up. Measured on 5M seats (855 MB): about 1.2 s. It can still be
+slow if it waits on long-running transactions on `seats`, because a concurrent build
+waits for every open transaction on the table. Deploy it outside an onsale.
+
+If a pod is killed mid-build (startup probe), golang-migrate leaves version 6 marked
+dirty and every pod then fails startup with a dirty-database error. The half-built
+index is `INVALID`. To recover, against the venue database:
+
+```sql
+DROP INDEX CONCURRENTLY IF EXISTS idx_seats_held_by_plan;
+UPDATE schema_migrations SET version = 5, dirty = false;
+```
+
+Then restart the pods; the migration runs again. If it keeps timing out, raise the
+startup probe's `failureThreshold` for that rollout.
+
 ---
 
 ## Redis Key Conventions (Cluster-Safe)
@@ -144,6 +163,7 @@ This ensures all keys for a plan land on the same Redis Cluster slot.
 | `LOG_LEVEL` | no | info | Zap log level |
 | `APP_ENV` | no | development | Environment tag |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | no | — | OTel collector; no-op if unset |
+| `SEATED_CAP_ENFORCED` | no | false | Enforce the ticket's `maxPerUser` (from ticket-service `GetTicket`) per buyer per seating plan on holds and reserves. ticket-service stores 0 as 1, so every ticket has a limit — audit existing seated tickets before turning it on. Holds keep each ticket's limit for a minute and keep using the last known one while ticket-service is down; only a ticket never read before refuses the hold (503) |
 
 ---
 

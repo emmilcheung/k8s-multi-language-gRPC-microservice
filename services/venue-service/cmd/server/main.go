@@ -20,6 +20,7 @@ import (
 	"github.com/acme/venue-service/internal/middleware"
 	"github.com/acme/venue-service/internal/migrations"
 	"github.com/acme/venue-service/internal/reconciler"
+	"github.com/acme/venue-service/internal/repository"
 	pgrepo "github.com/acme/venue-service/internal/repository/postgres"
 	"github.com/acme/venue-service/internal/security"
 	"github.com/acme/venue-service/internal/service"
@@ -224,6 +225,21 @@ func main() {
 
 	// gRPC server — wired with real repos.
 	grpcSrv := grpcserver.NewVenueGrpcServer(reservationRepo, sectionRepo, planRepo, ticketClient, log)
+
+	// Per-buyer seat limit: the ticket's maxPerUser, read from ticket-service
+	// (the owner of that setting). Reserves already fetch the ticket; holds
+	// keep each ticket's limit for a minute.
+	if cfg.SeatedCapEnforced {
+		grpcSrv.EnforceSeatLimit()
+		holdMgr.WithSeatLimit(hold.CachedSeatLimit(func(ctx context.Context, plan *repository.SeatingPlan) (int, error) {
+			t, err := ticketClient.GetTicket(ctx, &ticketsv1.GetTicketRequest{TicketId: plan.TicketID})
+			if err != nil {
+				return 0, err
+			}
+			return int(t.MaxPerUser), nil
+		}, time.Minute))
+		log.Info("per-buyer seat limit enforced for seated holds and reserves")
+	}
 	grpcCtx, grpcCancel := context.WithCancel(context.Background())
 	defer grpcCancel()
 	grpcAddr := fmt.Sprintf(":%d", cfg.GrpcPort)
