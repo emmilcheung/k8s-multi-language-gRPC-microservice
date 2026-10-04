@@ -49,6 +49,11 @@ RUN mkdir -p /etc/kong && chown kong:kong /etc/kong
 # module. Helm sets the same value in infra/helm/values.yaml kong.env.
 ENV KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES=resty.openssl.hmac
 
+# While armed, queue-gate.lua parses GraphQL bodies and refuses one Kong could
+# not read; nginx spills bodies over the 8k default to a temp file Kong cannot
+# read from Lua. 64k keeps every real GraphQL body in memory. Helm sets the same.
+ENV KONG_NGINX_HTTP_CLIENT_BODY_BUFFER_SIZE=64k
+
 # Switch to the non-root kong user before the entrypoint runs.
 # AGENTS.md §10.1: "Never run as root."
 USER kong

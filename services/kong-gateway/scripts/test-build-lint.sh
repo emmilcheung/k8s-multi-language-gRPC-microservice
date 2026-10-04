@@ -54,8 +54,8 @@ echo "PASS: build.sh rejects a route whose OAuth guard is not the first entry"
 # gate in the temp staging values, and use a runtime-generated secret so no
 # secret literal lives in this script.
 cp "${GATEWAY_DIR}/config/kong.base.yml" "${WORK}/config/kong.base.yml"
-printf '\nQUEUE_GATE_ARMED: "true"\n' >> "${WORK}/values/staging.yml"
-printf '\nQUEUE_GATE_ARMED: "true"\n' >> "${WORK}/values/local.yml"
+printf '\nQUEUE_GATE_ARMED: "true"\nQUEUE_EVENT_ID: "evt-1"\n' >> "${WORK}/values/staging.yml"
+printf '\nQUEUE_GATE_ARMED: "true"\nQUEUE_EVENT_ID: "evt-1"\n' >> "${WORK}/values/local.yml"
 DEFAULT_SECRET="$(sed -n 's/^QUEUE_HMAC_SECRET:[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "${WORK}/values/_defaults.yml")"
 if [[ -z "${DEFAULT_SECRET}" ]]; then
   echo "FAIL: fixture setup: could not read the QUEUE_HMAC_SECRET default" >&2
@@ -64,6 +64,8 @@ fi
 INJECTED_SECRET="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
 export KONG_RATE_LIMIT_REDIS_HOST="redis.example.internal"
 unset QUEUE_HMAC_SECRET
+# An armed gate needs the user-id signing key (checked below); generated, never a literal.
+export KONG_SIGNING_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
 
 # staging + armed + default secret -> fail, naming the variable, never the value
 if out="$("${WORK}/scripts/build.sh" staging "${WORK}/out.yml" 2>&1)"; then
@@ -100,6 +102,92 @@ if ! out="$("${WORK}/scripts/build.sh" local "${WORK}/out.yml" 2>&1)"; then
   exit 1
 fi
 echo "PASS: build.sh allows the dev queue secret on an armed local gate"
+
+# ── Armed gate placement ─────────────────────────────────────────────────────
+# The gate compares the pass's Sub with the JWT sub, so on /graphql it must run
+# in the post-function (after jwt), not the pre-function. The REST seat hold is a
+# purchase write and is gated; releasing seats must work after a pass expires.
+python3 - "${WORK}/out.yml" <<'PYEOF' || exit 1
+import re, sys
+text = open(sys.argv[1]).read()
+routes = {}
+for block in re.split(r'\n(?=      - name: )', text):
+    m = re.match(r'\s*- name: (\S+)\n', block)
+    if m:
+        routes[m.group(1)] = block
+GATE = 'waiting room: pass required'
+def plugin(block, name):
+    m = re.search(r'^( *)- name: ' + name + r'\n(.*?)(?=^\1- name: |\Z)', block, re.M | re.S)
+    return m.group(2) if m else ''
+checks = [
+    ('graphql gate runs after jwt', GATE in plugin(routes.get('graphql', ''), 'post-function')),
+    ('graphql gate is not in the pre-function', GATE not in plugin(routes.get('graphql', ''), 'pre-function')),
+    ('graphql gate is in purchase mode', 'local mode = "graphql-purchase"' in routes.get('graphql', '')),
+    ('REST seat hold is gated', GATE in routes.get('venue-seats-buyer-hold', '')),
+    ('REST seat release is not gated', 'venue-seats-buyer-release' in routes and GATE not in routes['venue-seats-buyer-release']),
+    ('REST order creation is gated', GATE in routes.get('orders-collection-write', '')),
+    ('armed event id is rendered', '~= "evt-1" then' in text),
+    # Buyers get their pass here; gating it would make the pass unobtainable.
+    ('pass redeem route exists and is not gated', 'queue-redeem' in routes and GATE not in routes['queue-redeem']),
+    ('pass redeem route signs the user id', 'X-User-Id-Sig' in routes.get('queue-redeem', '')),
+]
+bad = [label for label, ok in checks if not ok]
+for label in bad:
+    print('FAIL: armed render: ' + label, file=sys.stderr)
+sys.exit(1 if bad else 0)
+PYEOF
+echo "PASS: armed gate sits after jwt on /graphql and covers REST hold and order creation, not release"
+
+# armed without an event id -> fail: the gate would refuse every buyer's pass
+sed -i.bak '/^QUEUE_EVENT_ID:/d' "${WORK}/values/local.yml" && rm -f "${WORK}/values/local.yml.bak"
+if out="$("${WORK}/scripts/build.sh" local "${WORK}/out.yml" 2>&1)"; then
+  echo "FAIL: build.sh accepted an armed gate with no QUEUE_EVENT_ID" >&2
+  exit 1
+fi
+if ! grep -q "QUEUE_EVENT_ID is empty" <<<"${out}"; then
+  echo "FAIL: build.sh failed, but not with the event id error:" >&2
+  echo "${out}" >&2
+  exit 1
+fi
+printf '\nQUEUE_EVENT_ID: "evt-1\\"; x"\n' >> "${WORK}/values/local.yml"
+if "${WORK}/scripts/build.sh" local "${WORK}/out.yml" >/dev/null 2>&1; then
+  echo "FAIL: build.sh accepted a QUEUE_EVENT_ID that breaks out of the Lua string" >&2
+  exit 1
+fi
+sed -i.bak '/^QUEUE_EVENT_ID:/d' "${WORK}/values/local.yml" && rm -f "${WORK}/values/local.yml.bak"
+echo "PASS: build.sh refuses an armed gate without a plain QUEUE_EVENT_ID"
+
+# armed without the user-id signing key -> fail: queue-service would refuse every redeem
+printf '\nQUEUE_EVENT_ID: "evt-1"\n' >> "${WORK}/values/local.yml"
+if out="$(KONG_SIGNING_KEY="" "${WORK}/scripts/build.sh" local "${WORK}/out.yml" 2>&1)"; then
+  echo "FAIL: build.sh accepted an armed gate with no KONG_SIGNING_KEY" >&2
+  exit 1
+fi
+if ! grep -q "KONG_SIGNING_KEY is empty" <<<"${out}"; then
+  echo "FAIL: build.sh failed, but not with the signing key error:" >&2
+  echo "${out}" >&2
+  exit 1
+fi
+sed -i.bak '/^QUEUE_EVENT_ID:/d' "${WORK}/values/local.yml" && rm -f "${WORK}/values/local.yml.bak"
+echo "PASS: build.sh refuses an armed gate without KONG_SIGNING_KEY"
+
+# ── Gated GraphQL fields exist ───────────────────────────────────────────────
+# The gate matches purchase mutations by name. If one is renamed in a subgraph,
+# the gate would silently stop covering it, so every name must still be a field
+# of the composed supergraph's Mutation type.
+python3 - "${GATEWAY_DIR}/plugins/queue-gate.lua" "${GATEWAY_DIR}/../apollo-router/supergraph.graphql" <<'PYEOF' || exit 1
+import re, sys
+lua, sdl = open(sys.argv[1]).read(), open(sys.argv[2]).read()
+m = re.search(r'GATED_FIELDS = \{([^}]*)\}', lua)
+names = re.findall(r'"([A-Za-z_][A-Za-z0-9_]*)"', m.group(1)) if m else []
+mut = re.search(r'^type Mutation\b[^{]*\{(.*?)^\}', sdl, re.M | re.S)
+fields = set(re.findall(r'^\s+([A-Za-z_][A-Za-z0-9_]*)\s*[(:]', mut.group(1), re.M)) if mut else set()
+missing = [n for n in names if n not in fields]
+if not names or not fields or missing:
+    print(f'FAIL: queue gate fields not in the supergraph Mutation type: {missing or "(could not parse)"}', file=sys.stderr)
+    sys.exit(1)
+PYEOF
+echo "PASS: every queue-gated GraphQL field is a supergraph mutation"
 
 # ── Unsafe secrets are rejected whatever the source, armed or not ────────────
 # Values are built at runtime and never echoed; only the output is checked for a leak.
@@ -244,11 +332,11 @@ echo "PASS: the scope guard embeds the API audience derived from the OAuth issue
 # Guard counts unchanged by the new routes (they carry no jwt plugin).
 SCOPE_N="$(grep -c '{{SCOPE_CHECK_LUA:' "${GATEWAY_DIR}/config/kong.base.yml")"
 DENY_N="$(grep -c '{{OAUTH_DENY_LUA}}' "${GATEWAY_DIR}/config/kong.base.yml")"
-if [[ "${SCOPE_N}" != "11" || "${DENY_N}" != "17" ]]; then
-  echo "FAIL: guard counts changed (scope=${SCOPE_N} deny=${DENY_N}, expected 11/17); a new jwt route needs a deliberate guard" >&2
+if [[ "${SCOPE_N}" != "11" || "${DENY_N}" != "19" ]]; then
+  echo "FAIL: guard counts changed (scope=${SCOPE_N} deny=${DENY_N}, expected 11/19); a new jwt route needs a deliberate guard" >&2
   exit 1
 fi
-echo "PASS: guard counts are SCOPE 11 / DENY 17"
+echo "PASS: guard counts are SCOPE 11 / DENY 19"
 
 # The issuer is a build input: missing or malformed must fail loud, never fall
 # back to a hard-coded origin. dev/staging/prod have no values-file default.

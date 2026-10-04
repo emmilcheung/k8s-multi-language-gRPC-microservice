@@ -696,10 +696,33 @@ services:
                 - |
                   {{JWT_SUB_LUA}}
 
-      # Protected: buyer seat hold/release — JWT required only
-      - name: venue-seats-buyer
+      # Protected: buyer seat hold — JWT required; waiting-room pass required while armed
+      - name: venue-seats-buyer-hold
         paths:
           - ~/api/seating-plans/[^/]+/seats/hold$
+        methods: [POST]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{OAUTH_DENY_LUA}}
+                - |
+                  {{QUEUE_GATE_LUA:always}}
+                - |
+                  {{JWT_SUB_LUA}}
+
+      # Protected: buyer seat release — JWT required only. Never queue-gated:
+      # giving seats back must work even after the pass has expired.
+      - name: venue-seats-buyer-release
+        paths:
           - ~/api/seating-plans/[^/]+/seats/release$
         methods: [POST]
         strip_path: false
@@ -922,19 +945,21 @@ services:
                       "Bearer {{ANONYMOUS_GRAPHQL_JWT}}"
                     )
                   end
-                - |
-                  {{QUEUE_GATE_LUA:graphql-reserve}}
           - name: jwt
             config:
               key_claim_name: iss
               cookie_names: [{{JWT_COOKIE_NAME}}]
               header_names: [Authorization]
               claims_to_verify: [exp]
+          # The queue gate runs after jwt: it checks the pass was issued to the
+          # caller's sub, which only exists once the token has been validated.
           - name: post-function
             config:
               access:
                 - |
                   {{OAUTH_DENY_LUA}}
+                - |
+                  {{QUEUE_GATE_LUA:graphql-purchase}}
                 - |
                   {{JWT_SUB_LUA}}
           - name: cors
@@ -1015,6 +1040,37 @@ services:
   # ── client (Next.js SSR) — catch-all, must be last ────────────────────────────
   # Kong matches routes by longest-prefix first; all /api/* routes above always
   # win.  The client route has a higher read/write timeout to accommodate SSR.
+  # ── queue-service (waiting room, redeem only) ────────────────────────────────
+  # The waiting page lives on its own queue host, which never sees the site's
+  # login cookie. The client exchanges an admission token for a purchase pass
+  # here instead, so jwt proves the account and jwt-sub.lua signs it into
+  # X-User-Id-Sig; queue-service binds the pass to that account.
+  - name: queue-service
+    url: http://{{HOST_QUEUE}}/api/redeem
+    connect_timeout: {{CONNECT_TIMEOUT_MS}}
+    read_timeout: {{READ_TIMEOUT_MS}}
+    write_timeout: {{WRITE_TIMEOUT_MS}}
+    routes:
+      - name: queue-redeem
+        paths:
+          - ~/api/queue/redeem$
+        methods: [POST]
+        strip_path: true
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{OAUTH_DENY_LUA}}
+                - |
+                  {{JWT_SUB_LUA}}
+
   - name: client-service
     url: http://{{HOST_CLIENT}}
     connect_timeout: {{CONNECT_TIMEOUT_MS}}

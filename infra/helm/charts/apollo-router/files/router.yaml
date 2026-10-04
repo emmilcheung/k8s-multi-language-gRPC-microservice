@@ -3,6 +3,13 @@ supergraph:
   path: /graphql
   introspection: false
 
+# Automatic persisted queries are on by default in the router. A hash-only
+# request carries no query text, so the Kong waiting-room gate, which reads the
+# GraphQL text to find purchase mutations, could not see what it runs. Nothing
+# here sends persisted queries, so turn them off.
+apq:
+  enabled: false
+
 # The router serves its health endpoint on a separate listener, defaulting to
 # 127.0.0.1:8088 — unreachable from kubelet, so every probe failed and the
 # startupProbe killed the pod after 12 x 5s even though the router was serving
