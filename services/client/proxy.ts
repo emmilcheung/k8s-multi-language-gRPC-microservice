@@ -10,28 +10,13 @@ import {
   parseAuthCookies,
   toCookieOptions,
 } from "@/lib/session-cookies";
-import { gateDecision } from "@/lib/queue/gate";
+import { gateDecision, redeemAdmission } from "@/lib/queue/gate";
 
 const QUEUE_PASS_COOKIE = process.env.QUEUE_PASS_COOKIE || "qq_pass";
 
-// Redeems a one-time admission token at the queue-service. 200 = first use (admit);
-// 401/409 = invalid or already used (reject); network failure = fail closed.
-async function redeemQpass(queueUrl: string, token: string): Promise<boolean> {
-  try {
-    const r = await fetch(`${queueUrl}/api/redeem`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token }),
-    });
-    return r.ok;
-  } catch {
-    return false;
-  }
-}
-
 // Virtual waiting room gate. Returns a response when the gate intercepts
-// (redirect to the waiting room, or accept a qpass), or null to pass through
-// (gate disarmed, misconfigured, or visitor already admitted).
+// (redirect to the waiting room or to sign-in, or redeem a qpass), or null to
+// pass through (gate disarmed, misconfigured, or visitor already admitted).
 async function applyQueueGate(request: NextRequest): Promise<NextResponse | null> {
   if (process.env.QUEUE_GATE_ARMED !== "true") return null;
 
@@ -41,6 +26,7 @@ async function applyQueueGate(request: NextRequest): Promise<NextResponse | null
   if (!eventId || !secret || !queueUrl) return null; // misconfigured → fail open
 
   const url = request.nextUrl;
+  const accessToken = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
   const decision = await gateDecision({
     armed: true, eventId, secret, queueUrl,
     fullUrl: request.url,
@@ -48,6 +34,7 @@ async function applyQueueGate(request: NextRequest): Promise<NextResponse | null
     qpass: url.searchParams.get("qpass"),
     passCookie: request.cookies.get(QUEUE_PASS_COOKIE)?.value ?? null,
     nowSec: Math.floor(Date.now() / 1000),
+    loggedIn: Boolean(accessToken),
   });
 
   switch (decision.kind) {
@@ -55,14 +42,22 @@ async function applyQueueGate(request: NextRequest): Promise<NextResponse | null
       return null;
     case "redirect-queue":
       return NextResponse.redirect(decision.location, 302);
+    case "login":
+      return NextResponse.redirect(new URL(decision.location, request.url), 302);
     case "accept": {
-      // One-time redemption: a token leaked via logs/URL cannot be reused.
-      if (!(await redeemQpass(queueUrl, decision.cookieValue))) {
+      // The admission token becomes a pass bound to this account. A repeat by
+      // the same account (refresh, second tab) gets the same pass back.
+      const redeemed = await redeemAdmission(getApiBase(), decision.token, accessToken ?? "");
+      if (redeemed.kind === "login") {
+        const next = encodeURIComponent(url.pathname + url.search);
+        return NextResponse.redirect(new URL(`/auth/signin?next=${next}`, request.url), 302);
+      }
+      if (redeemed.kind === "failed") {
         const target = encodeURIComponent(url.pathname + url.search);
         return NextResponse.redirect(`${queueUrl}/wait?e=${eventId}&target=${target}`, 302);
       }
       const res = NextResponse.redirect(new URL(decision.cleanUrl, request.url), 302);
-      res.cookies.set(QUEUE_PASS_COOKIE, decision.cookieValue, {
+      res.cookies.set(QUEUE_PASS_COOKIE, redeemed.pass, {
         httpOnly: true, sameSite: "lax", path: "/",
         secure: process.env.NODE_ENV === "production",
       });

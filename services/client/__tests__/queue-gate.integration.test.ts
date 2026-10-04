@@ -17,13 +17,14 @@ describe.skipIf(!TOKEN)("real .NET token interop", () => {
     expect(p!.Exp).toBeGreaterThan(Math.floor(Date.now() / 1000));
   });
 
-  it("gateDecision treats the token as a valid pass cookie", async () => {
+  // A claim token is an admission link, redeemed for a pass; it is not a pass itself.
+  it("gateDecision accepts the token as an admission link for a logged-in visitor", async () => {
     const d = await gateDecision({
       armed: true, eventId: EVENT, secret: SECRET, queueUrl: "http://q:4100",
-      fullUrl: "http://app:4000/tickets/1",
-      pathWithQuery: "/tickets/1", qpass: null, passCookie: TOKEN!,
-      nowSec: Math.floor(Date.now() / 1000),
+      fullUrl: "http://app:4000/tickets/1?qpass=" + TOKEN!,
+      pathWithQuery: "/tickets/1?qpass=" + TOKEN!, qpass: TOKEN!, passCookie: null,
+      nowSec: Math.floor(Date.now() / 1000), loggedIn: true,
     });
-    expect(d.kind).toBe("pass");
+    expect(d.kind).toBe("accept");
   });
 });
