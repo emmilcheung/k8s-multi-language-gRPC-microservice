@@ -352,7 +352,7 @@ func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []
 		LEFT JOIN price_tiers seat_pt ON seat_pt.id = s.price_tier_id
 		LEFT JOIN sections sec ON sec.id = s.section_id
 		LEFT JOIN price_tiers section_pt ON section_pt.id = sec.price_tier_id
-		WHERE  s.id = ANY($1)
+		WHERE  s.id = ANY($1) AND s.plan_id = $4
 		FOR UPDATE OF s`
 
 	type seatRow struct {
@@ -364,7 +364,7 @@ func (r *ReservationRepo) AtomicReserveAndCreate(ctx context.Context, seatIDs []
 		reservable bool
 	}
 
-	rows, err := tx.Query(ctx, lockQ, seatIDs, ticketBasePrice, res.UserID)
+	rows, err := tx.Query(ctx, lockQ, seatIDs, ticketBasePrice, res.UserID, res.PlanID)
 	if err != nil {
 		return err
 	}

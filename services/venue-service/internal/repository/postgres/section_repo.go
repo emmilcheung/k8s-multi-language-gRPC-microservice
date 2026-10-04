@@ -301,11 +301,12 @@ func (r *SectionRepo) HoldSeats(ctx context.Context, planID string, seatIDs []st
 		return err
 	}
 
-	// Lock all target seats for update.
+	// Lock all target seats for update. A seat from another plan is not
+	// found, so it is refused below like any unavailable seat.
 	const lockQ = `
 		SELECT id, status, COALESCE(status = 'HELD' AND held_until < now(), false) AS lapsed
-		FROM seats WHERE id = ANY($1) FOR UPDATE`
-	rows, err := tx.Query(ctx, lockQ, seatIDs)
+		FROM seats WHERE id = ANY($1) AND plan_id = $2 FOR UPDATE`
+	rows, err := tx.Query(ctx, lockQ, seatIDs, planID)
 	if err != nil {
 		return err
 	}

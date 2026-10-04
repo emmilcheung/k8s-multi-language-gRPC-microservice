@@ -9,6 +9,7 @@ import (
 	"github.com/acme/venue-service/internal/hold"
 	"github.com/acme/venue-service/internal/repository"
 	pgrepo "github.com/acme/venue-service/internal/repository/postgres"
+	"github.com/jackc/pgx/v5/pgxpool"
 	ticketsv1 "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1"
 	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"github.com/stretchr/testify/assert"
@@ -176,6 +177,69 @@ func TestSeatLimit_NotEnforced_KeepsTodaysBehaviour(t *testing.T) {
 		UserId: limitBuyer, SeatIds: seatIDs,
 	})
 	assert.NoError(t, err)
+}
+
+// The limit is counted on the plan named in the request, so a seat from any
+// other plan must be refused outright. Otherwise a buyer could hold or reserve
+// another plan's seats through a plan where they have nothing, and every call
+// would count zero.
+func TestSeatLimit_SeatsFromAnotherPlanAreRefused(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	ctx := context.Background()
+	pool, planA, _ := setupHoldFixture(t, ctx)
+	defer pool.Close()
+	planB, seatsB := addActivePlan(t, ctx, pool)
+
+	mgr := hold.NewManager(nil, pgrepo.NewSectionRepo(pool), pgrepo.NewPlanRepo(pool), 600*time.Second, zap.NewNop())
+	mgr.WithSeatLimit(fixedLimit(1))
+	_, err := mgr.HoldSeats(ctx, planA, limitBuyer, "s", seatsB[:1])
+	assert.ErrorIs(t, err, repository.ErrSeatNotAvailable)
+	assert.Equal(t, "AVAILABLE", seatStatus(t, ctx, pool, seatsB[0]), "a hold through plan A must not take plan B's seat")
+
+	srv := grpcserver.NewVenueGrpcServer(pgrepo.NewReservationRepo(pool), pgrepo.NewSectionRepo(pool), pgrepo.NewPlanRepo(pool), &limitTicketClient{max: 1}, zap.NewNop())
+	srv.EnforceSeatLimit()
+	resp, err := srv.ReserveHeldSeats(ctx, &venuev1.ReserveHeldSeatsRequest{
+		PlanId: planA, TicketId: "00000000-0000-0000-0000-000000000002", ReservationId: "dddddddd-0000-0000-0000-000000000005",
+		UserId: limitBuyer, SeatIds: seatsB[1:2],
+	})
+	require.NoError(t, err)
+	assert.False(t, resp.GetSuccess())
+	assert.Equal(t, "AVAILABLE", seatStatus(t, ctx, pool, seatsB[1]), "a reserve through plan A must not take plan B's seat")
+
+	// The same seats are still sold normally through their own plan.
+	_, err = mgr.HoldSeats(ctx, planB, limitBuyer, "s", seatsB[:1])
+	assert.NoError(t, err)
+}
+
+// addActivePlan creates a second active plan with three seats in the same database.
+func addActivePlan(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (string, []string) {
+	t.Helper()
+	planRepo := pgrepo.NewPlanRepo(pool)
+	sectionRepo := pgrepo.NewSectionRepo(pool)
+	v := &repository.Venue{OrganizerID: "00000000-0000-0000-0000-000000000001", Name: "Second Arena", Capacity: 100, Timezone: "UTC"}
+	require.NoError(t, pgrepo.NewVenueRepo(pool).Create(ctx, v))
+	p := &repository.SeatingPlan{
+		VenueID: v.ID, TicketID: "00000000-0000-0000-0000-000000000003",
+		OrganizerID: v.OrganizerID, Name: "Second Plan", MaxSeatsPerOrder: 4,
+	}
+	require.NoError(t, planRepo.Create(ctx, p))
+	sec := &repository.Section{PlanID: p.ID, Name: "Floor B", Type: repository.SectionTypeSeated, RowCount: 1, ColumnCount: 3}
+	require.NoError(t, sectionRepo.CreateSection(ctx, sec))
+	tier := &repository.PriceTier{PlanID: p.ID, Name: "Standard", Price: "50.00"}
+	require.NoError(t, pgrepo.NewPriceTierRepo(pool).Create(ctx, tier))
+	seatIDs := make([]string, 3)
+	for i := range seatIDs {
+		seat := &repository.Seat{
+			SectionID: sec.ID, PlanID: p.ID, PriceTierID: tier.ID,
+			SeatLabel: "B" + itoa(i+1), RowLabel: "B", ColumnNumber: i + 1,
+		}
+		require.NoError(t, sectionRepo.UpsertSeat(ctx, seat))
+		seatIDs[i] = seat.ID
+	}
+	require.NoError(t, planRepo.Activate(ctx, p.ID, p.Version))
+	return p.ID, seatIDs
 }
 
 // limitTicketClient answers GetTicket with a fixed maxPerUser.
