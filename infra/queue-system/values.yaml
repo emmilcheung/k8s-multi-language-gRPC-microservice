@@ -9,14 +9,38 @@ image:
 # Used only when autoscaling.enabled is false.
 replicaCount: 3
 
+# The two keys below are secrets, and userIdSigningKey is the platform-wide key
+# every service uses to trust X-User-Id: anyone holding it can act as any user.
+# Outside local, provide them through secretRef or externalSecrets, never as
+# plain values (which end up in the release history and in shell history).
+#
+# Name of a Secret created out of band with keys `hmac-secret` and
+# `user-id-signing-key`. When set, this chart does not render its own Secret.
+secretRef: ""
+
+# ExternalSecret that fills the Secret (named by secretRef, else queue-secret)
+# from a store, like the charts under infra/helm. The remote value is a JSON
+# object with keys `hmac-secret` and `user-id-signing-key`. Needs the External
+# Secrets Operator and the named store to exist already.
+externalSecrets:
+  enabled: false
+  secretStore:
+    name: ""
+    kind: ClusterSecretStore
+  # Defaults to <release namespace>/queue-system.
+  remoteKey: ""
+  refreshInterval: 1h
+
 queue:
-  # REQUIRED: set via --set queue.hmacSecret=... or an external Secret (min 32 chars).
+  # REQUIRED unless secretRef or externalSecrets provides it (min 32 chars).
   # Empty by default so a deploy can never ship a known/placeholder signing key;
   # the service refuses to start in Production with the shipped placeholder.
+  # Plain values are for local clusters only.
   hmacSecret: ""
-  # REQUIRED: the platform's X_USER_ID_SIGNING_KEY (Kong's KONG_SIGNING_KEY, min 32
-  # chars). Redeem binds the purchase pass to the account Kong signed; the
-  # service refuses to start without it.
+  # REQUIRED unless secretRef or externalSecrets provides it: the platform's
+  # X_USER_ID_SIGNING_KEY (Kong's KONG_SIGNING_KEY, min 32 chars). Redeem binds
+  # the purchase pass to the account Kong signed; the service refuses to start
+  # without it. Plain values are for local clusters only.
   userIdSigningKey: ""
   # Lifetime of the admission token and of the purchase pass (15 minutes).
   admissionTtlSeconds: 900

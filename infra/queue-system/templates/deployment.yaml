@@ -33,12 +33,12 @@ spec:
             - name: Queue__HmacSecret
               valueFrom:
                 secretKeyRef:
-                  name: queue-secret
+                  name: {{ include "queue-system.secretName" . }}
                   key: hmac-secret
             - name: Queue__UserIdSigningKey
               valueFrom:
                 secretKeyRef:
-                  name: queue-secret
+                  name: {{ include "queue-system.secretName" . }}
                   key: user-id-signing-key
           readinessProbe:
             httpGet:
