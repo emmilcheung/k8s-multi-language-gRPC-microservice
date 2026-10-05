@@ -39,9 +39,9 @@ class OrderExpirySweepJobTest {
     void sweep_shouldExpireEveryOverdueOrder_throughTheSamePathAsTheKafkaConsumer() {
         UUID a = UUID.randomUUID();
         UUID b = UUID.randomUUID();
-        when(orderRepository.findOverdueOpenOrderIds(any(), eq(200))).thenReturn(List.of(a, b));
+        when(orderRepository.findOverdueOpenOrderIds(any(), any(), eq(200))).thenReturn(List.of(a, b));
 
-        new OrderExpirySweepJob(orderRepository, orderService, 300, 200).sweep();
+        new OrderExpirySweepJob(orderRepository, orderService, 300, 60, 200).sweep();
 
         // expireOrder is what emits orders.order.cancelled; a separate code path would let the
         // backstop and the normal path drift apart in which seats get released.
@@ -51,27 +51,33 @@ class OrderExpirySweepJobTest {
 
     @Test
     void sweep_shouldLeaveTheGraceWindowToAsynq_whenChoosingTheCutoff() {
-        when(orderRepository.findOverdueOpenOrderIds(any(), anyInt())).thenReturn(List.of());
+        when(orderRepository.findOverdueOpenOrderIds(any(), any(), anyInt())).thenReturn(List.of());
 
-        new OrderExpirySweepJob(orderRepository, orderService, 300, 200).sweep();
+        new OrderExpirySweepJob(orderRepository, orderService, 300, 60, 200).sweep();
 
         ArgumentCaptor<OffsetDateTime> cutoff = ArgumentCaptor.forClass(OffsetDateTime.class);
-        verify(orderRepository).findOverdueOpenOrderIds(cutoff.capture(), anyInt());
+        ArgumentCaptor<OffsetDateTime> paymentCutoff = ArgumentCaptor.forClass(OffsetDateTime.class);
+        verify(orderRepository).findOverdueOpenOrderIds(
+                cutoff.capture(), paymentCutoff.capture(), anyInt());
         assertThat(cutoff.getValue())
                 .as("cutoff must be now - grace; a cutoff of now races the normal asynq path on every order")
                 .isCloseTo(OffsetDateTime.now().minusSeconds(300), within(5, java.time.temporal.ChronoUnit.SECONDS));
+        assertThat(paymentCutoff.getValue())
+                .as("an AWAITING_PAYMENT order is due once it is the payment grace past its expiry; "
+                        + "picking it up earlier would just have expireOrder defer it every tick")
+                .isCloseTo(OffsetDateTime.now().minusSeconds(60), within(5, java.time.temporal.ChronoUnit.SECONDS));
     }
 
     @Test
     void sweep_shouldKeepGoing_whenOneOrderLosesARace() {
         UUID raced = UUID.randomUUID();
         UUID next = UUID.randomUUID();
-        when(orderRepository.findOverdueOpenOrderIds(any(), anyInt())).thenReturn(List.of(raced, next));
+        when(orderRepository.findOverdueOpenOrderIds(any(), any(), anyInt())).thenReturn(List.of(raced, next));
         // Another replica, the Kafka consumer, or a payment committed first: @Version rejects our write.
         doThrow(new ObjectOptimisticLockingFailureException("Order", raced))
                 .when(orderService).expireOrder(raced);
 
-        new OrderExpirySweepJob(orderRepository, orderService, 300, 200).sweep();
+        new OrderExpirySweepJob(orderRepository, orderService, 300, 60, 200).sweep();
 
         // Losing a race on one order must not strand the rest of the batch.
         verify(orderService).expireOrder(next);
@@ -79,12 +85,12 @@ class OrderExpirySweepJobTest {
 
     @Test
     void sweep_shouldNotThrow_whenTheQueryFails() {
-        when(orderRepository.findOverdueOpenOrderIds(any(), anyInt()))
+        when(orderRepository.findOverdueOpenOrderIds(any(), any(), anyInt()))
                 .thenThrow(new RuntimeException("database unavailable"));
 
         // A throw from a @Scheduled method is only logged by Spring, but the job must stay quiet
         // and retry on the next tick rather than rely on that.
-        new OrderExpirySweepJob(orderRepository, orderService, 300, 200).sweep();
+        new OrderExpirySweepJob(orderRepository, orderService, 300, 60, 200).sweep();
 
         verifyNoInteractions(orderService);
     }

@@ -126,6 +126,11 @@ redis:
 order:
   expiration:
     minutes: ${ORDER_EXPIRATION_MINUTES:15}
+  # How long an AWAITING_PAYMENT order stays open past its expiry, so a charge
+  # about to be captured (e.g. mid 3-D Secure) is not cancelled and refunded. Must not exceed 45:
+  # venue-service holds seats for the order lifetime plus 60 s, and 15 s of that is kept
+  # as a safety margin. Startup fails otherwise.
+  payment-grace-seconds: ${ORDER_PAYMENT_GRACE_SECONDS:45}
   # Backstop for expiration-service's asynq jobs, which a Redis failover can
   # lose. Orders still open this long past expires_at are expired from Postgres.
   # The grace leaves the normal asynq -> Kafka path time to win.

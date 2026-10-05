@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_seats_plan_open;

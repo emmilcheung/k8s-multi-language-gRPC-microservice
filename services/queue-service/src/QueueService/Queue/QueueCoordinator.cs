@@ -9,20 +9,21 @@ namespace QueueService.Queue;
 
 /// Orchestrates store + tokens + clock. Used by both the API and the Razor page.
 public sealed class QueueCoordinator(
-    QueueStore store, TokenService tokens, TimeProvider clock, IOptions<QueueOptions> options,
-    QueueMetrics? metrics = null)
+    QueueStore store, EventSnapshotCache snapshots, TokenService tokens, TimeProvider clock,
+    IOptions<QueueOptions> options, QueueMetrics? metrics = null)
 {
     private readonly QueueOptions _opt = options.Value;
 
-    public async Task<EventConfig> RequireConfigAsync(string eid)
-        => await store.GetConfigAsync(eid)
-           ?? throw new EventNotFoundException(eid);
+    // Config comes from the per-pod snapshot (at most a second old), not a Redis read per call.
+    private async Task<EventSnapshot> RequireSnapshotAsync(string eid)
+        => await snapshots.GetAsync(eid) ?? throw new EventNotFoundException(eid);
 
-    public Task<EventConfig?> GetConfigOrNullAsync(string eid) => store.GetConfigAsync(eid);
+    public async Task<EventConfig?> GetConfigOrNullAsync(string eid)
+        => (await snapshots.GetAsync(eid))?.Config;
 
     public async Task<EnqueueResult> EnqueueAsync(string eid, PreQueueTicket? existing)
     {
-        var cfg = await RequireConfigAsync(eid);
+        var cfg = (await RequireSnapshotAsync(eid)).Config;
         var now = clock.GetUtcNow();
         var mid = existing?.Mid ?? Guid.NewGuid().ToString("N");
         var r = existing?.R ?? RandomNumberGenerator.GetInt32(int.MaxValue) / (double)int.MaxValue;
@@ -47,20 +48,29 @@ public sealed class QueueCoordinator(
 
     public async Task<StatusResult> GetStatusAsync(string eid, PreQueueTicket ticket)
     {
-        var cfg = await RequireConfigAsync(eid);
+        var snap = await RequireSnapshotAsync(eid);
+        var cfg = snap.Config;
         var now = clock.GetUtcNow();
         var (position, updated) = await ResolvePositionAsync(eid, ticket, cfg, now);
-        var serving = AdmissionCalculator.Serving(now, cfg.T0, cfg.Rate);
+        var serving = snap.Serving(now);
         var wait = AdmissionCalculator.EstimatedWaitSeconds(position, serving, cfg.Rate);
         metrics?.RecordWait(wait);
         return new StatusResult(
             updated, position, serving,
             AdmissionCalculator.IsAdmitted(position, serving),
-            wait);
+            wait, snap.SoldOut, snap.Paused);
     }
 
     public async Task<ClaimResult> ClaimAsync(string eid, PreQueueTicket ticket)
     {
+        // A token is issued on this decision, so it needs a snapshot from the last refresh
+        // interval, not the stale one status polls can use.
+        var snap = await snapshots.GetFreshAsync(eid) ?? throw new EventNotFoundException(eid);
+        if (snap.SoldOut || snap.Paused)
+        {
+            metrics?.ClaimRejected();
+            return new ClaimResult(false, null, ticket, snap.SoldOut, snap.Paused);
+        }
         var status = await GetStatusAsync(eid, ticket);
         if (!status.Admitted)
         {
@@ -102,10 +112,10 @@ public sealed class QueueCoordinator(
             await store.SetPassOnceAsync(t.Eid, sub, pass, _opt.AdmissionTtlSeconds));
     }
 
-    public async Task<long> ServingAsync(string eid)
+    public async Task<ServingResult> ServingAsync(string eid)
     {
-        var cfg = await RequireConfigAsync(eid);
-        return AdmissionCalculator.Serving(clock.GetUtcNow(), cfg.T0, cfg.Rate);
+        var snap = await RequireSnapshotAsync(eid);
+        return new ServingResult(snap.Serving(clock.GetUtcNow()), snap.Config.Rate, snap.SoldOut, snap.Paused);
     }
 
     // Returns the member's position and a (possibly updated, position-frozen) ticket.

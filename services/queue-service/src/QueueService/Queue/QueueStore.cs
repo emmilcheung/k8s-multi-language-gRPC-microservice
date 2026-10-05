@@ -4,7 +4,7 @@ namespace QueueService.Queue;
 
 /// All Redis state for the waiting room. Keys are namespaced per event id and
 /// carry a TTL so abandoned events self-clean (no unbounded growth).
-public sealed class QueueStore(IConnectionMultiplexer mux)
+public class QueueStore(IConnectionMultiplexer mux)
 {
     private IDatabase Db => mux.GetDatabase();
 
@@ -61,12 +61,17 @@ return tonumber(pos)";
             new("t0", c.T0.ToUnixTimeMilliseconds()),
             new("rate", c.Rate),
             new("armed", c.Armed ? 1 : 0),
+            new("servingBase", c.ServingBase),
+            new("soldout", c.SoldOut ? 1 : 0),
+            new("paused", c.Paused ? 1 : 0),
+            new("venuePaused", c.VenuePaused ? 1 : 0),
         };
+        if (c.TBase is { } tb) entries.Add(new HashEntry("tBase", tb.ToUnixTimeMilliseconds()));
         if (c.PreQueueSize is long pq) entries.Add(new HashEntry("pqsize", pq));
         await Db.HashSetAsync(Cfg(c.Eid), entries.ToArray());
     }
 
-    public async Task<EventConfig?> GetConfigAsync(string eid)
+    public virtual async Task<EventConfig?> GetConfigAsync(string eid)
     {
         var h = await Db.HashGetAllAsync(Cfg(eid));
         if (h.Length == 0) return null;
@@ -77,8 +82,123 @@ return tonumber(pos)";
             DateTimeOffset.FromUnixTimeMilliseconds((long)map["t0"]),
             (double)map["rate"],
             (long)map["armed"] == 1,
-            pq);
+            pq,
+            map.TryGetValue("servingBase", out var sb) ? (long)sb : 0,
+            map.TryGetValue("tBase", out var tb) ? DateTimeOffset.FromUnixTimeMilliseconds((long)tb) : null,
+            map.TryGetValue("soldout", out var so) && (long)so == 1,
+            map.TryGetValue("paused", out var pa) && (long)pa == 1,
+            map.TryGetValue("venuePaused", out var vpa) && (long)vpa == 1);
     }
+
+    // Shared by the scripts below: serving as EventConfig.ServingAt computes it.
+    // Expects `now` (ms) and the cfg fields as locals: t0, rate, base, tb, paused, vp.
+    private const string ServingLua = @"
+local function serving()
+  if paused or vp then return base end
+  if now <= t0 then return 0 end
+  return base + math.floor(rate * math.max(0, (now - tb) / 1000))
+end
+local rebase = math.max(now, t0)";
+
+    // Read, compute and write in one script, so two operators changing the same
+    // event cannot overwrite each other's rebase. KEYS[1]=cfg hash.
+    // ARGV: op (rate|paused|soldout), value, now in ms. Returns 0 if the event has no config.
+    private const string AdminUpdateLua = @"
+local c = redis.call('HMGET', KEYS[1], 't0', 'rate', 'servingBase', 'tBase', 'paused', 'venuePaused')
+if not c[1] then return 0 end
+local t0, rate = tonumber(c[1]), tonumber(c[2])
+local base = tonumber(c[3]) or 0
+local tb = tonumber(c[4]) or t0
+local paused, vp = c[5] == '1', c[6] == '1'
+local now = tonumber(ARGV[3])
+" + ServingLua + @"
+local op, v = ARGV[1], ARGV[2]
+if op == 'rate' then
+  redis.call('HSET', KEYS[1], 'servingBase', string.format('%.0f', serving()), 'tBase', string.format('%.0f', rebase), 'rate', v)
+elseif op == 'paused' then
+  local want = v == '1'
+  if want == paused then return 1 end
+  if want then
+    redis.call('HSET', KEYS[1], 'servingBase', string.format('%.0f', serving()), 'paused', 1)
+  else
+    redis.call('HSET', KEYS[1], 'tBase', string.format('%.0f', rebase), 'paused', 0)
+  end
+else
+  redis.call('HSET', KEYS[1], 'soldout', v)
+end
+return 1";
+
+    // Idempotent venue freeze/unfreeze: only the first pod to see a change writes the
+    // flag, the rest find it already set. While it is set, a pod with a fresh reading
+    // also stamps venueAt (only ever forward), which is how other pods know the pause
+    // is still being reported. KEYS[1]=cfg hash.
+    // ARGV: want (1 frozen, 0 running), now in ms, the reading's time in ms.
+    private const string VenuePauseLua = @"
+local c = redis.call('HMGET', KEYS[1], 't0', 'rate', 'servingBase', 'tBase', 'paused', 'venuePaused', 'venueAt')
+if not c[1] then return 0 end
+local t0, rate = tonumber(c[1]), tonumber(c[2])
+local base = tonumber(c[3]) or 0
+local tb = tonumber(c[4]) or t0
+local paused, vp = c[5] == '1', c[6] == '1'
+local now = tonumber(ARGV[2])
+" + ServingLua + @"
+local want = ARGV[1] == '1'
+local at = tonumber(ARGV[3])
+if want == vp then
+  if want and at > (tonumber(c[7]) or 0) then redis.call('HSET', KEYS[1], 'venueAt', string.format('%.0f', at)) end
+  return 0
+end
+if want then
+  if not paused then redis.call('HSET', KEYS[1], 'servingBase', string.format('%.0f', serving())) end
+  redis.call('HSET', KEYS[1], 'venuePaused', 1, 'venueAt', string.format('%.0f', at))
+else
+  if not paused then redis.call('HSET', KEYS[1], 'tBase', string.format('%.0f', rebase)) end
+  redis.call('HSET', KEYS[1], 'venuePaused', 0)
+end
+return 1";
+
+    // Clears a venue flag nobody is refreshing any more. Both conditions are checked in
+    // here, so it cannot fight a pod that has just stamped a fresh reading. Serving
+    // resumes now, the moment the flag is cleared, as the normal unfreeze does: it was
+    // frozen until then, so crediting the time since the lapse would be a burst. Never
+    // earlier than the base time already set, so it does not rewind. A flag with no venueAt
+    // (set by an older pod) gets one now and lapses a full lapse from here.
+    // KEYS[1]=cfg hash. ARGV: now in ms, lapse in ms. Returns 1 only for the call that cleared it.
+    private const string VenueLapseLua = @"
+local c = redis.call('HMGET', KEYS[1], 't0', 'tBase', 'paused', 'venuePaused', 'venueAt')
+if not c[1] or c[4] ~= '1' then return 0 end
+local now, lapse = tonumber(ARGV[1]), tonumber(ARGV[2])
+local at = tonumber(c[5])
+if not at then
+  redis.call('HSET', KEYS[1], 'venueAt', string.format('%.0f', now))
+  return 0
+end
+if now - at <= lapse then return 0 end
+if c[3] ~= '1' then
+  local resume = math.max(now, tonumber(c[1]), tonumber(c[2]) or 0)
+  redis.call('HSET', KEYS[1], 'tBase', string.format('%.0f', resume))
+end
+redis.call('HSET', KEYS[1], 'venuePaused', 0)
+return 1";
+
+    /// Applies one operator change atomically. Returns false if the event has no config.
+    public async Task<bool> AdminUpdateAsync(string eid, string op, RedisValue value, DateTimeOffset now)
+        => (long)await Db.ScriptEvaluateAsync(AdminUpdateLua, new RedisKey[] { Cfg(eid) },
+            new RedisValue[] { op, value, now.ToUnixTimeMilliseconds() }) == 1;
+
+    /// Freezes (or releases) serving for the venue's paused / sold-out signal. Safe to call
+    /// from every pod: returns true only for the call that changed the flag. While the flag
+    /// is set, calling it with the venue's reading time (<paramref name="readingAt"/>, default
+    /// now) records that the pause is still being reported.
+    public async Task<bool> SetVenuePausedAsync(string eid, bool paused, DateTimeOffset now, DateTimeOffset? readingAt = null)
+        => (long)await Db.ScriptEvaluateAsync(VenuePauseLua, new RedisKey[] { Cfg(eid) },
+            new RedisValue[] { paused ? 1 : 0, now.ToUnixTimeMilliseconds(), (readingAt ?? now).ToUnixTimeMilliseconds() }) == 1;
+
+    /// Clears a venue flag that no pod has refreshed for <paramref name="lapse"/>. For a pod
+    /// without a fresh venue reading; returns true only for the call that cleared it.
+    public async Task<bool> LapseVenuePauseAsync(string eid, DateTimeOffset now, TimeSpan lapse)
+        => (long)await Db.ScriptEvaluateAsync(VenueLapseLua, new RedisKey[] { Cfg(eid) },
+            new RedisValue[] { now.ToUnixTimeMilliseconds(), (long)lapse.TotalMilliseconds }) == 1;
 
     /// Returns true if the member is in the pre-queue afterwards; false if rejected
     /// because the cap was already reached.

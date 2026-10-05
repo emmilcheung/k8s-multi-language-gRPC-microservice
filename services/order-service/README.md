@@ -41,6 +41,7 @@ See `.env.example` for all required variables with placeholder values.
 | `TICKET_SERVICE_GRPC_PORT` | Port of ticket-service gRPC server (default `9090`) |
 | `PORT` | HTTP listen port (default `8082`) |
 | `ORDER_EXPIRATION_MINUTES` | Minutes until an order expires (default `15`) |
+| `ORDER_PAYMENT_GRACE_SECONDS` | Seconds an `AWAITING_PAYMENT` order stays open past its expiry (default `45`, max `45`; startup fails above) |
 
 ## Running locally
 

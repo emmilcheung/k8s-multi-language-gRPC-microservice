@@ -164,7 +164,11 @@ compensating path, grounded in the actual code (topic names from
    gRPC `FinalizeReservation` / `FinalizeSeatReservation`, order → CONFIRMED.
 5. **Expire / compensate** — if the timer fires first,
    `expiration.order.expiration_complete` drives release of quota + seat holds
-   and cancels the PaymentIntent.
+   and cancels the PaymentIntent. An `AWAITING_PAYMENT` order is first kept open
+   for a payment grace past `expires_at` (`order.payment-grace-seconds`, default
+   45, at most 45) because a charge may be in flight; an expiry event inside the
+   grace does not expire it, and it is expired once the grace has passed, by
+   `OrderExpirySweepJob` or on the next `getOrder` read.
 
 A closing note documents the DLQ policy (`<topic>.dlq`, max 3 retries with
 exponential back-off), matching `docs/04-asynchronous-messaging.md`.
@@ -182,9 +186,14 @@ Pairs with "how would you build a search feature on top of a Mongo-backed micros
 
 A sequence diagram for the **onsale surge gate** (`services/queue-service`, a standalone
 .NET 10 subsystem on its own domain/Redis). Shows the armed-onsale path: connector 302 →
-pre-queue randomized draw → rate-based admission by pure time-math (`serving(t)=⌊rate·(t−T0)⌋`)
-→ single-use HMAC token → login, then the connector redeems it through Kong for a pass bound to
-that account and sets the `qq_pass` cookie → Kong purchase backstop checks the pass belongs to the caller. Pairs with "how would you protect the buy path under a
+pre-queue randomized draw → rate-based admission counted from a stored base
+(`serving = servingBase + ⌊rate·(now−tBase)⌋`), which stays frozen while the operator or the venue
+has paused, so it resumes without a jump. Each pod serves it from a per-event snapshot (1 s, up to
+10 s old if Redis errors; a claim waits for fresh data), and queue-service polls venue-service
+for seat availability (at most every 2 s per event) to set a shared pause flag; `/claim` answers
+409 while paused or sold out. Then a single-use HMAC token → login (the token waits in the `qq_admit` cookie, not the URL),
+then the connector redeems it through Kong for a pass bound to
+that account and sets the `qq_pass` cookie (a failed redeem sends the visitor back to the queue page) → Kong purchase backstop checks the pass belongs to the caller. Only the armed event's page and its seats and plans pages are gated. Pairs with "how would you protect the buy path under a
 Taylor-Swift-scale onsale" interview questions. Run `python3 render.py` to (re)wrap it
 into its HTML viewer and the landing page.
 

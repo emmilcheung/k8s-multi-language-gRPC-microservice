@@ -78,7 +78,9 @@ sequenceDiagram
     ES->>RD: ZPOPMIN expired timers (every 1s)
     ES->>MQ: publish expiration.order.expiration_complete
     MQ-->>OS: consume expiration.order.expiration_complete
-    alt order still PENDING or AWAITING_PAYMENT
+    alt AWAITING_PAYMENT and still inside the payment grace
+      Note over OS: Not expired yet: a charge may be in flight. The order stays open for the payment grace past expires_at (order.payment-grace-seconds, default 45, at most 45). Nothing re-sends the event, so the order is expired once the grace has passed, by OrderExpirySweepJob or on the next getOrder read.
+    else order still PENDING or AWAITING_PAYMENT, and past any grace
       OS->>TS: gRPC ReleaseReservation(reservation_id, reason=EXPIRED)
       OS->>VS: gRPC ReleaseSeatReservation(reservation_id, reason=EXPIRED)
       OS->>OS: UPDATE orders SET status=EXPIRED

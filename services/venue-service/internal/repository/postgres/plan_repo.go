@@ -346,3 +346,35 @@ func (r *PlanRepo) SaveLayout(ctx context.Context, planID, organizerID string, l
 	}
 	return nil
 }
+
+// TicketAvailability counts the seats of every active plan of a ticket in one
+// query. A HELD seat whose hold has lapsed counts as available, the same rule
+// HoldSeats applies, so the count matches what a buyer can actually hold.
+// Sold and blocked seats are excluded in the WHERE clause so the query can use
+// idx_seats_plan_open, which holds only seats that are not sold or blocked.
+// A ticket with no active plan, or whose active plans have no seat rows yet
+// (not provisioned), is ErrPlanNotFound: zero seats must not read as sold out.
+func (r *PlanRepo) TicketAvailability(ctx context.Context, ticketID string) (*repository.TicketAvailability, error) {
+	const q = `
+		WITH active AS (
+			SELECT id FROM seating_plans WHERE ticket_id = $1 AND status = 'active'
+		)
+		SELECT EXISTS (SELECT 1 FROM seats WHERE plan_id IN (SELECT id FROM active)),
+		       count(*) FILTER (WHERE status = 'AVAILABLE'
+		                           OR (status = 'HELD' AND held_until < now())),
+		       count(*) FILTER (WHERE status = 'RESERVED'
+		                           OR (status = 'HELD' AND NOT COALESCE(held_until < now(), false)))
+		FROM seats
+		WHERE plan_id IN (SELECT id FROM active)
+		  AND status IN ('AVAILABLE', 'HELD', 'RESERVED')`
+
+	var hasSeats bool
+	a := &repository.TicketAvailability{}
+	if err := r.pool.QueryRow(ctx, q, ticketID).Scan(&hasSeats, &a.Available, &a.Held); err != nil {
+		return nil, err
+	}
+	if !hasSeats {
+		return nil, repository.ErrPlanNotFound
+	}
+	return a, nil
+}

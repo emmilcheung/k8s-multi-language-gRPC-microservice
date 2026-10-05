@@ -43,8 +43,73 @@ queue:
   # without it. Plain values are for local clusters only.
   userIdSigningKey: ""
   # Lifetime of the admission token and of the purchase pass (15 minutes).
+  # Must stay above the 10 minute seat hold (600 s): the service refuses to start otherwise.
   admissionTtlSeconds: 900
   slidingGraceSeconds: 60
+  # Enqueue attempts per client IP per minute, counted PER POD: every replica keeps its
+  # own counter, so the effective global limit is this value times the replica count.
+  # Set it to the target global limit divided by autoscaling.minReplicas (a global
+  # limit at the ingress or Kong is a later option).
+  enqueuePerMinutePerIp: 20
+  # Networks of the proxies allowed to set X-Forwarded-For: the ingress controller's
+  # pods. The client address is the first hop outside these networks. REQUIRED (the
+  # service refuses to start without it). The default is the private ranges, which
+  # covers most pod CIDRs; narrow it to your ingress controller's pod/node network
+  # (and add the CDN's ranges if one sits in front) to stop other in-cluster pods
+  # from picking their own rate-limit bucket.
+  trustedProxyCidrs:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+  # Origins (scheme + host + port) the waiting page may send an admitted visitor back to
+  # when it runs on its own host and the return URL is absolute. Anything else collapses
+  # to "/". Empty = only same-origin relative paths. Example:
+  #   allowedTargetOrigins:
+  #     - https://www.example.com
+  allowedTargetOrigins: []
+  # Where to ask how many seats are left ({eid} = the sale's ticket id); venue-service
+  # answers GET -> 200 {"available":n,"held":n}, 404 for a sale without seating. With it
+  # set, no seats left pauses the queue (if seats are held) or marks it sold out.
+  # Empty = only the operator's flags. Example (venue-service's Service is
+  # <release>-venue-service, HTTP port service.httpPort = 3003):
+  #   http://ticketing-venue-service.ticketing.svc.cluster.local:3003/internal/tickets/{eid}/availability
+  # Where venue-service has NetworkPolicies on, also enable its
+  # networkPolicy.queueSystem (with this chart's namespace), or the poll is blocked.
+  venueAvailabilityUrl: ""
+  # Enables the operator endpoints under /api/admin (header X-Queue-Admin-Key, min 32
+  # chars). Empty = the endpoints are not mapped. Like the keys above, outside local
+  # provide it as `admin-api-key` in secretRef/externalSecrets, not as a plain value.
+  adminApiKey: ""
+  # Port the /api/admin routes are served on, apart from the public one (they answer 404
+  # there). The Service exposes it as port `admin`, which the Ingress does not route:
+  # reach it with `kubectl port-forward` or from ops tooling only. Must differ from
+  # service.targetPort; the service refuses to start if the admin key is set without it.
+  adminPort: 9090
+
+# Restricts who can reach queue-service pods. Off by default so local clusters keep working;
+# turn it on in staging/production (needs a CNI that enforces NetworkPolicy). Ingress only:
+# egress stays open. Where venue-service also has NetworkPolicies on, enable its
+# networkPolicy.queueSystem too.
+networkPolicy:
+  enabled: false
+  # The public HTTP port is open only to these pods (namespace AND pod labels).
+  # Defaults match ingress-nginx; change them to your controller's.
+  ingressController:
+    namespaceLabels:
+      kubernetes.io/metadata.name: ingress-nginx
+    podLabels:
+      app.kubernetes.io/name: ingress-nginx
+  # Kong calls queue-service in-cluster (redeem), so its pods may reach the public port too
+  # (namespace AND pod labels). Defaults match the umbrella chart's Kong subchart in the
+  # `ticketing` namespace; staging/production may differ (see services/kong-gateway/values).
+  kong:
+    namespaceLabels:
+      kubernetes.io/metadata.name: ticketing
+    podLabels:
+      app.kubernetes.io/name: kong
+  # The admin port is open only to pods in this namespace (ops tooling, port-forward
+  # from a bastion); the admin key is still required.
+  opsNamespace: ops
 
 # Stateless app — admission is pure time-math, safe to scale horizontally.
 autoscaling:

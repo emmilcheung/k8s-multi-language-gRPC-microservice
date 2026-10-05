@@ -298,3 +298,17 @@ type ReservationRepository interface {
 	// Returns ErrReservationConflict if RELEASED.
 	FinalizeReservation(ctx context.Context, reservationID, orderID string) error
 }
+
+// TicketAvailability counts the seats of a ticket's active seating plans.
+// Available seats can be held right now; Held seats are not sold and may
+// still come back (a live hold or an unpaid reservation).
+type TicketAvailability struct {
+	Available int
+	Held      int
+}
+
+// AvailabilityReader counts a ticket's seats straight from PostgreSQL.
+// It returns ErrPlanNotFound when the ticket has no active seating plan.
+type AvailabilityReader interface {
+	TicketAvailability(ctx context.Context, ticketID string) (*TicketAvailability, error)
+}

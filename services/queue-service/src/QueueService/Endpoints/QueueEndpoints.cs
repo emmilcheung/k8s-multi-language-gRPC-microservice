@@ -12,9 +12,9 @@ public static class QueueEndpoints
     {
         app.MapGet("/api/serving", async (string e, QueueCoordinator coord, HttpResponse res) =>
         {
-            var serving = await coord.ServingAsync(e);
-            res.Headers.CacheControl = "public, max-age=1";
-            return Results.Ok(new { serving });
+            var r = await coord.ServingAsync(e);
+            res.Headers.CacheControl = "public, max-age=2";
+            return Results.Ok(new { serving = r.Serving, rate = r.Rate, soldOut = r.SoldOut, paused = r.Paused });
         });
 
         app.MapPost("/api/enqueue", async (string e, HttpRequest req, HttpResponse res,
@@ -34,7 +34,8 @@ public static class QueueEndpoints
             var st = await coord.GetStatusAsync(e, ticket);
             WriteTicket(res, tokens, st.Ticket); // refresh frozen position
             return Results.Ok(new { position = st.Position, serving = st.Serving,
-                admitted = st.Admitted, waitSeconds = st.WaitSeconds });
+                admitted = st.Admitted, waitSeconds = st.WaitSeconds,
+                soldOut = st.SoldOut, paused = st.Paused });
         });
 
         app.MapPost("/api/claim", async (string e, HttpRequest req, HttpResponse res,
@@ -43,6 +44,12 @@ public static class QueueEndpoints
             var ticket = ReadTicket(req, tokens, e);
             if (ticket is null) return Results.Unauthorized();
             var claim = await coord.ClaimAsync(e, ticket);
+            if (claim.SoldOut || claim.Paused)
+                return Results.Conflict(new
+                {
+                    error = claim.SoldOut ? "sold out" : "admission is paused",
+                    soldOut = claim.SoldOut, paused = claim.Paused,
+                });
             WriteTicket(res, tokens, claim.Ticket);
             return claim.Admitted
                 ? Results.Ok(new { token = claim.Token })

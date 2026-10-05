@@ -31,12 +31,15 @@ import com.ticketing.orders.repository.OrderRepository;
 import com.ticketing.orders.repository.OrderSeatRepository;
 import com.ticketing.orders.repository.OutboxRepository;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
@@ -77,6 +80,9 @@ public class OrderService {
     @Value("${order.expiration.minutes:15}")
     private int expirationMinutes;
 
+    @PersistenceContext
+    private EntityManager entityManager;
+
     private final OrderRepository orderRepository;
     private final OrderSeatRepository orderSeatRepository;
     private final OutboxRepository outboxRepository;
@@ -86,6 +92,24 @@ public class OrderService {
     private final OrderTransactionService orderTransactionService;
     private final SeatedOrderTransactionService seatedOrderTransactionService;
     private final MeterRegistry meterRegistry;
+    private final Duration paymentGrace;
+
+    /**
+     * venue-service keeps a seat reservation for the order lifetime plus this much
+     * (see the {@code expirationMinutes + 1} reservation expiry below). The payment
+     * grace must fit inside it, or an order kept open for a charge would outlive
+     * its seats.
+     */
+    static final Duration RESERVATION_BUFFER = Duration.ofMinutes(1);
+
+    /**
+     * Kept free of the payment grace: the reservation's own expiry is computed slightly
+     * before the order's, so the real buffer is a little under {@link #RESERVATION_BUFFER}.
+     */
+    static final Duration RESERVATION_SAFETY_MARGIN = Duration.ofSeconds(15);
+
+    private static final long MAX_PAYMENT_GRACE_SECONDS =
+            RESERVATION_BUFFER.minus(RESERVATION_SAFETY_MARGIN).toSeconds();
 
     public OrderService(
             OrderRepository orderRepository,
@@ -96,7 +120,15 @@ public class OrderService {
             ObjectMapper objectMapper,
             OrderTransactionService orderTransactionService,
             SeatedOrderTransactionService seatedOrderTransactionService,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry,
+            @Value("${order.payment-grace-seconds:45}") long paymentGraceSeconds) {
+        if (paymentGraceSeconds < 0 || paymentGraceSeconds > MAX_PAYMENT_GRACE_SECONDS) {
+            throw new IllegalStateException("order.payment-grace-seconds must be between 0 and "
+                    + MAX_PAYMENT_GRACE_SECONDS + " (the venue seat-reservation buffer past order expiry, minus a "
+                    + RESERVATION_SAFETY_MARGIN.toSeconds() + " s safety margin), got "
+                    + paymentGraceSeconds);
+        }
+        this.paymentGrace = Duration.ofSeconds(paymentGraceSeconds);
         this.orderRepository = orderRepository;
         this.orderSeatRepository = orderSeatRepository;
         this.outboxRepository = outboxRepository;
@@ -425,12 +457,29 @@ public class OrderService {
         return result;
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * Returns the order. payment-service reads it here before charging, so a payable
+     * order whose payment window has closed is expired on the spot rather than waiting
+     * for the sweep: its seats may already be released, and a charge now would only be
+     * refunded. Not read-only for that reason.
+     *
+     * <p>The order read here is detached before expiring it, so the lock query in
+     * expireOrder loads the row fresh. Otherwise a payment that completed after this
+     * read would be hidden behind the stale managed copy and cancelled. The response
+     * is built from the row as expireOrder left it.
+     */
+    @Transactional
     public OrderResponse getOrder(UUID orderId, UUID userId) {
         Order order = orderRepository.findByIdWithTicket(orderId)
                 .orElseThrow(() -> new NotFoundException("Order not found: " + orderId));
         if (!order.getUserId().equals(userId)) {
             throw new ForbiddenException("You do not own this order");
+        }
+        if (!order.isTerminal() && !order.getExpiresAt().plus(paymentGrace).isAfter(OffsetDateTime.now())) {
+            entityManager.detach(order);
+            expireOrder(orderId);
+            order = orderRepository.findByIdWithTicket(orderId)
+                    .orElseThrow(() -> new NotFoundException("Order not found: " + orderId));
         }
         List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
         return OrderResponse.from(order, seats);
@@ -639,11 +688,27 @@ public class OrderService {
     /**
      * Cancel an order due to expiration (called by ExpirationEventConsumer).
      * Emits an outbox cancellation event so other services react.
+     *
+     * <p>An AWAITING_PAYMENT order is left open until the payment grace period after
+     * its expiry has passed: the buyer may be mid 3-D Secure, and cancelling then would
+     * refund a payment that could have succeeded. (The payment-initiated event fires
+     * when the payment form loads, not on submit, so the grace is anchored on the
+     * order's expiry.) Nothing re-delivers the Kafka event, so OrderExpirySweepJob
+     * picks the order up again once the grace has passed. CREATED orders expire at
+     * their deadline.
+     *
+     * <p>The row is locked, like markComplete, so an expiry can't cancel an order
+     * while a capture is completing it (and the grace decision reads a settled row).
      */
     @Transactional
     public void expireOrder(UUID orderId) {
-        orderRepository.findByIdWithTicket(orderId).ifPresent(order -> {
+        orderRepository.findByIdWithTicketForUpdate(orderId).ifPresent(order -> {
             if (!order.isTerminal()) {
+                if (isInPaymentGrace(order)) {
+                    log.info("Order expiry deferred, payment may be in flight orderId={} expiresAt={}",
+                            orderId, order.getExpiresAt());
+                    return;
+                }
                 order.setStatus(OrderStatus.CANCELLED);
                 order.setCancelReason(CancelReason.EXPIRED);
                 orderRepository.save(order);
@@ -658,6 +723,11 @@ public class OrderService {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private boolean isInPaymentGrace(Order order) {
+        return order.getStatus() == OrderStatus.AWAITING_PAYMENT
+                && order.getExpiresAt().plus(paymentGrace).isAfter(OffsetDateTime.now());
+    }
 
     private OrderCancelledEvent buildCancelledEventWithSeats(Order order, List<OrderSeat> seats) {
         List<String> seatIds = seats.stream()

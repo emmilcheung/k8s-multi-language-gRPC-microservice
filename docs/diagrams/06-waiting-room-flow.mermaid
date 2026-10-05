@@ -4,9 +4,10 @@ sequenceDiagram
     participant C as Connector (Next.js proxy.ts)
     participant Q as queue-service (queue.* domain)
     participant R as Queue Redis
+    participant V as venue-service
     participant K as Kong + ticket-service
 
-    Note over C: onsale armed (QUEUE_GATE_ARMED=true)
+    Note over C: onsale armed (QUEUE_GATE_ARMED=true). Only the armed event's page and its seats and plans pages are gated.
     B->>C: GET /tickets/123
     C-->>B: 302 to queue/wait?e=E&target=/tickets/123 (no valid pass)
     B->>Q: GET /wait (page only, joins nothing)
@@ -14,21 +15,37 @@ sequenceDiagram
     Q->>R: ZADD prequeue (random score - fair draw)
     Q-->>B: ticket cookie, the page counts down and polls
     loop until position < serving
-        B->>Q: GET /serving (cacheable, pure time-math)
-        Q-->>B: serving = floor(rate * (now - T0))
+        B->>Q: GET /serving (cacheable)
+        Note over Q: Per-pod snapshot kept 1 s. On a Redis error the last snapshot is served for up to 10 s. A claim always waits for fresh data.
+        Q->>R: read the event config hash (at most once a second per pod per event)
+        Q-->>B: serving = servingBase + floor(rate * (now - tBase)), frozen while the operator or the venue has paused
+        par venue polling, in the background
+            Q->>V: GET /internal/tickets/E/availability (at most every 2 s per event)
+            V-->>Q: seats free and seats held
+        end
+        Note over Q: No seats free but some held = paused. None free and none held = sold out. Either sets the shared venuePaused flag in the config hash, which freezes serving. Only a pod with a fresh reading may change it. If no pod refreshes it for 30 s it lapses, and serving resumes from the moment it is cleared.
+        Note over Q: The operator API (rate, paused, sold-out) runs on a separate admin port.
     end
     B->>Q: POST /claim
-    Q-->>B: signed admission token (HMAC, single-use nonce, no account yet)
+    alt event paused or sold out
+        Q-->>B: 409 (the waiting page shows paused, sold out, or "couldn't confirm your place" with a retry)
+    else admitted
+        Q-->>B: signed admission token (HMAC, single-use nonce, no account yet)
+    end
     B->>C: 302 to /tickets/123?qpass={token}
     opt not logged in
-        C-->>B: 302 to /auth/signin?next=/tickets/123?qpass={token}
-        B->>C: sign in, back to /tickets/123?qpass={token}
+        C-->>B: 302 to /auth/signin?next=/tickets/123 (token kept in the short-lived qq_admit cookie, not in the URL)
+        B->>C: sign in, back to /tickets/123 (qq_admit cookie sent)
     end
     C->>K: POST /api/queue/redeem (login token)
     K->>Q: /api/redeem + X-User-Id and its HMAC signature
     Note over Q: binds the queue place to the first account, one pass per account per event
     Q-->>C: pass (Sub = account, 15 min), the same pass again on a repeat
-    C-->>B: set qq_pass cookie, 302 /tickets/123 (clean URL)
+    alt redeem fails
+        C-->>B: 302 back to the queue page (queue/wait?e=E&target=...), qq_admit cleared
+    else redeemed
+        C-->>B: set qq_pass cookie, clear qq_admit, 302 /tickets/123 (clean URL)
+    end
     B->>K: hold seats / create order (qq_pass cookie)
     Note over K: Kong re-checks signature, expiry, event and Sub = caller
     K-->>B: held

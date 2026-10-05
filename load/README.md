@@ -37,24 +37,69 @@ docker compose exec -T mongodb mongosh --quiet --eval 'print(JSON.stringify(db.s
 
 ## Onsale waiting room — `k6/onsale-queue.js`
 
-Polling storm against the standalone queue-service (`docker-compose.queue.yml`).
-The `serving` scenario hammers `GET /api/serving?e=<id>` — the cacheable hot path
-whose admission count is pure time-math (`floor(rate·(now−T0))`, no Redis), so its
-latency must stay flat regardless of VU count. The `flow` scenario exercises the
-per-visitor `enqueue → status` path.
+Mirrors what the real waiting page (`services/queue-service/src/QueueService/wwwroot/js/wait.js`)
+sends against the standalone queue-service (`docker-compose.queue.yml`). Two scenarios:
+
+- `serving` hammers `GET /api/serving?e=<id>` with no think time. It is answered from
+  a per-pod in-memory snapshot (refreshed at most once a second per event, single-flight),
+  so a hit does no Redis work and latency must stay flat regardless of VU count.
+- `flow` is one visitor's journey with the page's own intervals: `POST /api/enqueue`,
+  then **one** `GET /api/status` 0-10 s later (that call freezes the position; it is
+  never repeated), then `GET /api/serving` every 15-30 s (random each time), and
+  `POST /api/claim` once `serving > position`. A claim answered 425 (this pod is a
+  moment behind) or 409 (paused / sold out) goes back to polling.
+
+### Rush profile and budget
+
+The page asks for as little as possible, so a rush of N visitors costs N enqueues, N
+status calls and then N/22 serving polls per second (22 s is the mean poll gap) instead
+of N/2. Thresholds: `flow_failed` < 1% (any failed request counts, **a 401 on status
+included** since the real page would have to join again), `status_calls_per_visitor` max 1,
+and the usual latency bounds. The Redis budget cannot be read from k6, so measure it
+around the run: the config read (`HGETALL`) rate is bounded by pods x events x 1/s, not by
+visitors, and `EVAL` (enqueue/freeze scripts) tracks joins only.
 
 ```bash
 docker compose -f docker-compose.queue.yml up -d
-# seed an already-open, high-rate event
+# seed an already-open, high-rate event (fields: t0 ms, rate per second, armed;
+# optional servingBase + tBase ms rebase the count, soldout / paused are 0 or 1)
 docker compose -f docker-compose.queue.yml exec -T queue-redis redis-cli \
-  HSET q:LOAD:cfg t0 $(( ($(date +%s) - 30) * 1000 )) rate 1000 armed 1
+  HSET q:{LOAD}:cfg t0 $(( ($(date +%s) - 30) * 1000 )) rate 1000 armed 1
+docker compose -f docker-compose.queue.yml exec -T queue-redis redis-cli CONFIG RESETSTAT
 k6 run -e QUEUE_EVENT=LOAD -e PEAK_VUS=400 load/k6/onsale-queue.js
+docker compose -f docker-compose.queue.yml exec -T queue-redis redis-cli INFO commandstats | grep -E 'hgetall|eval'
 ```
 
+The key is `q:{<id>}:cfg`; the braces are literal (a Redis Cluster hash tag), so quote
+them if your shell expands braces. Edit the hash by hand only to create an event: once a
+sale is running, change it through the admin API below, because a plain `HSET rate`
+makes serving jump.
+
+Not re-measured after the snapshot and wait.js changes: the figures below are from
+2026-06-16 against the previous design (every serving call computed from a Redis read).
+Rerun the commands above to refresh them.
+
 Measured (2026-06-16, local M-series + Docker, 500 peak VUs / ~31k req/s): `serving`
-p95 19.5 ms / p99 26 ms, **0% failures across 901k requests; 2.44M checks 100% passed**
-— the time-math read path absorbs the storm with flat latency, evidencing the
-origin-load invariant for the gate.
+p95 19.5 ms / p99 26 ms, **0% failures across 901k requests; 2.44M checks 100% passed**.
+
+### Operating a running sale
+
+Set `Queue__AdminApiKey` (32+ chars) and the service maps these routes (not mapped
+otherwise); send the key in `X-Queue-Admin-Key`. They take effect on every pod within
+about a second.
+
+```bash
+H='X-Queue-Admin-Key: <key>'; U=http://localhost:4100/api/admin/events/<id>
+# New rate; serving continues from where it is, no jump
+curl -X POST $U/rate     -H "$H" -H 'Content-Type: application/json' -d '{"rate": 200}'
+# Stop admitting (serving freezes) / resume (continues from there, no burst)
+curl -X POST $U/paused   -H "$H" -H 'Content-Type: application/json' -d '{"paused": true}'
+# Mark sold out (claims refused with 409; the page says so)
+curl -X POST $U/sold-out -H "$H" -H 'Content-Type: application/json' -d '{"soldOut": true}'
+```
+
+With `Queue__VenueAvailabilityUrl` set, the pods also pause (no seats free but some held)
+or mark sold out (none free, none held) on their own, ORed with the operator's flags.
 
 ## Caveats
 

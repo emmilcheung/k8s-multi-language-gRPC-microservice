@@ -6,9 +6,11 @@ import { PASSWORD, uniqueEmail } from "./_helpers/flows";
 // armed against a seeded, already-open, high-rate event. See the run recipe in
 // docs/superpowers/plans/2026-06-16-virtual-waiting-room-connector.md (Task 4).
 // Skipped unless E2E_QUEUE_ARMED=1 so it never runs in the normal E2E pass.
+// Only the armed event's pages are gated, so E2E_TICKET_ID must equal the
+// client's QUEUE_EVENT_ID (it defaults to the same "E2E" the recipe seeds).
 
 const ARMED = process.env.E2E_QUEUE_ARMED === "1";
-const TICKET = process.env.E2E_TICKET_ID || "any";
+const TICKET = process.env.E2E_TICKET_ID || "E2E";
 
 test.describe("virtual waiting room", () => {
   test.skip(!ARMED, "set E2E_QUEUE_ARMED=1 with the gate armed + queue stack up");
@@ -20,6 +22,22 @@ test.describe("virtual waiting room", () => {
     await page.goto(`/tickets/${TICKET}`);
     await expect(page).toHaveURL(/\/wait\?e=/);
     await expect(page.locator("#countdown")).toBeVisible();
+  });
+
+  // Only the armed event's purchase pages are gated (QUEUE_EVENT_ID is that
+  // event's ticket id); browsing and payment pages stay open to everyone.
+  test("pages outside the armed event's purchase path load without the queue", async ({ page }) => {
+    await page.route("**/api/claim**", (r) => r.abort());
+    for (const path of ["/", "/tickets/not-the-armed-event", `/tickets/${TICKET}/admission`, "/orders"]) {
+      await page.goto(path);
+      expect(page.url(), path).not.toContain("/wait?e=");
+    }
+  });
+
+  test("the armed event's seat picker is redirected to the waiting room", async ({ page }) => {
+    await page.route("**/api/claim**", (r) => r.abort());
+    await page.goto(`/tickets/${TICKET}/seats`);
+    await expect(page).toHaveURL(/\/wait\?e=/);
   });
 
   // The pass is bound to an account when redeemed, so an admitted visitor who

@@ -122,8 +122,24 @@ topologySpreadConstraints:
   # Requires nodes labelled with topology.kubernetes.io/zone (standard on EKS).
   # Disabled by default (not applicable in single-node minikube).
   enabled: false
+  # Lets the waiting room's queue-service pods reach venue's HTTP port, only for
+  # GET /internal/tickets/:id/availability (its automatic paused / sold-out signal).
+  # Turn on together with queue-system's queue.venueAvailabilityUrl, and only where
+  # queue-system is deployed. Has no effect while networkPolicy.enabled is false.
+  queueSystem:
+    enabled: false
+    # Namespace queue-system is installed in.
+    namespace: queue
 
 networkPolicy:
   # Enable in staging/production to restrict pod-to-pod communication.
   # Disabled by default to avoid breaking local (minikube) environments.
   enabled: false
+  # Lets the waiting room's queue-service pods reach venue's HTTP port, only for
+  # GET /internal/tickets/:id/availability (its automatic paused / sold-out signal).
+  # Turn on together with queue-system's queue.venueAvailabilityUrl, and only where
+  # queue-system is deployed. Has no effect while networkPolicy.enabled is false.
+  queueSystem:
+    enabled: false
+    # Namespace queue-system is installed in.
+    namespace: queue
