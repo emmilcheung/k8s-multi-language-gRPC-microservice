@@ -120,7 +120,6 @@ public class VenueSignalTests(RedisFixture fx)
 
     private static string CfgKey(string eid) => $"q:{{{eid}}}:cfg";
     private long VenueAtMs(string eid) => (long)fx.Mux.GetDatabase().HashGet(CfgKey(eid), "venueAt");
-    private static readonly TimeSpan Lapse = TimeSpan.FromSeconds(30);
 
     // Nobody can tell a venue that went quiet from one that is still sold out, so
     // serving does not resume on a guess at once. But a flag nobody can clear would
@@ -150,11 +149,31 @@ public class VenueSignalTests(RedisFixture fx)
 
         var released = await Settled(cache, clock, eid, x => !x.Paused);
         Assert.False((await new QueueStore(fx.Mux).GetConfigAsync(eid))!.VenuePaused);
-        // Serving resumes as of the lapse moment, not as of now: no jump, no rewind.
-        var lapseAt = DateTimeOffset.FromUnixTimeMilliseconds(VenueAtMs(eid)) + Lapse;
-        var expected = frozen + (long)Math.Floor(100 * (clock.GetUtcNow() - lapseAt).TotalSeconds);
-        Assert.Equal(expected, released.Serving(clock.GetUtcNow()));
-        Assert.True(released.Serving(clock.GetUtcNow()) >= frozen);
+        // Serving resumes at the moment the flag is cleared: no jump, no rewind.
+        Assert.Equal(frozen, released.Serving(clock.GetUtcNow()));
+    }
+
+    // Serving was frozen and claims were blocked until a pod finally cleared the flag, so
+    // crediting the quiet minutes at once would let the whole crowd in as one burst.
+    [Fact]
+    public async Task A_flag_cleared_long_after_it_lapsed_does_not_credit_the_gap_as_a_burst()
+    {
+        var (podA, venue, clock, eid) = await New();
+        clock.Advance(TimeSpan.FromSeconds(10));
+        await podA.GetAsync(eid);
+        venue.Availability(0, 3);
+        var paused = await Settled(podA, clock, eid, x => x.Paused);
+        var frozen = paused.Serving(clock.GetUtcNow());
+
+        var podB = new EventSnapshotCache(new QueueStore(fx.Mux), clock,
+            Options.Create(new QueueOptions()), new StubVenue(), NullLogger<EventSnapshotCache>.Instance);
+        clock.Advance(TimeSpan.FromMinutes(3)); // nobody asked while the venue was silent
+        var arrived = clock.GetUtcNow(); // the first reader clears the flag at this instant
+        await podB.GetAsync(eid);
+        var released = await Settled(podB, clock, eid, x => !x.Paused);
+
+        Assert.Equal(frozen, released.Serving(arrived));
+        Assert.Equal(frozen + 200, released.Serving(arrived + TimeSpan.FromSeconds(2)));
     }
 
     // The venue may still be sold out, so a flag set moments ago must not be undone

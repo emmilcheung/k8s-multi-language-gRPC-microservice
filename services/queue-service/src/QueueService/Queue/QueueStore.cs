@@ -159,8 +159,9 @@ return 1";
 
     // Clears a venue flag nobody is refreshing any more. Both conditions are checked in
     // here, so it cannot fight a pod that has just stamped a fresh reading. Serving
-    // resumes as of the lapse moment (venueAt + lapse), never earlier than the base
-    // time already set, so it neither jumps ahead nor rewinds. A flag with no venueAt
+    // resumes now, the moment the flag is cleared, as the normal unfreeze does: it was
+    // frozen until then, so crediting the time since the lapse would be a burst. Never
+    // earlier than the base time already set, so it does not rewind. A flag with no venueAt
     // (set by an older pod) gets one now and lapses a full lapse from here.
     // KEYS[1]=cfg hash. ARGV: now in ms, lapse in ms. Returns 1 only for the call that cleared it.
     private const string VenueLapseLua = @"
@@ -174,7 +175,7 @@ if not at then
 end
 if now - at <= lapse then return 0 end
 if c[3] ~= '1' then
-  local resume = math.max(at + lapse, tonumber(c[1]), tonumber(c[2]) or 0)
+  local resume = math.max(now, tonumber(c[1]), tonumber(c[2]) or 0)
   redis.call('HSET', KEYS[1], 'tBase', string.format('%.0f', resume))
 end
 redis.call('HSET', KEYS[1], 'venuePaused', 0)
