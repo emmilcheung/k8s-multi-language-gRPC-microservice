@@ -46,15 +46,22 @@ public class VenueSignalTests(RedisFixture fx)
     }
 
     // The poll runs in the background; step the clock past the refresh and read again.
+    // The clock must not move while a refresh is still running: its rebase would use the
+    // earlier instant and serving would read one step ahead. In production the clock and
+    // the refresh are milliseconds apart, so only a loaded test machine can open that gap.
     private static async Task<EventSnapshot> Settled(EventSnapshotCache cache, FakeTimeProvider clock, string eid,
         Func<EventSnapshot, bool> done)
     {
         for (var i = 0; i < 200; i++)
         {
             clock.Advance(TimeSpan.FromMilliseconds(1100));
-            await cache.GetAsync(eid); // an expired snapshot is answered as is while the refresh runs behind it
-            await Task.Delay(10);
-            var s = (await cache.GetAsync(eid))!; // same instant, so it sees the refreshed one
+            var before = (await cache.GetAsync(eid))!; // an expired snapshot is answered as is while the refresh runs behind it
+            var s = before;
+            for (var wait = 0; wait < 50 && ReferenceEquals(s, before); wait++)
+            {
+                await Task.Delay(10);
+                s = (await cache.GetAsync(eid))!; // same instant, so a finished refresh shows as a new snapshot
+            }
             if (done(s)) return s;
         }
         throw new Xunit.Sdk.XunitException("venue signal never reached the snapshot");
@@ -111,24 +118,125 @@ public class VenueSignalTests(RedisFixture fx)
         await Settled(cache, clock, eid, x => !x.Paused);
     }
 
-    // Nobody can tell a venue that went quiet from one that is still sold out, and
-    // serving that resumes on a guess lets everyone below it claim at once. So the
-    // flag stays as last set; operators clear it through the admin API.
+    private static string CfgKey(string eid) => $"q:{{{eid}}}:cfg";
+    private long VenueAtMs(string eid) => (long)fx.Mux.GetDatabase().HashGet(CfgKey(eid), "venueAt");
+    private static readonly TimeSpan Lapse = TimeSpan.FromSeconds(30);
+
+    // Nobody can tell a venue that went quiet from one that is still sold out, so
+    // serving does not resume on a guess at once. But a flag nobody can clear would
+    // freeze the sale for good, so it lapses once the venue has been silent for a
+    // while: well past any signal's life, so a briefly slow venue never trips it.
     [Fact]
-    public async Task A_venue_that_stops_answering_leaves_the_pause_in_place()
+    public async Task A_venue_that_goes_quiet_keeps_the_pause_for_a_while_then_it_lapses()
     {
         var (cache, venue, clock, eid) = await New();
+        clock.Advance(TimeSpan.FromSeconds(10));
+        await cache.GetAsync(eid);
         venue.Availability(0, 3);
-        await Settled(cache, clock, eid, x => x.Paused);
+        var s = await Settled(cache, clock, eid, x => x.Paused);
+        var frozen = s.Serving(clock.GetUtcNow());
         venue.Returns(HttpStatusCode.InternalServerError);
+        var lastReading = clock.GetUtcNow();
 
-        for (var i = 0; i < 20; i++) // well past the signal's 10 s life
+        while (clock.GetUtcNow() - lastReading < TimeSpan.FromSeconds(25)) // past the signal's 10 s life
         {
             await Task.Delay(10);
-            clock.Advance(TimeSpan.FromSeconds(2));
-            Assert.True((await cache.GetAsync(eid))!.Paused);
+            clock.Advance(TimeSpan.FromSeconds(1.1));
+            var held = (await cache.GetAsync(eid))!;
+            Assert.True(held.Paused);
+            Assert.Equal(frozen, held.Serving(clock.GetUtcNow()));
         }
         Assert.True((await new QueueStore(fx.Mux).GetConfigAsync(eid))!.VenuePaused);
+
+        var released = await Settled(cache, clock, eid, x => !x.Paused);
+        Assert.False((await new QueueStore(fx.Mux).GetConfigAsync(eid))!.VenuePaused);
+        // Serving resumes as of the lapse moment, not as of now: no jump, no rewind.
+        var lapseAt = DateTimeOffset.FromUnixTimeMilliseconds(VenueAtMs(eid)) + Lapse;
+        var expected = frozen + (long)Math.Floor(100 * (clock.GetUtcNow() - lapseAt).TotalSeconds);
+        Assert.Equal(expected, released.Serving(clock.GetUtcNow()));
+        Assert.True(released.Serving(clock.GetUtcNow()) >= frozen);
+    }
+
+    // The venue may still be sold out, so a flag set moments ago must not be undone
+    // by a pod that merely has no reading.
+    [Fact]
+    public async Task A_pod_without_a_reading_does_not_clear_a_recent_venue_pause()
+    {
+        var (podA, venue, clock, eid) = await New();
+        venue.Availability(0, 3);
+        await Settled(podA, clock, eid, x => x.Paused);
+
+        var podB = new EventSnapshotCache(new QueueStore(fx.Mux), clock,
+            Options.Create(new QueueOptions()), new StubVenue(), NullLogger<EventSnapshotCache>.Instance);
+        clock.Advance(TimeSpan.FromSeconds(20));
+        Assert.True((await podB.GetAsync(eid))!.Paused);
+        Assert.True((await new QueueStore(fx.Mux).GetConfigAsync(eid))!.VenuePaused);
+    }
+
+    // A pod that still hears "paused" keeps stamping the flag, so a pod that cannot
+    // reach the venue never mistakes a live pause for an abandoned one.
+    [Fact]
+    public async Task A_pod_with_a_fresh_paused_reading_keeps_the_flag_from_lapsing_on_other_pods()
+    {
+        var (podA, venue, clock, eid) = await New();
+        venue.Availability(0, 3);
+        await Settled(podA, clock, eid, x => x.Paused);
+        var deaf = new StubVenue();
+        deaf.Returns(HttpStatusCode.InternalServerError);
+        var podB = new EventSnapshotCache(new QueueStore(fx.Mux), clock,
+            Options.Create(new QueueOptions { VenueAvailabilityUrl = "http://venue/{eid}" }), deaf,
+            NullLogger<EventSnapshotCache>.Instance);
+
+        var started = clock.GetUtcNow();
+        while (clock.GetUtcNow() - started < TimeSpan.FromSeconds(90)) // three lapses
+        {
+            await Task.Delay(5);
+            clock.Advance(TimeSpan.FromSeconds(1.1));
+            await podA.GetAsync(eid);
+            await Task.Delay(5);
+            await podA.GetAsync(eid);
+            Assert.True((await podB.GetAsync(eid))!.Paused);
+            Assert.True((await new QueueStore(fx.Mux).GetConfigAsync(eid))!.VenuePaused);
+        }
+        Assert.True(clock.GetUtcNow() - DateTimeOffset.FromUnixTimeMilliseconds(VenueAtMs(eid)) < TimeSpan.FromSeconds(10));
+    }
+
+    // Removing the venue URL (or running without one) must not leave an old flag behind forever.
+    [Fact]
+    public async Task With_no_venue_url_a_flag_set_earlier_still_lapses()
+    {
+        var (podA, venue, clock, eid) = await New();
+        venue.Availability(0, 3);
+        await Settled(podA, clock, eid, x => x.Paused);
+
+        var podB = new EventSnapshotCache(new QueueStore(fx.Mux), clock,
+            Options.Create(new QueueOptions { VenueAvailabilityUrl = null }), new StubVenue(),
+            NullLogger<EventSnapshotCache>.Instance);
+        clock.Advance(TimeSpan.FromSeconds(35));
+        await podB.GetAsync(eid);
+        clock.Advance(TimeSpan.FromSeconds(2));
+        await podB.GetAsync(eid);
+        Assert.False((await new QueueStore(fx.Mux).GetConfigAsync(eid))!.VenuePaused);
+    }
+
+    // The operator's own pause outlives the venue flag lapsing.
+    [Fact]
+    public async Task A_lapsing_venue_flag_leaves_the_operator_pause_in_force()
+    {
+        var (podA, venue, clock, eid) = await New();
+        venue.Availability(0, 3);
+        await Settled(podA, clock, eid, x => x.Paused);
+        var store = new QueueStore(fx.Mux);
+        await store.AdminUpdateAsync(eid, "paused", 1, clock.GetUtcNow());
+
+        var podB = new EventSnapshotCache(store, clock,
+            Options.Create(new QueueOptions()), new StubVenue(), NullLogger<EventSnapshotCache>.Instance);
+        clock.Advance(TimeSpan.FromSeconds(40));
+        await podB.GetAsync(eid);
+        clock.Advance(TimeSpan.FromSeconds(2));
+        var s = (await podB.GetAsync(eid))!;
+        Assert.False((await store.GetConfigAsync(eid))!.VenuePaused);
+        Assert.True(s.Paused);
     }
 
     // A pod that just started has no venue reading. It must not undo the pause the
@@ -208,12 +316,18 @@ public class VenueSignalTests(RedisFixture fx)
         Assert.Equal(0, venue.Calls);
     }
 
-    // An expired snapshot is answered as is while the refresh runs behind it, so read twice.
+    // An expired snapshot is answered as is while the refresh runs behind it, so read again
+    // until the refresh has landed: the caller then moves the clock only after it is done.
     private static long ServingOf(EventSnapshotCache cache, FakeTimeProvider clock, string eid)
     {
-        cache.GetAsync(eid).GetAwaiter().GetResult();
-        Thread.Sleep(50);
-        return cache.GetAsync(eid).GetAwaiter().GetResult()!.Serving(clock.GetUtcNow());
+        var before = cache.GetAsync(eid).GetAwaiter().GetResult()!;
+        var s = before;
+        for (var wait = 0; wait < 50 && ReferenceEquals(s, before); wait++)
+        {
+            Thread.Sleep(10);
+            s = cache.GetAsync(eid).GetAwaiter().GetResult()!;
+        }
+        return s.Serving(clock.GetUtcNow());
     }
 
     // While no seat can be claimed, letting serving climb means that when a hold lapses

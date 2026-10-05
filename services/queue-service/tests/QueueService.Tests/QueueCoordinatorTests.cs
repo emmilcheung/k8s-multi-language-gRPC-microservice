@@ -94,6 +94,27 @@ public class QueueCoordinatorTests(RedisFixture fx)
         Assert.NotNull(ok.Token);
     }
 
+    // A pod that has not refreshed for a few seconds still answers status polls from its
+    // old snapshot, but a claim mints a token that outlives the pause, so it must not
+    // be decided on a snapshot from before the operator paused.
+    [Fact]
+    public async Task Claim_after_an_operator_pause_is_refused_even_on_a_pod_holding_an_older_snapshot()
+    {
+        var (coord, clock, eid) = New();
+        var enq = await coord.EnqueueAsync(eid, existing: null);
+        clock.SetUtcNow(T0.AddSeconds(1));
+        await coord.GetStatusAsync(eid, enq.Ticket); // the pod now holds a running snapshot
+
+        Assert.True(await new QueueStore(fx.Mux).AdminUpdateAsync(eid, "paused", 1, clock.GetUtcNow()));
+        clock.Advance(TimeSpan.FromSeconds(5)); // older than a refresh, inside the stale window
+
+        var claim = await coord.ClaimAsync(eid, enq.Ticket);
+
+        Assert.False(claim.Admitted);
+        Assert.Null(claim.Token);
+        Assert.True(claim.Paused);
+    }
+
     // The purchase pass is what Kong checks on every purchase write. It must name
     // the account that redeemed it, or one admission could be handed to any
     // number of accounts (bots sharing a queue place).

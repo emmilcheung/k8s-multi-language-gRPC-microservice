@@ -39,6 +39,9 @@ public sealed class EventSnapshotCache(
     private static readonly TimeSpan VenueTimeout = TimeSpan.FromMilliseconds(500);
     // After the venue stops answering, its last word is believed this long.
     private static readonly TimeSpan VenueSignalMaxAge = TimeSpan.FromSeconds(10);
+    // A venue flag that no pod has refreshed for this long is cleared by whichever pod
+    // notices: well past the signal's life plus a poll, so a slow venue never trips it.
+    public static readonly TimeSpan VenueFlagLapse = TimeSpan.FromSeconds(30);
     // How long the last good snapshot may stand in for a failing Redis read.
     public static readonly TimeSpan StaleWindow = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan RetryBackoff = TimeSpan.FromSeconds(1);
@@ -57,6 +60,7 @@ public sealed class EventSnapshotCache(
         // Guarded by Gate except Venue, which is replaced whole.
         public volatile VenueSignal? Venue;
         public DateTimeOffset VenuePolledAt = DateTimeOffset.MinValue;
+        public DateTimeOffset VenueStamped = DateTimeOffset.MinValue; // last reading time written to Redis (LoadAsync only)
         public bool VenuePolling, VenueFailing;
     }
 
@@ -66,7 +70,13 @@ public sealed class EventSnapshotCache(
     private readonly ConcurrentDictionary<string, Entry> _entries = new();
 
     /// Null when the event has no config.
-    public async Task<EventSnapshot?> GetAsync(string eid)
+    public Task<EventSnapshot?> GetAsync(string eid) => GetAsync(eid, fresh: false);
+
+    /// For decisions that must not rest on a snapshot older than RefreshInterval (a claim):
+    /// waits for a load instead of answering from a stale snapshot, and sees its error.
+    public Task<EventSnapshot?> GetFreshAsync(string eid) => GetAsync(eid, fresh: true);
+
+    private async Task<EventSnapshot?> GetAsync(string eid, bool fresh)
     {
         var entry = EntryFor(eid);
         TaskCompletionSource<EventSnapshot?> flight;
@@ -80,7 +90,7 @@ public sealed class EventSnapshotCache(
             if (c is not null && now - c.At < RefreshInterval) return c.Value;
             // A usable snapshot answers at once while the refresh runs behind it, so a slow
             // or dead Redis costs callers nothing until the snapshot is too old to trust.
-            if (c is { Value: { } last } && now - c.At <= StaleWindow)
+            if (!fresh && c is { Value: { } last } && now - c.At <= StaleWindow)
             {
                 serveStale = true;
                 stale = last;
@@ -130,20 +140,27 @@ public sealed class EventSnapshotCache(
                 // Freeze serving while the venue says paused or sold out, release it when it
                 // stops. Every pod with a fresh reading gets here, but the script flips the
                 // flag only once.
+                // While it stays set, each new reading is stamped once, so other pods can tell
+                // a pause the venue still reports from one nobody is watching.
                 var venueHolds = v.Paused || v.SoldOut;
-                if (venueHolds != cfg.VenuePaused)
+                var flip = venueHolds != cfg.VenuePaused;
+                if (flip || (venueHolds && v.At > entry.VenueStamped))
                 {
-                    await store.SetVenuePausedAsync(eid, venueHolds, now);
-                    cfg = await store.GetConfigAsync(eid) ?? cfg; // also picks up a flip by another pod
+                    await store.SetVenuePausedAsync(eid, venueHolds, now, v.At);
+                    entry.VenueStamped = v.At;
                 }
+                if (flip) cfg = await store.GetConfigAsync(eid) ?? cfg; // also picks up a flip by another pod
                 snap = new EventSnapshot(cfg, cfg.SoldOut || v.SoldOut, cfg.Paused || v.Paused);
             }
             else
             {
                 // No fresh reading (a new pod, or a venue that stopped answering) means no
                 // opinion: leave the shared flag alone and follow it. A pod that merely
-                // lacks data must not unfreeze a pause the others set. If the venue stays
-                // unreachable the flag stays as last set; operators clear it via the admin API.
+                // lacks data must not unfreeze a pause the others set. Only when no pod has
+                // stamped a reading for the whole lapse is the flag cleared (atomically, so
+                // it cannot fight a pod that just stamped one).
+                if (cfg.VenuePaused && await store.LapseVenuePauseAsync(eid, now, VenueFlagLapse))
+                    cfg = await store.GetConfigAsync(eid) ?? cfg;
                 snap = new EventSnapshot(cfg, cfg.SoldOut, cfg.Paused || cfg.VenuePaused);
             }
         }

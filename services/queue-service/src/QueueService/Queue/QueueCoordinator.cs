@@ -63,7 +63,9 @@ public sealed class QueueCoordinator(
 
     public async Task<ClaimResult> ClaimAsync(string eid, PreQueueTicket ticket)
     {
-        var snap = await RequireSnapshotAsync(eid);
+        // A token is issued on this decision, so it needs a snapshot from the last refresh
+        // interval, not the stale one status polls can use.
+        var snap = await snapshots.GetFreshAsync(eid) ?? throw new EventNotFoundException(eid);
         if (snap.SoldOut || snap.Paused)
         {
             metrics?.ClaimRejected();
