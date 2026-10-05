@@ -82,7 +82,8 @@ async function queueGate(request: NextRequest): Promise<NextResponse | null> {
         return keepAdmission(res, decision.token);
       }
       if (redeemed.kind === "failed") {
-        const target = encodeURIComponent(decision.cleanUrl);
+        // Absolute, like every other queue target: the waiting page redirects to it from its own origin.
+        const target = encodeURIComponent(new URL(decision.cleanUrl, request.url).toString());
         const res = NextResponse.redirect(`${queueUrl}/wait?e=${eventId}&target=${target}`, 302);
         res.cookies.delete(QUEUE_ADMIT_COOKIE);
         return res;
