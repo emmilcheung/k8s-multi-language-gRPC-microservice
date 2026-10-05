@@ -31,6 +31,8 @@ import com.ticketing.orders.repository.OrderRepository;
 import com.ticketing.orders.repository.OrderSeatRepository;
 import com.ticketing.orders.repository.OutboxRepository;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -77,6 +79,9 @@ public class OrderService {
 
     @Value("${order.expiration.minutes:15}")
     private int expirationMinutes;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     private final OrderRepository orderRepository;
     private final OrderSeatRepository orderSeatRepository;
@@ -457,6 +462,11 @@ public class OrderService {
      * order whose payment window has closed is expired on the spot rather than waiting
      * for the sweep: its seats may already be released, and a charge now would only be
      * refunded. Not read-only for that reason.
+     *
+     * <p>The order read here is detached before expiring it, so the lock query in
+     * expireOrder loads the row fresh. Otherwise a payment that completed after this
+     * read would be hidden behind the stale managed copy and cancelled. The response
+     * is built from the row as expireOrder left it.
      */
     @Transactional
     public OrderResponse getOrder(UUID orderId, UUID userId) {
@@ -466,7 +476,10 @@ public class OrderService {
             throw new ForbiddenException("You do not own this order");
         }
         if (!order.isTerminal() && !order.getExpiresAt().plus(paymentGrace).isAfter(OffsetDateTime.now())) {
+            entityManager.detach(order);
             expireOrder(orderId);
+            order = orderRepository.findByIdWithTicket(orderId)
+                    .orElseThrow(() -> new NotFoundException("Order not found: " + orderId));
         }
         List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
         return OrderResponse.from(order, seats);
