@@ -1,0 +1,36 @@
+{{- if .Values.networkPolicy.enabled }}
+# NetworkPolicy for queue-service (ingress only; egress is left open for Redis, venue and DNS)
+# Public HTTP port: the ingress controller's pods only
+# Admin port:       pods in the ops namespace only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: queue-service
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "queue-system.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: queue-service
+  policyTypes:
+    - Ingress
+  ingress:
+    # Same-entry namespaceSelector + podSelector means: that namespace AND those pods.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressController.namespaceLabels | nindent 14 }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressController.podLabels | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.targetPort }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.opsNamespace | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.queue.adminPort }}
+{{- end }}

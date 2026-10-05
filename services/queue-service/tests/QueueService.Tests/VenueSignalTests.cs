@@ -52,9 +52,10 @@ public class VenueSignalTests(RedisFixture fx)
         for (var i = 0; i < 200; i++)
         {
             clock.Advance(TimeSpan.FromMilliseconds(1100));
-            var s = (await cache.GetAsync(eid))!;
-            if (done(s)) return s;
+            await cache.GetAsync(eid); // an expired snapshot is answered as is while the refresh runs behind it
             await Task.Delay(10);
+            var s = (await cache.GetAsync(eid))!; // same instant, so it sees the refreshed one
+            if (done(s)) return s;
         }
         throw new Xunit.Sdk.XunitException("venue signal never reached the snapshot");
     }
@@ -110,23 +111,60 @@ public class VenueSignalTests(RedisFixture fx)
         await Settled(cache, clock, eid, x => !x.Paused);
     }
 
+    // Nobody can tell a venue that went quiet from one that is still sold out, and
+    // serving that resumes on a guess lets everyone below it claim at once. So the
+    // flag stays as last set; operators clear it through the admin API.
     [Fact]
-    public async Task A_failing_venue_keeps_the_last_signal_for_ten_seconds_then_drops_it()
+    public async Task A_venue_that_stops_answering_leaves_the_pause_in_place()
     {
         var (cache, venue, clock, eid) = await New();
         venue.Availability(0, 3);
         await Settled(cache, clock, eid, x => x.Paused);
         venue.Returns(HttpStatusCode.InternalServerError);
 
-        // Give the failing polls time to land, still inside the 10 s window.
-        for (var i = 0; i < 3; i++)
+        for (var i = 0; i < 20; i++) // well past the signal's 10 s life
         {
-            await Task.Delay(30);
+            await Task.Delay(10);
             clock.Advance(TimeSpan.FromSeconds(2));
             Assert.True((await cache.GetAsync(eid))!.Paused);
         }
-        clock.Advance(TimeSpan.FromSeconds(8));
-        Assert.False((await cache.GetAsync(eid))!.Paused);
+        Assert.True((await new QueueStore(fx.Mux).GetConfigAsync(eid))!.VenuePaused);
+    }
+
+    // A pod that just started has no venue reading. It must not undo the pause the
+    // other pods set: that would let about a second of claims through on every scale-up.
+    [Fact]
+    public async Task A_new_pod_with_no_venue_reading_neither_unfreezes_nor_allows_claims()
+    {
+        var (podA, venue, clock, eid) = await New();
+        venue.Availability(0, 3);
+        await Settled(podA, clock, eid, x => x.Paused);
+
+        var deaf = new StubVenue();
+        deaf.Returns(HttpStatusCode.InternalServerError);
+        var podB = new EventSnapshotCache(new QueueStore(fx.Mux), clock,
+            Options.Create(new QueueOptions { VenueAvailabilityUrl = "http://venue/{eid}" }), deaf,
+            NullLogger<EventSnapshotCache>.Instance);
+
+        for (var i = 0; i < 5; i++)
+        {
+            var s = (await podB.GetAsync(eid))!;
+            Assert.True(s.Paused);
+            Assert.True((await new QueueStore(fx.Mux).GetConfigAsync(eid))!.VenuePaused);
+            await Task.Delay(10);
+            clock.Advance(TimeSpan.FromMilliseconds(1100));
+        }
+    }
+
+    [Fact]
+    public async Task A_fresh_missing_seating_plan_clears_the_flag_in_the_shared_config()
+    {
+        var (cache, venue, clock, eid) = await New();
+        venue.Availability(0, 3);
+        await Settled(cache, clock, eid, x => x.Paused);
+        venue.Returns(HttpStatusCode.NotFound);
+        await Settled(cache, clock, eid, x => !x.Paused);
+        Assert.False((await new QueueStore(fx.Mux).GetConfigAsync(eid))!.VenuePaused);
     }
 
     [Fact]
@@ -170,8 +208,13 @@ public class VenueSignalTests(RedisFixture fx)
         Assert.Equal(0, venue.Calls);
     }
 
+    // An expired snapshot is answered as is while the refresh runs behind it, so read twice.
     private static long ServingOf(EventSnapshotCache cache, FakeTimeProvider clock, string eid)
-        => cache.GetAsync(eid).GetAwaiter().GetResult()!.Serving(clock.GetUtcNow());
+    {
+        cache.GetAsync(eid).GetAwaiter().GetResult();
+        Thread.Sleep(50);
+        return cache.GetAsync(eid).GetAwaiter().GetResult()!.Serving(clock.GetUtcNow());
+    }
 
     // While no seat can be claimed, letting serving climb means that when a hold lapses
     // everyone below serving can claim at once, out of order.

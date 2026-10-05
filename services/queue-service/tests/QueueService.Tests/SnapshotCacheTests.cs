@@ -138,6 +138,47 @@ public class SnapshotCacheTests(RedisFixture fx)
         Assert.All(snaps, s => Assert.NotNull(s));
     }
 
+    // Callers must not wait out Redis's own timeout (seconds) while a usable snapshot exists.
+    [Fact]
+    public async Task With_a_usable_snapshot_a_hanging_redis_does_not_delay_callers()
+    {
+        var (cache, store, clock, eid) = await New();
+        var good = await cache.GetAsync(eid);
+        clock.Advance(TimeSpan.FromSeconds(2));
+        store.Gate = new TaskCompletionSource(); // the refresh never completes
+
+        var first = cache.GetAsync(eid);
+        var more = Enumerable.Range(0, 10).Select(_ => cache.GetAsync(eid)).ToArray();
+        var all = Task.WhenAll(more.Append(first));
+        Assert.Same(all, await Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds(2))));
+        Assert.All(await all, s => Assert.Same(good, s));
+        Assert.Equal(2, store.ConfigReads); // still one refresh, shared
+    }
+
+    // After a failed refresh, retrying on every poll would hammer a Redis that is struggling.
+    [Fact]
+    public async Task After_a_failed_refresh_no_new_read_starts_within_the_backoff()
+    {
+        var (cache, store, clock, eid) = await New();
+        await cache.GetAsync(eid);
+        clock.Advance(TimeSpan.FromSeconds(2));
+        store.Fail = true;
+        await cache.GetAsync(eid);
+        for (var i = 0; i < 100 && store.ConfigReads < 2; i++) await Task.Delay(10);
+        await Task.Delay(50); // let the failure land
+        var reads = store.ConfigReads;
+
+        clock.Advance(TimeSpan.FromMilliseconds(500));
+        for (var i = 0; i < 5; i++) await cache.GetAsync(eid);
+        await Task.Delay(50);
+        Assert.Equal(reads, store.ConfigReads);
+
+        clock.Advance(TimeSpan.FromMilliseconds(600)); // backoff over
+        await cache.GetAsync(eid);
+        for (var i = 0; i < 100 && store.ConfigReads == reads; i++) await Task.Delay(10);
+        Assert.Equal(reads + 1, store.ConfigReads);
+    }
+
     private WebApplicationFactory<Program> Factory(CountingStore store, FakeTimeProvider clock) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {

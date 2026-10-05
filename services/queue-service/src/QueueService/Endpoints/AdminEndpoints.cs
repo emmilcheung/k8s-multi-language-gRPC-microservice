@@ -30,9 +30,13 @@ public static class AdminEndpoints
                 // Hash both sides so the compare is constant-time whatever length the caller sends.
                 var given = SHA256.HashData(Encoding.UTF8.GetBytes(
                     ctx.HttpContext.Request.Headers[KeyHeader].ToString()));
-                return CryptographicOperations.FixedTimeEquals(given, expected)
-                    ? await next(ctx)
-                    : Results.Unauthorized();
+                if (CryptographicOperations.FixedTimeEquals(given, expected)) return await next(ctx);
+                // Who tried which action on which event; never the key they sent.
+                ctx.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("QueueService.Admin")
+                    .LogWarning("Admin key rejected for event {Eid} on {Path} from {RemoteIp}",
+                        ctx.HttpContext.Request.RouteValues["eid"], ctx.HttpContext.Request.Path,
+                        ctx.HttpContext.Connection.RemoteIpAddress);
+                return Results.Unauthorized();
             });
 
         admin.MapPost("/rate", async (string eid, RateRequest body, EventAdmin ops, ILoggerFactory logs) =>

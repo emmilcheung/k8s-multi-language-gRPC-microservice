@@ -7,6 +7,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using QueueService.Queue;
 using StackExchange.Redis;
@@ -71,6 +72,8 @@ public class AdminApiTests(RedisFixture fx)
     private static async Task<JsonElement> Serving(HttpClient c, FakeTimeProvider clock, string eid)
     {
         clock.Advance(TimeSpan.FromMilliseconds(1100)); // past the snapshot refresh
+        await c.GetAsync($"/api/serving?e={eid}"); // an expired snapshot is answered as is while the refresh runs behind it
+        await Task.Delay(100);
         return await c.GetFromJsonAsync<JsonElement>($"/api/serving?e={eid}");
     }
 
@@ -97,6 +100,37 @@ public class AdminApiTests(RedisFixture fx)
         Assert.Equal(100, s.GetProperty("rate").GetDouble()); // nothing was applied
         Assert.False(s.GetProperty("paused").GetBoolean());
         Assert.False(s.GetProperty("soldOut").GetBoolean());
+    }
+
+    private sealed class CaptureLogs(List<string> lines) : ILoggerProvider, ILogger
+    {
+        public ILogger CreateLogger(string categoryName) => this;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel level, EventId id, TState state, Exception? ex, Func<TState, Exception?, string> fmt)
+        { lock (lines) lines.Add($"{level}: {fmt(state, ex)}"); }
+        public void Dispose() { }
+    }
+
+    // Guessing the key is the attack on this port, so a rejected attempt must leave a trace
+    // an operator can alert on, without writing down what was guessed.
+    [Fact]
+    public async Task A_rejected_admin_key_is_logged_as_a_warning_without_the_key()
+    {
+        var lines = new List<string>();
+        var clock = new FakeTimeProvider(T0.AddSeconds(10));
+        await using var f = Factory(clock, Key).WithWebHostBuilder(b =>
+            b.ConfigureLogging(l => l.AddProvider(new CaptureLogs(lines))));
+        var c = AdminClient(f);
+        var eid = await Seed();
+        const string guess = "super-secret-guess-super-secret-guess";
+
+        await c.SendAsync(Post($"/api/admin/events/{eid}/paused", new { paused = true }, guess));
+
+        string[] seen; lock (lines) seen = lines.ToArray();
+        var line = Assert.Single(seen, l => l.StartsWith("Warning:") && l.Contains("/paused"));
+        Assert.Contains(eid, line);
+        Assert.DoesNotContain(guess, string.Join('\n', seen));
     }
 
     // The ingress forwards the public port to the internet; the admin routes must not be there.

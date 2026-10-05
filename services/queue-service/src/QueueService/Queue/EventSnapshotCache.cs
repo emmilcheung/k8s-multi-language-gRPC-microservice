@@ -25,8 +25,10 @@ public sealed record EventSnapshot(EventConfig Config, bool SoldOut, bool Paused
 /// the venue (at most every 2 s per event). It never waits on it: the answer lands in
 /// the next snapshot, and a failing venue only means "no automatic signal".
 ///
-/// If Redis fails, the last good snapshot is served for up to StaleWindow, so a blip
-/// does not turn every waiting visitor's poll into a 500.
+/// A snapshot younger than StaleWindow is returned at once even when due for a refresh;
+/// the refresh runs in the background (one at a time, backing off after a failure). So a
+/// Redis blip neither slows nor fails waiting visitors' polls; past StaleWindow callers
+/// wait on the load and see its error.
 public sealed class EventSnapshotCache(
     QueueStore store, TimeProvider clock, IOptions<QueueOptions> options,
     IHttpClientFactory http, ILogger<EventSnapshotCache> log)
@@ -39,6 +41,7 @@ public sealed class EventSnapshotCache(
     private static readonly TimeSpan VenueSignalMaxAge = TimeSpan.FromSeconds(10);
     // How long the last good snapshot may stand in for a failing Redis read.
     public static readonly TimeSpan StaleWindow = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan RetryBackoff = TimeSpan.FromSeconds(1);
     private readonly string? _venueUrl = options.Value.VenueAvailabilityUrl;
     private const int PruneAbove = 1024;
     private static readonly TimeSpan PruneAge = TimeSpan.FromMinutes(1);
@@ -50,6 +53,7 @@ public sealed class EventSnapshotCache(
         public readonly object Gate = new();
         public volatile Slot? Current;
         public TaskCompletionSource<EventSnapshot?>? InFlight;
+        public DateTimeOffset RetryAt = DateTimeOffset.MinValue; // after a failed refresh, no new attempt before this
         // Guarded by Gate except Venue, which is replaced whole.
         public volatile VenueSignal? Venue;
         public DateTimeOffset VenuePolledAt = DateTimeOffset.MinValue;
@@ -67,33 +71,49 @@ public sealed class EventSnapshotCache(
         var entry = EntryFor(eid);
         TaskCompletionSource<EventSnapshot?> flight;
         var owner = false;
+        EventSnapshot? stale = null;
+        var serveStale = false;
         lock (entry.Gate)
         {
-            if (entry.Current is { } c && clock.GetUtcNow() - c.At < RefreshInterval) return c.Value;
-            if (entry.InFlight is null)
+            var now = clock.GetUtcNow();
+            var c = entry.Current;
+            if (c is not null && now - c.At < RefreshInterval) return c.Value;
+            // A usable snapshot answers at once while the refresh runs behind it, so a slow
+            // or dead Redis costs callers nothing until the snapshot is too old to trust.
+            if (c is { Value: { } last } && now - c.At <= StaleWindow)
+            {
+                serveStale = true;
+                stale = last;
+            }
+            if (entry.InFlight is null && (!serveStale || now >= entry.RetryAt))
             {
                 entry.InFlight = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 owner = true;
             }
-            flight = entry.InFlight;
+            flight = entry.InFlight!;
         }
 
-        if (owner)
-        {
-            try { flight.SetResult(await LoadAsync(eid, entry)); }
-            catch (Exception ex)
-            {
-                if (entry.Current is { Value: { } last } stale && clock.GetUtcNow() - stale.At <= StaleWindow)
-                {
-                    log.LogWarning(ex, "Redis read for event {Eid} failed; serving the snapshot from {AgeMs} ms ago",
-                        eid, (long)(clock.GetUtcNow() - stale.At).TotalMilliseconds);
-                    flight.SetResult(last);
-                }
-                else flight.SetException(ex);
-            }
-            finally { lock (entry.Gate) entry.InFlight = null; }
-        }
+        if (owner) _ = RefreshAsync(eid, entry, flight);
+        if (serveStale) return stale;
         return await flight.Task;
+    }
+
+    private async Task RefreshAsync(string eid, Entry entry, TaskCompletionSource<EventSnapshot?> flight)
+    {
+        try
+        {
+            var snap = await LoadAsync(eid, entry);
+            lock (entry.Gate) { entry.InFlight = null; entry.RetryAt = DateTimeOffset.MinValue; }
+            flight.SetResult(snap);
+        }
+        catch (Exception ex)
+        {
+            lock (entry.Gate) { entry.InFlight = null; entry.RetryAt = clock.GetUtcNow() + RetryBackoff; }
+            log.LogWarning(ex, "Redis read for event {Eid} failed; serving the last snapshot while it is under {StaleSeconds} s old",
+                eid, (int)StaleWindow.TotalSeconds);
+            flight.SetException(ex); // callers with no usable snapshot see it; others never look
+            _ = flight.Task.Exception;
+        }
     }
 
     private async Task<EventSnapshot?> LoadAsync(string eid, Entry entry)
@@ -105,15 +125,27 @@ public sealed class EventSnapshotCache(
         {
             StartVenuePollIfDue(eid, entry, now);
             var v = entry.Venue is { } sig && now - sig.At <= VenueSignalMaxAge ? sig : null;
-            // Freeze serving while the venue says paused or sold out, release it when it
-            // stops. Every pod gets here, but the script flips the flag only once.
-            var venueHolds = v is { Paused: true } or { SoldOut: true };
-            if (venueHolds != cfg.VenuePaused)
+            if (v is not null)
             {
-                await store.SetVenuePausedAsync(eid, venueHolds, now);
-                cfg = await store.GetConfigAsync(eid) ?? cfg; // also picks up a flip by another pod
+                // Freeze serving while the venue says paused or sold out, release it when it
+                // stops. Every pod with a fresh reading gets here, but the script flips the
+                // flag only once.
+                var venueHolds = v.Paused || v.SoldOut;
+                if (venueHolds != cfg.VenuePaused)
+                {
+                    await store.SetVenuePausedAsync(eid, venueHolds, now);
+                    cfg = await store.GetConfigAsync(eid) ?? cfg; // also picks up a flip by another pod
+                }
+                snap = new EventSnapshot(cfg, cfg.SoldOut || v.SoldOut, cfg.Paused || v.Paused);
             }
-            snap = new EventSnapshot(cfg, cfg.SoldOut || v?.SoldOut == true, cfg.Paused || v?.Paused == true);
+            else
+            {
+                // No fresh reading (a new pod, or a venue that stopped answering) means no
+                // opinion: leave the shared flag alone and follow it. A pod that merely
+                // lacks data must not unfreeze a pause the others set. If the venue stays
+                // unreachable the flag stays as last set; operators clear it via the admin API.
+                snap = new EventSnapshot(cfg, cfg.SoldOut, cfg.Paused || cfg.VenuePaused);
+            }
         }
         entry.Current = new Slot(snap, now);
         return snap;
@@ -140,7 +172,8 @@ public sealed class EventSnapshotCache(
             using var res = await http.CreateClient(VenueClient).GetAsync(url, cts.Token);
             if (res.StatusCode == HttpStatusCode.NotFound)
             {
-                entry.Venue = null; // no seating plan (a general-admission sale): nothing to signal
+                // No seating plan (a general-admission sale): a fresh "nothing to hold", which clears the flag.
+                entry.Venue = new VenueSignal(false, false, clock.GetUtcNow());
                 Recovered(entry);
                 return;
             }

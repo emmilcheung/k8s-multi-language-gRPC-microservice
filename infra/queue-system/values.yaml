@@ -86,6 +86,23 @@ queue:
   # service.targetPort; the service refuses to start if the admin key is set without it.
   adminPort: 9090
 
+# Restricts who can reach queue-service pods. Off by default so local clusters keep working;
+# turn it on in staging/production (needs a CNI that enforces NetworkPolicy). Ingress only:
+# egress stays open. Where venue-service also has NetworkPolicies on, enable its
+# networkPolicy.queueSystem too.
+networkPolicy:
+  enabled: false
+  # The public HTTP port is open only to these pods (namespace AND pod labels).
+  # Defaults match ingress-nginx; change them to your controller's.
+  ingressController:
+    namespaceLabels:
+      kubernetes.io/metadata.name: ingress-nginx
+    podLabels:
+      app.kubernetes.io/name: ingress-nginx
+  # The admin port is open only to pods in this namespace (ops tooling, port-forward
+  # from a bastion); the admin key is still required.
+  opsNamespace: ops
+
 # Stateless app — admission is pure time-math, safe to scale horizontally.
 autoscaling:
   enabled: true

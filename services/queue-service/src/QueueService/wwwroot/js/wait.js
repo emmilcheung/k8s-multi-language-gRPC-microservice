@@ -88,7 +88,12 @@ async function run() {
   await sleep(Math.max(0, t0 + jitter(0, 10000) - Date.now()));
   clearInterval(countdown);
   $("countdown").textContent = "open";
-  if (!(await freezePosition())) return;
+  if (!(await freezePosition())) {
+    // Giving up must not leave "—" with no explanation; a reload starts over and joins again.
+    $("gaveup").hidden = false;
+    $("retry").onclick = () => location.reload();
+    return;
+  }
 
   for (;;) {
     render();
