@@ -1,5 +1,6 @@
 // Pure waiting-room gate logic — no Next.js types, fully unit-testable.
 // Validates the HMAC-SHA256 admission token issued by the queue-service.
+import { isGatedPath } from "./gated-path";
 
 /** Sub is absent on the admission token /api/claim returns, and set on the
  *  purchase pass redeem returns (the account it is bound to; Kong checks it). */
@@ -90,6 +91,10 @@ export async function gateDecision(i: GateInput): Promise<Decision> {
     const p = await verifyAdmission(i.admitCookie, i.secret);
     if (valid(p, i.eventId, i.nowSec)) return { kind: "accept", cleanUrl: i.pathWithQuery, token: i.admitCookie };
   }
+
+  // Only the armed event's purchase pages need a pass. An admission link or kept
+  // admission above is still redeemed wherever it lands, so it is never dropped.
+  if (!isGatedPath(i.pathWithQuery.split("?")[0], i.eventId)) return { kind: "pass" };
 
   if (i.passCookie) {
     const p = await verifyAdmission(i.passCookie, i.secret);

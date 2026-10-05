@@ -22,6 +22,22 @@ test.describe("virtual waiting room", () => {
     await expect(page.locator("#countdown")).toBeVisible();
   });
 
+  // Only the armed event's purchase pages are gated (QUEUE_EVENT_ID is that
+  // event's ticket id); browsing and payment pages stay open to everyone.
+  test("pages outside the armed event's purchase path load without the queue", async ({ page }) => {
+    await page.route("**/api/claim**", (r) => r.abort());
+    for (const path of ["/", "/tickets/not-the-armed-event", `/tickets/${TICKET}/admission`, "/orders"]) {
+      await page.goto(path);
+      expect(page.url(), path).not.toContain("/wait?e=");
+    }
+  });
+
+  test("the armed event's seat picker is redirected to the waiting room", async ({ page }) => {
+    await page.route("**/api/claim**", (r) => r.abort());
+    await page.goto(`/tickets/${TICKET}/seats`);
+    await expect(page).toHaveURL(/\/wait\?e=/);
+  });
+
   // The pass is bound to an account when redeemed, so an admitted visitor who
   // is not logged in is sent to sign in. The admission token waits in a cookie,
   // not in the sign-in URL (history, logs, Referer), and signing in brings them

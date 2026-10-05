@@ -42,8 +42,8 @@ describe("verifyAdmission", () => {
 describe("gateDecision", () => {
   const base = {
     armed: true, eventId: "E1", secret: SECRET, queueUrl: "http://q:4100",
-    fullUrl: "http://app:4000/tickets/123",
-    pathWithQuery: "/tickets/123", qpass: null as string | null,
+    fullUrl: "http://app:4000/tickets/E1",
+    pathWithQuery: "/tickets/E1", qpass: null as string | null,
     passCookie: null as string | null, nowSec: 2000, loggedIn: true,
     admitCookie: null as string | null,
   };
@@ -57,15 +57,15 @@ describe("gateDecision", () => {
     expect(d.kind).toBe("redirect-queue");
     if (d.kind === "redirect-queue") {
       expect(d.location).toContain("http://q:4100/wait?e=E1");
-      expect(d.location).toContain("target=http%3A%2F%2Fapp%3A4000%2Ftickets%2F123");
+      expect(d.location).toContain("target=http%3A%2F%2Fapp%3A4000%2Ftickets%2FE1");
     }
   });
   it("accepts a valid qpass from a logged-in visitor and strips it from the URL", async () => {
     const t = await sign(payload());
-    const d = await gateDecision({ ...base, pathWithQuery: "/tickets/123?qpass=" + t, qpass: t });
+    const d = await gateDecision({ ...base, pathWithQuery: "/tickets/E1?qpass=" + t, qpass: t });
     expect(d.kind).toBe("accept");
     if (d.kind === "accept") {
-      expect(d.cleanUrl).toBe("/tickets/123");
+      expect(d.cleanUrl).toBe("/tickets/E1");
       expect(d.token).toBe(t);
     }
   });
@@ -75,10 +75,10 @@ describe("gateDecision", () => {
   // logs and the Referer of everything it loads.
   it("sends a visitor who is not logged in to sign in without the token in the URL", async () => {
     const t = await sign(payload());
-    const d = await gateDecision({ ...base, pathWithQuery: "/tickets/123?qpass=" + t, qpass: t, loggedIn: false });
+    const d = await gateDecision({ ...base, pathWithQuery: "/tickets/E1?qpass=" + t, qpass: t, loggedIn: false });
     expect(d.kind).toBe("login");
     if (d.kind === "login") {
-      expect(d.location).toBe("/auth/signin?next=" + encodeURIComponent("/tickets/123"));
+      expect(d.location).toBe("/auth/signin?next=" + encodeURIComponent("/tickets/E1"));
       expect(d.token).toBe(t);
       expect(d.expSec).toBe(payload().Exp);
     }
@@ -87,7 +87,7 @@ describe("gateDecision", () => {
   it("redeems the kept admission token once the visitor has signed in", async () => {
     const t = await sign(payload());
     const d = await gateDecision({ ...base, admitCookie: t });
-    expect(d).toEqual({ kind: "accept", cleanUrl: "/tickets/123", token: t });
+    expect(d).toEqual({ kind: "accept", cleanUrl: "/tickets/E1", token: t });
   });
   it("ignores a kept admission token until the visitor has signed in", async () => {
     const t = await sign(payload());
@@ -101,21 +101,48 @@ describe("gateDecision", () => {
   // A token that failed to verify must not be carried to the queue page either.
   it("drops an unusable qpass from the queue page's return target", async () => {
     const d = await gateDecision({
-      ...base, fullUrl: "http://app:4000/tickets/123?x=1&qpass=junk", pathWithQuery: "/tickets/123?x=1&qpass=junk", qpass: "junk",
+      ...base, fullUrl: "http://app:4000/tickets/E1?x=1&qpass=junk", pathWithQuery: "/tickets/E1?x=1&qpass=junk", qpass: "junk",
     });
     expect(d.kind).toBe("redirect-queue");
     if (d.kind === "redirect-queue") {
       expect(d.location).not.toContain("qpass");
-      expect(d.location).toContain(encodeURIComponent("http://app:4000/tickets/123?x=1"));
+      expect(d.location).toContain(encodeURIComponent("http://app:4000/tickets/E1?x=1"));
     }
   });
   // Every page is gated while armed; if sign-in were too, the visitor sent
   // there above would be bounced straight back to the queue.
   it("does not gate the sign-in and sign-up pages", async () => {
-    for (const path of ["/auth/signin", "/auth/signup", "/auth/signin?next=%2Ftickets%2F123"]) {
+    for (const path of ["/auth/signin", "/auth/signup", "/auth/signin?next=%2Ftickets%2FE1"]) {
       expect((await gateDecision({ ...base, pathWithQuery: path, loggedIn: false })).kind).toBe("pass");
     }
-    expect((await gateDecision({ ...base, pathWithQuery: "/auth/signin-elsewhere" })).kind).toBe("redirect-queue");
+    expect((await gateDecision({ ...base, pathWithQuery: "/tickets/E1/seats" })).kind).toBe("redirect-queue");
+  });
+
+  describe("scoping to the armed event's purchase pages", () => {
+    it("lets pages outside the armed event's purchase path through without a pass", async () => {
+      for (const path of ["/", "/orders/o1", "/checkout/recover?orderId=o1", "/tickets/OTHER", "/tickets/E1/admission"]) {
+        const d = await gateDecision({ ...base, fullUrl: "http://app:4000" + path, pathWithQuery: path });
+        expect(d.kind, path).toBe("pass");
+      }
+    });
+    it("redirects the event page, seat picker and plan pages to the queue", async () => {
+      for (const path of ["/tickets/E1", "/tickets/E1/seats", "/tickets/E1/plans/p1"]) {
+        const d = await gateDecision({ ...base, fullUrl: "http://app:4000" + path, pathWithQuery: path });
+        expect(d.kind, path).toBe("redirect-queue");
+      }
+    });
+    // Without this the admission would be dropped, leaving the visitor with
+    // a token that is never redeemed.
+    it("still redeems a valid qpass that lands on a page outside the gate", async () => {
+      const t = await sign(payload());
+      const d = await gateDecision({ ...base, pathWithQuery: "/?qpass=" + t, qpass: t });
+      expect(d).toEqual({ kind: "accept", cleanUrl: "/", token: t });
+    });
+    it("redeems a kept admission cookie after sign-in even if the return page is outside the gate", async () => {
+      const t = await sign(payload());
+      const d = await gateDecision({ ...base, pathWithQuery: "/", admitCookie: t });
+      expect(d.kind).toBe("accept");
+    });
   });
   it("passes when a valid pass cookie is present", async () => {
     const t = await sign(bound());
