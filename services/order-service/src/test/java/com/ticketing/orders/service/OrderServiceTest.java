@@ -110,7 +110,7 @@ class OrderServiceTest {
         orderService = new OrderService(
                 orderRepository, orderSeatRepository, outboxRepository, ticketServiceClient,
                 venueServiceClient, objectMapper, orderTransactionService,
-                seatedOrderTransactionService, meterRegistry, 60);
+                seatedOrderTransactionService, meterRegistry, 45);
         ReflectionTestUtils.setField(orderService, "expirationMinutes", 15);
 
         ticket = new OrderTicket(ticketId, "Concert Ticket", new BigDecimal("49.99"));
@@ -295,6 +295,65 @@ class OrderServiceTest {
                 .isInstanceOf(NotFoundException.class);
     }
 
+    @Test
+    void getOrder_should_expire_an_awaiting_payment_order_once_the_payment_grace_has_passed() {
+        // payment-service reads the order here before charging. Past the grace the seats
+        // may already be released, so the order must not be reported payable even if the
+        // expiry sweep has not run yet; otherwise the buyer is charged and then refunded.
+        Order order = new Order(userId, OrderStatus.AWAITING_PAYMENT,
+                OffsetDateTime.now().minusSeconds(46), ticket);
+        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdWithTicketForUpdate(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        OrderResponse response = orderService.getOrder(orderId, userId);
+
+        assertThat(response.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(order.getCancelReason()).isEqualTo(CancelReason.EXPIRED);
+        verify(outboxRepository).save(any());
+    }
+
+    @Test
+    void getOrder_should_expire_a_created_order_once_the_payment_grace_has_passed() {
+        // A payment that was never reported as initiated leaves the order CREATED; it
+        // loses its seats on the same schedule as an AWAITING_PAYMENT one.
+        Order order = new Order(userId, OrderStatus.CREATED,
+                OffsetDateTime.now().minusSeconds(46), ticket);
+        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdWithTicketForUpdate(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        OrderResponse response = orderService.getOrder(orderId, userId);
+
+        assertThat(response.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+    }
+
+    @Test
+    void getOrder_should_keep_an_awaiting_payment_order_payable_inside_the_payment_grace() {
+        // The buyer may be mid 3-D Secure just past the deadline; that payment must
+        // still be allowed to complete.
+        Order order = new Order(userId, OrderStatus.AWAITING_PAYMENT,
+                OffsetDateTime.now().minusSeconds(10), ticket);
+        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+
+        OrderResponse response = orderService.getOrder(orderId, userId);
+
+        assertThat(response.getStatus()).isEqualTo(OrderStatus.AWAITING_PAYMENT);
+        verify(outboxRepository, never()).save(any());
+    }
+
+    @Test
+    void getOrder_should_not_touch_an_order_that_is_already_terminal_past_the_grace() {
+        Order order = new Order(userId, OrderStatus.COMPLETE,
+                OffsetDateTime.now().minusMinutes(5), ticket);
+        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+
+        OrderResponse response = orderService.getOrder(orderId, userId);
+
+        assertThat(response.getStatus()).isEqualTo(OrderStatus.COMPLETE);
+        verify(outboxRepository, never()).save(any());
+    }
+
     // ── cancelOrder ───────────────────────────────────────────────────────────
 
     @Test
@@ -472,16 +531,26 @@ class OrderServiceTest {
     }
 
     @Test
-    void constructor_should_reject_a_grace_period_longer_than_the_venue_reservation_buffer() {
-        // venue-service holds the seats for the order lifetime + 60 s. A longer grace
-        // would keep the order open after its seats were released for resale.
+    void constructor_should_reject_a_grace_period_that_leaves_no_safety_margin_before_the_seats_are_released() {
+        // venue-service releases the seats 60 s after expiry, but the reservation's own
+        // expiry is computed slightly before the order's, and the order sweep only runs
+        // periodically. A grace that eats the whole buffer keeps orders open after their
+        // seats are gone, so a buyer is charged and then refunded.
         assertThatThrownBy(() -> new OrderService(
                 orderRepository, orderSeatRepository, outboxRepository, ticketServiceClient,
                 venueServiceClient, new ObjectMapper(), orderTransactionService,
-                seatedOrderTransactionService, meterRegistry, 61))
+                seatedOrderTransactionService, meterRegistry, 46))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("order.payment-grace-seconds")
-                .hasMessageContaining("60");
+                .hasMessageContaining("45");
+    }
+
+    @Test
+    void constructor_should_accept_the_largest_grace_period_that_keeps_the_safety_margin() {
+        new OrderService(
+                orderRepository, orderSeatRepository, outboxRepository, ticketServiceClient,
+                venueServiceClient, new ObjectMapper(), orderTransactionService,
+                seatedOrderTransactionService, meterRegistry, 45);
     }
 
     @Test

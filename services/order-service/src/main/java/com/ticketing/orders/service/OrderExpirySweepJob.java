@@ -51,7 +51,7 @@ public class OrderExpirySweepJob {
             OrderRepository orderRepository,
             OrderService orderService,
             @Value("${order.expiry-sweep.grace-seconds:300}") long graceSeconds,
-            @Value("${order.payment-grace-seconds:60}") long paymentGraceSeconds,
+            @Value("${order.payment-grace-seconds:45}") long paymentGraceSeconds,
             @Value("${order.expiry-sweep.batch-size:200}") int batchSize) {
         this.orderRepository = orderRepository;
         this.orderService = orderService;
