@@ -22,20 +22,27 @@ async function join() {
 }
 
 // Calling status after T0 freezes the position, so it is called once; it is
-// repeated only when it fails, and a 401 (no ticket) joins again first.
+// repeated only when it fails, and a 401 (no ticket) joins again first. A network
+// error, 5xx or 429 is retried for as long as it lasts, but a permanent answer such as 404 gets
+// a few tries with growing pauses and then gives up (returns false).
 async function freezePosition() {
-  for (;;) {
+  for (let refused = 0; refused < 5;) {
     try {
       const res = await fetch(`/api/status?e=${q}`);
-      if (res.ok) { const st = await res.json(); position = st.position; apply(st); return; }
+      if (res.ok) { const st = await res.json(); position = st.position; apply(st); return true; }
       if (res.status === 401) await join();
+      else if (res.status < 500 && res.status !== 408 && res.status !== 429) refused++; // permanent
     } catch { /* network error: retry */ }
-    await sleep(jitter(2000, 5000));
+    await sleep(jitter(2000, 5000) * 2 ** refused);
   }
+  return false;
 }
 
+// Pods learn of a pause or rate change up to a few seconds apart, so a poll can
+// answer with a lower number than an earlier one; the count never goes back.
 function apply(st) {
-  serving = st.serving; soldOut = !!st.soldOut; paused = !!st.paused;
+  serving = Math.max(serving, st.serving);
+  soldOut = !!st.soldOut; paused = !!st.paused;
   if (st.rate) rate = st.rate;
 }
 
@@ -81,7 +88,7 @@ async function run() {
   await sleep(Math.max(0, t0 + jitter(0, 10000) - Date.now()));
   clearInterval(countdown);
   $("countdown").textContent = "open";
-  await freezePosition();
+  if (!(await freezePosition())) return;
 
   for (;;) {
     render();

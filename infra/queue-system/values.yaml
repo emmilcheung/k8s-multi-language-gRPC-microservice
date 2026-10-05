@@ -61,6 +61,12 @@ queue:
     - 10.0.0.0/8
     - 172.16.0.0/12
     - 192.168.0.0/16
+  # Origins (scheme + host + port) the waiting page may send an admitted visitor back to
+  # when it runs on its own host and the return URL is absolute. Anything else collapses
+  # to "/". Empty = only same-origin relative paths. Example:
+  #   allowedTargetOrigins:
+  #     - https://www.example.com
+  allowedTargetOrigins: []
   # Where to ask how many seats are left ({eid} = the sale's ticket id); venue-service
   # answers GET -> 200 {"available":n,"held":n}, 404 for a sale without seating. With it
   # set, no seats left pauses the queue (if seats are held) or marks it sold out.
@@ -74,6 +80,11 @@ queue:
   # chars). Empty = the endpoints are not mapped. Like the keys above, outside local
   # provide it as `admin-api-key` in secretRef/externalSecrets, not as a plain value.
   adminApiKey: ""
+  # Port the /api/admin routes are served on, apart from the public one (they answer 404
+  # there). The Service exposes it as port `admin`, which the Ingress does not route:
+  # reach it with `kubectl port-forward` or from ops tooling only. Must differ from
+  # service.targetPort; the service refuses to start if the admin key is set without it.
+  adminPort: 9090
 
 # Stateless app — admission is pure time-math, safe to scale horizontally.
 autoscaling:

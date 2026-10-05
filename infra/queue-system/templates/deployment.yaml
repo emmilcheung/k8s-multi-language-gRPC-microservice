@@ -22,7 +22,10 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - containerPort: {{ .Values.service.targetPort }}
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+            - name: admin
+              containerPort: {{ .Values.queue.adminPort }}
           env:
             - name: Queue__RedisConnection
               value: {{ .Values.redis.external.host | default "queue-redis:6379" | quote }}
@@ -36,6 +39,13 @@ spec:
             - name: Queue__TrustedProxyCidrs__{{ $i }}
               value: {{ $cidr | quote }}
             {{- end }}
+            {{- range $i, $origin := .Values.queue.allowedTargetOrigins }}
+            - name: Queue__AllowedTargetOrigins__{{ $i }}
+              value: {{ $origin | quote }}
+            {{- end }}
+            # The admin routes answer only on this port; it is not in the Ingress.
+            - name: Queue__AdminPort
+              value: {{ .Values.queue.adminPort | quote }}
             {{- with .Values.queue.venueAvailabilityUrl }}
             - name: Queue__VenueAvailabilityUrl
               value: {{ . | quote }}

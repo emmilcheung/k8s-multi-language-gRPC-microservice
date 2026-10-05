@@ -7,5 +7,12 @@ spec:
   selector:
     app: queue-service
   ports:
-    - port: {{ .Values.service.port }}
+    - name: http
+      port: {{ .Values.service.port }}
       targetPort: {{ .Values.service.targetPort }}
+    # Operator endpoints (/api/admin). NOT referenced by the Ingress, so it is not on the
+    # internet. For `kubectl port-forward svc/queue-service 9090:{{ .Values.queue.adminPort }}` or
+    # ops tooling only; the admin key is still required.
+    - name: admin
+      port: {{ .Values.queue.adminPort }}
+      targetPort: admin

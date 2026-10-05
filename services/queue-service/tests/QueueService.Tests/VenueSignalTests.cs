@@ -169,4 +169,55 @@ public class VenueSignalTests(RedisFixture fx)
         await Task.Delay(50);
         Assert.Equal(0, venue.Calls);
     }
+
+    private static long ServingOf(EventSnapshotCache cache, FakeTimeProvider clock, string eid)
+        => cache.GetAsync(eid).GetAwaiter().GetResult()!.Serving(clock.GetUtcNow());
+
+    // While no seat can be claimed, letting serving climb means that when a hold lapses
+    // everyone below serving can claim at once, out of order.
+    [Theory]
+    [InlineData(0, 3)] // all seats held: paused
+    [InlineData(0, 0)] // nothing held either: sold out
+    public async Task Serving_does_not_advance_during_a_venue_pause_and_does_not_jump_when_it_ends(int available, int held)
+    {
+        var (cache, venue, clock, eid) = await New();
+        clock.Advance(TimeSpan.FromSeconds(10));
+        await cache.GetAsync(eid);
+        venue.Availability(available, held);
+        var s = await Settled(cache, clock, eid, x => x.Paused || x.SoldOut);
+        var frozen = s.Serving(clock.GetUtcNow());
+
+        var last = frozen;
+        for (var i = 0; i < 40; i++) // ~44 s of polling, well past the venue signal's 10 s life
+        {
+            await Task.Delay(10);
+            clock.Advance(TimeSpan.FromMilliseconds(1100));
+            var now = ServingOf(cache, clock, eid);
+            Assert.Equal(frozen, now);
+            last = now;
+        }
+
+        venue.Availability(5, 0);
+        var after = await Settled(cache, clock, eid, x => !x.Paused && !x.SoldOut);
+        Assert.Equal(last, after.Serving(clock.GetUtcNow())); // resume continues from the freeze: no catch-up burst
+        clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal(last + 100, ServingOf(cache, clock, eid));
+    }
+
+    [Fact]
+    public async Task Two_pods_seeing_the_same_venue_pause_freeze_serving_at_the_same_count()
+    {
+        var (podA, venue, clock, eid) = await New();
+        var podB = new EventSnapshotCache(new QueueStore(fx.Mux), clock,
+            Options.Create(new QueueOptions { VenueAvailabilityUrl = "http://venue/{eid}" }), venue,
+            NullLogger<EventSnapshotCache>.Instance);
+        clock.Advance(TimeSpan.FromSeconds(10));
+        venue.Availability(0, 3);
+
+        await Settled(podA, clock, eid, x => x.Paused);
+        var a = ServingOf(podA, clock, eid);
+        await Settled(podB, clock, eid, x => x.Paused);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal(a, ServingOf(podB, clock, eid)); // the second pod did not re-base the count upward
+    }
 }

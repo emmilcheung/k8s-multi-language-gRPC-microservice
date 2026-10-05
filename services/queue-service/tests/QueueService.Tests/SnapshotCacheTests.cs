@@ -18,11 +18,13 @@ public sealed class CountingStore(IConnectionMultiplexer mux) : QueueStore(mux)
     private int _reads;
     public int ConfigReads => Volatile.Read(ref _reads);
     public TaskCompletionSource? Gate { get; set; }
+    public bool Fail { get; set; }
 
     public override async Task<EventConfig?> GetConfigAsync(string eid)
     {
         Interlocked.Increment(ref _reads);
         if (Gate is { } g) await g.Task;
+        if (Fail) throw new RedisConnectionException(ConnectionFailureType.UnableToConnect, "redis is down");
         return await base.GetConfigAsync(eid);
     }
 }
@@ -87,6 +89,53 @@ public class SnapshotCacheTests(RedisFixture fx)
         var (cache, store, _, _) = await New();
         for (var i = 0; i < 10; i++) Assert.Null(await cache.GetAsync("no-such-event"));
         Assert.Equal(1, store.ConfigReads);
+    }
+
+    // A Redis blip must not turn every waiting visitor's poll into a 500, but a snapshot
+    // must not stand in for the real config indefinitely either.
+    [Fact]
+    public async Task A_redis_failure_serves_the_last_snapshot_within_ten_seconds_then_fails()
+    {
+        var (cache, store, clock, eid) = await New();
+        var good = await cache.GetAsync(eid);
+        store.Fail = true;
+
+        clock.Advance(TimeSpan.FromSeconds(5));
+        Assert.Same(good, await cache.GetAsync(eid));
+        clock.Advance(TimeSpan.FromSeconds(5)); // exactly 10 s old: still inside the window
+        Assert.Same(good, await cache.GetAsync(eid));
+
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        await Assert.ThrowsAsync<RedisConnectionException>(() => cache.GetAsync(eid));
+
+        store.Fail = false; // recovery: a fresh read replaces the stale one
+        Assert.NotSame(good, await cache.GetAsync(eid));
+    }
+
+    [Fact]
+    public async Task A_redis_failure_with_no_earlier_snapshot_fails()
+    {
+        var (cache, store, _, eid) = await New();
+        store.Fail = true;
+        await Assert.ThrowsAsync<RedisConnectionException>(() => cache.GetAsync(eid));
+    }
+
+    [Fact]
+    public async Task During_a_redis_failure_concurrent_callers_share_one_attempt_and_all_get_the_snapshot()
+    {
+        var (cache, store, clock, eid) = await New();
+        await cache.GetAsync(eid);
+        clock.Advance(TimeSpan.FromSeconds(2));
+        store.Fail = true;
+        store.Gate = new TaskCompletionSource();
+        var reads = store.ConfigReads;
+
+        var calls = Enumerable.Range(0, 20).Select(_ => cache.GetAsync(eid)).ToArray();
+        store.Gate.SetResult();
+        var snaps = await Task.WhenAll(calls);
+
+        Assert.Equal(reads + 1, store.ConfigReads);
+        Assert.All(snaps, s => Assert.NotNull(s));
     }
 
     private WebApplicationFactory<Program> Factory(CountingStore store, FakeTimeProvider clock) =>

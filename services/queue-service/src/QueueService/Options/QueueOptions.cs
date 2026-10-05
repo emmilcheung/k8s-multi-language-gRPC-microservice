@@ -62,4 +62,10 @@ public sealed class QueueOptions
     /// Enables the operator endpoints under /api/admin (header X-Queue-Admin-Key).
     /// Empty means they are not mapped at all. At least 32 characters when set.
     public string? AdminApiKey { get; set; }
+
+    /// Port the operator endpoints are served on, in addition to the public one: they are
+    /// answered ONLY on this port (404 elsewhere), and it must never be routed through the
+    /// public ingress. Required when AdminApiKey is set, and must differ from the public port.
+    [Range(1, 65535)]
+    public int? AdminPort { get; set; }
 }

@@ -8,8 +8,10 @@ namespace QueueService.Queue;
 
 /// What this pod currently believes about one event: its config and the flags that
 /// stop claims (the operator's, OR'd with the venue's). Serving is computed from it
-/// and the clock, so no call needs Redis. Only an operator pause freezes serving:
-/// the venue signal blocks claims while it lasts but does not move the count.
+/// and the clock, so no call needs Redis. Both an operator pause and a venue pause
+/// freeze serving (the venue's through a flag in the config, set once by whichever
+/// pod sees it first), so a seat hold lapsing cannot let everyone below serving
+/// claim at once.
 public sealed record EventSnapshot(EventConfig Config, bool SoldOut, bool Paused)
 {
     public long Serving(DateTimeOffset now) => Config.ServingAt(now);
@@ -22,6 +24,9 @@ public sealed record EventSnapshot(EventConfig Config, bool SoldOut, bool Paused
 /// When Queue:VenueAvailabilityUrl is set, a refresh also starts a background poll of
 /// the venue (at most every 2 s per event). It never waits on it: the answer lands in
 /// the next snapshot, and a failing venue only means "no automatic signal".
+///
+/// If Redis fails, the last good snapshot is served for up to StaleWindow, so a blip
+/// does not turn every waiting visitor's poll into a 500.
 public sealed class EventSnapshotCache(
     QueueStore store, TimeProvider clock, IOptions<QueueOptions> options,
     IHttpClientFactory http, ILogger<EventSnapshotCache> log)
@@ -32,6 +37,8 @@ public sealed class EventSnapshotCache(
     private static readonly TimeSpan VenueTimeout = TimeSpan.FromMilliseconds(500);
     // After the venue stops answering, its last word is believed this long.
     private static readonly TimeSpan VenueSignalMaxAge = TimeSpan.FromSeconds(10);
+    // How long the last good snapshot may stand in for a failing Redis read.
+    public static readonly TimeSpan StaleWindow = TimeSpan.FromSeconds(10);
     private readonly string? _venueUrl = options.Value.VenueAvailabilityUrl;
     private const int PruneAbove = 1024;
     private static readonly TimeSpan PruneAge = TimeSpan.FromMinutes(1);
@@ -74,7 +81,16 @@ public sealed class EventSnapshotCache(
         if (owner)
         {
             try { flight.SetResult(await LoadAsync(eid, entry)); }
-            catch (Exception ex) { flight.SetException(ex); }
+            catch (Exception ex)
+            {
+                if (entry.Current is { Value: { } last } stale && clock.GetUtcNow() - stale.At <= StaleWindow)
+                {
+                    log.LogWarning(ex, "Redis read for event {Eid} failed; serving the snapshot from {AgeMs} ms ago",
+                        eid, (long)(clock.GetUtcNow() - stale.At).TotalMilliseconds);
+                    flight.SetResult(last);
+                }
+                else flight.SetException(ex);
+            }
             finally { lock (entry.Gate) entry.InFlight = null; }
         }
         return await flight.Task;
@@ -89,6 +105,14 @@ public sealed class EventSnapshotCache(
         {
             StartVenuePollIfDue(eid, entry, now);
             var v = entry.Venue is { } sig && now - sig.At <= VenueSignalMaxAge ? sig : null;
+            // Freeze serving while the venue says paused or sold out, release it when it
+            // stops. Every pod gets here, but the script flips the flag only once.
+            var venueHolds = v is { Paused: true } or { SoldOut: true };
+            if (venueHolds != cfg.VenuePaused)
+            {
+                await store.SetVenuePausedAsync(eid, venueHolds, now);
+                cfg = await store.GetConfigAsync(eid) ?? cfg; // also picks up a flip by another pod
+            }
             snap = new EventSnapshot(cfg, cfg.SoldOut || v?.SoldOut == true, cfg.Paused || v?.Paused == true);
         }
         entry.Current = new Slot(snap, now);

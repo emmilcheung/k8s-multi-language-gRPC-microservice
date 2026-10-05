@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -15,6 +17,21 @@ public class AdminApiTests(RedisFixture fx)
 {
     private static readonly DateTimeOffset T0 = new(2026, 6, 16, 10, 0, 0, TimeSpan.Zero);
     private static readonly string Key = new('a', 40);
+    private const int AdminPort = 9090;
+
+    // TestServer has no sockets, so stand in for the listener: the local port is what the
+    // Host header says, as it would be for a request that arrived on that port.
+    private sealed class LocalPortFromHost : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            app.Use((ctx, n) => { ctx.Connection.LocalPort = ctx.Request.Host.Port ?? 80; return n(ctx); });
+            next(app);
+        };
+    }
+
+    private static HttpClient AdminClient(WebApplicationFactory<Program> f)
+        => f.CreateClient(new() { BaseAddress = new Uri($"http://localhost:{AdminPort}") });
 
     private WebApplicationFactory<Program> Factory(FakeTimeProvider clock, string? adminKey) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
@@ -22,9 +39,14 @@ public class AdminApiTests(RedisFixture fx)
             b.UseSetting("Queue:HmacSecret", new string('k', 32));
             b.UseSetting("Queue:UserIdSigningKey", new string('s', 32));
             b.UseSetting("Queue:RedisConnection", "unused");
-            if (adminKey is not null) b.UseSetting("Queue:AdminApiKey", adminKey);
+            if (adminKey is not null)
+            {
+                b.UseSetting("Queue:AdminApiKey", adminKey);
+                b.UseSetting("Queue:AdminPort", AdminPort.ToString());
+            }
             b.ConfigureServices(s =>
             {
+                s.AddSingleton<IStartupFilter, LocalPortFromHost>();
                 s.RemoveAll(typeof(IConnectionMultiplexer));
                 s.AddSingleton(fx.Mux);
                 s.RemoveAll<TimeProvider>();
@@ -60,7 +82,7 @@ public class AdminApiTests(RedisFixture fx)
     {
         var clock = new FakeTimeProvider(T0.AddSeconds(10));
         await using var f = Factory(clock, Key);
-        var c = f.CreateClient();
+        var c = AdminClient(f);
         var eid = await Seed();
         var body = JsonSerializer.Deserialize<JsonElement>(json);
 
@@ -77,13 +99,31 @@ public class AdminApiTests(RedisFixture fx)
         Assert.False(s.GetProperty("soldOut").GetBoolean());
     }
 
+    // The ingress forwards the public port to the internet; the admin routes must not be there.
+    [Fact]
+    public async Task Admin_routes_are_not_reachable_on_the_public_port_even_with_the_right_key()
+    {
+        var clock = new FakeTimeProvider(T0.AddSeconds(10));
+        await using var f = Factory(clock, Key);
+        var eid = await Seed();
+        var publicClient = f.CreateClient(); // http://localhost, not the admin port
+
+        var res = await publicClient.SendAsync(Post($"/api/admin/events/{eid}/paused", new { paused = true }, Key));
+        Assert.Equal(HttpStatusCode.NotFound, res.StatusCode);
+        Assert.False((await Serving(publicClient, clock, eid)).GetProperty("paused").GetBoolean());
+
+        var onAdmin = await AdminClient(f).SendAsync(Post($"/api/admin/events/{eid}/paused", new { paused = true }, Key));
+        Assert.Equal(HttpStatusCode.OK, onAdmin.StatusCode);
+        Assert.True((await Serving(publicClient, clock, eid)).GetProperty("paused").GetBoolean());
+    }
+
     [Fact]
     public async Task Admin_routes_do_not_exist_when_no_key_is_configured()
     {
         var clock = new FakeTimeProvider(T0);
         await using var f = Factory(clock, adminKey: null);
         var eid = await Seed();
-        var res = await f.CreateClient().SendAsync(Post($"/api/admin/events/{eid}/paused", new { paused = true }, Key));
+        var res = await AdminClient(f).SendAsync(Post($"/api/admin/events/{eid}/paused", new { paused = true }, Key));
         Assert.Equal(HttpStatusCode.NotFound, res.StatusCode);
     }
 
@@ -92,7 +132,7 @@ public class AdminApiTests(RedisFixture fx)
     {
         var clock = new FakeTimeProvider(T0.AddSeconds(10));
         await using var f = Factory(clock, Key);
-        var c = f.CreateClient();
+        var c = AdminClient(f);
         var eid = await Seed(rate: 100);
         Assert.Equal(1110, (await Serving(c, clock, eid)).GetProperty("serving").GetInt64()); // 11.1 s at 100/s
 
@@ -113,9 +153,35 @@ public class AdminApiTests(RedisFixture fx)
         var clock = new FakeTimeProvider(T0.AddSeconds(10));
         await using var f = Factory(clock, Key);
         var eid = await Seed();
-        var res = await f.CreateClient().SendAsync(Post($"/api/admin/events/{eid}/rate",
+        var res = await AdminClient(f).SendAsync(Post($"/api/admin/events/{eid}/rate",
             JsonSerializer.Deserialize<JsonElement>(json), Key));
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
+    // A huge rate would overflow the admitted count, which is a long.
+    [Theory]
+    [InlineData("{\"rate\":1e30}")]
+    [InlineData("{\"rate\":100001}")]
+    public async Task Rate_above_the_ceiling_is_refused_and_changes_nothing(string json)
+    {
+        var clock = new FakeTimeProvider(T0.AddSeconds(10));
+        await using var f = Factory(clock, Key);
+        var c = AdminClient(f);
+        var eid = await Seed(rate: 100);
+        var res = await c.SendAsync(Post($"/api/admin/events/{eid}/rate",
+            JsonSerializer.Deserialize<JsonElement>(json), Key));
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+        Assert.Equal(100, (await Serving(c, clock, eid)).GetProperty("rate").GetDouble());
+    }
+
+    [Fact]
+    public async Task Rate_at_the_ceiling_is_accepted()
+    {
+        var clock = new FakeTimeProvider(T0.AddSeconds(10));
+        await using var f = Factory(clock, Key);
+        var eid = await Seed();
+        var res = await AdminClient(f).SendAsync(Post($"/api/admin/events/{eid}/rate", new { rate = 100000 }, Key));
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
     }
 
     [Fact]
@@ -123,7 +189,7 @@ public class AdminApiTests(RedisFixture fx)
     {
         var clock = new FakeTimeProvider(T0.AddSeconds(10));
         await using var f = Factory(clock, Key);
-        var c = f.CreateClient();
+        var c = AdminClient(f);
         var eid = await Seed(rate: 100);
         await c.PostAsync($"/api/enqueue?e={eid}", null);
 
@@ -147,7 +213,7 @@ public class AdminApiTests(RedisFixture fx)
     {
         var clock = new FakeTimeProvider(T0.AddSeconds(10));
         await using var f = Factory(clock, Key);
-        var c = f.CreateClient();
+        var c = AdminClient(f);
         var eid = await Seed();
         await c.PostAsync($"/api/enqueue?e={eid}", null);
 
@@ -164,7 +230,7 @@ public class AdminApiTests(RedisFixture fx)
     {
         var clock = new FakeTimeProvider(T0);
         await using var f = Factory(clock, Key);
-        var res = await f.CreateClient().SendAsync(Post("/api/admin/events/nope/paused", new { paused = true }, Key));
+        var res = await AdminClient(f).SendAsync(Post("/api/admin/events/nope/paused", new { paused = true }, Key));
         Assert.Equal(HttpStatusCode.NotFound, res.StatusCode);
     }
 }
@@ -206,6 +272,37 @@ public class PassLifetimeStartupTests
         Assert.NotNull(ex);
         Assert.Contains("AdminApiKey", ex!.ToString());
     }
+
+    // Without a separate port the admin routes would have nowhere safe to be answered.
+    [Fact]
+    public void An_admin_key_without_an_admin_port_fails_startup()
+    {
+        var ex = Start(b => b.UseSetting("Queue:AdminApiKey", new string('a', 40)));
+        Assert.NotNull(ex);
+        Assert.Contains("AdminPort", ex!.ToString());
+    }
+
+    [Fact]
+    public void An_admin_port_equal_to_the_public_port_fails_startup()
+    {
+        var ex = Start(b =>
+        {
+            b.UseSetting("HTTP_PORTS", "8080");
+            b.UseSetting("Queue:AdminApiKey", new string('a', 40));
+            b.UseSetting("Queue:AdminPort", "8080");
+        });
+        Assert.NotNull(ex);
+        Assert.Contains("AdminPort", ex!.ToString());
+    }
+
+    [Fact]
+    public void An_admin_key_with_a_separate_admin_port_starts() =>
+        Assert.Null(Start(b =>
+        {
+            b.UseSetting("HTTP_PORTS", "8080");
+            b.UseSetting("Queue:AdminApiKey", new string('a', 40));
+            b.UseSetting("Queue:AdminPort", "9090");
+        }));
 
     [Theory]
     [InlineData("not a url")]

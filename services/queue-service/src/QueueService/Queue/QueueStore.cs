@@ -64,6 +64,7 @@ return tonumber(pos)";
             new("servingBase", c.ServingBase),
             new("soldout", c.SoldOut ? 1 : 0),
             new("paused", c.Paused ? 1 : 0),
+            new("venuePaused", c.VenuePaused ? 1 : 0),
         };
         if (c.TBase is { } tb) entries.Add(new HashEntry("tBase", tb.ToUnixTimeMilliseconds()));
         if (c.PreQueueSize is long pq) entries.Add(new HashEntry("pqsize", pq));
@@ -85,22 +86,81 @@ return tonumber(pos)";
             map.TryGetValue("servingBase", out var sb) ? (long)sb : 0,
             map.TryGetValue("tBase", out var tb) ? DateTimeOffset.FromUnixTimeMilliseconds((long)tb) : null,
             map.TryGetValue("soldout", out var so) && (long)so == 1,
-            map.TryGetValue("paused", out var pa) && (long)pa == 1);
+            map.TryGetValue("paused", out var pa) && (long)pa == 1,
+            map.TryGetValue("venuePaused", out var vpa) && (long)vpa == 1);
     }
 
-    // Writes the fields in one HSET, and only if the event exists (a stray write
-    // must not conjure a half-built config for an event that was never created).
-    private const string UpdateConfigLua = @"
-if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
-redis.call('HSET', KEYS[1], unpack(ARGV))
+    // Shared by the scripts below: serving as EventConfig.ServingAt computes it.
+    // Expects `now` (ms) and the cfg fields as locals: t0, rate, base, tb, paused, vp.
+    private const string ServingLua = @"
+local function serving()
+  if paused or vp then return base end
+  if now <= t0 then return 0 end
+  return base + math.floor(rate * math.max(0, (now - tb) / 1000))
+end
+local rebase = math.max(now, t0)";
+
+    // Read, compute and write in one script, so two operators changing the same
+    // event cannot overwrite each other's rebase. KEYS[1]=cfg hash.
+    // ARGV: op (rate|paused|soldout), value, now in ms. Returns 0 if the event has no config.
+    private const string AdminUpdateLua = @"
+local c = redis.call('HMGET', KEYS[1], 't0', 'rate', 'servingBase', 'tBase', 'paused', 'venuePaused')
+if not c[1] then return 0 end
+local t0, rate = tonumber(c[1]), tonumber(c[2])
+local base = tonumber(c[3]) or 0
+local tb = tonumber(c[4]) or t0
+local paused, vp = c[5] == '1', c[6] == '1'
+local now = tonumber(ARGV[3])
+" + ServingLua + @"
+local op, v = ARGV[1], ARGV[2]
+if op == 'rate' then
+  redis.call('HSET', KEYS[1], 'servingBase', string.format('%.0f', serving()), 'tBase', string.format('%.0f', rebase), 'rate', v)
+elseif op == 'paused' then
+  local want = v == '1'
+  if want == paused then return 1 end
+  if want then
+    redis.call('HSET', KEYS[1], 'servingBase', string.format('%.0f', serving()), 'paused', 1)
+  else
+    redis.call('HSET', KEYS[1], 'tBase', string.format('%.0f', rebase), 'paused', 0)
+  end
+else
+  redis.call('HSET', KEYS[1], 'soldout', v)
+end
 return 1";
 
-    /// Returns false if the event has no config.
-    public async Task<bool> UpdateConfigFieldsAsync(string eid, params HashEntry[] fields)
-    {
-        var args = fields.SelectMany(f => new[] { f.Name, f.Value }).ToArray();
-        return (long)await Db.ScriptEvaluateAsync(UpdateConfigLua, new RedisKey[] { Cfg(eid) }, args) == 1;
-    }
+    // Idempotent venue freeze/unfreeze: only the first pod to see a change writes,
+    // the rest find the flag already set and return 0. KEYS[1]=cfg hash.
+    // ARGV: want (1 frozen, 0 running), now in ms.
+    private const string VenuePauseLua = @"
+local c = redis.call('HMGET', KEYS[1], 't0', 'rate', 'servingBase', 'tBase', 'paused', 'venuePaused')
+if not c[1] then return 0 end
+local t0, rate = tonumber(c[1]), tonumber(c[2])
+local base = tonumber(c[3]) or 0
+local tb = tonumber(c[4]) or t0
+local paused, vp = c[5] == '1', c[6] == '1'
+local now = tonumber(ARGV[2])
+" + ServingLua + @"
+local want = ARGV[1] == '1'
+if want == vp then return 0 end
+if want then
+  if not paused then redis.call('HSET', KEYS[1], 'servingBase', string.format('%.0f', serving())) end
+  redis.call('HSET', KEYS[1], 'venuePaused', 1)
+else
+  if not paused then redis.call('HSET', KEYS[1], 'tBase', string.format('%.0f', rebase)) end
+  redis.call('HSET', KEYS[1], 'venuePaused', 0)
+end
+return 1";
+
+    /// Applies one operator change atomically. Returns false if the event has no config.
+    public async Task<bool> AdminUpdateAsync(string eid, string op, RedisValue value, DateTimeOffset now)
+        => (long)await Db.ScriptEvaluateAsync(AdminUpdateLua, new RedisKey[] { Cfg(eid) },
+            new RedisValue[] { op, value, now.ToUnixTimeMilliseconds() }) == 1;
+
+    /// Freezes (or releases) serving for the venue's paused / sold-out signal. Safe to call
+    /// from every pod: returns true only for the call that changed the flag.
+    public async Task<bool> SetVenuePausedAsync(string eid, bool paused, DateTimeOffset now)
+        => (long)await Db.ScriptEvaluateAsync(VenuePauseLua, new RedisKey[] { Cfg(eid) },
+            new RedisValue[] { paused ? 1 : 0, now.ToUnixTimeMilliseconds() }) == 1;
 
     /// Returns true if the member is in the pre-queue afterwards; false if rejected
     /// because the cap was already reached.
