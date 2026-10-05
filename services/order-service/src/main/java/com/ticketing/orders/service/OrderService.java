@@ -37,6 +37,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
@@ -86,6 +87,15 @@ public class OrderService {
     private final OrderTransactionService orderTransactionService;
     private final SeatedOrderTransactionService seatedOrderTransactionService;
     private final MeterRegistry meterRegistry;
+    private final Duration paymentGrace;
+
+    /**
+     * venue-service keeps a seat reservation for the order lifetime plus this much
+     * (see the {@code expirationMinutes + 1} reservation expiry below). The payment
+     * grace must fit inside it, or an order kept open for a charge would outlive
+     * its seats.
+     */
+    static final Duration RESERVATION_BUFFER = Duration.ofMinutes(1);
 
     public OrderService(
             OrderRepository orderRepository,
@@ -96,7 +106,14 @@ public class OrderService {
             ObjectMapper objectMapper,
             OrderTransactionService orderTransactionService,
             SeatedOrderTransactionService seatedOrderTransactionService,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry,
+            @Value("${order.payment-grace-seconds:60}") long paymentGraceSeconds) {
+        if (paymentGraceSeconds < 0 || paymentGraceSeconds > RESERVATION_BUFFER.toSeconds()) {
+            throw new IllegalStateException("order.payment-grace-seconds must be between 0 and "
+                    + RESERVATION_BUFFER.toSeconds() + " (the venue seat-reservation buffer past order expiry), got "
+                    + paymentGraceSeconds);
+        }
+        this.paymentGrace = Duration.ofSeconds(paymentGraceSeconds);
         this.orderRepository = orderRepository;
         this.orderSeatRepository = orderSeatRepository;
         this.outboxRepository = outboxRepository;
@@ -639,11 +656,27 @@ public class OrderService {
     /**
      * Cancel an order due to expiration (called by ExpirationEventConsumer).
      * Emits an outbox cancellation event so other services react.
+     *
+     * <p>An AWAITING_PAYMENT order is left open until the payment grace period after
+     * its expiry has passed: the buyer may be mid 3-D Secure, and cancelling then would
+     * refund a payment that could have succeeded. (The payment-initiated event fires
+     * when the payment form loads, not on submit, so the grace is anchored on the
+     * order's expiry.) Nothing re-delivers the Kafka event, so OrderExpirySweepJob
+     * picks the order up again once the grace has passed. CREATED orders expire at
+     * their deadline.
+     *
+     * <p>The row is locked, like markComplete, so an expiry can't cancel an order
+     * while a capture is completing it (and the grace decision reads a settled row).
      */
     @Transactional
     public void expireOrder(UUID orderId) {
-        orderRepository.findByIdWithTicket(orderId).ifPresent(order -> {
+        orderRepository.findByIdWithTicketForUpdate(orderId).ifPresent(order -> {
             if (!order.isTerminal()) {
+                if (isInPaymentGrace(order)) {
+                    log.info("Order expiry deferred, payment may be in flight orderId={} expiresAt={}",
+                            orderId, order.getExpiresAt());
+                    return;
+                }
                 order.setStatus(OrderStatus.CANCELLED);
                 order.setCancelReason(CancelReason.EXPIRED);
                 orderRepository.save(order);
@@ -658,6 +691,11 @@ public class OrderService {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private boolean isInPaymentGrace(Order order) {
+        return order.getStatus() == OrderStatus.AWAITING_PAYMENT
+                && order.getExpiresAt().plus(paymentGrace).isAfter(OffsetDateTime.now());
+    }
 
     private OrderCancelledEvent buildCancelledEventWithSeats(Order order, List<OrderSeat> seats) {
         List<String> seatIds = seats.stream()

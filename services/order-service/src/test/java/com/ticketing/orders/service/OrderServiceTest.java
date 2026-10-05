@@ -48,6 +48,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -109,7 +110,7 @@ class OrderServiceTest {
         orderService = new OrderService(
                 orderRepository, orderSeatRepository, outboxRepository, ticketServiceClient,
                 venueServiceClient, objectMapper, orderTransactionService,
-                seatedOrderTransactionService, meterRegistry);
+                seatedOrderTransactionService, meterRegistry, 60);
         ReflectionTestUtils.setField(orderService, "expirationMinutes", 15);
 
         ticket = new OrderTicket(ticketId, "Concert Ticket", new BigDecimal("49.99"));
@@ -407,24 +408,90 @@ class OrderServiceTest {
     void expireOrder_should_cancel_active_order_and_write_outbox() {
         Order order = new Order(userId, OrderStatus.AWAITING_PAYMENT,
                 OffsetDateTime.now().minusMinutes(1), ticket);
-        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdWithTicketForUpdate(orderId)).thenReturn(Optional.of(order));
         when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
 
         orderService.expireOrder(orderId);
 
         verify(outboxRepository).save(any());
         assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(order.getCancelReason()).isEqualTo(CancelReason.EXPIRED);
     }
 
     @Test
     void expireOrder_should_be_noop_when_order_is_already_terminal() {
         Order order = new Order(userId, OrderStatus.COMPLETE,
                 OffsetDateTime.now().minusMinutes(5), ticket);
-        when(orderRepository.findByIdWithTicket(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdWithTicketForUpdate(orderId)).thenReturn(Optional.of(order));
 
         orderService.expireOrder(orderId);
 
         verify(outboxRepository, never()).save(any());
+    }
+
+    @Test
+    void expireOrder_should_leave_awaiting_payment_order_open_inside_the_grace_period_after_expiry() {
+        // The buyer may be mid 3-D Secure when the deadline passes; cancelling now
+        // would turn a payment that is about to be captured into a refund.
+        Order order = new Order(userId, OrderStatus.AWAITING_PAYMENT,
+                OffsetDateTime.now().minusSeconds(10), ticket);
+        when(orderRepository.findByIdWithTicketForUpdate(orderId)).thenReturn(Optional.of(order));
+
+        orderService.expireOrder(orderId);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.AWAITING_PAYMENT);
+        verify(outboxRepository, never()).save(any());
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    void expireOrder_should_cancel_awaiting_payment_order_once_the_grace_period_after_expiry_has_passed() {
+        Order order = new Order(userId, OrderStatus.AWAITING_PAYMENT,
+                OffsetDateTime.now().minusSeconds(61), ticket);
+        when(orderRepository.findByIdWithTicketForUpdate(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        orderService.expireOrder(orderId);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(order.getCancelReason()).isEqualTo(CancelReason.EXPIRED);
+        verify(outboxRepository).save(any());
+    }
+
+    @Test
+    void expireOrder_should_cancel_a_created_order_at_its_deadline_without_any_grace() {
+        Order order = new Order(userId, OrderStatus.CREATED,
+                OffsetDateTime.now().minusSeconds(1), ticket);
+        when(orderRepository.findByIdWithTicketForUpdate(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        orderService.expireOrder(orderId);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        verify(outboxRepository).save(any());
+    }
+
+    @Test
+    void constructor_should_reject_a_grace_period_longer_than_the_venue_reservation_buffer() {
+        // venue-service holds the seats for the order lifetime + 60 s. A longer grace
+        // would keep the order open after its seats were released for resale.
+        assertThatThrownBy(() -> new OrderService(
+                orderRepository, orderSeatRepository, outboxRepository, ticketServiceClient,
+                venueServiceClient, new ObjectMapper(), orderTransactionService,
+                seatedOrderTransactionService, meterRegistry, 61))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("order.payment-grace-seconds")
+                .hasMessageContaining("60");
+    }
+
+    @Test
+    void constructor_should_reject_a_negative_grace_period() {
+        assertThatThrownBy(() -> new OrderService(
+                orderRepository, orderSeatRepository, outboxRepository, ticketServiceClient,
+                venueServiceClient, new ObjectMapper(), orderTransactionService,
+                seatedOrderTransactionService, meterRegistry, -1))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("order.payment-grace-seconds");
     }
 
     // ── markComplete ──────────────────────────────────────────────────────────
