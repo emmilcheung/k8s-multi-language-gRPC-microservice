@@ -74,6 +74,7 @@ import static org.mockito.Mockito.when;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class OrderServiceTest {
 
+    @Mock jakarta.persistence.EntityManager entityManager;
     @Mock OrderRepository orderRepository;
     @Mock OrderSeatRepository orderSeatRepository;
     @Mock OrderTicketRepository orderTicketRepository;
@@ -112,6 +113,7 @@ class OrderServiceTest {
                 venueServiceClient, objectMapper, orderTransactionService,
                 seatedOrderTransactionService, meterRegistry, 45);
         ReflectionTestUtils.setField(orderService, "expirationMinutes", 15);
+        ReflectionTestUtils.setField(orderService, "entityManager", entityManager);
 
         ticket = new OrderTicket(ticketId, "Concert Ticket", new BigDecimal("49.99"));
 
@@ -311,6 +313,29 @@ class OrderServiceTest {
         assertThat(response.getStatus()).isEqualTo(OrderStatus.CANCELLED);
         assertThat(order.getCancelReason()).isEqualTo(CancelReason.EXPIRED);
         verify(outboxRepository).save(any());
+    }
+
+    @Test
+    void getOrder_should_not_cancel_an_order_whose_payment_completed_after_it_was_first_read() {
+        // A payment that completed at the last moment must not be cancelled by the
+        // buyer's own page load. The first read sees AWAITING_PAYMENT past the grace,
+        // but by the time the row is locked the capture has committed COMPLETE; the
+        // expiry has to decide on that fresh state and the response must show it.
+        Order stale = new Order(userId, OrderStatus.AWAITING_PAYMENT,
+                OffsetDateTime.now().minusSeconds(46), ticket);
+        Order fresh = new Order(userId, OrderStatus.COMPLETE,
+                OffsetDateTime.now().minusSeconds(46), ticket);
+        when(orderRepository.findByIdWithTicket(orderId))
+                .thenReturn(Optional.of(stale), Optional.of(fresh));
+        when(orderRepository.findByIdWithTicketForUpdate(orderId)).thenReturn(Optional.of(fresh));
+
+        OrderResponse response = orderService.getOrder(orderId, userId);
+
+        assertThat(response.getStatus()).isEqualTo(OrderStatus.COMPLETE);
+        assertThat(fresh.getCancelReason()).isNull();
+        verify(entityManager).detach(stale);
+        verify(orderRepository, never()).save(any(Order.class));
+        verify(outboxRepository, never()).save(any());
     }
 
     @Test
