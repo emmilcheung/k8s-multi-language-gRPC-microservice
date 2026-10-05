@@ -129,7 +129,7 @@ topologySpreadConstraints:
   queueSystem:
     enabled: false
     # Namespace queue-system is installed in.
-    namespace: queue-system
+    namespace: queue
 
 networkPolicy:
   # Enable in staging/production to restrict pod-to-pod communication.
@@ -142,4 +142,4 @@ networkPolicy:
   queueSystem:
     enabled: false
     # Namespace queue-system is installed in.
-    namespace: queue-system
+    namespace: queue

@@ -1,6 +1,6 @@
 {{- if .Values.networkPolicy.enabled }}
 # NetworkPolicy for queue-service (ingress only; egress is left open for Redis, venue and DNS)
-# Public HTTP port: the ingress controller's pods only
+# Public HTTP port: the ingress controller's pods, and Kong's (it calls /api/queue/redeem in-cluster)
 # Admin port:       pods in the ops namespace only
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -23,6 +23,16 @@ spec:
           podSelector:
             matchLabels:
               {{- toYaml .Values.networkPolicy.ingressController.podLabels | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.targetPort }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.kong.namespaceLabels | nindent 14 }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.kong.podLabels | nindent 14 }}
       ports:
         - protocol: TCP
           port: {{ .Values.service.targetPort }}

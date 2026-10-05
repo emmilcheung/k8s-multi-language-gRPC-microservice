@@ -99,6 +99,14 @@ networkPolicy:
       kubernetes.io/metadata.name: ingress-nginx
     podLabels:
       app.kubernetes.io/name: ingress-nginx
+  # Kong calls queue-service in-cluster (redeem), so its pods may reach the public port too
+  # (namespace AND pod labels). Defaults match the umbrella chart's Kong subchart in the
+  # `ticketing` namespace; staging/production may differ (see services/kong-gateway/values).
+  kong:
+    namespaceLabels:
+      kubernetes.io/metadata.name: ticketing
+    podLabels:
+      app.kubernetes.io/name: kong
   # The admin port is open only to pods in this namespace (ops tooling, port-forward
   # from a bastion); the admin key is still required.
   opsNamespace: ops
