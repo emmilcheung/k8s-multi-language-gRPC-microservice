@@ -11,6 +11,15 @@
 
 ---
 
+## Session: 2026-10-06 — Waiting-room and order-expiry behaviour docs ⏳ IN PR ([#161](https://github.com/emmilcheung/k8s-multi-language-gRPC-microservice/pull/161))
+
+On `feat/waiting-room-behaviour`. Documentation for the behaviour changes in the PR; no code changed in this step.
+
+- **Serving and pause (queue-service).** Serving counts from a stored base and stays frozen while the operator or the venue has paused, so it resumes without a jump. Each pod serves from a per-event snapshot (1 s, up to 10 s old if Redis errors; a claim waits for fresh data). queue-service polls venue-service for seat availability (at most every 2 s per event) and sets a shared pause flag that lapses after 30 s without a refresh. `/claim` returns 409 while paused or sold out.
+- **Operator API.** It answers only on a separate admin port, with an optional NetworkPolicy in `infra/queue-system` and an optional venue-service rule for the availability read. [06](06-security.md) records it.
+- **Order expiry (order-service).** An `AWAITING_PAYMENT` order stays open for a payment grace (default 45 s, at most 45) past `expires_at`. It is expired afterwards by the sweep job or the next `getOrder` read.
+- **Diagrams.** The waiting-room diagram (06) and the data-flow diagram (04, Phase 5) show the above. The waiting-room diagram also no longer shows the admission token in the sign-in URL.
+
 ## Session: 2026-10-05 — Waiting-room review follow-ups ⏳ IN PR (#160)
 
 On `fix/waiting-room-review-followups`. These are fixes for three findings from the review of #158.
