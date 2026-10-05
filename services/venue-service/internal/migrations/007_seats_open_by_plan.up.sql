@@ -1,0 +1,12 @@
+-- Migration 007: index the seats that can still be sold, per plan
+--
+-- The waiting room polls a ticket's seat availability every couple of seconds
+-- during a sale. That count only reads AVAILABLE, HELD and RESERVED seats, and
+-- by the end of a sale most seats are SOLD. This partial index leaves the sold
+-- ones out and carries status and held_until, so the count is answered from
+-- the index alone instead of reading every seat of the plan.
+--
+-- CONCURRENTLY keeps the seats table writable while the index builds; it must
+-- be the only statement in the file so golang-migrate runs it outside a
+-- transaction.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_seats_plan_open ON seats (plan_id) INCLUDE (status, held_until) WHERE status IN ('AVAILABLE', 'HELD', 'RESERVED');

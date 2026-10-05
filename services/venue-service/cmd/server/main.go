@@ -267,6 +267,10 @@ func main() {
 	e.GET("/healthz/live", healthHandler.Live)
 	e.GET("/healthz/ready", healthHandler.Ready)
 
+	// Cluster-internal availability counts for the waiting room. Registered at
+	// the root, outside /api, so the gateway does not expose it.
+	handler.NewAvailabilityHandler(planRepo, log).RegisterRoutes(e)
+
 	// API routes.
 	api := e.Group("/api")
 
