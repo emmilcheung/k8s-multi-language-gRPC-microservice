@@ -97,6 +97,15 @@ public class OrderService {
      */
     static final Duration RESERVATION_BUFFER = Duration.ofMinutes(1);
 
+    /**
+     * Kept free of the payment grace: the reservation's own expiry is computed slightly
+     * before the order's, so the real buffer is a little under {@link #RESERVATION_BUFFER}.
+     */
+    static final Duration RESERVATION_SAFETY_MARGIN = Duration.ofSeconds(15);
+
+    private static final long MAX_PAYMENT_GRACE_SECONDS =
+            RESERVATION_BUFFER.minus(RESERVATION_SAFETY_MARGIN).toSeconds();
+
     public OrderService(
             OrderRepository orderRepository,
             OrderSeatRepository orderSeatRepository,
@@ -107,10 +116,11 @@ public class OrderService {
             OrderTransactionService orderTransactionService,
             SeatedOrderTransactionService seatedOrderTransactionService,
             MeterRegistry meterRegistry,
-            @Value("${order.payment-grace-seconds:60}") long paymentGraceSeconds) {
-        if (paymentGraceSeconds < 0 || paymentGraceSeconds > RESERVATION_BUFFER.toSeconds()) {
+            @Value("${order.payment-grace-seconds:45}") long paymentGraceSeconds) {
+        if (paymentGraceSeconds < 0 || paymentGraceSeconds > MAX_PAYMENT_GRACE_SECONDS) {
             throw new IllegalStateException("order.payment-grace-seconds must be between 0 and "
-                    + RESERVATION_BUFFER.toSeconds() + " (the venue seat-reservation buffer past order expiry), got "
+                    + MAX_PAYMENT_GRACE_SECONDS + " (the venue seat-reservation buffer past order expiry, minus a "
+                    + RESERVATION_SAFETY_MARGIN.toSeconds() + " s safety margin), got "
                     + paymentGraceSeconds);
         }
         this.paymentGrace = Duration.ofSeconds(paymentGraceSeconds);
@@ -442,12 +452,21 @@ public class OrderService {
         return result;
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * Returns the order. payment-service reads it here before charging, so a payable
+     * order whose payment window has closed is expired on the spot rather than waiting
+     * for the sweep: its seats may already be released, and a charge now would only be
+     * refunded. Not read-only for that reason.
+     */
+    @Transactional
     public OrderResponse getOrder(UUID orderId, UUID userId) {
         Order order = orderRepository.findByIdWithTicket(orderId)
                 .orElseThrow(() -> new NotFoundException("Order not found: " + orderId));
         if (!order.getUserId().equals(userId)) {
             throw new ForbiddenException("You do not own this order");
+        }
+        if (!order.isTerminal() && !order.getExpiresAt().plus(paymentGrace).isAfter(OffsetDateTime.now())) {
+            expireOrder(orderId);
         }
         List<OrderSeat> seats = orderSeatRepository.findAllByOrderId(orderId);
         return OrderResponse.from(order, seats);
