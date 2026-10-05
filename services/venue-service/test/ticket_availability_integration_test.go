@@ -48,6 +48,21 @@ func TestTicketAvailability_CountsByWhatABuyerCanDo(t *testing.T) {
 	assert.Equal(t, 1, got.Available, "a lapsed hold is free to take, as HoldSeats treats it")
 	assert.Equal(t, 2, got.Held, "a live hold and a reservation may still come back; sold and blocked seats never do")
 
+	// Every seat sold is a real sell-out: the plan has seats, so it reports zero available.
+	_, err = pool.Exec(ctx, `UPDATE seats SET status='SOLD', held_by=NULL, held_until=NULL WHERE plan_id=$1`, planID)
+	require.NoError(t, err)
+	got, err = repo.TicketAvailability(ctx, ticketID)
+	require.NoError(t, err)
+	assert.Equal(t, &repository.TicketAvailability{}, got)
+
+	// A plan whose seats were never created (not provisioned yet) is not a sell-out.
+	// It must read as "no signal" (not found), or the waiting room would block
+	// claims for an event that simply has no seats yet.
+	_, err = pool.Exec(ctx, `DELETE FROM seats WHERE plan_id=$1`, planID)
+	require.NoError(t, err)
+	_, err = repo.TicketAvailability(ctx, ticketID)
+	assert.ErrorIs(t, err, repository.ErrPlanNotFound)
+
 	// A deactivated plan no longer counts, and a ticket with no active plan is not found.
 	_, err = pool.Exec(ctx, `UPDATE seating_plans SET status='inactive' WHERE id=$1`, planID)
 	require.NoError(t, err)

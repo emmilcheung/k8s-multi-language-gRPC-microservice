@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -55,6 +56,20 @@ func TestAvailabilityHandler_Get_ShouldReturn404_WhenTicketHasNoActivePlan(t *te
 	}}
 
 	assert.Equal(t, http.StatusNotFound, getAvailability(t, reader, availabilityTicketID).Code)
+}
+
+// A plan with no seat rows yet (not provisioned) is reported by the repository
+// as not found. The handler must answer 404, not {available:0}, because the
+// waiting room reads zero available as sold out and would block claims.
+func TestAvailabilityHandler_Get_ShouldReturn404NotZeroCounts_WhenPlanHasNoSeatsYet(t *testing.T) {
+	reader := &stubAvailabilityReader{fn: func(context.Context, string) (*repository.TicketAvailability, error) {
+		return nil, fmt.Errorf("count seats: %w", repository.ErrPlanNotFound)
+	}}
+
+	rec := getAvailability(t, reader, availabilityTicketID)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "available")
 }
 
 // A non-UUID id must be refused before it reaches the database.
