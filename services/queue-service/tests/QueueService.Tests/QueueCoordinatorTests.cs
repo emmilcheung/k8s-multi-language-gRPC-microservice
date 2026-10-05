@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using QueueService.Options;
@@ -21,7 +22,7 @@ public class QueueCoordinatorTests(RedisFixture fx)
         });
         var store = new QueueStore(fx.Mux);
         var tokens = new TokenService(opts.Value.HmacSecret);
-        var coord = new QueueCoordinator(store, tokens, clock, opts);
+        var coord = new QueueCoordinator(store, new EventSnapshotCache(store, clock, opts, null!, NullLogger<EventSnapshotCache>.Instance), tokens, clock, opts);
         _tokens = tokens;
         store.SetConfigAsync(new EventConfig(eid, T0, 100, true, null)).GetAwaiter().GetResult();
         return (coord, clock, eid);

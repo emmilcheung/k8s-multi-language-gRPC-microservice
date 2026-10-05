@@ -29,6 +29,7 @@ public class StartupValidationTests
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseEnvironment("Production");
+            b.UseSetting("Queue:TrustedProxyCidrs:0", "10.0.0.0/8"); // only the secret is wrong
             b.UseSetting("Queue:RedisConnection", "localhost:6379");
             b.UseSetting("Queue:HmacSecret", QueueOptions.PlaceholderSecret);
             b.UseSetting("Queue:UserIdSigningKey", new string('s', 32)); // only the secret is wrong
@@ -130,6 +131,8 @@ public class QueueApiTests(RedisFixture fx)
         var html = await f.CreateClient().GetStringAsync($"/wait?e={eid}&target=%2Ftickets%2F123");
 
         Assert.Contains("id=\"countdown\"", html);
+        Assert.Contains("id=\"soldout\"", html);
+        Assert.Contains("id=\"paused\"", html);
         Assert.Contains("/js/wait.js", html);
         Assert.Contains(eid, html);
     }
@@ -272,7 +275,11 @@ public class QueueApiTests(RedisFixture fx)
     [Fact]
     public async Task Ticket_cookie_is_secure_outside_development()
     {
-        await using var f = Factory().WithWebHostBuilder(b => b.UseEnvironment("Production"));
+        await using var f = Factory().WithWebHostBuilder(b =>
+        {
+            b.UseEnvironment("Production");
+            b.UseSetting("Queue:TrustedProxyCidrs:0", "10.0.0.0/8");
+        });
         var eid = await SeedEvent(f, openSecondsAgo: 5, rate: 100);
         var res = await f.CreateClient().PostAsync($"/api/enqueue?e={eid}", null);
         Assert.Contains(res.Headers.GetValues("Set-Cookie"),

@@ -30,6 +30,23 @@ spec:
               value: {{ .Values.queue.admissionTtlSeconds | quote }}
             - name: Queue__SlidingGraceSeconds
               value: {{ .Values.queue.slidingGraceSeconds | quote }}
+            - name: Queue__EnqueuePerMinutePerIp
+              value: {{ .Values.queue.enqueuePerMinutePerIp | quote }}
+            {{- range $i, $cidr := .Values.queue.trustedProxyCidrs }}
+            - name: Queue__TrustedProxyCidrs__{{ $i }}
+              value: {{ $cidr | quote }}
+            {{- end }}
+            {{- with .Values.queue.venueAvailabilityUrl }}
+            - name: Queue__VenueAvailabilityUrl
+              value: {{ . | quote }}
+            {{- end }}
+            # Optional key: absent means the admin API stays unmapped.
+            - name: Queue__AdminApiKey
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "queue-system.secretName" . }}
+                  key: admin-api-key
+                  optional: true
             - name: Queue__HmacSecret
               valueFrom:
                 secretKeyRef:

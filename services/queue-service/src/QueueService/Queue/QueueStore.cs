@@ -4,7 +4,7 @@ namespace QueueService.Queue;
 
 /// All Redis state for the waiting room. Keys are namespaced per event id and
 /// carry a TTL so abandoned events self-clean (no unbounded growth).
-public sealed class QueueStore(IConnectionMultiplexer mux)
+public class QueueStore(IConnectionMultiplexer mux)
 {
     private IDatabase Db => mux.GetDatabase();
 
@@ -61,12 +61,16 @@ return tonumber(pos)";
             new("t0", c.T0.ToUnixTimeMilliseconds()),
             new("rate", c.Rate),
             new("armed", c.Armed ? 1 : 0),
+            new("servingBase", c.ServingBase),
+            new("soldout", c.SoldOut ? 1 : 0),
+            new("paused", c.Paused ? 1 : 0),
         };
+        if (c.TBase is { } tb) entries.Add(new HashEntry("tBase", tb.ToUnixTimeMilliseconds()));
         if (c.PreQueueSize is long pq) entries.Add(new HashEntry("pqsize", pq));
         await Db.HashSetAsync(Cfg(c.Eid), entries.ToArray());
     }
 
-    public async Task<EventConfig?> GetConfigAsync(string eid)
+    public virtual async Task<EventConfig?> GetConfigAsync(string eid)
     {
         var h = await Db.HashGetAllAsync(Cfg(eid));
         if (h.Length == 0) return null;
@@ -77,7 +81,25 @@ return tonumber(pos)";
             DateTimeOffset.FromUnixTimeMilliseconds((long)map["t0"]),
             (double)map["rate"],
             (long)map["armed"] == 1,
-            pq);
+            pq,
+            map.TryGetValue("servingBase", out var sb) ? (long)sb : 0,
+            map.TryGetValue("tBase", out var tb) ? DateTimeOffset.FromUnixTimeMilliseconds((long)tb) : null,
+            map.TryGetValue("soldout", out var so) && (long)so == 1,
+            map.TryGetValue("paused", out var pa) && (long)pa == 1);
+    }
+
+    // Writes the fields in one HSET, and only if the event exists (a stray write
+    // must not conjure a half-built config for an event that was never created).
+    private const string UpdateConfigLua = @"
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+redis.call('HSET', KEYS[1], unpack(ARGV))
+return 1";
+
+    /// Returns false if the event has no config.
+    public async Task<bool> UpdateConfigFieldsAsync(string eid, params HashEntry[] fields)
+    {
+        var args = fields.SelectMany(f => new[] { f.Name, f.Value }).ToArray();
+        return (long)await Db.ScriptEvaluateAsync(UpdateConfigLua, new RedisKey[] { Cfg(eid) }, args) == 1;
     }
 
     /// Returns true if the member is in the pre-queue afterwards; false if rejected

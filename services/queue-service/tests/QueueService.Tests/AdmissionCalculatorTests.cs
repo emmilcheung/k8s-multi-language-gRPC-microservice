@@ -22,4 +22,16 @@ public class AdmissionCalculatorTests
 
     [Fact] public void Wait_is_zero_when_already_admitted()
         => Assert.Equal(0.0, AdmissionCalculator.EstimatedWaitSeconds(position: 10, serving: 1000, rate: 100));
+
+    // Configs written before rebasing existed carry only t0 and rate.
+    [Fact] public void Without_a_rebase_serving_is_the_original_formula()
+        => Assert.Equal(AdmissionCalculator.Serving(T0.AddSeconds(10), T0, 100),
+            AdmissionCalculator.Serving(T0.AddSeconds(10), T0, 100, servingBase: 0, tBase: T0));
+
+    [Fact] public void A_rebase_continues_from_the_base_at_the_new_rate()
+        => Assert.Equal(1000 + 50 * 4,
+            AdmissionCalculator.Serving(T0.AddSeconds(14), T0, rate: 50, servingBase: 1000, tBase: T0.AddSeconds(10)));
+
+    [Fact] public void Serving_stays_zero_before_T0_even_with_an_earlier_rebase_time()
+        => Assert.Equal(0, AdmissionCalculator.Serving(T0.AddSeconds(-5), T0, 100, 0, T0.AddSeconds(-30)));
 }

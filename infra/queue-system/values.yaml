@@ -43,8 +43,37 @@ queue:
   # without it. Plain values are for local clusters only.
   userIdSigningKey: ""
   # Lifetime of the admission token and of the purchase pass (15 minutes).
+  # Must stay above the 10 minute seat hold (600 s): the service refuses to start otherwise.
   admissionTtlSeconds: 900
   slidingGraceSeconds: 60
+  # Enqueue attempts per client IP per minute, counted PER POD: every replica keeps its
+  # own counter, so the effective global limit is this value times the replica count.
+  # Set it to the target global limit divided by autoscaling.minReplicas (a global
+  # limit at the ingress or Kong is a later option).
+  enqueuePerMinutePerIp: 20
+  # Networks of the proxies allowed to set X-Forwarded-For: the ingress controller's
+  # pods. The client address is the first hop outside these networks. REQUIRED (the
+  # service refuses to start without it). The default is the private ranges, which
+  # covers most pod CIDRs; narrow it to your ingress controller's pod/node network
+  # (and add the CDN's ranges if one sits in front) to stop other in-cluster pods
+  # from picking their own rate-limit bucket.
+  trustedProxyCidrs:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+  # Where to ask how many seats are left ({eid} = the sale's ticket id); venue-service
+  # answers GET -> 200 {"available":n,"held":n}, 404 for a sale without seating. With it
+  # set, no seats left pauses the queue (if seats are held) or marks it sold out.
+  # Empty = only the operator's flags. Example (venue-service's Service is
+  # <release>-venue-service, HTTP port service.httpPort = 3003):
+  #   http://ticketing-venue-service.ticketing.svc.cluster.local:3003/internal/tickets/{eid}/availability
+  # Where venue-service has NetworkPolicies on, also enable its
+  # networkPolicy.queueSystem (with this chart's namespace), or the poll is blocked.
+  venueAvailabilityUrl: ""
+  # Enables the operator endpoints under /api/admin (header X-Queue-Admin-Key, min 32
+  # chars). Empty = the endpoints are not mapped. Like the keys above, outside local
+  # provide it as `admin-api-key` in secretRef/externalSecrets, not as a plain value.
+  adminApiKey: ""
 
 # Stateless app — admission is pure time-math, safe to scale horizontally.
 autoscaling:

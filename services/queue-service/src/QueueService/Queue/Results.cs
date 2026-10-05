@@ -15,6 +15,10 @@ public sealed class QueueFullException(string eid)
 public enum RedeemOutcome { Invalid, Ok, AlreadyUsed, OtherAccount }
 
 public sealed record EnqueueResult(PreQueueTicket Ticket, string Phase, long? Position, EventConfig Config);
-public sealed record StatusResult(PreQueueTicket Ticket, long Position, long Serving, bool Admitted, double WaitSeconds);
-public sealed record ClaimResult(bool Admitted, string? Token, PreQueueTicket Ticket);
+public sealed record StatusResult(PreQueueTicket Ticket, long Position, long Serving, bool Admitted, double WaitSeconds,
+    bool SoldOut = false, bool Paused = false);
+/// Refused (not merely early) when SoldOut or Paused is set.
+public sealed record ClaimResult(bool Admitted, string? Token, PreQueueTicket Ticket,
+    bool SoldOut = false, bool Paused = false);
 public sealed record RedeemResult(RedeemOutcome Outcome, string? Pass = null);
+public sealed record ServingResult(long Serving, double Rate, bool SoldOut, bool Paused);

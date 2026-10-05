@@ -21,14 +21,19 @@ public sealed class QueueOptions
     [Required, MinLength(32)]
     public string UserIdSigningKey { get; set; } = string.Empty;
 
+    /// Seats are held for this long while a buyer checks out; the pass must outlive it.
+    public const int SeatHoldSeconds = 600;
+
     /// Lifetime of both the admission token and the purchase pass: long enough
-    /// to pick seats and check out.
+    /// to pick seats and check out, and longer than the seat hold.
     [Range(1, 86400)]
     public int AdmissionTtlSeconds { get; set; } = 900;
 
     [Range(1, 3600)]
     public int SlidingGraceSeconds { get; set; } = 60;
 
+    /// Per pod: each replica keeps its own counter, so the effective global limit is
+    /// this value times the replica count. Size it as target limit / minimum replicas.
     [Range(1, 100000)]
     public int EnqueuePerMinutePerIp { get; set; } = 60;
 
@@ -42,4 +47,19 @@ public sealed class QueueOptions
     /// Example: [ "https://www.example.com", "http://localhost:4000" ].
     /// Empty list means only same-origin relative paths are accepted.
     public List<string> AllowedTargetOrigins { get; set; } = new();
+
+    /// Networks (CIDR) of the proxies allowed to set X-Forwarded-For, e.g. the ingress
+    /// controller's pod network. Only a hop inside these networks is believed; the
+    /// client address is then the first hop outside them. Required outside Development,
+    /// where an empty list means the connection's own address is used.
+    public List<string> TrustedProxyCidrs { get; set; } = new();
+
+    /// Where to ask how many seats are left, with {eid} standing for the event id,
+    /// e.g. http://venue-service:8080/internal/tickets/{eid}/availability. Optional:
+    /// empty means no automatic paused / sold-out signal, only the operator's flags.
+    public string? VenueAvailabilityUrl { get; set; }
+
+    /// Enables the operator endpoints under /api/admin (header X-Queue-Admin-Key).
+    /// Empty means they are not mapped at all. At least 32 characters when set.
+    public string? AdminApiKey { get; set; }
 }
