@@ -45,12 +45,20 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     boolean existsByTicketIdAndStatusNotIn(UUID ticketId, List<OrderStatus> excludedStatuses);
 
     /**
-     * Returns the ids of open (CREATED / AWAITING_PAYMENT) orders that expired
-     * before {@code cutoff}, oldest first, at most {@code limit} of them.
+     * Returns the ids of open (CREATED / AWAITING_PAYMENT) orders that are due for
+     * expiry, oldest first, at most {@code limit} of them.
+     *
+     * <p>A CREATED order is due once it expired before {@code cutoff} (the sweep grace
+     * that lets the normal expiry path win). An AWAITING_PAYMENT order is due once it
+     * expired before {@code paymentCutoff}: expireOrder leaves it open until the
+     * payment grace after expiry has passed, so asking earlier would only be deferred.
+     * The payment grace is the shorter one, so AWAITING_PAYMENT orders are picked up
+     * sooner, which is intended since venue releases the seats a minute after expiry.
      * Native query so the status literals match V7's partial index predicate.
      */
     @Query(value = "SELECT id FROM orders"
-            + " WHERE status IN ('CREATED', 'AWAITING_PAYMENT') AND expires_at < :cutoff"
+            + " WHERE status IN ('CREATED', 'AWAITING_PAYMENT') AND expires_at < :paymentCutoff"
+            + " AND (status = 'AWAITING_PAYMENT' OR expires_at < :cutoff)"
             + " ORDER BY expires_at LIMIT :limit", nativeQuery = true)
-    List<UUID> findOverdueOpenOrderIds(OffsetDateTime cutoff, int limit);
+    List<UUID> findOverdueOpenOrderIds(OffsetDateTime cutoff, OffsetDateTime paymentCutoff, int limit);
 }

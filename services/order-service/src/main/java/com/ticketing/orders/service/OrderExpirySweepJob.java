@@ -21,7 +21,10 @@ import java.util.UUID;
  * before it. Without a backstop those orders stay open forever and keep their seats
  * reserved. This job finds open orders more than {@code grace} past
  * {@code expires_at} and expires them through the same
- * {@link OrderService#expireOrder} the Kafka consumer calls.
+ * {@link OrderService#expireOrder} the Kafka consumer calls. An AWAITING_PAYMENT
+ * order is picked up once it is the payment grace past {@code expires_at} (expireOrder
+ * would defer it any earlier); this is also what re-checks orders the Kafka path
+ * deferred.
  *
  * Safe on every replica without a leader lock. Each expireOrder is its own
  * transaction, and Order's {@code @Version} makes a concurrent expire — another
@@ -41,16 +44,19 @@ public class OrderExpirySweepJob {
     private final OrderRepository orderRepository;
     private final OrderService orderService;
     private final Duration grace;
+    private final Duration paymentGrace;
     private final int batchSize;
 
     public OrderExpirySweepJob(
             OrderRepository orderRepository,
             OrderService orderService,
             @Value("${order.expiry-sweep.grace-seconds:300}") long graceSeconds,
+            @Value("${order.payment-grace-seconds:60}") long paymentGraceSeconds,
             @Value("${order.expiry-sweep.batch-size:200}") int batchSize) {
         this.orderRepository = orderRepository;
         this.orderService = orderService;
         this.grace = Duration.ofSeconds(graceSeconds);
+        this.paymentGrace = Duration.ofSeconds(paymentGraceSeconds);
         this.batchSize = batchSize;
     }
 
@@ -58,7 +64,9 @@ public class OrderExpirySweepJob {
     public void sweep() {
         List<UUID> overdue;
         try {
-            overdue = orderRepository.findOverdueOpenOrderIds(OffsetDateTime.now().minus(grace), batchSize);
+            OffsetDateTime now = OffsetDateTime.now();
+            overdue = orderRepository.findOverdueOpenOrderIds(
+                    now.minus(grace), now.minus(paymentGrace), batchSize);
         } catch (Exception e) {
             log.warn("Order expiry sweep query failed — will retry on next schedule: {}", e.getMessage(), e);
             return;

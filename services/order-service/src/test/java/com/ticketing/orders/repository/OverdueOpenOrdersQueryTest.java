@@ -108,12 +108,12 @@ class OverdueOpenOrdersQueryTest {
     void findOverdueOpenOrderIds_shouldReturnOnlyOpenOrdersPastTheCutoff_oldestFirst() {
         UUID createdOld = seed("CREATED", "20 minutes");
         UUID awaitingOlder = seed("AWAITING_PAYMENT", "30 minutes");
-        seed("AWAITING_PAYMENT", "1 minute");   // inside the grace window: asynq may still fire
+        seed("AWAITING_PAYMENT", "30 seconds"); // inside the payment grace: not due yet
         seed("AWAITING_PAYMENT", "-10 minutes"); // not expired yet
         seed("COMPLETE", "30 minutes");          // paid: must never be expired
         seed("CANCELLED", "30 minutes");         // already terminal
 
-        List<UUID> ids = orderRepository.findOverdueOpenOrderIds(OffsetDateTime.now().minusMinutes(5), 100);
+        List<UUID> ids = due(100);
 
         assertThat(ids)
                 .as("both open statuses must be swept — orders are created as CREATED, so sweeping only "
@@ -122,13 +122,32 @@ class OverdueOpenOrdersQueryTest {
                 .containsExactly(awaitingOlder, createdOld);
     }
 
+    private List<UUID> due(int limit) {
+        OffsetDateTime now = OffsetDateTime.now();
+        return orderRepository.findOverdueOpenOrderIds(now.minusMinutes(5), now.minusSeconds(60), limit);
+    }
+
+    @Test
+    void findOverdueOpenOrderIds_shouldPickUpAwaitingPaymentAfterThePaymentGrace_andCreatedAfterTheSweepGrace() {
+        UUID awaitingPastGrace = seed("AWAITING_PAYMENT", "90 seconds");
+        seed("AWAITING_PAYMENT", "30 seconds");  // inside the payment grace: expireOrder would defer it
+        seed("CREATED", "90 seconds");           // no payment: waits for the longer sweep grace
+        UUID createdPastSweepGrace = seed("CREATED", "6 minutes");
+
+        assertThat(due(100))
+                .as("AWAITING_PAYMENT orders are picked up sooner than CREATED ones because venue "
+                        + "releases the seats a minute after expiry; neither may be swept earlier")
+                .containsExactly(createdPastSweepGrace, awaitingPastGrace);
+    }
+
     @Test
     void findOverdueOpenOrderIds_shouldRespectItsLimit_whenTheBacklogIsLarger() {
         for (int i = 0; i < 5; i++) {
             seed("AWAITING_PAYMENT", (10 + i) + " minutes");
         }
 
-        assertThat(orderRepository.findOverdueOpenOrderIds(OffsetDateTime.now(), 3))
+        assertThat(orderRepository.findOverdueOpenOrderIds(
+                OffsetDateTime.now(), OffsetDateTime.now(), 3))
                 .as("the batch bound caps one sweep's work after a large job loss; the rest waits for the next run")
                 .hasSize(3);
     }
@@ -142,7 +161,8 @@ class OverdueOpenOrdersQueryTest {
                 st.execute("SET enable_seqscan = off");
                 StringBuilder sb = new StringBuilder();
                 try (ResultSet rs = st.executeQuery("EXPLAIN SELECT id FROM orders"
-                        + " WHERE status IN ('CREATED', 'AWAITING_PAYMENT') AND expires_at < now()"
+                        + " WHERE status IN ('CREATED', 'AWAITING_PAYMENT') AND expires_at < now() - interval '60 seconds'"
+                        + " AND (status = 'AWAITING_PAYMENT' OR expires_at < now() - interval '5 minutes')"
                         + " ORDER BY expires_at LIMIT 200")) {
                     while (rs.next()) {
                         sb.append(rs.getString(1)).append('\n');
