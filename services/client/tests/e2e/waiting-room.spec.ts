@@ -6,9 +6,11 @@ import { PASSWORD, uniqueEmail } from "./_helpers/flows";
 // armed against a seeded, already-open, high-rate event. See the run recipe in
 // docs/superpowers/plans/2026-06-16-virtual-waiting-room-connector.md (Task 4).
 // Skipped unless E2E_QUEUE_ARMED=1 so it never runs in the normal E2E pass.
+// Only the armed event's pages are gated, so E2E_TICKET_ID must equal the
+// client's QUEUE_EVENT_ID (it defaults to the same "E2E" the recipe seeds).
 
 const ARMED = process.env.E2E_QUEUE_ARMED === "1";
-const TICKET = process.env.E2E_TICKET_ID || "any";
+const TICKET = process.env.E2E_TICKET_ID || "E2E";
 
 test.describe("virtual waiting room", () => {
   test.skip(!ARMED, "set E2E_QUEUE_ARMED=1 with the gate armed + queue stack up");
