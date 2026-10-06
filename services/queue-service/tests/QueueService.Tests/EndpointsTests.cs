@@ -272,7 +272,11 @@ public class QueueApiTests(RedisFixture fx)
     [Fact]
     public async Task Ticket_cookie_is_secure_outside_development()
     {
-        await using var f = Factory().WithWebHostBuilder(b => b.UseEnvironment("Production"));
+        await using var f = Factory().WithWebHostBuilder(b =>
+        {
+            b.UseEnvironment("Production");
+            b.UseSetting("Queue:TrustedProxyCidrs:0", "10.0.0.0/8"); // required outside Development
+        });
         var eid = await SeedEvent(f, openSecondsAgo: 5, rate: 100);
         var res = await f.CreateClient().PostAsync($"/api/enqueue?e={eid}", null);
         Assert.Contains(res.Headers.GetValues("Set-Cookie"),

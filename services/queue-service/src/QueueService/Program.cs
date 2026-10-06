@@ -6,6 +6,7 @@ using QueueService.Tokens;
 using QueueService.Web;
 using StackExchange.Redis;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Options;
 using System.Threading.RateLimiting;
 using OpenTelemetry;
@@ -20,7 +21,26 @@ builder.Services.AddOptions<QueueOptions>()
     .ValidateDataAnnotations()
     .Validate(o => !builder.Environment.IsProduction() || o.HmacSecret != QueueOptions.PlaceholderSecret,
         "Queue:HmacSecret must be changed from the shipped placeholder in Production.")
+    .Validate(o => builder.Environment.IsDevelopment() || o.TrustedProxyCidrs.Count > 0,
+        "Queue:TrustedProxyCidrs is required outside Development: without it every visitor "
+        + "behind the ingress shares one address and one enqueue limit.")
+    .Validate(o => o.TrustedProxyCidrs.All(c => System.Net.IPNetwork.TryParse(c, out _)),
+        "Queue:TrustedProxyCidrs contains an entry that is not a CIDR such as 10.0.0.0/8.")
     .ValidateOnStart();
+
+// Only the configured proxy networks are believed; the defaults (loopback) are
+// cleared so a forged X-Forwarded-For from anywhere else is ignored.
+var trustedProxies = builder.Configuration.GetSection(QueueOptions.SectionName)
+    .GetSection(nameof(QueueOptions.TrustedProxyCidrs)).Get<string[]>() ?? [];
+builder.Services.Configure<ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
+    o.KnownProxies.Clear();
+    o.KnownIPNetworks.Clear();
+    foreach (var cidr in trustedProxies)
+        if (System.Net.IPNetwork.TryParse(cidr, out var net)) o.KnownIPNetworks.Add(net);
+    o.ForwardLimit = null; // unwrap every trusted hop (CDN -> ingress); stops at the first untrusted one
+});
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 {
@@ -58,8 +78,8 @@ builder.Services.AddRateLimiter(o =>
     o.AddPolicy("enqueue", ctx =>
     {
         var limit = ctx.RequestServices.GetRequiredService<IOptions<QueueOptions>>().Value.EnqueuePerMinutePerIp;
-        // NOTE: behind an ingress/proxy, enable ForwardedHeaders with trusted proxies
-        // so RemoteIpAddress is the real client — do NOT trust raw X-Forwarded-For.
+        // RemoteIpAddress is the real client once UseForwardedHeaders has unwrapped
+        // the trusted proxies' X-Forwarded-For.
         var key = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
         {
@@ -71,6 +91,9 @@ builder.Services.AddRateLimiter(o =>
 });
 
 var app = builder.Build();
+// With no trusted networks the middleware would believe every sender, so it is
+// only added once some are configured (Development may leave the list empty).
+if (trustedProxies.Length > 0) app.UseForwardedHeaders();
 app.UseExceptionHandler();
 app.UseRateLimiter();
 app.UseStaticFiles();

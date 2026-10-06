@@ -45,6 +45,19 @@ queue:
   # Lifetime of the admission token and of the purchase pass (15 minutes).
   admissionTtlSeconds: 900
   slidingGraceSeconds: 60
+  # REQUIRED: networks of the proxies in front of the service (the ingress
+  # controller pods). Only they may say who the real client is through
+  # X-Forwarded-For; the per-IP enqueue limit counts that client. Without it
+  # every visitor shares the ingress address and one limit. The defaults are the
+  # private ranges; narrow them to the ingress pod network.
+  trustedProxyCidrs:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+  # Public origin(s) of the shop the admitted buyer is sent back to, e.g.
+  # https://shop.example.com. The queue runs on its own origin, so with none
+  # listed every admitted buyer lands on "/" of the queue host.
+  allowedTargetOrigins: []
 
 # Stateless app — admission is pure time-math, safe to scale horizontally.
 autoscaling:
