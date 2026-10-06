@@ -26,6 +26,13 @@ export interface GateInput {
 
 // Visitors sent to sign in before redeeming must be able to reach these pages.
 const UNGATED_PATHS = new Set(["/auth/signin", "/auth/signup"]);
+// Payment is never gated at Kong, so an expired pass must not strand a paying
+// buyer at checkout or on the return from Stripe. Match whole path segments only.
+const UNGATED_PREFIXES = ["/checkout", "/orders"];
+
+function ungated(path: string): boolean {
+  return UNGATED_PATHS.has(path) || UNGATED_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
+}
 
 function b64urlToBytes(s: string): Uint8Array {
   let b64 = s.replace(/-/g, "+").replace(/_/g, "/");
@@ -70,7 +77,7 @@ function valid(p: AdmissionPayload | null, eventId: string, nowSec: number): boo
 
 export async function gateDecision(i: GateInput): Promise<Decision> {
   if (!i.armed) return { kind: "pass" };
-  if (UNGATED_PATHS.has(i.pathWithQuery.split("?")[0])) return { kind: "pass" };
+  if (ungated(i.pathWithQuery.split("?")[0])) return { kind: "pass" };
 
   if (i.qpass) {
     const p = await verifyAdmission(i.qpass, i.secret);

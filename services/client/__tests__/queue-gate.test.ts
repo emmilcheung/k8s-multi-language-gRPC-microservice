@@ -117,6 +117,20 @@ describe("gateDecision", () => {
     }
     expect((await gateDecision({ ...base, pathWithQuery: "/auth/signin-elsewhere" })).kind).toBe("redirect-queue");
   });
+  // Kong never gates payment, so a buyer whose pass expires while paying (or
+  // returning from Stripe) must not be bounced back into the queue mid-purchase.
+  it("lets checkout and order pages through without a pass", async () => {
+    for (const path of ["/checkout", "/checkout/recover", "/checkout/xyz?a=1", "/orders", "/orders/o-1", "/orders/o-1/refund"]) {
+      expect((await gateDecision({ ...base, pathWithQuery: path })).kind).toBe("pass");
+    }
+  });
+  // The exemption is for the payment path only; a lookalike prefix or any other
+  // page would otherwise let buyers skip the queue.
+  it("still gates lookalike paths and other pages without a pass", async () => {
+    for (const path of ["/ordersx", "/orders-evil", "/checkout-evil", "/checkoutx/1", "/tickets/123", "/"]) {
+      expect((await gateDecision({ ...base, pathWithQuery: path })).kind).toBe("redirect-queue");
+    }
+  });
   it("passes when a valid pass cookie is present", async () => {
     const t = await sign(bound());
     const d = await gateDecision({ ...base, passCookie: t });
