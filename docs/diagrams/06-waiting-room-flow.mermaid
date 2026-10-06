@@ -21,8 +21,8 @@ sequenceDiagram
     Q-->>B: signed admission token (HMAC, single-use nonce, no account yet)
     B->>C: 302 to /tickets/123?qpass={token}
     opt not logged in
-        C-->>B: 302 to /auth/signin?next=/tickets/123?qpass={token}
-        B->>C: sign in, back to /tickets/123?qpass={token}
+        C-->>B: set short-lived qq_admit cookie (token), 302 to /auth/signin?next=/tickets/123 (no token in URL)
+        B->>C: sign in, back to /tickets/123 (qq_admit cookie sent)
     end
     C->>K: POST /api/queue/redeem (login token)
     K->>Q: /api/redeem + X-User-Id and its HMAC signature
