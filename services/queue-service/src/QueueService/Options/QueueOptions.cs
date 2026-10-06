@@ -42,4 +42,10 @@ public sealed class QueueOptions
     /// Example: [ "https://www.example.com", "http://localhost:4000" ].
     /// Empty list means only same-origin relative paths are accepted.
     public List<string> AllowedTargetOrigins { get; set; } = new();
+
+    /// Networks of the proxies in front of the service (the ingress). Only requests
+    /// from these addresses may say who the real client is through X-Forwarded-For;
+    /// anyone else's header is ignored, so a visitor cannot pick their own rate-limit
+    /// bucket. Example: [ "10.0.0.0/8" ]. Required outside Development.
+    public List<string> TrustedProxyCidrs { get; set; } = new();
 }

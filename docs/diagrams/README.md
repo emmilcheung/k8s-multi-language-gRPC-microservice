@@ -183,7 +183,7 @@ Pairs with "how would you build a search feature on top of a Mongo-backed micros
 A sequence diagram for the **onsale surge gate** (`services/queue-service`, a standalone
 .NET 10 subsystem on its own domain/Redis). Shows the armed-onsale path: connector 302 →
 pre-queue randomized draw → rate-based admission by pure time-math (`serving(t)=⌊rate·(t−T0)⌋`)
-→ single-use HMAC token → login, then the connector redeems it through Kong for a pass bound to
+→ single-use HMAC token → login (token held in a short-lived `qq_admit` cookie, never in the sign-in URL), then the connector redeems it through Kong for a pass bound to
 that account and sets the `qq_pass` cookie → Kong purchase backstop checks the pass belongs to the caller. Pairs with "how would you protect the buy path under a
 Taylor-Swift-scale onsale" interview questions. Run `python3 render.py` to (re)wrap it
 into its HTML viewer and the landing page.
