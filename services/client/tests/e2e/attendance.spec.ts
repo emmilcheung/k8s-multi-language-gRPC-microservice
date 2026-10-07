@@ -421,3 +421,17 @@ test(
 
   }
 );
+
+// Door staff limited to one event can scan that event and not another.
+// Skipped: giving a user a door-staff membership needs the accounts
+// membership mutation (invite/add member with a scoped DOOR_STAFF role),
+// which the accounts API does not expose yet. Not run; enable once it exists.
+test.skip(
+  "door staff limited to one event can check in at that event but not at another",
+  async () => {
+    // Plan: organizer creates two events; a second user is added as
+    // DOOR_STAFF scoped to event one via the accounts membership mutation;
+    // that user checks in a buyer at event one (admitted) and gets a
+    // forbidden answer at event two.
+  }
+);

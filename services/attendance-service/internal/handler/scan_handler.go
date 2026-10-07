@@ -14,14 +14,21 @@ import (
 // ScanHandler handles scanner REST endpoints.
 // Stub implementation: business logic (token verification, scan recording) is wired in WS2.
 type ScanHandler struct {
-	svc  service.ScanService
-	auth service.AttendanceService
-	log  *zap.Logger
+	svc    service.ScanService
+	auth   service.AttendanceService
+	access *service.OrganizerAccess
+	log    *zap.Logger
 }
 
 // NewScanHandler creates a new ScanHandler.
 func NewScanHandler(svc service.ScanService, auth service.AttendanceService, log *zap.Logger) *ScanHandler {
 	return &ScanHandler{svc: svc, auth: auth, log: log}
+}
+
+// WithAccess sends scan checks through the permission service.
+func (h *ScanHandler) WithAccess(access *service.OrganizerAccess) *ScanHandler {
+	h.access = access
+	return h
 }
 
 // ValidateToken handles POST /api/attendance/scan/validate
@@ -44,7 +51,10 @@ func (h *ScanHandler) ValidateToken(c echo.Context) error {
 	if scannerUserID == "" {
 		return jsonError(c, http.StatusUnauthorized, "MISSING_USER_ID", "scanner identity required")
 	}
-	if err := h.auth.EnsureOrganizerOwnsEvent(c.Request().Context(), req.EventID, scannerUserID); err != nil {
+	if _, _, err := authorizeEvent(c, h.auth, h.access, service.PermAttendanceScan, req.EventID, scannerUserID); err != nil {
+		if done, rerr := accessFailure(c, h.log, err); done {
+			return rerr
+		}
 		if errors.Is(err, service.ErrForbidden) {
 			return jsonError(c, http.StatusForbidden, "FORBIDDEN", "scanner is not allowed")
 		}
@@ -103,7 +113,10 @@ func (h *ScanHandler) CheckIn(c echo.Context) error {
 	if scannerUserID == "" {
 		return jsonError(c, http.StatusUnauthorized, "MISSING_USER_ID", "scanner identity required")
 	}
-	if err := h.auth.EnsureOrganizerOwnsEvent(c.Request().Context(), req.EventID, scannerUserID); err != nil {
+	if _, _, err := authorizeEvent(c, h.auth, h.access, service.PermAttendanceScan, req.EventID, scannerUserID); err != nil {
+		if done, rerr := accessFailure(c, h.log, err); done {
+			return rerr
+		}
 		if errors.Is(err, service.ErrForbidden) {
 			return jsonError(c, http.StatusForbidden, "FORBIDDEN", "scanner is not allowed")
 		}
@@ -165,7 +178,10 @@ func (h *ScanHandler) CheckInByBuyer(c echo.Context) error {
 	if scannerUserID == "" {
 		return jsonError(c, http.StatusUnauthorized, "MISSING_USER_ID", "scanner identity required")
 	}
-	if err := h.auth.EnsureOrganizerOwnsEvent(c.Request().Context(), req.EventID, scannerUserID); err != nil {
+	if _, _, err := authorizeEvent(c, h.auth, h.access, service.PermAttendanceScan, req.EventID, scannerUserID); err != nil {
+		if done, rerr := accessFailure(c, h.log, err); done {
+			return rerr
+		}
 		if errors.Is(err, service.ErrForbidden) {
 			return jsonError(c, http.StatusForbidden, "FORBIDDEN", "scanner is not allowed")
 		}

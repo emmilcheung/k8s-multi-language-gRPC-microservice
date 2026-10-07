@@ -8,4 +8,7 @@ import (
 type Resolver struct {
 	Svc     service.AttendanceService
 	ScanSvc service.ScanService
+	// Access sends organizer and staff checks through the permission service.
+	// Nil keeps the old creator-only comparison.
+	Access *service.OrganizerAccess
 }
