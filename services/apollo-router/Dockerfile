@@ -1,6 +1,6 @@
 # Apollo Router v2.1.1 — pin to digest for reproducible builds
 # To get the digest: docker pull ghcr.io/apollographql/router:v2.1.1 && docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/apollographql/router:v2.1.1
-FROM ghcr.io/apollographql/router:v2.1.1@sha256:d0f8e557152ae26a666392c3835aff17d59ae3b4a6be61faa60e762a93ab1b36
+FROM ghcr.io/apollographql/router:v2.18.0@sha256:5b02af03e8f0268b8fcf85132c9e54ea36a1029b0823b00bb9151f698a991215
 
 COPY router.yaml /dist/config/router.yaml
 COPY supergraph.graphql /dist/config/supergraph.graphql
