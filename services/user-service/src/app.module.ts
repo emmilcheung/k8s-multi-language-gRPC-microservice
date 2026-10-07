@@ -5,6 +5,7 @@ import { z } from "zod";
 import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./modules/health/health.module";
 import { MetricsModule } from "./modules/metrics/metrics.module";
+import { AccountsModule } from "./modules/accounts/accounts.module";
 import { UserSettingsModule } from "./modules/user-settings/user-settings.module";
 import { UserGraphQLModule } from "./graphql/graphql.module";
 
@@ -75,6 +76,7 @@ const envSchema = z
     HealthModule,
     MetricsModule,
     UserSettingsModule,
+    AccountsModule,
     UserGraphQLModule,
   ],
 })

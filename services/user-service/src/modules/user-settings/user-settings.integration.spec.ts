@@ -38,11 +38,10 @@ beforeAll(async () => {
   process.env.NODE_ENV = "test";
 
   pool = new Pool({ connectionString: databaseUrl });
-  const migrationSql = fs.readFileSync(
-    path.join(__dirname, "../../../migrations/001_init_user_settings.sql"),
-    "utf-8",
-  );
-  await pool.query(migrationSql);
+  const migrationsDir = path.join(__dirname, "../../../migrations");
+  for (const file of fs.readdirSync(migrationsDir).sort()) {
+    await pool.query(fs.readFileSync(path.join(migrationsDir, file), "utf-8"));
+  }
 
   const { AppModule } = (await import("../../app.module.js")) as {
     AppModule: typeof UserServiceAppModule;
