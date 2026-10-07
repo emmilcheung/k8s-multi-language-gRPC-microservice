@@ -1,0 +1,33 @@
+{{- if and .Values.global.serviceMesh.enabled (eq .Values.global.serviceMesh.provider "linkerd") .Values.global.serviceMesh.linkerd.grpcServerPolicy.enabled (.Capabilities.APIVersions.Has "policy.linkerd.io/v1beta1/Server") (.Capabilities.APIVersions.Has "policy.linkerd.io/v1beta1/ServerAuthorization") }}
+apiVersion: policy.linkerd.io/v1beta1
+kind: Server
+metadata:
+  name: {{ include "user-service.fullname" . }}-grpc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "user-service.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "user-service.selectorLabels" . | nindent 6 }}
+  port: grpc
+  proxyProtocol: gRPC
+---
+apiVersion: policy.linkerd.io/v1beta1
+kind: ServerAuthorization
+metadata:
+  name: {{ include "user-service.fullname" . }}-grpc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "user-service.labels" . | nindent 4 }}
+spec:
+  server:
+    name: {{ include "user-service.fullname" . }}-grpc
+  client:
+    meshTLS:
+      identities:
+        - {{ printf "ticket-service.%s.serviceaccount.identity.linkerd.%s" .Release.Namespace .Values.global.serviceMesh.linkerd.identityDomain | quote }}
+        - {{ printf "venue-service.%s.serviceaccount.identity.linkerd.%s" .Release.Namespace .Values.global.serviceMesh.linkerd.identityDomain | quote }}
+        - {{ printf "attendance-service.%s.serviceaccount.identity.linkerd.%s" .Release.Namespace .Values.global.serviceMesh.linkerd.identityDomain | quote }}
+        - {{ printf "order-service.%s.serviceaccount.identity.linkerd.%s" .Release.Namespace .Values.global.serviceMesh.linkerd.identityDomain | quote }}
+{{- end }}

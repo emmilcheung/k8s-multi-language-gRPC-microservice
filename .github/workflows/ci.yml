@@ -115,6 +115,7 @@ jobs:
               - '.github/workflows/ci.yml'
             user:
               - 'services/user-service/**'
+              - 'proto/**'
               - '.github/workflows/ci.yml'
             mcp:
               - 'services/mcp-service/**'
@@ -771,7 +772,7 @@ jobs:
       - name: Build image
         uses: docker/build-push-action@v6
         with:
-          context: services/user-service
+          context: .
           file: services/user-service/Dockerfile
           push: false
           tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}

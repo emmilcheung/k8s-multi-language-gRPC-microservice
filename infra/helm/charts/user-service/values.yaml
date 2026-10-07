@@ -7,10 +7,12 @@ image:
 
 service:
   port: 3004
+  grpcPort: 50053
 
 env:
   NODE_ENV: production
   PORT: "3004"
+  GRPC_PORT: "50053"
 
 # Name of a Kubernetes Secret containing:
 #   DATABASE_URL, DB_POOL_MAX

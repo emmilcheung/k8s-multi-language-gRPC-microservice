@@ -6,7 +6,7 @@
 
 - **Role:** Owns user **profile, preferences, and billing address** data. Authentication and session/JWT issuance remain in `auth-service` — this service never mints tokens.
 - **Stack:** TypeScript / Node.js + NestJS, pnpm-managed, Drizzle ORM (see `drizzle.config.ts`), Vitest for unit + integration tests.
-- **Ports:** `3004` (host and container).
+- **Ports:** `3004` HTTP (host and container); `50053` gRPC (`GRPC_PORT`, internal only, not published to the host).
 - **Datastore:** Owns one database; schema managed by Drizzle migrations under `migrations/`. No cross-DB queries (per root rule).
 
 ## Quick Commands
@@ -44,7 +44,7 @@ nest-cli.json               ← NestJS build/dev config
 vitest.config.ts            ← unit test config
 vitest.integration.config.ts← integration test config (separate suite)
 eslint.config.mjs           ← flat-config ESLint
-Dockerfile                  ← multi-stage build; runs migrations before the app
+Dockerfile                  ← multi-stage build (context = repo root, ships the accounts proto); runs migrations before the app
 ```
 
 ## Endpoints
@@ -55,6 +55,7 @@ Dockerfile                  ← multi-stage build; runs migrations before the ap
 - `PUT  /api/user-settings/preferences`
 - `GET  /api/user-settings/billing-address`
 - `PUT  /api/user-settings/billing-address`
+- gRPC `acme.accounts.v1.AccountsService` on `GRPC_PORT` (`proto/accounts/v1/accounts.proto`): `CheckPermission`, `ListMyAccounts`, `GetAccount`, `EnsurePersonalAccount`, plus the standard `grpc.health.v1.Health/Check`. Callers: ticket, venue, attendance and order service. The permission table lives only in `src/modules/accounts/permissions.ts`.
 - `GET  /healthz/live`
 - `GET  /healthz/ready`
 

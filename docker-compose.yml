@@ -525,12 +525,14 @@ services:
   # ── user-service: Node.js / NestJS ─────────────────────────────────────────
   user-service:
     build:
-      context: ./services/user-service
-      dockerfile: Dockerfile
+      # Context must be repo root: the image ships proto/accounts/v1/accounts.proto.
+      context: .
+      dockerfile: services/user-service/Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: development
       PORT: 3004
+      GRPC_PORT: 50053
       DATABASE_URL: postgresql://users_user:users_pass@postgres-users:5432/users_db
       DB_POOL_MAX: 20
       X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
