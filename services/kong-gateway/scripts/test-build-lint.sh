@@ -288,7 +288,7 @@ if [[ -z "${RT_BLOCK}" ]]; then
   echo "FAIL: the /mcp route has no request-transformer plugin" >&2
   exit 1
 fi
-for h in X-User-Id X-User-Roles X-User-Id-Sig; do
+for h in X-User-Id X-User-Roles X-User-Roles-Sig X-User-Id-Sig; do
   if ! grep -qE -- "^ +- ${h}\$" <<<"${RT_BLOCK}"; then
     echo "FAIL: the /mcp request-transformer does not remove inbound ${h}" >&2
     exit 1

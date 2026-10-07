@@ -939,6 +939,7 @@ services:
                   kong.service.request.clear_header("X-User-Id")
                   kong.service.request.clear_header("X-User-Id-Sig")
                   kong.service.request.clear_header("X-User-Roles")
+                  kong.service.request.clear_header("X-User-Roles-Sig")
                   local auth = kong.request.get_header("Authorization")
                   local cookie = kong.request.get_header("Cookie")
                   local has_cookie_token = cookie and cookie:find("{{JWT_COOKIE_NAME}}=", 1, true) ~= nil
@@ -1025,6 +1026,7 @@ services:
                 headers:
                   - X-User-Id
                   - X-User-Roles
+                  - X-User-Roles-Sig
                   - X-User-Id-Sig
           # Replaces the global limiter for this route; per source IP because the
           # caller is unauthenticated at the edge.
@@ -1131,6 +1133,7 @@ plugins:
         headers:
           - X-User-Id
           - X-User-Roles
+          - X-User-Roles-Sig
 
   # Inject a correlation ID on every request for distributed tracing
   - name: correlation-id
