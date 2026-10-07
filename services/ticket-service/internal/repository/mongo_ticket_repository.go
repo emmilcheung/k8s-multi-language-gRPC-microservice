@@ -80,6 +80,7 @@ type Ticket struct {
 	Title         string              `bson:"title"`
 	Price         string              `bson:"price"` // decimal string; migrated from float64
 	UserID        string              `bson:"userId"`
+	AccountID     string              `bson:"accountId,omitempty"`     // owning organizer account; empty until backfilled
 	OrderID       string              `bson:"orderId,omitempty"`       // deprecated: kept for backward compat during migration
 	SeatingPlanID string              `bson:"seatingPlanId,omitempty"` // Venue seating plan UUID; empty = GA ticket
 	TicketType    string              `bson:"ticket_type,omitempty"`   // WS3: "GA" | "SEATED_MANUAL" | "SEATED_AUTO"
@@ -581,6 +582,13 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection) error {
 		{
 			Keys:    bson.D{{Key: "orderId", Value: 1}},
 			Options: options.Index().SetName("idx_orderId").SetSparse(true),
+		},
+		// Sparse: only tickets that already belong to an account are indexed, so the
+		// index grows as the ownership backfill runs. Mongo 4.2+ builds it without
+		// blocking reads or writes.
+		{
+			Keys:    bson.D{{Key: "accountId", Value: 1}},
+			Options: options.Index().SetName("idx_accountId").SetSparse(true),
 		},
 		// Sparse index for seating plan lookups — only present on seated tickets.
 		{
