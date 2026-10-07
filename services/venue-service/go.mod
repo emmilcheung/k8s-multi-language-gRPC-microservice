@@ -13,6 +13,7 @@ require (
 	github.com/labstack/echo-contrib v0.50.1
 	github.com/labstack/echo/v4 v4.15.3
 	github.com/org/ticketing/libs/grpc-stubs/go v0.0.0
+	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.17.0
 	github.com/sony/gobreaker/v2 v2.3.0
 	github.com/stretchr/testify v1.11.1
@@ -67,6 +68,7 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/klauspost/compress v1.18.2 // indirect
+	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/labstack/gommon v0.5.0 // indirect
 	github.com/lib/pq v1.10.9 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
@@ -87,7 +89,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
-	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.19.2 // indirect
