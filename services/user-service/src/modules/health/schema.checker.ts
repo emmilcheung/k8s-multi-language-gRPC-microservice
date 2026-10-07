@@ -12,6 +12,7 @@ const REQUIRED_TABLES = [
   "membership_event_scopes",
   "invitations",
   "venue_claims",
+  "audit_log",
 ] as const;
 
 @Injectable()

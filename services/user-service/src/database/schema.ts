@@ -1,6 +1,7 @@
 import {
   boolean,
   index,
+  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -160,6 +161,23 @@ export const venueClaims = pgTable(
       .defaultNow(),
   },
   (t) => [index("venue_claims_venue_idx").on(t.venueId)],
+);
+
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    actorUserId: text("actor_user_id").notNull(),
+    actorAccountId: text("actor_account_id"),
+    action: text("action").notNull(),
+    resource: text("resource").notNull(),
+    before: jsonb("before").$type<Record<string, unknown>>(),
+    after: jsonb("after").$type<Record<string, unknown>>(),
+    reason: text("reason"),
+    traceId: text("trace_id"),
+  },
+  (t) => [index("audit_log_resource_at_idx").on(t.resource, t.at.desc())],
 );
 
 export type OrganizerAccount = typeof organizerAccounts.$inferSelect;
