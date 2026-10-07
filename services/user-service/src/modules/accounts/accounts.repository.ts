@@ -11,6 +11,7 @@ import { DRIZZLE_DB, type DrizzleDB } from "../../database/database.module";
 import { Roles } from "./roles";
 
 const ACCOUNT = "ORGANIZER_ACCOUNT" as const;
+const VENUE = "VENUE" as const;
 
 @Injectable()
 export class AccountsRepository {
@@ -43,11 +44,49 @@ export class AccountsRepository {
     return membership;
   }
 
+  async findVenueMembership(
+    venueId: string,
+    userId: string,
+  ): Promise<Membership | undefined> {
+    const [membership] = await this.db
+      .select()
+      .from(memberships)
+      .where(
+        and(
+          eq(memberships.userId, userId),
+          eq(memberships.resourceType, VENUE),
+          eq(memberships.resourceId, venueId),
+        ),
+      )
+      .limit(1);
+    return membership;
+  }
+
   listMembershipsForUser(userId: string): Promise<Membership[]> {
     return this.db
       .select()
       .from(memberships)
       .where(eq(memberships.userId, userId));
+  }
+
+  async listAccountsForUser(
+    userId: string,
+  ): Promise<{ account: OrganizerAccount; role: Roles }[]> {
+    const rows = await this.db
+      .select({ account: organizerAccounts, role: memberships.role })
+      .from(memberships)
+      .innerJoin(
+        organizerAccounts,
+        eq(sql`${memberships.resourceId}`, sql`${organizerAccounts.id}::text`),
+      )
+      .where(
+        and(
+          eq(memberships.userId, userId),
+          eq(memberships.resourceType, ACCOUNT),
+        ),
+      )
+      .orderBy(organizerAccounts.createdAt, organizerAccounts.id);
+    return rows;
   }
 
   async listEventScopes(membershipId: string): Promise<string[]> {

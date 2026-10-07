@@ -9,6 +9,12 @@ import type { Membership, OrganizerAccount } from "../../database/schema";
 import { AccountsRepository } from "./accounts.repository";
 import { Roles, isAccountRole, roleRank } from "./roles";
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isUuid(value: string): boolean {
+  return UUID.test(value);
+}
+
 const DEFAULT_PERSONAL_ACCOUNT_NAME = "Personal account";
 
 @Injectable()
@@ -33,6 +39,21 @@ export class AccountsService {
       displayName?.trim() || DEFAULT_PERSONAL_ACCOUNT_NAME,
     );
     return account.id;
+  }
+
+  async getAccount(accountId: string): Promise<OrganizerAccount> {
+    if (!isUuid(accountId)) {
+      throw new BadRequestException("account_id is not a valid id");
+    }
+    const account = await this.repository.getAccount(accountId);
+    if (!account) throw new NotFoundException("Account not found");
+    return account;
+  }
+
+  listAccountsForUser(
+    userId: string,
+  ): Promise<{ account: OrganizerAccount; role: Roles }[]> {
+    return this.repository.listAccountsForUser(userId);
   }
 
   addMember(
