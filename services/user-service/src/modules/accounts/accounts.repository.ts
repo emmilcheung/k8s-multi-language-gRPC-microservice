@@ -1,14 +1,18 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, count, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 import {
+  type Invitation,
   type Membership,
   type OrganizerAccount,
+  type VenueClaim,
+  invitations,
   membershipEventScopes,
   memberships,
   organizerAccounts,
   userProfiles,
+  venueClaims,
 } from "../../database/schema";
-import { record } from "../audit/audit";
+import { type AuditEntry, record } from "../audit/audit";
 import { DRIZZLE_DB, type DrizzleDB } from "../../database/database.module";
 import { Roles } from "./roles";
 
@@ -27,6 +31,11 @@ export class AccountsRepository {
       .where(eq(organizerAccounts.id, accountId))
       .limit(1);
     return account;
+  }
+
+  // Joins the open transaction when called on a repository from withLockedAccount.
+  audit(entry: AuditEntry): Promise<void> {
+    return record(this.db, entry);
   }
 
   async findMembership(
@@ -181,6 +190,13 @@ export class AccountsRepository {
         role: Roles.OWNER,
         createdBy: input.createdBy,
       });
+      await record(tx, {
+        actorUserId: input.createdBy,
+        actorAccountId: account.id,
+        action: "account.created",
+        resource: `account:${account.id}`,
+        after: { name: account.name },
+      });
       return account;
     });
   }
@@ -218,6 +234,215 @@ export class AccountsRepository {
         .where(eq(organizerAccounts.personalForUserId, userId))
         .limit(1);
       return existing;
+    });
+  }
+
+  async listMembers(
+    accountId: string,
+  ): Promise<{ membership: Membership; eventIds: string[] }[]> {
+    const members = await this.db
+      .select()
+      .from(memberships)
+      .where(
+        and(
+          eq(memberships.resourceType, ACCOUNT),
+          eq(memberships.resourceId, accountId),
+        ),
+      )
+      .orderBy(memberships.createdAt, memberships.id);
+    if (members.length === 0) return [];
+    const scopes = await this.db
+      .select()
+      .from(membershipEventScopes)
+      .where(
+        inArray(
+          membershipEventScopes.membershipId,
+          members.map((m) => m.id),
+        ),
+      );
+    return members.map((membership) => ({
+      membership,
+      eventIds: scopes
+        .filter((s) => s.membershipId === membership.id)
+        .map((s) => s.eventId),
+    }));
+  }
+
+  async setAccountStatus(
+    accountId: string,
+    status: "ACTIVE" | "SUSPENDED",
+  ): Promise<OrganizerAccount> {
+    const [account] = await this.db
+      .update(organizerAccounts)
+      .set({ status })
+      .where(eq(organizerAccounts.id, accountId))
+      .returning();
+    return account;
+  }
+
+  async insertInvitation(input: {
+    accountId: string;
+    email: string;
+    role: Roles;
+    tokenHash: string;
+    createdBy: string;
+  }): Promise<Invitation> {
+    const [invitation] = await this.db
+      .insert(invitations)
+      .values(input)
+      .returning();
+    return invitation;
+  }
+
+  listInvitationsCreatedBy(userId: string): Promise<Invitation[]> {
+    return this.db
+      .select()
+      .from(invitations)
+      .where(eq(invitations.createdBy, userId))
+      .orderBy(desc(invitations.createdAt), invitations.id);
+  }
+
+  // The invitation row is locked, so two people opening the same link cannot
+  // both get in. An overdue invitation is marked expired and left unused.
+  async acceptInvitation(
+    tokenHash: string,
+    userId: string,
+  ): Promise<
+    | { outcome: "ACCEPTED"; invitation: Invitation }
+    | { outcome: "NOT_FOUND" | "USED" | "EXPIRED" | "ALREADY_MEMBER" }
+  > {
+    return this.db.transaction(async (tx) => {
+      const [invitation] = await tx
+        .select()
+        .from(invitations)
+        .where(eq(invitations.tokenHash, tokenHash))
+        .for("update");
+      if (!invitation) return { outcome: "NOT_FOUND" as const };
+      if (invitation.status === "EXPIRED") {
+        return { outcome: "EXPIRED" as const };
+      }
+      if (invitation.status !== "PENDING") return { outcome: "USED" as const };
+      if (invitation.expiresAt.getTime() <= Date.now()) {
+        await tx
+          .update(invitations)
+          .set({ status: "EXPIRED" })
+          .where(eq(invitations.id, invitation.id));
+        return { outcome: "EXPIRED" as const };
+      }
+
+      const txRepo = new AccountsRepository(tx as unknown as DrizzleDB);
+      if (await txRepo.findMembership(invitation.accountId, userId)) {
+        return { outcome: "ALREADY_MEMBER" as const };
+      }
+      const membership = await txRepo.insertMembership({
+        accountId: invitation.accountId,
+        userId,
+        role: invitation.role as Roles,
+        createdBy: invitation.createdBy,
+      });
+      await tx
+        .update(invitations)
+        .set({ status: "ACCEPTED", acceptedBy: userId })
+        .where(eq(invitations.id, invitation.id));
+      await record(tx, {
+        actorUserId: userId,
+        actorAccountId: invitation.accountId,
+        action: "invitation.accepted",
+        resource: `account:${invitation.accountId}`,
+        after: {
+          invitationId: invitation.id,
+          membershipId: membership.id,
+          userId,
+          role: invitation.role,
+        },
+      });
+      return { outcome: "ACCEPTED" as const, invitation };
+    });
+  }
+
+  async insertVenueClaim(input: {
+    venueId: string;
+    claimantUserId: string;
+    claimantAccountId?: string;
+    evidenceText?: string;
+  }): Promise<VenueClaim> {
+    return this.db.transaction(async (tx) => {
+      const [claim] = await tx.insert(venueClaims).values(input).returning();
+      await record(tx, {
+        actorUserId: input.claimantUserId,
+        actorAccountId: input.claimantAccountId,
+        action: "venue_claim.submitted",
+        resource: `venue:${input.venueId}`,
+        after: { claimId: claim.id, status: claim.status },
+      });
+      return claim;
+    });
+  }
+
+  async findPendingClaim(
+    venueId: string,
+    claimantUserId: string,
+  ): Promise<VenueClaim | undefined> {
+    const [claim] = await this.db
+      .select()
+      .from(venueClaims)
+      .where(
+        and(
+          eq(venueClaims.venueId, venueId),
+          eq(venueClaims.claimantUserId, claimantUserId),
+          eq(venueClaims.status, "PENDING"),
+        ),
+      )
+      .limit(1);
+    return claim;
+  }
+
+  // Approval and the venue manager membership commit together.
+  async decideVenueClaim(input: {
+    claimId: string;
+    approve: boolean;
+    decidedBy: string;
+    reason: string;
+  }): Promise<
+    | { outcome: "DECIDED"; claim: VenueClaim }
+    | { outcome: "NOT_FOUND" | "DECIDED_ALREADY" }
+  > {
+    return this.db.transaction(async (tx) => {
+      const [claim] = await tx
+        .select()
+        .from(venueClaims)
+        .where(eq(venueClaims.id, input.claimId))
+        .for("update");
+      if (!claim) return { outcome: "NOT_FOUND" as const };
+      if (claim.status !== "PENDING") {
+        return { outcome: "DECIDED_ALREADY" as const };
+      }
+      const status = input.approve
+        ? ("APPROVED" as const)
+        : ("REJECTED" as const);
+      const [decided] = await tx
+        .update(venueClaims)
+        .set({ status, decidedBy: input.decidedBy, reason: input.reason })
+        .where(eq(venueClaims.id, claim.id))
+        .returning();
+      if (input.approve) {
+        await new AccountsRepository(
+          tx as unknown as DrizzleDB,
+        ).ensureVenueManager(claim.claimantUserId, claim.venueId);
+      }
+      await record(tx, {
+        actorUserId: input.decidedBy,
+        action: "venue_claim.decided",
+        resource: `venue:${claim.venueId}`,
+        before: { status: claim.status },
+        after: {
+          claimId: claim.id,
+          status,
+          claimantUserId: claim.claimantUserId,
+        },
+        reason: input.reason,
+      });
+      return { outcome: "DECIDED" as const, claim: decided };
     });
   }
 

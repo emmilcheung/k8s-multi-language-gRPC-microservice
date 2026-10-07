@@ -181,6 +181,8 @@ export const auditLog = pgTable(
 );
 
 export type OrganizerAccount = typeof organizerAccounts.$inferSelect;
+export type Invitation = typeof invitations.$inferSelect;
+export type VenueClaim = typeof venueClaims.$inferSelect;
 export type Membership = typeof memberships.$inferSelect;
 export type UserProfile = typeof userProfiles.$inferSelect;
 export type UserPreferences = typeof userPreferences.$inferSelect;

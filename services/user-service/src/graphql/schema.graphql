@@ -1,5 +1,8 @@
 extend schema
-  @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@tag", "@external"])
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.9"
+    import: ["@key", "@tag", "@external", "@shareable"]
+  )
 
 type User @key(fields: "id") {
   id: ID! @external
@@ -51,8 +54,197 @@ input BillingAddressInput {
   country: String!
 }
 
+enum AccountRole {
+  OWNER
+  ADMIN
+  EVENT_MANAGER
+  FINANCE
+  DOOR_STAFF
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+enum VenueClaimStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum VenueClaimDecision {
+  APPROVE
+  REJECT
+}
+
+# Returned by every accounts mutation instead of throwing. `code` is one of
+# NOT_ALLOWED, NOT_FOUND, INVALID, CONFLICT or INTERNAL.
+type UserError @shareable {
+  field: [String!]
+  message: String!
+  code: String!
+}
+
+type Account {
+  id: ID!
+  name: String!
+  contactEmail: String
+  status: AccountStatus!
+}
+
+type MyAccount {
+  account: Account!
+  role: AccountRole!
+}
+
+type AccountMember {
+  userId: ID!
+  role: AccountRole!
+  # Door staff only: the events they are limited to. Empty means every event.
+  eventIds: [ID!]!
+  joinedAt: String!
+}
+
+type Invitation {
+  id: ID!
+  accountId: ID!
+  email: String!
+  role: AccountRole!
+  status: InvitationStatus!
+  expiresAt: String!
+}
+
+type VenueClaim {
+  id: ID!
+  venueId: ID!
+  accountId: ID
+  status: VenueClaimStatus!
+  reason: String
+}
+
+type Query {
+  # Accounts the signed-in user belongs to.
+  myAccounts: [MyAccount!]!
+  # Null unless the caller is a member (or platform staff).
+  account(id: ID!): Account
+  # Team list; needs permission to manage the team.
+  accountMembers(accountId: ID!): [AccountMember!]!
+  # Invitations the signed-in user has sent, newest first.
+  myInvitations: [Invitation!]!
+}
+
+input CreateOrganizerAccountInput {
+  name: String!
+  contactEmail: String
+}
+
+input InviteMemberInput {
+  accountId: ID!
+  email: String!
+  role: AccountRole!
+}
+
+input ChangeMemberRoleInput {
+  accountId: ID!
+  userId: ID!
+  role: AccountRole!
+}
+
+input RemoveMemberInput {
+  accountId: ID!
+  userId: ID!
+}
+
+input SetDoorStaffEventsInput {
+  accountId: ID!
+  userId: ID!
+  eventIds: [ID!]!
+}
+
+input SubmitVenueClaimInput {
+  venueId: ID!
+  accountId: ID
+  evidenceText: String
+}
+
+input DecideVenueClaimInput {
+  claimId: ID!
+  decision: VenueClaimDecision!
+  reason: String!
+}
+
+input SuspendAccountInput {
+  accountId: ID!
+  reason: String!
+}
+
+type CreateOrganizerAccountPayload {
+  account: Account
+  userErrors: [UserError!]!
+}
+
+type InviteMemberPayload {
+  invitation: Invitation
+  # Shown once to the inviter, who passes it on; only its hash is stored.
+  acceptLink: String
+  userErrors: [UserError!]!
+}
+
+type AcceptInvitationPayload {
+  account: Account
+  role: AccountRole
+  userErrors: [UserError!]!
+}
+
+type MemberPayload {
+  member: AccountMember
+  userErrors: [UserError!]!
+}
+
+type RemoveMemberPayload {
+  removed: Boolean!
+  userErrors: [UserError!]!
+}
+
+type SubmitVenueClaimPayload {
+  claim: VenueClaim
+  userErrors: [UserError!]!
+}
+
+type DecideVenueClaimPayload {
+  claim: VenueClaim
+  userErrors: [UserError!]!
+}
+
+type SuspendAccountPayload {
+  account: Account
+  userErrors: [UserError!]!
+}
+
 type Mutation {
   updateProfile(input: UpdateProfileInput!): UserProfile!
   updatePreferences(input: UpdatePreferencesInput!): UserPreferences!
   updateBillingAddress(input: BillingAddressInput!): BillingAddress!
+
+  createOrganizerAccount(
+    input: CreateOrganizerAccountInput!
+  ): CreateOrganizerAccountPayload!
+  inviteMember(input: InviteMemberInput!): InviteMemberPayload!
+  acceptInvitation(token: String!): AcceptInvitationPayload!
+  changeMemberRole(input: ChangeMemberRoleInput!): MemberPayload!
+  removeMember(input: RemoveMemberInput!): RemoveMemberPayload!
+  setDoorStaffEvents(input: SetDoorStaffEventsInput!): MemberPayload!
+  submitVenueClaim(input: SubmitVenueClaimInput!): SubmitVenueClaimPayload!
+  # Platform admin only.
+  decideVenueClaim(input: DecideVenueClaimInput!): DecideVenueClaimPayload!
+  # Platform admin only.
+  suspendAccount(input: SuspendAccountInput!): SuspendAccountPayload!
 }

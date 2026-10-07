@@ -9,6 +9,8 @@ import {
   UserSettingsMutationResolver,
   UserProfileResolver,
 } from "./user.resolver";
+import { AccountsResolver } from "./accounts.resolver";
+import { AccountsModule } from "../modules/accounts/accounts.module";
 import { UserLoader } from "./users.loader";
 import { UserSettingsModule } from "../modules/user-settings/user-settings.module";
 import { SecurityModule } from "../common/security/security.module";
@@ -22,12 +24,14 @@ import { UserIdSigGuard } from "./guards/user-id-sig.guard";
       playground: false,
     }),
     UserSettingsModule,
+    AccountsModule,
     SecurityModule,
   ],
   providers: [
     UserResolver,
     UserSettingsMutationResolver,
     UserProfileResolver,
+    AccountsResolver,
     UserLoader,
     UserIdSigGuard,
   ],

@@ -29,7 +29,12 @@ class FakeRepository {
   }[] = [];
   rows: Row[] = [];
   scopes = new Map<string, string[]>();
+  audited: { action: string }[] = [];
   private seq = 0;
+
+  async audit(entry: { action: string }) {
+    this.audited.push(entry);
+  }
 
   private nextId(prefix: string) {
     this.seq += 1;

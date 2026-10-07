@@ -56,6 +56,7 @@ Dockerfile                  ← multi-stage build (context = repo root, ships th
 - `GET  /api/user-settings/billing-address`
 - `PUT  /api/user-settings/billing-address`
 - gRPC `acme.accounts.v1.AccountsService` on `GRPC_PORT` (`proto/accounts/v1/accounts.proto`): `CheckPermission`, `ListMyAccounts`, `GetAccount`, `EnsurePersonalAccount`, plus the standard `grpc.health.v1.Health/Check`. Callers: ticket, venue, attendance and order service. The permission table lives only in `src/modules/accounts/permissions.ts`.
+- GraphQL accounts API (`src/graphql/accounts.resolver.ts`): `myAccounts`, `account`, `accountMembers`, `myInvitations`; mutations `createOrganizerAccount`, `inviteMember`, `acceptInvitation`, `changeMemberRole`, `removeMember`, `setDoorStaffEvents`, `submitVenueClaim`, `decideVenueClaim`, `suspendAccount` (the last two need a platform admin role verified through `X-User-Roles-Sig`). Every mutation returns `userErrors`; `PUBLIC_WEB_URL` (optional) prefixes the invitation link.
 - `GET  /healthz/live`
 - `GET  /healthz/ready`
 

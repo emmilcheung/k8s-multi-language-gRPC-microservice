@@ -20,6 +20,8 @@ export const envSchema = z
     DATABASE_URL: z.string(),
     DB_POOL_MAX: z.coerce.number().int().positive().default(12),
     X_USER_ID_SIGNING_KEY: z.string().optional().default(""),
+    // Origin used to build invitation links; unset gives a path-only link.
+    PUBLIC_WEB_URL: z.string().url().optional(),
   })
   .superRefine((config, ctx) => {
     if (config.GRPC_PORT === config.PORT) {
