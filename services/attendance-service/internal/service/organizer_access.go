@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"time"
 
 	"github.com/acme/attendance-service/internal/audit"
 	"github.com/acme/attendance-service/internal/authz"
@@ -42,6 +43,10 @@ var (
 	// ErrTicketLookupUnavailable means ticket-service could not say which
 	// account owns the event while enforcement needed the answer.
 	ErrTicketLookupUnavailable = errors.New("ticket owner lookup unavailable")
+	// ErrScanTokenUnverifiable means enforcement could not trust the event a
+	// scan token names (bad signature or malformed), so the scanner cannot be
+	// scoped. The caller answers like an invalid signature and records nothing.
+	ErrScanTokenUnverifiable = errors.New("scan token cannot be verified")
 )
 
 // Authorizer is the permission check organizer and staff operations go through.
@@ -61,9 +66,10 @@ type TicketOwnershipLookup interface {
 	LookupTicketOwnership(ctx context.Context, ticketID string) (TicketOwner, error)
 }
 
-// TokenVerifier reads the event out of a signed admission token.
+// TokenVerifier reads the event out of a signed admission token. VerifySigned
+// returns the claims whenever the signature is good, expired or not.
 type TokenVerifier interface {
-	Verify(token string) (*qr.Claims, error)
+	VerifySigned(token string) (*qr.Claims, error)
 }
 
 // TxRunner runs a function inside one database transaction.
@@ -190,22 +196,43 @@ func (a *OrganizerAccess) AuthorizeEvent(ctx context.Context, caller security.Tr
 	return "", nil
 }
 
+// logModeBudget bounds the log-mode comparison on validateScan, which made no
+// remote call before the check existed: a slow or down service must not stall scans.
+const logModeBudget = 300 * time.Millisecond
+
 // AuthorizeScanToken checks attendance.scan for the event a signed admission
 // token names. validateScan had no check before, so outside enforcement the
-// answer is only compared and logged. A token that does not verify names no
-// event: enforcement refuses it rather than let a non-member probe tokens.
+// answer is only compared and logged, and in logging mode only within
+// logModeBudget. A token with a good signature names a trustworthy event even
+// when expired, so it is checked and the caller then validates as before. A
+// token whose signature fails names no event: enforcement returns
+// ErrScanTokenUnverifiable rather than let a non-member probe tokens.
 func (a *OrganizerAccess) AuthorizeScanToken(ctx context.Context, caller security.TrustedCaller, acting, token string) (string, error) {
 	var claims *qr.Claims
 	if a.tokens != nil {
-		claims, _ = a.tokens.Verify(token)
+		claims, _ = a.tokens.VerifySigned(token)
 	}
 	if claims == nil {
 		if a.Enforcing() {
-			return "", ErrForbidden
+			return "", ErrScanTokenUnverifiable
 		}
 		return "", nil
 	}
-	return a.AuthorizeEvent(ctx, caller, acting, PermAttendanceScan, claims.EventID, false)
+	if !a.logging() {
+		return a.AuthorizeEvent(ctx, caller, acting, PermAttendanceScan, claims.EventID, false)
+	}
+	// The goroutine lets the bound hold even if a lookup ignores its context.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = a.AuthorizeEvent(ctx, caller, acting, PermAttendanceScan, claims.EventID, false)
+	}()
+	select {
+	case <-done:
+	case <-time.After(logModeBudget):
+		a.log.Warn("authz comparison for validateScan timed out", zap.String("eventId", claims.EventID))
+	}
+	return "", nil
 }
 
 // decide answers one permission question. legacyAllowed is what the old rule
@@ -290,8 +317,12 @@ func (a *OrganizerAccess) SavePolicy(ctx context.Context, svc AttendanceService,
 	if a == nil {
 		return svc.UpsertAttendancePolicy(ctx, policy)
 	}
+	entry := PolicyEditEntry(ctx, caller.UserID, account, before, policy)
+	if len(entry.After) == 0 {
+		return svc.UpsertAttendancePolicy(ctx, policy)
+	}
 	return a.Audited(ctx,
-		func() audit.Entry { return PolicyEditEntry(ctx, caller.UserID, account, before, policy) },
+		func() audit.Entry { return entry },
 		func(ctx context.Context) error { return svc.UpsertAttendancePolicy(ctx, policy) })
 }
 

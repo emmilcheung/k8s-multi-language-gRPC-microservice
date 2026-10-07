@@ -423,15 +423,19 @@ test(
 );
 
 // Door staff limited to one event can scan that event and not another.
-// Skipped: giving a user a door-staff membership needs the accounts
-// membership mutation (invite/add member with a scoped DOOR_STAFF role),
-// which the accounts API does not expose yet. Not run; enable once it exists.
-test.skip(
+// Not implemented: giving a user a door-staff membership needs the accounts
+// membership mutation (add a member with a DOOR_STAFF role scoped to one
+// event), which the accounts API does not expose yet. Never run.
+test.fixme(
   "door staff limited to one event can check in at that event but not at another",
   async () => {
-    // Plan: organizer creates two events; a second user is added as
-    // DOOR_STAFF scoped to event one via the accounts membership mutation;
-    // that user checks in a buyer at event one (admitted) and gets a
-    // forbidden answer at event two.
+    // 1. Organizer signs in and creates two events (event one, event two).
+    // 2. A second user is added as DOOR_STAFF scoped to event one through the
+    //    accounts membership mutation.
+    // 3. A buyer buys a ticket for event one.
+    // 4. The door-staff user opens /scan?eventId=<event one> and checks the
+    //    buyer in: admitted.
+    // 5. The door-staff user opens /scan?eventId=<event two>: forbidden.
+    throw new Error("not implemented");
   }
 );

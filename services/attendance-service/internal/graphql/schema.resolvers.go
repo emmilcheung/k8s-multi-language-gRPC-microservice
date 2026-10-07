@@ -68,6 +68,12 @@ func (r *mutationResolver) ValidateScan(ctx context.Context, token string) (*Sca
 		return nil, fmt.Errorf("unauthorized: scanner identity required")
 	}
 	if err := r.authorizeScanToken(ctx, scannerUserID, token); err != nil {
+		if errors.Is(err, service.ErrScanTokenUnverifiable) {
+			// Same answer the scanner gave for a bad signature, but nothing is
+			// recorded: the caller cannot be scoped to an event.
+			reason := string(service.ScanResultInvalidSignature)
+			return &ScanValidationResult{Valid: false, Reason: &reason}, nil
+		}
 		return nil, err
 	}
 	outcome, err := r.ScanSvc.Validate(ctx, token, "", scannerUserID, "graphql", nil)

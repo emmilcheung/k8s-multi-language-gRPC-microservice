@@ -64,7 +64,9 @@ func (accountTickets) LookupTicketOwnership(_ context.Context, id string) (servi
 
 type tokenEvents map[string]string
 
-func (t tokenEvents) Verify(token string) (*qr.Claims, error) {
+// VerifySigned answers like the real verifier: unknown tokens fail the
+// signature; expired tokens still carry their event.
+func (t tokenEvents) VerifySigned(token string) (*qr.Claims, error) {
 	if e, ok := t[token]; ok {
 		return &qr.Claims{EventID: e}, nil
 	}
@@ -83,7 +85,7 @@ func (c *countingScanSvc) Validate(ctx context.Context, token, eventID, scanner,
 
 func enforcingAccess(a service.Authorizer) *service.OrganizerAccess {
 	return service.NewOrganizerAccess(a, authz.ModeOn, accountTickets{},
-		tokenEvents{"token-one": eventOne, "token-two": eventTwo}, nil, nil, zap.NewNop())
+		tokenEvents{"token-one": eventOne, "token-two": eventTwo, "token-expired-one": eventOne}, nil, nil, zap.NewNop())
 }
 
 func graphqlCtx(user string) context.Context {
@@ -127,6 +129,69 @@ func TestGraphQL_PermissionServiceFaultsAreHiddenFromTheClient(t *testing.T) {
 	_, err = r.Mutation().ValidateScan(graphqlCtx("door"), "token-one")
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "secret detail")
+}
+
+func TestGraphQL_ValidateScan_ATokenWhoseSignatureFailsGetsTheOldInvalidAnswerAndNoScanRow(t *testing.T) {
+	scan := &countingScanSvc{}
+	r := &gqlgraph.Resolver{
+		Svc: service.NewAttendanceService(nil, nil, nil), ScanSvc: scan,
+		Access: enforcingAccess(doorStaffAuthz{doorEvents: map[string][]string{"door": {eventOne}}}),
+	}
+
+	got, err := r.Mutation().ValidateScan(graphqlCtx("door"), "forged-token")
+
+	require.NoError(t, err, "same response shape the old code gave for a bad signature")
+	assert.False(t, got.Valid)
+	require.NotNil(t, got.Reason)
+	assert.Equal(t, string(service.ScanResultInvalidSignature), *got.Reason)
+	assert.Zero(t, scan.validated, "the caller cannot be scoped, so no scan row is written")
+}
+
+func TestGraphQL_ValidateScan_AnExpiredButSignedTokenStillReachesValidateForDoorStaff(t *testing.T) {
+	scan := &countingScanSvc{}
+	r := &gqlgraph.Resolver{
+		Svc: service.NewAttendanceService(nil, nil, nil), ScanSvc: scan,
+		Access: enforcingAccess(doorStaffAuthz{doorEvents: map[string][]string{"door": {eventOne}}}),
+	}
+
+	_, err := r.Mutation().ValidateScan(graphqlCtx("door"), "token-expired-one")
+	require.NoError(t, err)
+	assert.Equal(t, 1, scan.validated, "the old valid:false answer and the recorded attempt are kept")
+
+	_, err = r.Mutation().ValidateScan(graphqlCtx("stranger"), "token-expired-one")
+	require.Error(t, err)
+	assert.Equal(t, 1, scan.validated)
+}
+
+type countingAuthz struct{ calls int }
+
+func (c *countingAuthz) Check(context.Context, security.TrustedCaller, string, authz.Scope) (authz.Decision, error) {
+	c.calls++
+	return authz.Decision{Allowed: true, Reason: authz.ReasonAllowed}, nil
+}
+
+func TestBuyerPassPathsNeverAskThePermissionService(t *testing.T) {
+	counter := &countingAuthz{}
+	access := enforcingAccess(counter)
+	svc := service.NewAttendanceService(&stubCredentialRepo{err: repository.ErrNotFound}, &stubPolicyRepo{}, &stubScanRepo{})
+
+	h := handler.NewAttendanceHandler(svc, zap.NewNop()).WithAccess(access)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/attendance/tickets/"+eventOne, nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+	c.SetParamNames("ticketId")
+	c.SetParamValues(eventOne)
+	c.Set(middleware.ContextKeyUserID, "buyer")
+	require.NoError(t, h.GetTicket(c))
+
+	r := &gqlgraph.Resolver{Svc: svc, ScanSvc: &stubScanService{}, Access: access}
+	ctx := graphqlCtx("buyer")
+	_, _ = r.Query().AdmissionPass(ctx, eventOne, nil)
+	_, _ = r.Mutation().TransferAdmissionCredential(ctx, gqlgraph.TransferAdmissionCredentialInput{CredentialID: "c", RecipientEmail: "a@b.co"})
+	_, _ = r.Mutation().RecallTransfer(ctx, "c")
+	_, _ = r.Mutation().AcceptTransfer(ctx, "p")
+
+	assert.Zero(t, counter.calls, "buyer pass paths are not organizer operations")
 }
 
 type errTest string

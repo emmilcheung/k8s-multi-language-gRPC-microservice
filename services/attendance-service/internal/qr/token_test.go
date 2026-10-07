@@ -158,3 +158,25 @@ func splitToken(token string) []string {
 	}
 	return []string{token[:idx], token[idx+1:]}
 }
+
+func TestVerifySigned_ShouldStillNameTheEvent_WhenTheTokenIsExpired(t *testing.T) {
+	g := qr.NewGenerator("test-key")
+	token, err := g.Generate(qr.Claims{EventID: "event-1", ExpiresAt: time.Now().Add(-time.Hour)})
+	require.NoError(t, err)
+
+	claims, err := g.VerifySigned(token)
+	require.NoError(t, err)
+	assert.Equal(t, "event-1", claims.EventID)
+
+	_, err = g.Verify(token)
+	assert.ErrorIs(t, err, qr.ErrTokenExpired, "Verify still rejects it")
+}
+
+func TestVerifySigned_ShouldRefuse_WhenTheSignatureFails(t *testing.T) {
+	g := qr.NewGenerator("test-key")
+	token, err := qr.NewGenerator("other-key").Generate(qr.Claims{EventID: "event-1", ExpiresAt: time.Now().Add(time.Hour)})
+	require.NoError(t, err)
+
+	_, err = g.VerifySigned(token)
+	assert.ErrorIs(t, err, qr.ErrTokenInvalid)
+}

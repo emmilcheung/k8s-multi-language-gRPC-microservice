@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/acme/attendance-service/internal/audit"
 	"github.com/acme/attendance-service/internal/authz"
@@ -89,7 +90,9 @@ func (f fakeTickets) LookupTicketOwnership(_ context.Context, id string) (Ticket
 
 type fakeTokens struct{ events map[string]string }
 
-func (f fakeTokens) Verify(token string) (*qr.Claims, error) {
+// VerifySigned returns claims for any token whose signature is good, expired
+// or not; "forged" and unknown tokens fail the signature.
+func (f fakeTokens) VerifySigned(token string) (*qr.Claims, error) {
 	e, ok := f.events[token]
 	if !ok {
 		return nil, qr.ErrTokenInvalid
@@ -102,7 +105,7 @@ func newAccess(mode authz.Mode, a *fakeAuthz) *OrganizerAccess {
 		eventX: {UserID: ownerID, AccountID: acctA},
 		eventY: {UserID: ownerID, AccountID: acctA},
 	}}
-	tokens := fakeTokens{events: map[string]string{"token-x": eventX, "token-y": eventY}}
+	tokens := fakeTokens{events: map[string]string{"token-x": eventX, "token-y": eventY, "token-expired-x": eventX}}
 	return NewOrganizerAccess(a, mode, tickets, tokens, nil, nil, zap.NewNop())
 }
 
@@ -153,11 +156,45 @@ func TestValidateScanIsDeniedForNonMembers(t *testing.T) {
 	assert.ErrorIs(t, err, ErrForbidden, "door staff limited to X cannot validate a pass for Y")
 }
 
-func TestValidateScanWithATokenThatNamesNoEventIsRefusedWhenEnforcing(t *testing.T) {
+func TestValidateScanWithATokenWhoseSignatureFailsIsRefusedWithoutAnyCheckWhenEnforcing(t *testing.T) {
 	a := &fakeAuthz{members: map[string]member{"mgr": staff("EVENT_MANAGER")}}
 	_, err := newAccess(authz.ModeOn, a).AuthorizeScanToken(context.Background(),
 		security.TrustedCaller{UserID: "mgr"}, acctA, "forged")
+	assert.ErrorIs(t, err, ErrScanTokenUnverifiable,
+		"no trustworthy event, so the caller cannot be scoped and no scan row may be written")
+	assert.Empty(t, a.asked)
+}
+
+func TestValidateScanWithAnExpiredButCorrectlySignedTokenIsCheckedOnItsEvent(t *testing.T) {
+	a := &fakeAuthz{members: map[string]member{"door": staff("DOOR_STAFF", eventX), "fin": staff("FINANCE")}}
+	access := newAccess(authz.ModeOn, a)
+
+	_, err := access.AuthorizeScanToken(context.Background(), security.TrustedCaller{UserID: "door"}, acctA, "token-expired-x")
+	require.NoError(t, err, "door staff for the event still reach Validate, which answers valid:false and records the attempt")
+
+	_, err = access.AuthorizeScanToken(context.Background(), security.TrustedCaller{UserID: "fin"}, acctA, "token-expired-x")
 	assert.ErrorIs(t, err, ErrForbidden)
+}
+
+type slowTickets struct{ delay time.Duration }
+
+// LookupTicketOwnership ignores the context on purpose: the bound must hold
+// even when a lookup does not honour its deadline.
+func (s slowTickets) LookupTicketOwnership(context.Context, string) (TicketOwner, error) {
+	time.Sleep(s.delay)
+	return TicketOwner{UserID: ownerID, AccountID: acctA}, nil
+}
+
+func TestLoggingModeNeverLetsASlowTicketServiceStallAScan(t *testing.T) {
+	a := &fakeAuthz{members: map[string]member{}}
+	access := NewOrganizerAccess(a, authz.ModeLog, slowTickets{delay: 3 * time.Second},
+		fakeTokens{events: map[string]string{"token-x": eventX}}, nil, nil, zap.NewNop())
+
+	start := time.Now()
+	_, err := access.AuthorizeScanToken(context.Background(), security.TrustedCaller{UserID: "stranger"}, "", "token-x")
+
+	require.NoError(t, err, "log mode never blocks a scan")
+	assert.Less(t, time.Since(start), time.Second, "the comparison is cut off at the short log-mode deadline")
 }
 
 func TestTheAttendancePolicyEditNeedsEventEdit(t *testing.T) {
@@ -322,4 +359,31 @@ func TestOffModeWritesNoAuditRow(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, called)
 	assert.False(t, tx.ran)
+}
+
+func TestAPolicySaveThatChangesNothingWritesNoAuditRow(t *testing.T) {
+	tx := &fakeTx{}
+	access := NewOrganizerAccess(&fakeAuthz{}, authz.ModeOn, nil, nil, tx, nil, zap.NewNop())
+	wrote := false
+	access.record = func(context.Context, pgx.Tx, audit.Entry) error { wrote = true; return nil }
+	repo := &savedPolicies{}
+	svc := NewAttendanceService(nil, repo, nil)
+
+	same := &repository.AttendancePolicy{EventID: eventX, RequireQRForEntry: true, AllowManualOverride: true}
+	err := access.SavePolicy(context.Background(), svc, security.TrustedCaller{UserID: "mgr"}, acctA, same, same)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, repo.saves, "the save itself still happens")
+	assert.False(t, wrote, "an edit that changed no field leaves nothing worth auditing")
+}
+
+type savedPolicies struct{ saves int }
+
+func (s *savedPolicies) FindByEventID(context.Context, string) (*repository.AttendancePolicy, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (s *savedPolicies) Upsert(context.Context, *repository.AttendancePolicy) error {
+	s.saves++
+	return nil
 }
