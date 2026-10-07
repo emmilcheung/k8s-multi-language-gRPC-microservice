@@ -4,6 +4,7 @@ import { executeQuery } from "@/lib/graphql/execute";
 import { AttendancePolicyDocument, TicketDetailDocument } from "@/lib/graphql/generated";
 import { readCurrentUserIdFromToken } from "@/lib/server-utils";
 import { ScannerClient } from "@/components/scanner-client";
+import { belongsToOrganizerAccount } from "@/lib/organizer-access";
 
 interface Props {
   searchParams: Promise<{ eventId?: string }>;
@@ -36,7 +37,7 @@ export default async function ScanPage({ searchParams }: Props) {
   if (!ticketData?.ticket) {
     notFound();
   }
-  if (ticketData.ticket.userId !== currentUserId) {
+  if (ticketData.ticket.userId !== currentUserId && !(await belongsToOrganizerAccount(cookie))) {
     notFound();
   }
   if (!policyData?.attendancePolicy?.requireQrForEntry) {

@@ -321,53 +321,47 @@ describe("OrganizerPage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders organizer stats and activity placeholder from owned tickets", async () => {
+  it("shows the selected organizer account's events, including ones a teammate created", async () => {
     executeQueryMock
       .mockResolvedValueOnce({
-        tickets: [
+        myAccounts: [
           {
-            id: "ticket-uuid-1",
-            title: "Concert Night",
-            userId: "owner-uuid",
-            priceDecimal: "49.99",
-            sold: 3,
-            available: 25,
-            ticketType: "GENERAL_ADMISSION",
-            event: {
-              title: "Phoenix",
-              startsAt: "2099-08-09T20:30:00Z",
-              venueName: "The Greek Theatre",
-              venueAddress: "2700 N Vermont Ave",
-            },
-          },
-          {
-            id: "ticket-uuid-2",
-            title: "Other Event",
-            userId: "someone-else",
-            priceDecimal: "20.00",
-            sold: 5,
-            available: 10,
-            ticketType: "GENERAL_ADMISSION",
-            event: {
-              title: "Ignore Me",
-              startsAt: "2099-08-12T20:30:00Z",
-              venueName: "Elsewhere",
-              venueAddress: "Hidden",
-            },
+            role: "EVENT_MANAGER",
+            account: { id: "3f1c6d0e-5b7a-4c1e-9a52-0a1b2c3d4e5f", name: "Acme", contactEmail: null, status: "ACTIVE" },
           },
         ],
       })
       .mockResolvedValueOnce({
-        ticket: { id: "ticket-uuid-1", title: "Concert Night", userId: "owner-uuid", sold: 3 },
+        eventsByAccount: {
+          edges: [
+            {
+              node: {
+                id: "ticket-uuid-1",
+                title: "Concert Night",
+                priceDecimal: "49.99",
+                sold: 3,
+                event: {
+                  title: "Phoenix",
+                  startsAt: "2099-08-09T20:30:00Z",
+                  venueName: "The Greek Theatre",
+                },
+              },
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        ticket: { id: "ticket-uuid-1", title: "Concert Night", userId: "teammate-uuid", sold: 3 },
         attendancePolicy: { eventId: "ticket-uuid-1", requireQrForEntry: true, allowManualOverride: false },
         attendanceSummary: { eventId: "ticket-uuid-1", totalAdmitted: 7, totalDenied: 2, totalCheckedIn: 7 },
         eventCheckins: [],
       });
-    cookieStoreMock.get.mockReturnValue({ value: makeJwt("owner-uuid") });
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("invitee-uuid") });
 
     const { default: OrganizerPage } = await import("@/app/organizer/page");
     render(await OrganizerPage());
 
+    expect(executeQueryMock.mock.calls[1][1]).toEqual({ accountId: "3f1c6d0e-5b7a-4c1e-9a52-0a1b2c3d4e5f" });
     expect(screen.getByText("$149.97")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /attendance monitor/i })).toHaveAttribute(
@@ -379,6 +373,19 @@ describe("OrganizerPage", () => {
       "/scan?eventId=ticket-uuid-1"
     );
     expect(screen.getByText(/live activity coming soon/i)).toBeInTheDocument();
+  });
+
+  it("offers to create an organizer account to someone who belongs to none", async () => {
+    executeQueryMock.mockResolvedValueOnce({ myAccounts: [] });
+    cookieStoreMock.get.mockReturnValue({ value: makeJwt("buyer-uuid") });
+
+    const { default: OrganizerPage } = await import("@/app/organizer/page");
+    render(await OrganizerPage());
+
+    expect(screen.getByRole("link", { name: /create organizer account/i })).toHaveAttribute(
+      "href",
+      "/organizer/new-account"
+    );
   });
 });
 

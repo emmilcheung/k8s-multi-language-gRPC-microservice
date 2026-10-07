@@ -1,0 +1,9 @@
+mutation RemoveMember($input: RemoveMemberInput!) {
+  removeMember(input: $input) {
+    removed
+    userErrors {
+      message
+      code
+    }
+  }
+}

@@ -18,6 +18,7 @@ import { TicketForm } from "@/components/ticket-form";
 import { SeatingPlanPreview } from "@/components/seating-plan-preview";
 import { updateTicket } from "@/app/actions/tickets";
 import { fetchPriceTiers } from "@/app/actions/venues";
+import { belongsToOrganizerAccount } from "@/lib/organizer-access";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -102,7 +103,7 @@ export default async function OrganizerEventEditPage({ params }: Props) {
     notFound();
   }
 
-  if (ticketData.userId !== currentUserId) {
+  if (ticketData.userId !== currentUserId && !(await belongsToOrganizerAccount(cookie))) {
     notFound();
   }
 

@@ -44,7 +44,11 @@ function resolveGraphqlUrl(): string {
  * Apollo GraphOS registry is provisioned — operations will then be sent as
  * sha256 hashes only and the router will enforce a safelist.
  */
-export function createGraphQLClient(cookie?: string, timeoutMs = 5_000): Client {
+export function createGraphQLClient(
+  cookie?: string,
+  timeoutMs = 5_000,
+  extraHeaders: Record<string, string> = {},
+): Client {
   return createClient({
     url: resolveGraphqlUrl(),
     preferGetMethod: false,
@@ -61,6 +65,7 @@ export function createGraphQLClient(cookie?: string, timeoutMs = 5_000): Client 
           const merged: Record<string, string> = {
             ...headersFromExisting,
             ...traceHeaders(),
+            ...extraHeaders,
             ...(cookie ? { Cookie: cookie } : {}),
           };
           // Wrap fetch so we can inject a per-attempt timeout.

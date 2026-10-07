@@ -1,0 +1,17 @@
+query AccountEvents($accountId: ID!) {
+  eventsByAccount(accountId: $accountId, first: 50) {
+    edges {
+      node {
+        id
+        title
+        priceDecimal
+        sold
+        event {
+          title
+          startsAt
+          venueName
+        }
+      }
+    }
+  }
+}

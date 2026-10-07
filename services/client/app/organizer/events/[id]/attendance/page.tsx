@@ -11,6 +11,7 @@ import { executeQuery } from "@/lib/graphql/execute";
 import { AttendancePageDocument, TicketDetailDocument, UserLookupDocument } from "@/lib/graphql/generated";
 import { readCurrentUserIdFromToken } from "@/lib/server-utils";
 import type { AttendanceCheckInItem } from "@/lib/types";
+import { belongsToOrganizerAccount } from "@/lib/organizer-access";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -36,7 +37,7 @@ export default async function OrganizerAttendancePage({ params }: Props) {
   ]);
 
   const ticket = attendanceData.ticket;
-  if (!ticket || ticket.userId !== currentUserId) {
+  if (!ticket || (ticket.userId !== currentUserId && !(await belongsToOrganizerAccount(cookie)))) {
     notFound();
   }
 

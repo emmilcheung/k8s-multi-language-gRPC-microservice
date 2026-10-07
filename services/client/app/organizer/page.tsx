@@ -7,8 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { executeQuery } from "@/lib/graphql/execute";
-import { AttendancePageDocument, OrganizerTicketsDocument } from "@/lib/graphql/generated";
-import { readCurrentUserIdFromToken } from "@/lib/server-utils";
+import { AccountEventsDocument, AttendancePageDocument, MyAccountsDocument } from "@/lib/graphql/generated";
+import { readSelectedAccountId, resolveSelectedAccountId } from "@/lib/organizer-account";
 import { cn } from "@/lib/utils";
 
 type OrganizerEventRow = {
@@ -42,14 +42,14 @@ function grossForRow(row: OrganizerEventRow): number {
   return Math.round(parseFloat(row.priceDecimal) * 100) * row.sold;
 }
 
-async function getOrganizerRows(cookie: string, currentUserId: string): Promise<OrganizerEventRow[]> {
-  const data = await executeQuery(OrganizerTicketsDocument, {}, { cookie });
-  const ownedTickets = data.tickets.filter(
-    (ticket) => ticket.userId === currentUserId && ticket.event?.startsAt
-  );
+async function getOrganizerRows(cookie: string, accountId: string): Promise<OrganizerEventRow[]> {
+  const data = await executeQuery(AccountEventsDocument, { accountId }, { cookie });
+  const events = data.eventsByAccount.edges
+    .map((edge) => edge.node)
+    .filter((ticket) => ticket.event?.startsAt);
 
   const rows = await Promise.all(
-    ownedTickets.map(async (ticket) => {
+    events.map(async (ticket) => {
       const attendance = await executeQuery(AttendancePageDocument, { id: ticket.id }, { cookie });
 
       return {
@@ -75,12 +75,30 @@ export default async function OrganizerPage() {
     redirect("/auth/signin");
   }
 
-  const currentUserId = readCurrentUserIdFromToken(token);
-  if (!currentUserId) {
-    redirect("/auth/signin");
+  const { myAccounts } = await executeQuery(MyAccountsDocument, {}, { cookie: cookieStore.toString() });
+  const accountId = resolveSelectedAccountId(
+    myAccounts.map((m) => m.account.id),
+    await readSelectedAccountId()
+  );
+  if (!accountId) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Organizer dashboard</CardTitle>
+          <CardDescription>
+            Create an organizer account to sell tickets, or accept an invitation to join a team.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Link href="/organizer/new-account" className={buttonVariants({ size: "sm" })}>
+            Create organizer account
+          </Link>
+        </CardContent>
+      </Card>
+    );
   }
 
-  const rows = await getOrganizerRows(cookieStore.toString(), currentUserId);
+  const rows = await getOrganizerRows(cookieStore.toString(), accountId);
   const now = getCurrentTime();
   const activeRows = rows.filter((row) => new Date(row.startsAt).getTime() >= now);
   const grossSales = rows.reduce((sum, row) => sum + grossForRow(row), 0);
@@ -92,7 +110,7 @@ export default async function OrganizerPage() {
       <Card>
         <CardHeader>
           <CardTitle>Organizer dashboard</CardTitle>
-          <CardDescription>No owned events were found for this account yet.</CardDescription>
+          <CardDescription>This organizer account has no events yet.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-3">
           <Link href="/tickets/new" className={buttonVariants({ size: "sm" })}>

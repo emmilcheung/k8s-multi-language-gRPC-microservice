@@ -1,0 +1,12 @@
+mutation ChangeMemberRole($input: ChangeMemberRoleInput!) {
+  changeMemberRole(input: $input) {
+    member {
+      userId
+      role
+    }
+    userErrors {
+      message
+      code
+    }
+  }
+}

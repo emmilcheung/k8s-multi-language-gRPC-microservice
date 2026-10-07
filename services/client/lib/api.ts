@@ -6,6 +6,7 @@
 import { cookies } from "next/headers";
 import { traceHeaders } from "@/lib/tracing";
 import { ApiError } from "@/lib/api-error";
+import { organizerAccountHeaders } from "@/lib/organizer-account";
 
 // Paths whose responses are safe to cache via ISR (non-user-specific, read-only).
 // All other paths use cache:"no-store" to prevent stale user-specific data.
@@ -68,6 +69,7 @@ export async function serverApi<T = unknown>(
       : (options.headers ?? {});
 
   const canRetry = isRetryableReadMethod(options.method);
+  const accountHeaders = await organizerAccountHeaders();
 
   for (let attempt = 0; attempt <= READ_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
@@ -77,6 +79,7 @@ export async function serverApi<T = unknown>(
         headers: {
           "Content-Type": "application/json",
           ...traceHeaders(),
+          ...accountHeaders,
           ...(token ? { Cookie: `token=${token}` } : {}),
           ...headers,
         },

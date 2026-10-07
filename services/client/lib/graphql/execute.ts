@@ -2,6 +2,7 @@ import type { TypedDocumentNode } from "@graphql-typed-document-node/core";
 import type { AnyVariables, OperationContext } from "urql";
 import { createGraphQLClient, toApiError } from "@/lib/graphql-client";
 import { getValidAccessToken } from "@/lib/server-utils";
+import { organizerAccountHeaders } from "@/lib/organizer-account";
 import { ACCESS_TOKEN_COOKIE } from "@/lib/session-cookies";
 
 interface ExecuteOptions {
@@ -31,7 +32,7 @@ export async function executeQuery<TData, TVariables extends AnyVariables>(
   options: ExecuteOptions = {},
 ): Promise<TData> {
   const cookie = await resolveCookie(options.cookie);
-  const client = createGraphQLClient(cookie, options.timeoutMs);
+  const client = createGraphQLClient(cookie, options.timeoutMs, await organizerAccountHeaders());
   const context: Partial<OperationContext> = {
     requestPolicy: "network-only",
   };
@@ -62,7 +63,7 @@ export async function executeMutation<TData, TVariables extends AnyVariables>(
   options: ExecuteOptions = {},
 ): Promise<TData> {
   const cookie = await resolveCookie(options.cookie);
-  const client = createGraphQLClient(cookie, options.timeoutMs);
+  const client = createGraphQLClient(cookie, options.timeoutMs, await organizerAccountHeaders());
   const result = await client.mutation(document, variables).toPromise();
   if (result.error) throw toApiError(result.error);
   if (result.data === undefined) {

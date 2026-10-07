@@ -1,0 +1,14 @@
+mutation InviteMember($input: InviteMemberInput!) {
+  inviteMember(input: $input) {
+    acceptLink
+    invitation {
+      id
+      email
+      role
+    }
+    userErrors {
+      message
+      code
+    }
+  }
+}

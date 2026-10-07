@@ -1,0 +1,10 @@
+query MyInvitations {
+  myInvitations {
+    id
+    accountId
+    email
+    role
+    status
+    expiresAt
+  }
+}

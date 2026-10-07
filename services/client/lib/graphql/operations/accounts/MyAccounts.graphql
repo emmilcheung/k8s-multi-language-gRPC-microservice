@@ -1,0 +1,11 @@
+query MyAccounts {
+  myAccounts {
+    role
+    account {
+      id
+      name
+      contactEmail
+      status
+    }
+  }
+}
