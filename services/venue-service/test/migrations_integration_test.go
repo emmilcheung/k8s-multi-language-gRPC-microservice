@@ -62,6 +62,7 @@ func TestMigrations_ShouldApplyAllSchemas_WhenDBIsEmpty(t *testing.T) {
 		"seats",
 		"seat_reservations",
 		"seat_reservation_items",
+		"audit_log",
 	}
 
 	for _, table := range expectedTables {
