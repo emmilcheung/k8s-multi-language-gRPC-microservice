@@ -423,9 +423,11 @@ test(
 );
 
 // Door staff limited to one event can scan that event and not another.
-// Not implemented: giving a user a door-staff membership needs the accounts
-// membership mutation (add a member with a DOOR_STAFF role scoped to one
-// event), which the accounts API does not expose yet. Never run.
+// Not implemented: the accounts API now lets an owner invite a door-staff
+// member and limit them to events (inviteMember, acceptInvitation,
+// setDoorStaffEvents), but the client has no way to send the acting account
+// (X-Organizer-Account) yet, so a door-staff user cannot scan from the UI.
+// Never run.
 test.fixme(
   "door staff limited to one event can check in at that event but not at another",
   async () => {
