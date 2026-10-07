@@ -35,6 +35,14 @@ message GetTicketResponse {
   int32 sold = 11;
   int32 max_per_user = 12;
   string seating_plan_id = 13;
+  string event_title = 14; // event metadata
+  google.protobuf.Timestamp event_starts_at = 15;
+  google.protobuf.Timestamp event_ends_at = 16;
+  string event_image_url = 17;
+  string venue_name = 18;
+  string venue_address = 19;
+  string ticket_type = 20; // "GA" | "SEATED_MANUAL" | "SEATED_AUTO"
+  string account_id = 21; // owning organizer account; empty until backfilled
 }
 
 message ValidateTicketRequest {

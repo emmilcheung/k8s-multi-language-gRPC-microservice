@@ -86,3 +86,26 @@ func TestReservationInactivePrefix_ContractValue(t *testing.T) {
 		t.Fatalf("prefix changed to %q: update order-service TicketServiceClient.RESERVATION_INACTIVE_PREFIX and its contract test", ReservationInactivePrefix)
 	}
 }
+
+// seating-plan writes in venue-service decide ownership from the ticket's account,
+// so GetTicket has to tell them which account owns it.
+func TestGetTicket_TellsCallersWhichAccountOwnsTheTicket(t *testing.T) {
+	repo := &accountRepo{accountID: "9f1c2b3a-0000-4000-8000-000000000001"}
+	s := NewTicketGrpcServer(repo, zap.NewNop())
+	resp, err := s.GetTicket(context.Background(), &v1.GetTicketRequest{TicketId: "t1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.AccountId != repo.accountID {
+		t.Fatalf("want account %q, got %q", repo.accountID, resp.AccountId)
+	}
+}
+
+type accountRepo struct {
+	repository.TicketRepository
+	accountID string
+}
+
+func (r *accountRepo) FindByID(context.Context, string) (*repository.Ticket, error) {
+	return &repository.Ticket{ID: "t1", AccountID: r.accountID}, nil
+}

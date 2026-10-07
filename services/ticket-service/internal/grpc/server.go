@@ -56,6 +56,7 @@ func (s *TicketGrpcServer) GetTicket(ctx context.Context, req *v1.GetTicketReque
 		Title:      ticket.Title,
 		Price:      ticket.Price,
 		UserId:     ticket.UserID,
+		AccountId:  ticket.AccountID,
 		OrderId:    ticket.OrderID,
 		Version:    int64(ticket.Version),
 		CreatedAt:  timestamppb.New(ticket.CreatedAt),
