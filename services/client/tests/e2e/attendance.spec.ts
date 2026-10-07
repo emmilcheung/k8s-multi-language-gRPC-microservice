@@ -16,6 +16,7 @@
 import { randomUUID } from "node:crypto";
 import { test, expect, type Page } from "@playwright/test";
 import { installNoLegacyPaymentRestGuard } from "./_helpers/expect-no-rest";
+import { createOrganizerAccount } from "./_helpers/flows";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -179,6 +180,7 @@ test(
     // Phase 1 — Organizer: create a GA ticket (quota=1, maxPerUser=1)
     // ────────────────────────────────────────────────────────────────────────
     await signup(page, organizerEmail);
+    await createOrganizerAccount(page, `Attendance Org ${Date.now()}`);
 
     await page.goto("/tickets/new");
     await page
@@ -344,6 +346,7 @@ test(
     const buyerEmail = uniqueEmail("att-buyer");
 
     await signup(page, organizerEmail);
+    await createOrganizerAccount(page, `Attendance Org ${Date.now()}`);
 
     await page.goto("/tickets/new");
     await page
@@ -423,21 +426,109 @@ test(
 );
 
 // Door staff limited to one event can scan that event and not another.
-// Not implemented: the accounts API now lets an owner invite a door-staff
-// member and limit them to events (inviteMember, acceptInvitation,
-// setDoorStaffEvents), but the client has no way to send the acting account
-// (X-Organizer-Account) yet, so a door-staff user cannot scan from the UI.
-// Never run.
-test.fixme(
+test(
   "door staff limited to one event can check in at that event but not at another",
-  async () => {
-    // 1. Organizer signs in and creates two events (event one, event two).
-    // 2. A second user is added as DOOR_STAFF scoped to event one through the
-    //    accounts membership mutation.
-    // 3. A buyer buys a ticket for event one.
-    // 4. The door-staff user opens /scan?eventId=<event one> and checks the
-    //    buyer in: admitted.
-    // 5. The door-staff user opens /scan?eventId=<event two>: forbidden.
-    throw new Error("not implemented");
+  async ({ page }) => {
+    await installStripeMock(page);
+
+    const ownerEmail = uniqueEmail("door-owner");
+    const doorEmail = uniqueEmail("door-staff");
+    const buyerEmail = uniqueEmail("door-buyer");
+
+    async function createEvent(title: string): Promise<string> {
+      await page.goto("/tickets/new");
+      await page.getByRole("button", { name: /general admission/i }).click();
+      await page.locator("#title").waitFor({ state: "visible", timeout: 5_000 });
+      await fillInput(page, "#title", title);
+      await fillInput(page, "#price", "10.00");
+      await fillInput(page, "#startsAt", "2026-12-01T18:00");
+      await fillInput(page, "#quota", "5");
+      await fillInput(page, "#maxPerUser", "1");
+      await page
+        .locator("form", { has: page.locator("#title") })
+        .getByRole("button", { name: /create ticket/i })
+        .click();
+      await page.waitForURL((url) => !url.pathname.endsWith("/new"), { timeout: 15_000 });
+      const id = page.url().split("/tickets/")[1]!.split("/")[0]!;
+
+      // Door staff check buyers in by email, which the event's policy must allow.
+      await page.goto(`/organizer/events/${id}/attendance`);
+      const toggle = page.getByLabel(/allow manual override/i);
+      await expect(toggle).toBeVisible({ timeout: 10_000 });
+      await toggle.check();
+      await page.getByRole("button", { name: /save settings/i }).click();
+      await expect(page.getByText(/settings saved\./i)).toBeVisible({ timeout: 10_000 });
+      return id;
+    }
+
+    async function buy(id: string) {
+      await page.goto(`/tickets/${id}`, { waitUntil: "commit" });
+      await page.getByRole("button", { name: /purchase ticket/i }).waitFor({ state: "visible", timeout: 30_000 });
+      await page.getByRole("button", { name: /purchase ticket/i }).click();
+      await page.waitForURL(/\/orders\/.+/, { waitUntil: "commit", timeout: 30_000 });
+      const orderId = page.url().split("/orders/")[1]!.split("?")[0]!;
+      const paid = page.waitForResponse(
+        (r) => /\/orders\/[^/]+/.test(r.url()) && r.request().method() === "POST" && Boolean(r.request().headers()["next-action"]),
+        { timeout: 60_000 }
+      );
+      await page.getByRole("button", { name: /pay now/i }).click();
+      await paid;
+      await waitForOrderComplete(page, orderId);
+    }
+
+    // The door-staff user must exist before the owner can invite them.
+    await signup(page, doorEmail);
+    await signout(page);
+
+    // Owner: account, two events, door staff limited to event one.
+    await signup(page, ownerEmail);
+    await createOrganizerAccount(page, `Door Org ${Date.now()}`);
+    const eventOne = await createEvent(`Door One ${Date.now()}`);
+    const eventTwo = await createEvent(`Door Two ${Date.now()}`);
+
+    await page.goto("/organizer/team");
+    await page.locator("#invite-email").fill(doorEmail);
+    await page.locator("#invite-role").selectOption("DOOR_STAFF");
+    await page.getByRole("button", { name: /invite to team/i }).click();
+    const acceptLink = await page.locator("#accept-link").inputValue();
+    expect(acceptLink).toContain("/invitations/accept");
+    await signout(page);
+
+    // Door staff accepts, then the owner limits them to event one.
+    await signin(page, doorEmail);
+    await page.goto(new URL(acceptLink, "http://localhost:4000").pathname + new URL(acceptLink, "http://localhost:4000").search);
+    await page.getByRole("button", { name: /accept invitation/i }).click();
+    await page.waitForURL(/\/organizer$/, { timeout: 15_000 });
+    await signout(page);
+
+    await signin(page, ownerEmail);
+    await page.goto("/organizer/team");
+    // The door staff member is the only one with an events form.
+    const card = page.locator("form", { has: page.getByRole("button", { name: /save door staff events/i }) });
+    await card.getByLabel(/^Door One/).check();
+    await card.getByRole("button", { name: /save door staff events/i }).click();
+    await expect(card.getByText(/door staff limited to 1 event/i)).toBeVisible({ timeout: 10_000 });
+    await signout(page);
+
+    // Buyer holds a pass for each event.
+    await signup(page, buyerEmail);
+    await buy(eventOne);
+    await buy(eventTwo);
+    await signout(page);
+
+    // Door staff: event one is admitted, event two is refused.
+    await signin(page, doorEmail);
+    await page.goto(`/scan?eventId=${eventOne}`);
+    await page.getByLabel(/buyer email/i).fill(buyerEmail);
+    await expect(async () => {
+      await page.getByRole("button", { name: /check in by email/i }).click();
+      await expect(page.locator("aside").getByText(/^admitted$/i)).toBeVisible({ timeout: 5_000 });
+    }).toPass({ timeout: 30_000, intervals: [2000, 3000, 5000] });
+
+    await page.goto(`/scan?eventId=${eventTwo}`);
+    await page.getByLabel(/buyer email/i).fill(buyerEmail);
+    await page.getByRole("button", { name: /check in by email/i }).click();
+    await expect(page.locator("aside .text-destructive")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator("aside").getByText(/^admitted$/i)).toHaveCount(0);
   }
 );

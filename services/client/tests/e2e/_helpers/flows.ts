@@ -217,3 +217,15 @@ export async function payAndWaitForComplete(page: Page) {
     )
     .toBe(true);
 }
+
+/**
+ * Creates an organizer account for the signed-in user through the console and
+ * waits for the console overview. The account is remembered as the acting one.
+ */
+export async function createOrganizerAccount(page: Page, name: string) {
+  await page.goto("/organizer/new-account");
+  await page.getByLabel("Organizer account name").fill(name);
+  await page.getByLabel(/i accept the organizer terms/i).check();
+  await page.getByRole("button", { name: /create organizer account/i }).click();
+  await page.waitForURL(/\/organizer$/, { timeout: 15000 });
+}
