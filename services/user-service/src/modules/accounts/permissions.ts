@@ -111,14 +111,16 @@ export function permissionTarget(permission: Permission): PermissionTarget {
   return "account";
 }
 
-// What a suspended account's members may still do: look, so organizers can
-// see sales and reports while the suspension is sorted out. Everything that
-// changes the account or its events is refused, and so are refunds and door
-// scanning, which are not views.
+// What a suspended account's members may still do. Events already on sale keep
+// selling, so people can still look at sales and reports, ticket holders must
+// still get in at the door, and buyers must still be refundable. Suspension
+// blocks organizer edits and publishing, not buyer protection.
 const SUSPENDED_ALLOWED: ReadonlySet<Permission> = new Set([
   "event.view",
   "orders.view",
   "reports.view",
+  "attendance.scan",
+  "orders.refund",
 ]);
 
 export interface DecideInput {

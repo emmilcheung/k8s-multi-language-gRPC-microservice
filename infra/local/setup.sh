@@ -165,11 +165,17 @@ for SERVICE_ENTRY in \
   SERVICE="${SERVICE_ENTRY%%:*}"
   SERVICE_DIR="${SERVICE_ENTRY#*:}"
   info "  Building ${SERVICE}..."
+  # user-service ships proto/ from outside its directory, so its build context
+  # is the repo root.
+  BUILD_CONTEXT="${SERVICE_DIR}"
+  if [ "${SERVICE}" = "user-service" ]; then
+    BUILD_CONTEXT="${REPO_ROOT}"
+  fi
   docker build \
     --file "${SERVICE_DIR}/Dockerfile" \
     --tag "${SERVICE}:latest" \
     --quiet \
-    "${SERVICE_DIR}"
+    "${BUILD_CONTEXT}"
   minikube image load "${SERVICE}:latest"
   info "  Loaded ${SERVICE}:latest"
 done

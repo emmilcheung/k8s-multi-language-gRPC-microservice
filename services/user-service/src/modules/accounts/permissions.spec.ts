@@ -160,6 +160,13 @@ describe("suspended account", () => {
     }
   });
 
+  it("a suspended account still lets ticket holders in and buyers be refunded", () => {
+    for (const keepsWorking of ["attendance.scan", "orders.refund"]) {
+      expect(suspended(keepsWorking).allowed, keepsWorking).toBe(true);
+    }
+    expect(suspended("event.reschedule").allowed).toBe(false);
+  });
+
   it("a suspended account's member whose role lacks the permission is told so, not that the account is suspended", () => {
     expect(suspended("event.edit", Roles.FINANCE)).toEqual({
       allowed: false,
