@@ -56,8 +56,12 @@ export class PermissionsService {
           this.repository.getAccount(input.accountId),
           this.repository.listEventScopes(found.id),
         ]);
-        accountSuspended = account?.status === "SUSPENDED";
-        membership = { role: found.role, eventIds };
+        // A membership without its account is stale: treat as no membership
+        // rather than guessing the account is active.
+        if (account) {
+          accountSuspended = account.status === "SUSPENDED";
+          membership = { role: found.role, eventIds };
+        }
       }
     } else if (target === "venue" && input.venueId) {
       const found = await this.repository.findVenueMembership(

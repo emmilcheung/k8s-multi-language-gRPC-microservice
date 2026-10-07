@@ -98,6 +98,16 @@ describe("PermissionsService", () => {
     }
   });
 
+  it("a membership whose account no longer exists grants nothing", async () => {
+    const { service, repo } = setup({
+      accountMembership: { id: "m1", role: Roles.OWNER },
+    });
+    repo.getAccount.mockResolvedValue(undefined as never);
+    expect(
+      await service.check({ ...base, permission: "event.view", accountId: A1 }),
+    ).toEqual({ allowed: false, reason: "NOT_MEMBER" });
+  });
+
   it("door staff limited to listed events cannot scan at another event", async () => {
     const { service } = setup({
       accountMembership: { id: "m1", role: Roles.DOOR_STAFF },

@@ -1,9 +1,8 @@
-import { Controller, UseFilters } from "@nestjs/common";
+import { BadRequestException, Controller, UseFilters } from "@nestjs/common";
 import { GrpcMethod } from "@nestjs/microservices";
 import type { OrganizerAccount } from "../database/schema";
 import { AccountsService } from "../modules/accounts/accounts.service";
 import { PermissionsService } from "../modules/accounts/permissions.service";
-import { BadRequestException } from "@nestjs/common";
 import { GrpcExceptionFilter } from "./grpc-exception.filter";
 
 interface CheckPermissionRequest {
