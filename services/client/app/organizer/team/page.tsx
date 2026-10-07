@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +17,7 @@ import {
   MyAccountsDocument,
   UserLookupDocument,
 } from "@/lib/graphql/generated";
-import { TEAM_ROLES } from "@/lib/team-roles";
+import { TEAM_ROLES, canManageTeam } from "@/lib/team-roles";
 import { readSelectedAccountId, resolveSelectedAccountId } from "@/lib/organizer-account";
 
 async function emailFor(userId: string, cookie: string): Promise<string> {
@@ -57,9 +58,11 @@ export default async function TeamPage() {
     );
   }
 
-  // Members can read the roster; only owners and admins can change it. The
-  // services enforce this, the page only avoids offering buttons that would fail.
-  const canManage = membership.role === "OWNER" || membership.role === "ADMIN";
+  // Only owners and admins may see or change the team; the console hides the
+  // tab from everyone else, and a direct visit goes back to the overview.
+  if (!canManageTeam(membership.role)) {
+    redirect("/organizer");
+  }
 
   const [{ accountMembers }, { eventsByAccount }] = await Promise.all([
     executeQuery(AccountMembersDocument, { accountId }, { cookie }),
@@ -84,39 +87,33 @@ export default async function TeamPage() {
                 <p className="font-semibold text-ink">{emails[index]}</p>
                 <Badge tone="neutral">{roleLabel(member.role)}</Badge>
               </div>
-              {canManage && (
-                <>
-                  <RoleForm accountId={accountId} userId={member.userId} role={member.role} />
-                  {member.role === "DOOR_STAFF" && (
-                    <DoorStaffForm
-                      accountId={accountId}
-                      userId={member.userId}
-                      events={events}
-                      selected={member.eventIds}
-                    />
-                  )}
-                  <RemoveForm accountId={accountId} userId={member.userId} />
-                </>
+              <RoleForm accountId={accountId} userId={member.userId} role={member.role} />
+              {member.role === "DOOR_STAFF" && (
+                <DoorStaffForm
+                  accountId={accountId}
+                  userId={member.userId}
+                  events={events}
+                  selected={member.eventIds}
+                />
               )}
+              <RemoveForm accountId={accountId} userId={member.userId} />
             </div>
           ))}
         </CardContent>
       </Card>
 
       <div className="flex flex-col gap-6">
-        {canManage && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Invite to team</CardTitle>
-              <CardDescription>
-                Door staff scan passes only for the events you choose. Share the invitation link with the invitee.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <InviteForm accountId={accountId} />
-            </CardContent>
-          </Card>
-        )}
+        <Card>
+          <CardHeader>
+            <CardTitle>Invite to team</CardTitle>
+            <CardDescription>
+              Door staff scan passes only for the events you choose. Share the invitation link with the invitee.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <InviteForm accountId={accountId} />
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

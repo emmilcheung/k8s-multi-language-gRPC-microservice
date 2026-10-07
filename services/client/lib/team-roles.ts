@@ -6,3 +6,8 @@ export const TEAM_ROLES: { value: string; label: string }[] = [
   { value: "FINANCE", label: "Finance" },
   { value: "DOOR_STAFF", label: "Door staff" },
 ];
+
+/** Owners and admins manage the team; the users subgraph refuses everyone else, so the console hides it. */
+export function canManageTeam(role: string | undefined): boolean {
+  return role === "OWNER" || role === "ADMIN";
+}

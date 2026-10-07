@@ -6,12 +6,13 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { executeQuery } from "@/lib/graphql/execute";
 import { MyAccountsDocument } from "@/lib/graphql/generated";
 import { readSelectedAccountId, resolveSelectedAccountId } from "@/lib/organizer-account";
+import { canManageTeam } from "@/lib/team-roles";
 import { cn } from "@/lib/utils";
 
-async function loadAccounts(): Promise<{ id: string; name: string }[]> {
+async function loadAccounts(): Promise<{ id: string; name: string; role: string }[]> {
   try {
     const { myAccounts } = await executeQuery(MyAccountsDocument, {}, { cookie: (await cookies()).toString() });
-    return myAccounts.map((m) => ({ id: m.account.id, name: m.account.name }));
+    return myAccounts.map((m) => ({ id: m.account.id, name: m.account.name, role: m.role }));
   } catch {
     return [];
   }
@@ -27,6 +28,7 @@ export default async function OrganizerLayout({
     accounts.map((a) => a.id),
     await readSelectedAccountId()
   );
+  const showTeam = canManageTeam(accounts.find((a) => a.id === selectedId)?.role);
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-8">
@@ -50,10 +52,12 @@ export default async function OrganizerLayout({
               <LayoutDashboard className="size-3.5" />
               Overview
             </Link>
-            <Link href="/organizer/team" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-1.5")}>
-              <Users className="size-3.5" />
-              Team
-            </Link>
+            {showTeam && (
+              <Link href="/organizer/team" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-1.5")}>
+                <Users className="size-3.5" />
+                Team
+              </Link>
+            )}
             <Link href="/venues" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-1.5")}>
               <Building2 className="size-3.5" />
               Venues
