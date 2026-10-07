@@ -359,3 +359,38 @@ describe('RefreshTokenService', () => {
     });
   });
 });
+
+describe('RefreshTokenService.revokeAllForUser', () => {
+  it('should delete every session of the user and the index that lists them', async () => {
+    const redis = makeRedis();
+    redis.smembers.mockResolvedValue(['s1', 's2']);
+    redis.del.mockResolvedValue(1);
+    const service = new RefreshTokenService(
+      redis as never,
+      makeConfig() as never,
+    );
+
+    await service.revokeAllForUser('user-uuid-1');
+
+    expect(redis.smembers).toHaveBeenCalledWith(
+      'auth-service:user-sessions:user-uuid-1',
+    );
+    expect(redis.del).toHaveBeenCalledWith(
+      'auth-service:refresh:session:s1',
+      'auth-service:refresh:session:s2',
+      'auth-service:user-sessions:user-uuid-1',
+    );
+  });
+
+  it('should do nothing harmful when the user has no sessions', async () => {
+    const redis = makeRedis();
+    redis.smembers.mockResolvedValue([]);
+    redis.del.mockResolvedValue(0);
+    const service = new RefreshTokenService(
+      redis as never,
+      makeConfig() as never,
+    );
+
+    await expect(service.revokeAllForUser('user-uuid-1')).resolves.toBe(0);
+  });
+});

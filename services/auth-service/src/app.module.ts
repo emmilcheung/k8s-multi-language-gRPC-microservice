@@ -4,6 +4,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { trace } from '@opentelemetry/api';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { OAuthModule } from './modules/oauth/oauth.module';
 import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
@@ -78,6 +79,7 @@ function otelMixin(): Record<string, string> {
     UsersModule,
     AuthModule,
     OAuthModule,
+    AdminModule,
     HealthModule,
     MetricsModule,
     AuthGraphQLModule,

@@ -42,6 +42,7 @@
     "start:prod": "node dist/main",
     "migrate": "drizzle-kit migrate",
     "migrate:generate": "drizzle-kit generate",
+    "admin:grant-role": "ts-node scripts/grant-role.ts",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "vitest run",
     "test:watch": "vitest",
