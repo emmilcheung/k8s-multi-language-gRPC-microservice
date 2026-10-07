@@ -25,7 +25,7 @@ func (r *PriceTierRepo) Create(ctx context.Context, t *repository.PriceTier) err
 		INSERT INTO price_tiers (plan_id, name, price)
 		VALUES ($1, $2, $3::numeric)
 		RETURNING id, created_at`
-	return r.pool.QueryRow(ctx, q, t.PlanID, t.Name, t.Price).
+	return conn(ctx, r.pool).QueryRow(ctx, q, t.PlanID, t.Name, t.Price).
 		Scan(&t.ID, &t.CreatedAt)
 }
 
@@ -35,7 +35,7 @@ func (r *PriceTierRepo) FindByID(ctx context.Context, id string) (*repository.Pr
 		SELECT id, plan_id, name, price::text, created_at
 		FROM price_tiers WHERE id = $1`
 	t := &repository.PriceTier{}
-	err := r.pool.QueryRow(ctx, q, id).Scan(&t.ID, &t.PlanID, &t.Name, &t.Price, &t.CreatedAt)
+	err := conn(ctx, r.pool).QueryRow(ctx, q, id).Scan(&t.ID, &t.PlanID, &t.Name, &t.Price, &t.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, repository.ErrSectionNotFound // reuse nearest sentinel
@@ -51,7 +51,7 @@ func (r *PriceTierRepo) ListByPlan(ctx context.Context, planID string) ([]*repos
 		SELECT id, plan_id, name, price::text, created_at
 		FROM price_tiers WHERE plan_id = $1
 		ORDER BY created_at ASC`
-	rows, err := r.pool.Query(ctx, q, planID)
+	rows, err := conn(ctx, r.pool).Query(ctx, q, planID)
 	if err != nil {
 		return nil, err
 	}

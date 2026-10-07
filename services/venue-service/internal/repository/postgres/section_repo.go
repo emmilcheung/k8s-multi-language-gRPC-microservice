@@ -32,7 +32,7 @@ func NewSectionRepo(pool *pgxpool.Pool) *SectionRepo {
 
 // CreateSection inserts a new section. On return, s.ID, s.CreatedAt, s.UpdatedAt are populated.
 func (r *SectionRepo) CreateSection(ctx context.Context, s *repository.Section) error {
-	return createSection(ctx, r.pool, s)
+	return createSection(ctx, conn(ctx, r.pool), s)
 }
 
 func createSection(ctx context.Context, db querier, s *repository.Section) error {
@@ -47,7 +47,7 @@ func createSection(ctx context.Context, db querier, s *repository.Section) error
 // BulkInsertSeats auto-generates seat rows for a newly created section using a
 // pgx batch to avoid N round-trips. priceTierID is optional; pass "" for NULL.
 func (r *SectionRepo) BulkInsertSeats(ctx context.Context, sectionID, planID, sectionType, priceTierID string, rowCount, columnCount int) error {
-	return bulkInsertSeats(ctx, r.pool, sectionID, planID, sectionType, priceTierID, rowCount, columnCount)
+	return bulkInsertSeats(ctx, conn(ctx, r.pool), sectionID, planID, sectionType, priceTierID, rowCount, columnCount)
 }
 
 func bulkInsertSeats(ctx context.Context, db querier, sectionID, planID, sectionType, priceTierID string, rowCount, columnCount int) error {

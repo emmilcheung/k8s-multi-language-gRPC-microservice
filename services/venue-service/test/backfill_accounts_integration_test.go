@@ -75,12 +75,19 @@ func startBackfillPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func seedVenues(t *testing.T, repo *pgrepo.VenueRepo, owners ...string) []*repository.Venue {
+// seedVenues stores venues the way they looked before accounts existed: marked
+// VERIFIED (what migration 008 did to every row it found) and with no creator
+// account. Venues created now start UNVERIFIED, so they are adjusted here.
+func seedVenues(t *testing.T, pool *pgxpool.Pool, owners ...string) []*repository.Venue {
 	t.Helper()
+	repo := pgrepo.NewVenueRepo(pool)
 	var out []*repository.Venue
 	for i, owner := range owners {
 		v := &repository.Venue{OrganizerID: owner, Name: fmt.Sprintf("Venue %d", i), Capacity: 100, Timezone: "UTC"}
 		require.NoError(t, repo.Create(context.Background(), v))
+		_, err := pool.Exec(context.Background(), `UPDATE venues SET status = 'VERIFIED', created_by_account_id = NULL WHERE id = $1`, v.ID)
+		require.NoError(t, err)
+		v.Status = repository.VenueStatusVerified
 		out = append(out, v)
 	}
 	return out
@@ -114,8 +121,7 @@ var backfillOpts = backfill.Options{BatchSize: 2, Log: zap.NewNop()}
 func TestBackfillAccounts_ShouldChangeNothing_WhenRunTwice(t *testing.T) {
 	pool := startBackfillPool(t)
 	ctx := context.Background()
-	repo := pgrepo.NewVenueRepo(pool)
-	seedVenues(t, repo, uuid.NewString(), uuid.NewString(), uuid.NewString())
+	seedVenues(t, pool, uuid.NewString(), uuid.NewString(), uuid.NewString())
 	accounts := newFakeAccounts()
 
 	first, err := backfill.Run(ctx, pool, accounts, backfillOpts)
@@ -134,9 +140,8 @@ func TestBackfillAccounts_ShouldChangeNothing_WhenRunTwice(t *testing.T) {
 
 func TestBackfillAccounts_ShouldAskOncePerOwner_WhenOwnerHasManyVenues(t *testing.T) {
 	pool := startBackfillPool(t)
-	repo := pgrepo.NewVenueRepo(pool)
 	ada, bob := uuid.NewString(), uuid.NewString()
-	seedVenues(t, repo, ada, ada, ada, bob)
+	seedVenues(t, pool, ada, ada, ada, bob)
 	accounts := newFakeAccounts()
 
 	res, err := backfill.Run(context.Background(), pool, accounts, backfillOpts)
@@ -157,7 +162,7 @@ func TestBackfillAccounts_ShouldLeaveCreatorAbleToEditVenue(t *testing.T) {
 	ctx := context.Background()
 	repo := pgrepo.NewVenueRepo(pool)
 	owner := uuid.NewString()
-	v := seedVenues(t, repo, owner)[0]
+	v := seedVenues(t, pool, owner)[0]
 
 	_, err := backfill.Run(ctx, pool, newFakeAccounts(), backfillOpts)
 	require.NoError(t, err)
@@ -177,9 +182,8 @@ func TestBackfillAccounts_ShouldLeaveCreatorAbleToEditVenue(t *testing.T) {
 
 func TestBackfillAccounts_ShouldOnlyCount_WhenDryRun(t *testing.T) {
 	pool := startBackfillPool(t)
-	repo := pgrepo.NewVenueRepo(pool)
 	ada := uuid.NewString()
-	seedVenues(t, repo, ada, ada, uuid.NewString())
+	seedVenues(t, pool, ada, ada, uuid.NewString())
 	accounts := newFakeAccounts()
 	opts := backfillOpts
 	opts.DryRun = true
@@ -197,8 +201,7 @@ func TestBackfillAccounts_ShouldOnlyCount_WhenDryRun(t *testing.T) {
 
 func TestBackfillAccounts_ShouldResume_WhenInterruptedMidway(t *testing.T) {
 	pool := startBackfillPool(t)
-	repo := pgrepo.NewVenueRepo(pool)
-	seedVenues(t, repo, uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString())
+	seedVenues(t, pool, uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString())
 	ctx, cancel := context.WithCancel(context.Background())
 	opts := backfillOpts
 	opts.OnProgress = func(backfill.Result) { cancel() } // stop after the first batch
@@ -216,7 +219,7 @@ func TestBackfillAccounts_ShouldResume_WhenInterruptedMidway(t *testing.T) {
 
 func TestMigrations_ShouldMarkVenuesVerified_AndLeaveAccountEmpty(t *testing.T) {
 	pool := startBackfillPool(t)
-	seedVenues(t, pgrepo.NewVenueRepo(pool), uuid.NewString())
+	seedVenues(t, pool, uuid.NewString())
 
 	for _, r := range venueRows(t, pool) {
 		assert.Equal(t, "VERIFIED", r.Status)

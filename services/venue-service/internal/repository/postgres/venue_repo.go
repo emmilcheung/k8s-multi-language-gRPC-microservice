@@ -24,22 +24,22 @@ func NewVenueRepo(pool *pgxpool.Pool) *VenueRepo {
 // Create inserts a new venue row. On return, v.ID, v.CreatedAt, and v.UpdatedAt are populated.
 func (r *VenueRepo) Create(ctx context.Context, v *repository.Venue) error {
 	const q = `
-		INSERT INTO venues (organizer_id, name, capacity, timezone, address)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, address, created_at, updated_at`
-	return r.pool.QueryRow(ctx, q, v.OrganizerID, v.Name, v.Capacity, v.Timezone, v.Address).
-		Scan(&v.ID, &v.Address, &v.CreatedAt, &v.UpdatedAt)
+		INSERT INTO venues (organizer_id, name, capacity, timezone, address, status, created_by_account_id)
+		VALUES ($1, $2, $3, $4, $5, 'UNVERIFIED', NULLIF($6, '')::uuid)
+		RETURNING id, address, status, created_at, updated_at`
+	return conn(ctx, r.pool).QueryRow(ctx, q, v.OrganizerID, v.Name, v.Capacity, v.Timezone, v.Address, v.CreatedByAccountID).
+		Scan(&v.ID, &v.Address, &v.Status, &v.CreatedAt, &v.UpdatedAt)
 }
 
 // FindByID returns a venue by primary key.
 func (r *VenueRepo) FindByID(ctx context.Context, id string) (*repository.Venue, error) {
 	const q = `
-		SELECT id, organizer_id, name, capacity, timezone, address, created_at, updated_at
+		SELECT id, organizer_id, name, capacity, timezone, address, status, COALESCE(created_by_account_id::text, ''), created_at, updated_at
 		FROM venues
 		WHERE id = $1`
 	v := &repository.Venue{}
-	err := r.pool.QueryRow(ctx, q, id).
-		Scan(&v.ID, &v.OrganizerID, &v.Name, &v.Capacity, &v.Timezone, &v.Address, &v.CreatedAt, &v.UpdatedAt)
+	err := conn(ctx, r.pool).QueryRow(ctx, q, id).
+		Scan(&v.ID, &v.OrganizerID, &v.Name, &v.Capacity, &v.Timezone, &v.Address, &v.Status, &v.CreatedByAccountID, &v.CreatedAt, &v.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, repository.ErrVenueNotFound
@@ -52,11 +52,11 @@ func (r *VenueRepo) FindByID(ctx context.Context, id string) (*repository.Venue,
 // ListByOrganizer returns all venues owned by the given organizer.
 func (r *VenueRepo) ListByOrganizer(ctx context.Context, organizerID string) ([]*repository.Venue, error) {
 	const q = `
-		SELECT id, organizer_id, name, capacity, timezone, address, created_at, updated_at
+		SELECT id, organizer_id, name, capacity, timezone, address, status, COALESCE(created_by_account_id::text, ''), created_at, updated_at
 		FROM venues
 		WHERE organizer_id = $1
 		ORDER BY created_at DESC`
-	rows, err := r.pool.Query(ctx, q, organizerID)
+	rows, err := conn(ctx, r.pool).Query(ctx, q, organizerID)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (r *VenueRepo) ListByOrganizer(ctx context.Context, organizerID string) ([]
 	var venues []*repository.Venue
 	for rows.Next() {
 		v := &repository.Venue{}
-		if err := rows.Scan(&v.ID, &v.OrganizerID, &v.Name, &v.Capacity, &v.Timezone, &v.Address, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.OrganizerID, &v.Name, &v.Capacity, &v.Timezone, &v.Address, &v.Status, &v.CreatedByAccountID, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, err
 		}
 		venues = append(venues, v)
@@ -81,7 +81,7 @@ func (r *VenueRepo) Update(ctx context.Context, v *repository.Venue) error {
 		WHERE id = $5 AND organizer_id = $6
 		RETURNING updated_at`
 	var updatedAt time.Time
-	err := r.pool.QueryRow(ctx, q, v.Name, v.Capacity, v.Timezone, v.Address, v.ID, v.OrganizerID).
+	err := conn(ctx, r.pool).QueryRow(ctx, q, v.Name, v.Capacity, v.Timezone, v.Address, v.ID, v.OrganizerID).
 		Scan(&updatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
