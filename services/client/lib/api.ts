@@ -69,7 +69,12 @@ export async function serverApi<T = unknown>(
       : (options.headers ?? {});
 
   const canRetry = isRetryableReadMethod(options.method);
-  const accountHeaders = await organizerAccountHeaders();
+  // A fetch cached for everyone (next.revalidate) must not vary by the acting
+  // account, so only per-request fetches carry the selector.
+  const sharedCacheFetch =
+    nextCacheOptions.next?.revalidate !== undefined ||
+    options.next?.revalidate !== undefined;
+  const accountHeaders = sharedCacheFetch ? {} : await organizerAccountHeaders();
 
   for (let attempt = 0; attempt <= READ_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
