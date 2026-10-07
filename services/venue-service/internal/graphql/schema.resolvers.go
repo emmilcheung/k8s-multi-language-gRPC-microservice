@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/acme/venue-service/internal/audit"
 	"github.com/acme/venue-service/internal/hold"
 	"github.com/acme/venue-service/internal/repository"
+	"github.com/acme/venue-service/internal/service"
 )
 
 // CreateVenue is the resolver for the createVenue field.
@@ -32,7 +34,19 @@ func (r *mutationResolver) CreateVenue(ctx context.Context, input CreateVenueInp
 		Timezone:    input.Timezone,
 		Address:     address,
 	}
-	if err := r.VenueRepo.Create(ctx, v); err != nil {
+	caller, acting, err := r.organizerCaller(ctx, organizerID)
+	if err != nil {
+		return nil, err
+	}
+	createdBy, err := r.org().AuthorizeVenueCreate(ctx, caller, acting)
+	if err != nil {
+		return nil, accessError(r.org(), err, "")
+	}
+	v.CreatedByAccountID = createdBy
+	err = r.org().Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, caller.UserID, createdBy, service.ActionVenueCreate, "venue:"+v.ID, nil, service.VenueFields(v))
+	}, func(ctx context.Context) error { return r.VenueRepo.Create(ctx, v) })
+	if err != nil {
 		return nil, err
 	}
 	return mapVenueToGQL(v), nil
@@ -48,15 +62,37 @@ func (r *mutationResolver) UpdateVenue(ctx context.Context, id string, input Upd
 	if input.Address != nil {
 		address = *input.Address
 	}
-	v := &repository.Venue{
-		ID:          id,
-		OrganizerID: organizerID,
-		Name:        input.Name,
-		Capacity:    input.Capacity,
-		Timezone:    input.Timezone,
-		Address:     address,
+	existing, err := r.VenueRepo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrVenueNotFound) {
+			return nil, fmt.Errorf("not found: venue not found")
+		}
+		return nil, err
 	}
-	if err := r.VenueRepo.Update(ctx, v); err != nil {
+	caller, acting, err := r.organizerCaller(ctx, organizerID)
+	if err != nil {
+		return nil, err
+	}
+	actorAccount, err := r.org().AuthorizeVenueEdit(ctx, caller, acting, existing)
+	if err != nil {
+		return nil, accessError(r.org(), err, "not found: venue not found")
+	}
+	// The stored owner is passed so a venue team member passes the repository's
+	// ownership guard once authorized.
+	v := &repository.Venue{
+		ID:                 id,
+		OrganizerID:        existing.OrganizerID,
+		Name:               input.Name,
+		Capacity:           input.Capacity,
+		Timezone:           input.Timezone,
+		Address:            address,
+		Status:             existing.Status,
+		CreatedByAccountID: existing.CreatedByAccountID,
+	}
+	err = r.org().Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, caller.UserID, actorAccount, service.ActionVenueUpdate, "venue:"+id, service.VenueFields(existing), service.VenueFields(v))
+	}, func(ctx context.Context) error { return r.VenueRepo.Update(ctx, v) })
+	if err != nil {
 		if errors.Is(err, repository.ErrVenueNotFound) {
 			return nil, fmt.Errorf("not found: venue not found")
 		}
@@ -80,8 +116,13 @@ func (r *mutationResolver) CreateSection(ctx context.Context, venueID string, in
 		}
 		return nil, err
 	}
-	if venue.OrganizerID != organizerID {
-		return nil, fmt.Errorf("forbidden: not the venue owner")
+	caller, acting, err := r.organizerCaller(ctx, organizerID)
+	if err != nil {
+		return nil, err
+	}
+	actorAccount, err := r.org().AuthorizeVenueEdit(ctx, caller, acting, venue)
+	if err != nil {
+		return nil, accessError(r.org(), err, "forbidden: not the venue owner")
 	}
 
 	sectionType := repository.SectionTypeSeated
@@ -104,7 +145,10 @@ func (r *mutationResolver) CreateSection(ctx context.Context, venueID string, in
 		ColumnCount:  input.ColumnCount,
 		DisplayOrder: displayOrder,
 	}
-	if err := r.VenueSectionRepo.Create(ctx, vs); err != nil {
+	err = r.org().Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, caller.UserID, actorAccount, service.ActionVenueSectionCreate, "venue_section:"+vs.ID, nil, venueSectionFields(vs))
+	}, func(ctx context.Context) error { return r.VenueSectionRepo.Create(ctx, vs) })
+	if err != nil {
 		return nil, err
 	}
 	return mapVenueSectionToGQL(vs), nil
@@ -128,10 +172,16 @@ func (r *mutationResolver) UpdateSection(ctx context.Context, id string, input U
 	if err != nil {
 		return nil, err
 	}
-	if venue.OrganizerID != organizerID {
-		return nil, fmt.Errorf("forbidden: not the venue owner")
+	caller, acting, err := r.organizerCaller(ctx, organizerID)
+	if err != nil {
+		return nil, err
+	}
+	actorAccount, err := r.org().AuthorizeVenueEdit(ctx, caller, acting, venue)
+	if err != nil {
+		return nil, accessError(r.org(), err, "forbidden: not the venue owner")
 	}
 
+	before := venueSectionFields(existing)
 	if input.Name != nil {
 		existing.Name = *input.Name
 	}
@@ -144,7 +194,10 @@ func (r *mutationResolver) UpdateSection(ctx context.Context, id string, input U
 	if input.DisplayOrder != nil {
 		existing.DisplayOrder = *input.DisplayOrder
 	}
-	if err := r.VenueSectionRepo.Update(ctx, existing); err != nil {
+	err = r.org().Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, caller.UserID, actorAccount, service.ActionVenueSectionUpdate, "venue_section:"+id, before, venueSectionFields(existing))
+	}, func(ctx context.Context) error { return r.VenueSectionRepo.Update(ctx, existing) })
+	if err != nil {
 		return nil, err
 	}
 	return mapVenueSectionToGQL(existing), nil
@@ -168,6 +221,25 @@ func (r *mutationResolver) CreateSeatingPlan(ctx context.Context, input CreateSe
 	if input.PricingMode != nil {
 		pricingMode = *input.PricingMode
 	}
+	caller, acting, err := r.organizerCaller(ctx, organizerID)
+	if err != nil {
+		return nil, err
+	}
+	var actorAccount string
+	if r.org().Checking() {
+		venue, verr := r.VenueRepo.FindByID(ctx, input.VenueID)
+		switch {
+		case verr == nil:
+			actorAccount, err = r.org().AuthorizePlanCreate(ctx, caller, acting, venue, input.TicketID)
+			if err != nil {
+				return nil, accessError(r.org(), err, "")
+			}
+		case r.org().Enforcing() && errors.Is(verr, repository.ErrVenueNotFound):
+			return nil, fmt.Errorf("not found: venue not found")
+		case r.org().Enforcing():
+			return nil, verr
+		}
+	}
 	p := &repository.SeatingPlan{
 		VenueID:          input.VenueID,
 		TicketID:         input.TicketID,
@@ -177,7 +249,12 @@ func (r *mutationResolver) CreateSeatingPlan(ctx context.Context, input CreateSe
 		AssignmentMode:   normalizeAssignmentMode(input.AssignmentMode),
 		PricingMode:      pricingMode,
 	}
-	if err := r.PlanRepo.Create(ctx, p); err != nil {
+	err = r.org().Audited(ctx, func() audit.Entry {
+		after := service.PlanFields(p)
+		after["venueId"], after["ticketId"] = p.VenueID, p.TicketID
+		return service.ChangeEntry(ctx, caller.UserID, actorAccount, service.ActionPlanCreate, "seating_plan:"+p.ID, nil, after)
+	}, func(ctx context.Context) error { return r.PlanRepo.Create(ctx, p) })
+	if err != nil {
 		return nil, err
 	}
 	// Auto-provision sections from the venue template (best-effort).
@@ -205,6 +282,11 @@ func (r *mutationResolver) UpdateSeatingPlan(ctx context.Context, id string, inp
 		}
 		return nil, err
 	}
+	caller, actorAccount, err := r.authorizePlanEdit(ctx, organizerID, existing, "not found: seating plan not found")
+	if err != nil {
+		return nil, err
+	}
+	before := service.PlanFields(existing)
 	if input.Name != nil {
 		existing.Name = *input.Name
 	}
@@ -217,8 +299,10 @@ func (r *mutationResolver) UpdateSeatingPlan(ctx context.Context, id string, inp
 	if input.PricingMode != nil {
 		existing.PricingMode = *input.PricingMode
 	}
-	existing.OrganizerID = organizerID
-	if err := r.PlanRepo.Update(ctx, existing); err != nil {
+	err = r.org().Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, caller.UserID, actorAccount, service.ActionPlanUpdate, "seating_plan:"+id, before, service.PlanFields(existing))
+	}, func(ctx context.Context) error { return r.PlanRepo.Update(ctx, existing) })
+	if err != nil {
 		if errors.Is(err, repository.ErrPlanNotFound) {
 			return nil, fmt.Errorf("not found: seating plan not found")
 		}
@@ -244,10 +328,15 @@ func (r *mutationResolver) ActivateSeatingPlan(ctx context.Context, id string) (
 		}
 		return nil, err
 	}
-	if existing.OrganizerID != organizerID {
-		return nil, fmt.Errorf("forbidden: not the plan owner")
+	caller, actorAccount, err := r.authorizePlanEdit(ctx, organizerID, existing, "forbidden: not the plan owner")
+	if err != nil {
+		return nil, err
 	}
-	if err := r.PlanRepo.Activate(ctx, id, existing.Version); err != nil {
+	err = r.org().Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, caller.UserID, actorAccount, service.ActionPlanActivate, "seating_plan:"+id,
+			map[string]any{"status": string(existing.Status)}, map[string]any{"status": string(repository.PlanStatusActive)})
+	}, func(ctx context.Context) error { return r.PlanRepo.Activate(ctx, id, existing.Version) })
+	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrPlanAlreadyActive):
 			return nil, fmt.Errorf("conflict: plan is already active")
@@ -268,7 +357,22 @@ func (r *mutationResolver) DeactivateSeatingPlan(ctx context.Context, id string)
 	if organizerID == "" {
 		return nil, fmt.Errorf("unauthorized: organizer identity required")
 	}
-	if err := r.PlanRepo.Deactivate(ctx, id, organizerID); err != nil {
+	existing, err := r.PlanRepo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrPlanNotFound) {
+			return nil, fmt.Errorf("not found: seating plan not found")
+		}
+		return nil, err
+	}
+	caller, actorAccount, err := r.authorizePlanEdit(ctx, organizerID, existing, "not found: seating plan not found")
+	if err != nil {
+		return nil, err
+	}
+	err = r.org().Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, caller.UserID, actorAccount, service.ActionPlanDeactivate, "seating_plan:"+id,
+			map[string]any{"status": string(existing.Status)}, map[string]any{"status": string(repository.PlanStatusInactive)})
+	}, func(ctx context.Context) error { return r.PlanRepo.Deactivate(ctx, id, existing.OrganizerID) })
+	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrPlanNotFound):
 			return nil, fmt.Errorf("not found: seating plan not found")
@@ -295,8 +399,9 @@ func (r *mutationResolver) CreatePriceTier(ctx context.Context, planID string, i
 		}
 		return nil, err
 	}
-	if plan.OrganizerID != organizerID {
-		return nil, fmt.Errorf("forbidden: not the plan owner")
+	caller, actorAccount, err := r.authorizePlanEdit(ctx, organizerID, plan, "forbidden: not the plan owner")
+	if err != nil {
+		return nil, err
 	}
 
 	t := &repository.PriceTier{
@@ -304,7 +409,11 @@ func (r *mutationResolver) CreatePriceTier(ctx context.Context, planID string, i
 		Name:   input.Name,
 		Price:  input.Price,
 	}
-	if err := r.PriceTierRepo.Create(ctx, t); err != nil {
+	err = r.org().Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, caller.UserID, actorAccount, service.ActionPriceTierCreate, "seating_plan:"+planID, nil,
+			map[string]any{"priceTierId": t.ID, "name": t.Name, "price": t.Price})
+	}, func(ctx context.Context) error { return r.PriceTierRepo.Create(ctx, t) })
+	if err != nil {
 		return nil, err
 	}
 	return mapPriceTierToGQL(t), nil

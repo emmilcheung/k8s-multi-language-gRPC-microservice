@@ -6,6 +6,8 @@ import (
 
 	"github.com/acme/venue-service/internal/hold"
 	"github.com/acme/venue-service/internal/repository"
+	"github.com/acme/venue-service/internal/security"
+	"github.com/acme/venue-service/internal/service"
 )
 
 // priceTierRepository is the subset of the price-tier repo used by GraphQL resolvers.
@@ -28,6 +30,10 @@ type Resolver struct {
 	VenueSectionRepo repository.VenueSectionRepository
 	PriceTierRepo    priceTierRepository
 	HoldMgr          holdManager
+	// Access and Verifier send organizer writes through the permission check.
+	// Left nil, only the old creator comparison applies.
+	Access   *service.OrganizerAccess
+	Verifier *security.CallerVerifier
 }
 
 // ── mapping helpers ───────────────────────────────────────────────────────────

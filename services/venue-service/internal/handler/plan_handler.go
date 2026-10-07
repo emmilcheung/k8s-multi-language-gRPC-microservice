@@ -1,13 +1,16 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
+	"github.com/acme/venue-service/internal/audit"
 	"github.com/acme/venue-service/internal/repository"
 	"github.com/acme/venue-service/internal/security"
+	"github.com/acme/venue-service/internal/service"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
@@ -17,12 +20,46 @@ type PlanHandler struct {
 	planRepo    repository.PlanRepository
 	sectionRepo repository.SectionRepository
 	validator   *security.UserIDSignatureValidator
+	access      *Access
+	venueRepo   repository.VenueRepository
 	log         *zap.Logger
 }
 
 // NewPlanHandler creates a new PlanHandler.
 func NewPlanHandler(planRepo repository.PlanRepository, sectionRepo repository.SectionRepository, validator *security.UserIDSignatureValidator, log *zap.Logger) *PlanHandler {
-	return &PlanHandler{planRepo: planRepo, sectionRepo: sectionRepo, validator: validator, log: log}
+	return &PlanHandler{planRepo: planRepo, sectionRepo: sectionRepo, validator: validator, access: legacyAccess(log), log: log}
+}
+
+// WithAccess sends organizer writes through the permission check. venueRepo is
+// used to learn whether a venue is verified and who created it.
+func (h *PlanHandler) WithAccess(a *Access, venueRepo repository.VenueRepository) *PlanHandler {
+	h.access = a
+	h.venueRepo = venueRepo
+	return h
+}
+
+// authorizeEdit loads the plan and checks the caller may change it. When
+// handled is true the response has been written. legacyStatus/legacyMsg are
+// what a refusal looked like before the permission check existed.
+func (h *PlanHandler) authorizeEdit(c echo.Context, organizerID, planID string, legacyStatus int, legacyMsg string) (plan *repository.SeatingPlan, actorUser, actorAccount string, handled bool, err error) {
+	ctx := c.Request().Context()
+	plan, ferr := h.planRepo.FindByID(ctx, planID)
+	if ferr != nil {
+		if errors.Is(ferr, repository.ErrPlanNotFound) {
+			return nil, "", "", true, c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
+		}
+		h.log.Error("plan lookup failed", zap.Error(ferr), zap.String("planId", planID))
+		return nil, "", "", true, c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+	}
+	caller, acting, cerr := h.access.Caller(c, organizerID)
+	if done, e := h.access.Fail(c, h.log, cerr, 0, ""); done {
+		return nil, "", "", true, e
+	}
+	account, aerr := h.access.org.AuthorizePlanEdit(ctx, caller, acting, plan)
+	if done, e := h.access.Fail(c, h.log, aerr, legacyStatus, legacyMsg); done {
+		return nil, "", "", true, e
+	}
+	return plan, caller.UserID, account, false, nil
 }
 
 // RegisterRoutes attaches seating plan routes to the given Echo group.
@@ -133,6 +170,30 @@ func (h *PlanHandler) Create(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, errorResponse("name is required"))
 	}
 
+	ctx := c.Request().Context()
+	caller, acting, err := h.access.Caller(c, organizerID)
+	if handled, e := h.access.Fail(c, h.log, err, 0, ""); handled {
+		return e
+	}
+	var actorAccount string
+	if h.access.org.Checking() && h.venueRepo != nil {
+		venue, verr := h.venueRepo.FindByID(ctx, req.VenueID)
+		switch {
+		case verr == nil:
+			actorAccount, err = h.access.org.AuthorizePlanCreate(ctx, caller, acting, venue, req.TicketID)
+			if handled, e := h.access.Fail(c, h.log, err, 0, ""); handled {
+				return e
+			}
+		case h.access.org.Enforcing() && errors.Is(verr, repository.ErrVenueNotFound):
+			return c.JSON(http.StatusNotFound, errorResponse("venue not found"))
+		case h.access.org.Enforcing():
+			h.log.Error("plan create: venue lookup failed", zap.Error(verr))
+			return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+		default:
+			h.log.Warn("plan create: venue lookup failed, skipping permission comparison", zap.Error(verr))
+		}
+	}
+
 	p := &repository.SeatingPlan{
 		VenueID:          req.VenueID,
 		TicketID:         req.TicketID,
@@ -143,7 +204,12 @@ func (h *PlanHandler) Create(c echo.Context) error {
 		PricingMode:      req.PricingMode,
 	}
 
-	if err := h.planRepo.Create(c.Request().Context(), p); err != nil {
+	err = h.access.org.Audited(ctx, func() audit.Entry {
+		after := service.PlanFields(p)
+		after["venueId"], after["ticketId"] = p.VenueID, p.TicketID
+		return service.ChangeEntry(ctx, caller.UserID, actorAccount, service.ActionPlanCreate, "seating_plan:"+p.ID, nil, after)
+	}, func(ctx context.Context) error { return h.planRepo.Create(ctx, p) })
+	if err != nil {
 		h.log.Error("plan create failed", zap.Error(err))
 		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
 	}
@@ -212,16 +278,25 @@ func (h *PlanHandler) Update(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, errorResponse("name is required"))
 	}
 
+	existing, actorUser, actorAccount, handled, err := h.authorizeEdit(c, organizerID, id, http.StatusNotFound, "seating plan not found")
+	if handled {
+		return err
+	}
+
 	p := &repository.SeatingPlan{
 		ID:               id,
-		OrganizerID:      organizerID,
+		OrganizerID:      existing.OrganizerID,
 		Name:             req.Name,
 		MaxSeatsPerOrder: req.MaxSeatsPerOrder,
 		AssignmentMode:   req.AssignmentMode,
 		PricingMode:      req.PricingMode,
 	}
 
-	if err := h.planRepo.Update(c.Request().Context(), p); err != nil {
+	ctx := c.Request().Context()
+	err = h.access.org.Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, actorUser, actorAccount, service.ActionPlanUpdate, "seating_plan:"+id, service.PlanFields(existing), service.PlanFields(p))
+	}, func(ctx context.Context) error { return h.planRepo.Update(ctx, p) })
+	if err != nil {
 		if errors.Is(err, repository.ErrPlanNotFound) {
 			return c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
 		}
@@ -261,16 +336,9 @@ func (h *PlanHandler) Activate(c echo.Context) error {
 	}
 
 	// Validate ownership.
-	existing, err := h.planRepo.FindByID(c.Request().Context(), id)
-	if err != nil {
-		if errors.Is(err, repository.ErrPlanNotFound) {
-			return c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
-		}
-		h.log.Error("plan activate lookup failed", zap.Error(err), zap.String("planId", id))
-		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
-	}
-	if existing.OrganizerID != organizerID {
-		return c.JSON(http.StatusForbidden, errorResponse("not the plan owner"))
+	existing, actorUser, actorAccount, handled, err := h.authorizeEdit(c, organizerID, id, http.StatusForbidden, "not the plan owner")
+	if handled {
+		return err
 	}
 
 	// Validate that plan has at least one seat: compute total capacity.
@@ -302,7 +370,12 @@ func (h *PlanHandler) Activate(c echo.Context) error {
 		version = existing.Version
 	}
 
-	if err := h.planRepo.Activate(c.Request().Context(), id, version); err != nil {
+	ctx := c.Request().Context()
+	err = h.access.org.Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, actorUser, actorAccount, service.ActionPlanActivate, "seating_plan:"+id,
+			map[string]any{"status": string(existing.Status)}, map[string]any{"status": string(repository.PlanStatusActive)})
+	}, func(ctx context.Context) error { return h.planRepo.Activate(ctx, id, version) })
+	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrPlanNotFound):
 			return c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
@@ -342,7 +415,17 @@ func (h *PlanHandler) Deactivate(c echo.Context) error {
 
 	id := c.Param("id")
 
-	if err := h.planRepo.Deactivate(c.Request().Context(), id, organizerID); err != nil {
+	existing, actorUser, actorAccount, handled, err := h.authorizeEdit(c, organizerID, id, http.StatusNotFound, "seating plan not found")
+	if handled {
+		return err
+	}
+
+	ctx := c.Request().Context()
+	err = h.access.org.Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, actorUser, actorAccount, service.ActionPlanDeactivate, "seating_plan:"+id,
+			map[string]any{"status": string(existing.Status)}, map[string]any{"status": string(repository.PlanStatusInactive)})
+	}, func(ctx context.Context) error { return h.planRepo.Deactivate(ctx, id, existing.OrganizerID) })
+	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrPlanNotFound):
 			return c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
@@ -398,7 +481,19 @@ func (h *PlanHandler) SaveLayout(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, errorResponse("layout JSON exceeds 1 MB limit"))
 	}
 
-	if err := h.planRepo.SaveLayout(c.Request().Context(), id, organizerID, req.LayoutJSON); err != nil {
+	existing, actorUser, actorAccount, handled, err := h.authorizeEdit(c, organizerID, id, http.StatusNotFound, "seating plan not found")
+	if handled {
+		return err
+	}
+
+	ctx := c.Request().Context()
+	err = h.access.org.Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, actorUser, actorAccount, service.ActionPlanSaveLayout, "seating_plan:"+id,
+			nil, map[string]any{"layoutBytes": len(req.LayoutJSON)})
+	}, func(ctx context.Context) error {
+		return h.planRepo.SaveLayout(ctx, id, existing.OrganizerID, req.LayoutJSON)
+	})
+	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrPlanNotFound):
 			return c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))

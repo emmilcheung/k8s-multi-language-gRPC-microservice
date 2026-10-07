@@ -10,6 +10,7 @@ import (
 	"time"
 
 	gqlhandler "github.com/99designs/gqlgen/graphql/handler"
+	"github.com/acme/venue-service/internal/authz"
 	"github.com/acme/venue-service/internal/config"
 	gqlgraph "github.com/acme/venue-service/internal/graphql"
 	grpcserver "github.com/acme/venue-service/internal/grpc"
@@ -31,6 +32,7 @@ import (
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	accountsv1 "github.com/org/ticketing/libs/grpc-stubs/go/accounts/v1"
 	ticketsv1 "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
@@ -247,6 +249,31 @@ func main() {
 	// Signature validator — validates X-User-Id-Sig headers signed by Kong.
 	sigValidator := security.NewUserIDSignatureValidator(cfg.UserIDSigningKey)
 
+	// Organizer permission check. Without an address (allowed unless
+	// AUTHZ_ENFORCED=on, which config rejects) the client has no connection and
+	// logging mode records "unavailable" while the old owner check decides.
+	var accountsRPC accountsv1.AccountsServiceClient
+	if cfg.AccountsGRPCAddr != "" && cfg.AuthzMode != authz.ModeOff {
+		accountsConn, err := grpc.NewClient(
+			cfg.AccountsGRPCAddr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:                30 * time.Second,
+				Timeout:             10 * time.Second,
+				PermitWithoutStream: true,
+			}),
+		)
+		if err != nil {
+			log.Fatal("failed to dial user-service accounts", zap.Error(err), zap.String("addr", cfg.AccountsGRPCAddr))
+		}
+		defer accountsConn.Close() //nolint:errcheck
+		accountsRPC = accountsv1.NewAccountsServiceClient(accountsConn)
+	}
+	callerVerifier := security.NewCallerVerifier(cfg.UserIDSigningKey)
+	orgAccess := service.NewOrganizerAccess(authz.New(cfg.AuthzMode, accountsRPC, log), cfg.AuthzMode, ticketClient, pgrepo.NewTxRunner(pool), log)
+	access := handler.NewAccess(callerVerifier, orgAccess)
+	log.Info("organizer authz configured", zap.String("mode", string(cfg.AuthzMode)), zap.Bool("accountsConnected", accountsRPC != nil))
+
 	// Echo HTTP server.
 	e := echo.New()
 	e.HideBanner = true
@@ -270,16 +297,16 @@ func main() {
 	// API routes.
 	api := e.Group("/api")
 
-	venueHandler := handler.NewVenueHandler(venueRepo, sigValidator, log)
+	venueHandler := handler.NewVenueHandler(venueRepo, sigValidator, log).WithAccess(access)
 	venueHandler.RegisterRoutes(api.Group("/venues"))
 
-	venueSectionHandler := handler.NewVenueSectionHandler(venueRepo, venueSectionRepo, sigValidator, log)
+	venueSectionHandler := handler.NewVenueSectionHandler(venueRepo, venueSectionRepo, sigValidator, log).WithAccess(access)
 	venueSectionHandler.RegisterRoutes(api.Group("/venues/:venueId"))
 
-	planHandler := handler.NewPlanHandler(planRepo, sectionRepo, sigValidator, log)
+	planHandler := handler.NewPlanHandler(planRepo, sectionRepo, sigValidator, log).WithAccess(access, venueRepo)
 	planHandler.RegisterRoutes(api.Group("/seating-plans"))
 
-	sectionHandler := handler.NewSectionHandler(planRepo, sectionRepo, priceTierRepo, sigValidator, log)
+	sectionHandler := handler.NewSectionHandler(planRepo, sectionRepo, priceTierRepo, sigValidator, log).WithAccess(access)
 	sectionHandler.RegisterRoutes(api.Group("/seating-plans/:planId"))
 
 	seatHoldHandler := handler.NewSeatHoldHandler(holdMgr, sigValidator, log)
@@ -299,6 +326,8 @@ func main() {
 		VenueSectionRepo: venueSectionRepo,
 		PriceTierRepo:    priceTierRepo,
 		HoldMgr:          holdMgr,
+		Access:           orgAccess,
+		Verifier:         callerVerifier,
 	}
 	gqlSrv := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{Resolvers: gqlResolver}))
 	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
