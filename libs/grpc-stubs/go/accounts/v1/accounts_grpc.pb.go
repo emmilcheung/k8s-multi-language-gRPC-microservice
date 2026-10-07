@@ -23,6 +23,7 @@ const (
 	AccountsService_ListMyAccounts_FullMethodName        = "/acme.accounts.v1.AccountsService/ListMyAccounts"
 	AccountsService_GetAccount_FullMethodName            = "/acme.accounts.v1.AccountsService/GetAccount"
 	AccountsService_EnsurePersonalAccount_FullMethodName = "/acme.accounts.v1.AccountsService/EnsurePersonalAccount"
+	AccountsService_EnsureVenueManager_FullMethodName    = "/acme.accounts.v1.AccountsService/EnsureVenueManager"
 )
 
 // AccountsServiceClient is the client API for AccountsService service.
@@ -46,6 +47,9 @@ type AccountsServiceClient interface {
 	// EnsurePersonalAccount returns the user's personal organizer account,
 	// creating it (with the user as OWNER) on first call. Idempotent.
 	EnsurePersonalAccount(ctx context.Context, in *EnsurePersonalAccountRequest, opts ...grpc.CallOption) (*EnsurePersonalAccountResponse, error)
+	// EnsureVenueManager gives the user the VENUE_MANAGER role on the venue,
+	// doing nothing if they already hold a membership on it. Idempotent.
+	EnsureVenueManager(ctx context.Context, in *EnsureVenueManagerRequest, opts ...grpc.CallOption) (*EnsureVenueManagerResponse, error)
 }
 
 type accountsServiceClient struct {
@@ -96,6 +100,16 @@ func (c *accountsServiceClient) EnsurePersonalAccount(ctx context.Context, in *E
 	return out, nil
 }
 
+func (c *accountsServiceClient) EnsureVenueManager(ctx context.Context, in *EnsureVenueManagerRequest, opts ...grpc.CallOption) (*EnsureVenueManagerResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnsureVenueManagerResponse)
+	err := c.cc.Invoke(ctx, AccountsService_EnsureVenueManager_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AccountsServiceServer is the server API for AccountsService service.
 // All implementations should embed UnimplementedAccountsServiceServer
 // for forward compatibility.
@@ -117,6 +131,9 @@ type AccountsServiceServer interface {
 	// EnsurePersonalAccount returns the user's personal organizer account,
 	// creating it (with the user as OWNER) on first call. Idempotent.
 	EnsurePersonalAccount(context.Context, *EnsurePersonalAccountRequest) (*EnsurePersonalAccountResponse, error)
+	// EnsureVenueManager gives the user the VENUE_MANAGER role on the venue,
+	// doing nothing if they already hold a membership on it. Idempotent.
+	EnsureVenueManager(context.Context, *EnsureVenueManagerRequest) (*EnsureVenueManagerResponse, error)
 }
 
 // UnimplementedAccountsServiceServer should be embedded to have
@@ -137,6 +154,9 @@ func (UnimplementedAccountsServiceServer) GetAccount(context.Context, *GetAccoun
 }
 func (UnimplementedAccountsServiceServer) EnsurePersonalAccount(context.Context, *EnsurePersonalAccountRequest) (*EnsurePersonalAccountResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method EnsurePersonalAccount not implemented")
+}
+func (UnimplementedAccountsServiceServer) EnsureVenueManager(context.Context, *EnsureVenueManagerRequest) (*EnsureVenueManagerResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EnsureVenueManager not implemented")
 }
 func (UnimplementedAccountsServiceServer) testEmbeddedByValue() {}
 
@@ -230,6 +250,24 @@ func _AccountsService_EnsurePersonalAccount_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AccountsService_EnsureVenueManager_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnsureVenueManagerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AccountsServiceServer).EnsureVenueManager(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AccountsService_EnsureVenueManager_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AccountsServiceServer).EnsureVenueManager(ctx, req.(*EnsureVenueManagerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AccountsService_ServiceDesc is the grpc.ServiceDesc for AccountsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -252,6 +290,10 @@ var AccountsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EnsurePersonalAccount",
 			Handler:    _AccountsService_EnsurePersonalAccount_Handler,
+		},
+		{
+			MethodName: "EnsureVenueManager",
+			Handler:    _AccountsService_EnsureVenueManager_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

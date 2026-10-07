@@ -657,6 +657,94 @@ func (x *EnsurePersonalAccountResponse) GetAccountId() string {
 	return ""
 }
 
+type EnsureVenueManagerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	VenueId       string                 `protobuf:"bytes,2,opt,name=venue_id,json=venueId,proto3" json:"venue_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnsureVenueManagerRequest) Reset() {
+	*x = EnsureVenueManagerRequest{}
+	mi := &file_accounts_v1_accounts_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnsureVenueManagerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnsureVenueManagerRequest) ProtoMessage() {}
+
+func (x *EnsureVenueManagerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_accounts_v1_accounts_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnsureVenueManagerRequest.ProtoReflect.Descriptor instead.
+func (*EnsureVenueManagerRequest) Descriptor() ([]byte, []int) {
+	return file_accounts_v1_accounts_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *EnsureVenueManagerRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *EnsureVenueManagerRequest) GetVenueId() string {
+	if x != nil {
+		return x.VenueId
+	}
+	return ""
+}
+
+type EnsureVenueManagerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnsureVenueManagerResponse) Reset() {
+	*x = EnsureVenueManagerResponse{}
+	mi := &file_accounts_v1_accounts_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnsureVenueManagerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnsureVenueManagerResponse) ProtoMessage() {}
+
+func (x *EnsureVenueManagerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_accounts_v1_accounts_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnsureVenueManagerResponse.ProtoReflect.Descriptor instead.
+func (*EnsureVenueManagerResponse) Descriptor() ([]byte, []int) {
+	return file_accounts_v1_accounts_proto_rawDescGZIP(), []int{11}
+}
+
 var File_accounts_v1_accounts_proto protoreflect.FileDescriptor
 
 const file_accounts_v1_accounts_proto_rawDesc = "" +
@@ -697,7 +785,11 @@ const file_accounts_v1_accounts_proto_rawDesc = "" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\">\n" +
 	"\x1dEnsurePersonalAccountResponse\x12\x1d\n" +
 	"\n" +
-	"account_id\x18\x01 \x01(\tR\taccountId*\xad\x01\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\"O\n" +
+	"\x19EnsureVenueManagerRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x19\n" +
+	"\bvenue_id\x18\x02 \x01(\tR\avenueId\"\x1c\n" +
+	"\x1aEnsureVenueManagerResponse*\xad\x01\n" +
 	"\n" +
 	"ReasonCode\x12\x1b\n" +
 	"\x17REASON_CODE_UNSPECIFIED\x10\x00\x12\x1a\n" +
@@ -708,13 +800,14 @@ const file_accounts_v1_accounts_proto_rawDesc = "" +
 	"\rAccountStatus\x12\x1e\n" +
 	"\x1aACCOUNT_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15ACCOUNT_STATUS_ACTIVE\x10\x01\x12\x1c\n" +
-	"\x18ACCOUNT_STATUS_SUSPENDED\x10\x022\xb1\x03\n" +
+	"\x18ACCOUNT_STATUS_SUSPENDED\x10\x022\xa2\x04\n" +
 	"\x0fAccountsService\x12f\n" +
 	"\x0fCheckPermission\x12(.acme.accounts.v1.CheckPermissionRequest\x1a).acme.accounts.v1.CheckPermissionResponse\x12c\n" +
 	"\x0eListMyAccounts\x12'.acme.accounts.v1.ListMyAccountsRequest\x1a(.acme.accounts.v1.ListMyAccountsResponse\x12W\n" +
 	"\n" +
 	"GetAccount\x12#.acme.accounts.v1.GetAccountRequest\x1a$.acme.accounts.v1.GetAccountResponse\x12x\n" +
-	"\x15EnsurePersonalAccount\x12..acme.accounts.v1.EnsurePersonalAccountRequest\x1a/.acme.accounts.v1.EnsurePersonalAccountResponseB\xcb\x01\n" +
+	"\x15EnsurePersonalAccount\x12..acme.accounts.v1.EnsurePersonalAccountRequest\x1a/.acme.accounts.v1.EnsurePersonalAccountResponse\x12o\n" +
+	"\x12EnsureVenueManager\x12+.acme.accounts.v1.EnsureVenueManagerRequest\x1a,.acme.accounts.v1.EnsureVenueManagerResponseB\xcb\x01\n" +
 	"\x14com.acme.accounts.v1B\rAccountsProtoP\x01ZBgithub.com/org/ticketing/libs/grpc-stubs/go/accounts/v1;accountsv1\xa2\x02\x03AAX\xaa\x02\x10Acme.Accounts.V1\xca\x02\x10Acme\\Accounts\\V1\xe2\x02\x1cAcme\\Accounts\\V1\\GPBMetadata\xea\x02\x12Acme::Accounts::V1b\x06proto3"
 
 var (
@@ -730,7 +823,7 @@ func file_accounts_v1_accounts_proto_rawDescGZIP() []byte {
 }
 
 var file_accounts_v1_accounts_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_accounts_v1_accounts_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_accounts_v1_accounts_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_accounts_v1_accounts_proto_goTypes = []any{
 	(ReasonCode)(0),                       // 0: acme.accounts.v1.ReasonCode
 	(AccountStatus)(0),                    // 1: acme.accounts.v1.AccountStatus
@@ -744,6 +837,8 @@ var file_accounts_v1_accounts_proto_goTypes = []any{
 	(*GetAccountResponse)(nil),            // 9: acme.accounts.v1.GetAccountResponse
 	(*EnsurePersonalAccountRequest)(nil),  // 10: acme.accounts.v1.EnsurePersonalAccountRequest
 	(*EnsurePersonalAccountResponse)(nil), // 11: acme.accounts.v1.EnsurePersonalAccountResponse
+	(*EnsureVenueManagerRequest)(nil),     // 12: acme.accounts.v1.EnsureVenueManagerRequest
+	(*EnsureVenueManagerResponse)(nil),    // 13: acme.accounts.v1.EnsureVenueManagerResponse
 }
 var file_accounts_v1_accounts_proto_depIdxs = []int32{
 	0,  // 0: acme.accounts.v1.CheckPermissionResponse.reason_code:type_name -> acme.accounts.v1.ReasonCode
@@ -755,12 +850,14 @@ var file_accounts_v1_accounts_proto_depIdxs = []int32{
 	6,  // 6: acme.accounts.v1.AccountsService.ListMyAccounts:input_type -> acme.accounts.v1.ListMyAccountsRequest
 	8,  // 7: acme.accounts.v1.AccountsService.GetAccount:input_type -> acme.accounts.v1.GetAccountRequest
 	10, // 8: acme.accounts.v1.AccountsService.EnsurePersonalAccount:input_type -> acme.accounts.v1.EnsurePersonalAccountRequest
-	3,  // 9: acme.accounts.v1.AccountsService.CheckPermission:output_type -> acme.accounts.v1.CheckPermissionResponse
-	7,  // 10: acme.accounts.v1.AccountsService.ListMyAccounts:output_type -> acme.accounts.v1.ListMyAccountsResponse
-	9,  // 11: acme.accounts.v1.AccountsService.GetAccount:output_type -> acme.accounts.v1.GetAccountResponse
-	11, // 12: acme.accounts.v1.AccountsService.EnsurePersonalAccount:output_type -> acme.accounts.v1.EnsurePersonalAccountResponse
-	9,  // [9:13] is the sub-list for method output_type
-	5,  // [5:9] is the sub-list for method input_type
+	12, // 9: acme.accounts.v1.AccountsService.EnsureVenueManager:input_type -> acme.accounts.v1.EnsureVenueManagerRequest
+	3,  // 10: acme.accounts.v1.AccountsService.CheckPermission:output_type -> acme.accounts.v1.CheckPermissionResponse
+	7,  // 11: acme.accounts.v1.AccountsService.ListMyAccounts:output_type -> acme.accounts.v1.ListMyAccountsResponse
+	9,  // 12: acme.accounts.v1.AccountsService.GetAccount:output_type -> acme.accounts.v1.GetAccountResponse
+	11, // 13: acme.accounts.v1.AccountsService.EnsurePersonalAccount:output_type -> acme.accounts.v1.EnsurePersonalAccountResponse
+	13, // 14: acme.accounts.v1.AccountsService.EnsureVenueManager:output_type -> acme.accounts.v1.EnsureVenueManagerResponse
+	10, // [10:15] is the sub-list for method output_type
+	5,  // [5:10] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -777,7 +874,7 @@ func file_accounts_v1_accounts_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_accounts_v1_accounts_proto_rawDesc), len(file_accounts_v1_accounts_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

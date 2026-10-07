@@ -24,6 +24,9 @@ service AccountsService {
   // EnsurePersonalAccount returns the user's personal organizer account,
   // creating it (with the user as OWNER) on first call. Idempotent.
   rpc EnsurePersonalAccount(EnsurePersonalAccountRequest) returns (EnsurePersonalAccountResponse);
+  // EnsureVenueManager gives the user the VENUE_MANAGER role on the venue,
+  // doing nothing if they already hold a membership on it. Idempotent.
+  rpc EnsureVenueManager(EnsureVenueManagerRequest) returns (EnsureVenueManagerResponse);
 }
 
 enum ReasonCode {
@@ -101,3 +104,10 @@ message EnsurePersonalAccountRequest {
 message EnsurePersonalAccountResponse {
   string account_id = 1;
 }
+
+message EnsureVenueManagerRequest {
+  string user_id = 1;
+  string venue_id = 2;
+}
+
+message EnsureVenueManagerResponse {}
