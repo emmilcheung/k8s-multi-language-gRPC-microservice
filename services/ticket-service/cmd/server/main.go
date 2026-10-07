@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	gqlhandler "github.com/99designs/gqlgen/graphql/handler"
+	"github.com/acme/ticket-service/internal/authz"
 	"github.com/acme/ticket-service/internal/cache"
 	"github.com/acme/ticket-service/internal/config"
 	gqlgraph "github.com/acme/ticket-service/internal/graphql"
@@ -30,6 +32,7 @@ import (
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	accountsv1 "github.com/org/ticketing/libs/grpc-stubs/go/accounts/v1"
 	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
@@ -197,6 +200,30 @@ func main() {
 	// Business logic service
 	svc := service.NewTicketService(ticketRepo, producer, log, venueClient, savedEventRepo)
 
+	// Organizer permission check. Without an address (allowed unless
+	// AUTHZ_ENFORCED=on, which config rejects) the client has no connection and
+	// logging mode records "unavailable" while the old owner check decides.
+	var accountsRPC accountsv1.AccountsServiceClient
+	if cfg.AccountsGRPCAddr != "" && cfg.AuthzMode != authz.ModeOff {
+		accountsConn, err := grpc.NewClient(
+			cfg.AccountsGRPCAddr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:                30 * time.Second,
+				Timeout:             10 * time.Second,
+				PermitWithoutStream: true,
+			}),
+		)
+		if err != nil {
+			log.Fatal("failed to dial user-service accounts", zap.Error(err), zap.String("addr", cfg.AccountsGRPCAddr))
+		}
+		defer accountsConn.Close() //nolint:errcheck
+		accountsRPC = accountsv1.NewAccountsServiceClient(accountsConn)
+	}
+	svc.WithAuthz(authz.New(cfg.AuthzMode, accountsRPC, log), cfg.AuthzMode)
+	svc.WithAccountReads(mongoRepo)
+	log.Info("organizer authz configured", zap.String("mode", string(cfg.AuthzMode)), zap.Bool("accountsConnected", accountsRPC != nil))
+
 	// Wire search client + start indexer now that svc and Kafka producer exist.
 	if openSearchClient != nil {
 		svc.WithSearchClient(openSearchClient)
@@ -243,7 +270,8 @@ func main() {
 	// Ticket routes
 	signingKey := os.Getenv("X_USER_ID_SIGNING_KEY")
 	signatureValidator := security.NewUserIDSignatureValidator(signingKey)
-	ticketHandler := handler.NewTicketHandler(svc, log, signatureValidator)
+	callerVerifier := security.NewCallerVerifier(signingKey)
+	ticketHandler := handler.NewTicketHandler(svc, log, signatureValidator).WithCallerVerifier(callerVerifier)
 	v1 := e.Group("/api/tickets")
 	v1.POST("", ticketHandler.Create)
 	v1.GET("", ticketHandler.List)
@@ -260,6 +288,10 @@ func main() {
 		loader := gqlgraph.NewTicketLoader(svc)
 		ctx := gqlgraph.WithTicketLoader(r.Context(), loader)
 		ctx = gqlgraph.WithUserID(ctx, r.Header.Get("X-User-Id"))
+		ctx = gqlgraph.WithCaller(ctx, callerVerifier.TrustedCaller(
+			r.Header.Get("X-User-Id"), r.Header.Get("X-User-Id-Sig"),
+			r.Header.Get("X-User-Roles"), r.Header.Get("X-User-Roles-Sig")))
+		ctx = gqlgraph.WithOrganizerAccount(ctx, strings.TrimSpace(r.Header.Get("X-Organizer-Account")))
 		gqlSrv.ServeHTTP(w, r.WithContext(ctx))
 	})
 	e.POST("/graphql", echo.WrapHandler(gqlgraph.WrapWithUserIDSignatureValidation(gqlHandler, signatureValidator)))

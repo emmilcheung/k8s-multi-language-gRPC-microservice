@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/acme/ticket-service/internal/authz"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/security"
 	"github.com/acme/ticket-service/internal/service"
@@ -27,6 +28,7 @@ type TicketHandler struct {
 	svc                *service.TicketService
 	log                *zap.Logger
 	signatureValidator *security.UserIDSignatureValidator
+	callerVerifier     *security.CallerVerifier // nil: callers carry no platform roles
 }
 
 // NewTicketHandler creates a new TicketHandler.
@@ -36,6 +38,44 @@ func NewTicketHandler(svc *service.TicketService, log *zap.Logger, sigValidator 
 		log:                log,
 		signatureValidator: sigValidator,
 	}
+}
+
+// WithCallerVerifier lets the handler trust platform roles the gateway signed.
+func (h *TicketHandler) WithCallerVerifier(v *security.CallerVerifier) *TicketHandler {
+	h.callerVerifier = v
+	return h
+}
+
+// caller returns the verified caller; the user id signature was already checked.
+func (h *TicketHandler) caller(c echo.Context, userID string) security.TrustedCaller {
+	if h.callerVerifier == nil {
+		return security.TrustedCaller{UserID: userID}
+	}
+	hd := c.Request().Header
+	tc := h.callerVerifier.TrustedCaller(userID, hd.Get("X-User-Id-Sig"), hd.Get("X-User-Roles"), hd.Get("X-User-Roles-Sig"))
+	if tc.UserID == "" {
+		return security.TrustedCaller{UserID: userID}
+	}
+	return tc
+}
+
+// organizerAccessError maps a permission failure to its response. It reports
+// false for errors that are not about organizer access.
+func organizerAccessError(c echo.Context, log *zap.Logger, err error) (bool, error) {
+	switch {
+	case errors.Is(err, service.ErrActingAccountRequired):
+		return true, errorResponse(c, http.StatusBadRequest, "ACCOUNT_REQUIRED", "Choose an organizer account", nil)
+	case errors.Is(err, service.ErrActingAccountInvalid):
+		return true, errorResponse(c, http.StatusBadRequest, "VALIDATION_FAILED", "X-Organizer-Account must be a valid account id", nil)
+	case errors.Is(err, service.ErrUnauthorized):
+		return true, errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Not authorised to modify this ticket", nil)
+	case errors.Is(err, authz.ErrAuthzUnavailable):
+		return true, errorResponse(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "Permission service is temporarily unavailable", nil)
+	case errors.Is(err, service.ErrPermissionCheckFailed):
+		log.Error("permission check failed", zap.Error(err))
+		return true, errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred", nil)
+	}
+	return false, nil
 }
 
 // createTicketRequest is the request body for POST /api/tickets.
@@ -225,8 +265,14 @@ func (h *TicketHandler) Create(c echo.Context) error {
 		MaxPerUser: req.MaxPerUser,
 		Category:   req.Category,
 		Event:      eventData,
+
+		Caller:          h.caller(c, userID),
+		ActingAccountID: strings.TrimSpace(c.Request().Header.Get("X-Organizer-Account")),
 	})
 	if err != nil {
+		if handled, rerr := organizerAccessError(c, h.log, err); handled {
+			return rerr
+		}
 		h.log.Error("create ticket failed", zap.Error(err))
 		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred", nil)
 	}
@@ -350,13 +396,17 @@ func (h *TicketHandler) Update(c echo.Context) error {
 		SeatingPlanID: req.SeatingPlanID,
 		TicketType:    req.TicketType,
 		Event:         eventData,
+
+		Caller:          h.caller(c, userID),
+		ActingAccountID: strings.TrimSpace(c.Request().Header.Get("X-Organizer-Account")),
 	})
 	if err != nil {
+		if handled, rerr := organizerAccessError(c, h.log, err); handled {
+			return rerr
+		}
 		switch {
 		case errors.Is(err, repository.ErrTicketNotFound):
 			return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Ticket not found", nil)
-		case errors.Is(err, service.ErrUnauthorized):
-			return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Not authorised to modify this ticket", nil)
 		case errors.Is(err, repository.ErrTicketReserved):
 			return errorResponse(c, http.StatusConflict, "CONFLICT", "Cannot edit a reserved ticket", nil)
 		case errors.Is(err, repository.ErrVersionConflict):

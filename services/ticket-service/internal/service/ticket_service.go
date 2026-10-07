@@ -8,9 +8,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/acme/ticket-service/internal/audit"
+	"github.com/acme/ticket-service/internal/authz"
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/acme/ticket-service/internal/search"
+	"github.com/acme/ticket-service/internal/security"
+	"github.com/google/uuid"
 	venuev1 "github.com/org/ticketing/libs/grpc-stubs/go/venue/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -43,6 +47,11 @@ type CreateTicketInput struct {
 	MaxPerUser int    // defaults to 1 if 0
 	Category   string // optional; defaults to "OTHER" if empty
 	Event      *repository.TicketEvent
+
+	// Caller is the verified identity; ActingAccountID is the X-Organizer-Account
+	// selector. The permission check decides what they may do.
+	Caller          security.TrustedCaller
+	ActingAccountID string
 }
 
 // UpdateTicketInput is the validated input for updating a ticket.
@@ -56,6 +65,9 @@ type UpdateTicketInput struct {
 	SeatingPlanID string // optional; attach plan if non-empty
 	TicketType    string // optional; fallback if venue-service returns empty assignment mode
 	Event         *repository.TicketEvent
+
+	Caller          security.TrustedCaller
+	ActingAccountID string
 }
 
 // ErrUnauthorized is returned when a user tries to modify a ticket they don't own.
@@ -77,6 +89,9 @@ type TicketService struct {
 	venueServiceClient SeatingPlanLookupClient // WS3: fetch seating plan assignment mode
 	savedEventRepo     repository.SavedEventRepository
 	searchClient       *search.Client // nil when search backend is mongo
+	authz              Authorizer     // nil means only the old creator check applies
+	authzMode          authz.Mode
+	accountReads       AccountReads
 }
 
 // NewTicketService creates a new TicketService with the given dependencies.
@@ -141,18 +156,36 @@ func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInpu
 		category = "OTHER"
 	}
 
+	caller := withUser(input.Caller, input.UserID)
+	acting, err := normalizeActingAccount(input.ActingAccountID)
+	if err != nil {
+		return nil, err
+	}
+	accountID, err := s.authorizeCreate(ctx, caller, acting)
+	if err != nil {
+		return nil, err
+	}
+
+	// The id is chosen here so the history entry can name the event it created.
 	ticket := &repository.Ticket{
+		ID:         uuid.NewString(),
 		Title:      input.Title,
 		Price:      input.Price,
 		UserID:     input.UserID,
+		AccountID:  accountID,
 		Quota:      input.Quota,
 		MaxPerUser: input.MaxPerUser,
 		Category:   category,
 		Event:      input.Event,
 	}
-	ticket.PendingOutbox = []repository.TicketOutboxEvent{
-		repository.NewTicketOutboxEvent(repository.OutboxEventTypeTicketCreated, buildOutboxPayload(ticket)),
-	}
+	created := repository.NewTicketOutboxEvent(repository.OutboxEventTypeTicketCreated, buildOutboxPayload(ticket))
+	created.RecordAudit(audit.Entry{
+		ActorUserID: caller.UserID, ActorAccountID: acting,
+		Action: permEventCreate, Resource: auditResource(ticket.ID),
+		After:   map[string]any{"title": ticket.Title, "price": ticket.Price, "quota": ticket.Quota, "category": ticket.Category, "accountId": accountID},
+		TraceID: traceID(ctx),
+	})
+	ticket.PendingOutbox = []repository.TicketOutboxEvent{created}
 
 	if err := s.repo.Create(ctx, ticket); err != nil {
 		return nil, fmt.Errorf("create ticket: %w", err)
@@ -206,10 +239,16 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 		return nil, fmt.Errorf("find ticket for update: %w", err)
 	}
 
-	// Ownership check — must happen before any write
-	if ticket.UserID != input.UserID {
-		return nil, ErrUnauthorized
+	caller := withUser(input.Caller, input.UserID)
+	acting, err := normalizeActingAccount(input.ActingAccountID)
+	if err != nil {
+		return nil, err
 	}
+	// Permission check — must happen before any write
+	if err := s.authorizeEdit(ctx, caller, acting, ticket); err != nil {
+		return nil, err
+	}
+	before := *ticket
 
 	// Reservation check — cannot update a ticket that has active reservations
 	if ticket.Reserved > 0 {
@@ -286,9 +325,9 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 		}
 	}
 
-	ticket.PendingOutbox = []repository.TicketOutboxEvent{
-		repository.NewTicketOutboxEvent(repository.OutboxEventTypeTicketUpdated, buildOutboxPayload(ticket)),
-	}
+	updated := repository.NewTicketOutboxEvent(repository.OutboxEventTypeTicketUpdated, buildOutboxPayload(ticket))
+	updated.RecordAudit(editAudit(ctx, caller.UserID, firstNonEmpty(acting, ticket.AccountID), before, *ticket))
+	ticket.PendingOutbox = []repository.TicketOutboxEvent{updated}
 
 	if err := s.repo.Update(ctx, ticket); err != nil {
 		return nil, fmt.Errorf("update ticket: %w", err)

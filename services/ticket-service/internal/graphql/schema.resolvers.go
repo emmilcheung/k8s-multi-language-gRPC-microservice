@@ -16,9 +16,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// maxRefill caps worst-case OpenSearch fan-out iterations in the refill loop.
-const maxRefill = 5
-
 // CreateTicket is the resolver for the createTicket field.
 func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketInput) (*Ticket, error) {
 	userID := userIDFromContext(ctx)
@@ -32,6 +29,9 @@ func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketI
 		Price:  price,
 		Quota:  input.Quota,
 		UserID: userID,
+
+		Caller:          callerFromContext(ctx),
+		ActingAccountID: organizerAccountFromContext(ctx),
 	}
 	if input.MaxPerUser != nil {
 		svcInput.MaxPerUser = *input.MaxPerUser
@@ -71,6 +71,9 @@ func (r *mutationResolver) UpdateTicket(ctx context.Context, id string, input Up
 		Title:  existing.Title,
 		Price:  existing.Price,
 		UserID: userID,
+
+		Caller:          callerFromContext(ctx),
+		ActingAccountID: organizerAccountFromContext(ctx),
 	}
 
 	if input.Title != nil {
@@ -141,79 +144,6 @@ func (r *queryResolver) Tickets(ctx context.Context) ([]*Ticket, error) {
 		result[i] = mapTicketToGQL(t)
 	}
 	return result, nil
-}
-
-// ticketsConnectionMongo runs the Mongo-backed tickets page and is the fallback
-// used by TicketsConnection when OpenSearch is unavailable or not configured.
-// It observes search_query_duration_seconds{backend="mongo"} when SearchMetrics is wired.
-func (r *queryResolver) ticketsConnectionMongo(ctx context.Context, filter *TicketFilter, limit int, cursorIn string) (*TicketConnection, error) {
-	if r.SearchMetrics != nil {
-		t0 := time.Now()
-		defer func() { r.SearchMetrics.QueryDuration.WithLabelValues("mongo").Observe(time.Since(t0).Seconds()) }()
-	}
-	params := repository.PaginationParams{Limit: limit + 1}
-	if cursorIn != "" {
-		params.After = cursorIn
-	}
-	if filter != nil {
-		if filter.AvailableOnly != nil {
-			params.AvailableOnly = *filter.AvailableOnly
-		}
-		if filter.Search != nil {
-			params.Search = *filter.Search
-		}
-		if filter.Category != nil {
-			params.Category = string(*filter.Category)
-		}
-		if filter.MinPrice != nil {
-			minPriceFloat := float64(*filter.MinPrice)
-			params.MinPrice = &minPriceFloat
-		}
-		if filter.MaxPrice != nil {
-			maxPriceFloat := float64(*filter.MaxPrice)
-			params.MaxPrice = &maxPriceFloat
-		}
-	}
-
-	tickets, err := r.TicketService.ListTickets(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("ticketsConnection: %w", err)
-	}
-
-	// Apply ticketType filter in-memory (repo doesn't accept it yet).
-	if filter != nil && filter.TicketType != nil {
-		filtered := tickets[:0]
-		for _, t := range tickets {
-			if string(t.TicketType) == string(*filter.TicketType) {
-				filtered = append(filtered, t)
-			}
-		}
-		tickets = filtered
-	}
-
-	hasNext := len(tickets) > limit
-	if hasNext {
-		tickets = tickets[:limit]
-	}
-
-	edges := make([]*TicketEdge, len(tickets))
-	for i, t := range tickets {
-		edges[i] = &TicketEdge{
-			Node:   mapTicketToGQL(t),
-			Cursor: fmt.Sprintf("%d:%s", t.CreatedAt.UnixMilli(), t.ID),
-		}
-	}
-
-	var endCursor *string
-	if len(edges) > 0 {
-		c := edges[len(edges)-1].Cursor
-		endCursor = &c
-	}
-
-	return &TicketConnection{
-		Edges:    edges,
-		PageInfo: &PageInfo{HasNextPage: hasNext, EndCursor: endCursor},
-	}, nil
 }
 
 // TicketsConnection is the resolver for the ticketsConnection field.
@@ -409,6 +339,50 @@ func (r *queryResolver) SavedEvents(ctx context.Context, first *int, after *stri
 			EndCursor:   endCursor,
 		},
 	}, nil
+}
+
+// EventsByAccount is the resolver for the eventsByAccount field.
+func (r *queryResolver) EventsByAccount(ctx context.Context, accountID string, first *int, after *string) (*TicketConnection, error) {
+	limit := pageSize(first)
+	cursor := ""
+	if after != nil {
+		cursor = *after
+	}
+	tickets, err := r.TicketService.EventsByAccount(ctx, callerFromContext(ctx), accountID, limit+1, cursor)
+	if err != nil {
+		return nil, fmt.Errorf("eventsByAccount: %w", err)
+	}
+	hasNext := len(tickets) > limit
+	if hasNext {
+		tickets = tickets[:limit]
+	}
+	edges := make([]*TicketEdge, len(tickets))
+	for i, t := range tickets {
+		edges[i] = &TicketEdge{Node: mapTicketToGQL(t), Cursor: fmt.Sprintf("%d:%s", t.CreatedAt.UnixMilli(), t.ID)}
+	}
+	return &TicketConnection{Edges: edges, PageInfo: pageInfo(edges, hasNext, func(e *TicketEdge) string { return e.Cursor })}, nil
+}
+
+// EventHistory is the resolver for the eventHistory field.
+func (r *queryResolver) EventHistory(ctx context.Context, eventID string, first *int, after *string) (*EventHistoryConnection, error) {
+	limit := pageSize(first)
+	cursor := ""
+	if after != nil {
+		cursor = *after
+	}
+	rows, err := r.TicketService.EventHistory(ctx, callerFromContext(ctx), eventID, limit+1, cursor)
+	if err != nil {
+		return nil, fmt.Errorf("eventHistory: %w", err)
+	}
+	hasNext := len(rows) > limit
+	if hasNext {
+		rows = rows[:limit]
+	}
+	edges := make([]*EventHistoryEdge, len(rows))
+	for i, row := range rows {
+		edges[i] = &EventHistoryEdge{Node: mapHistoryEntry(row), Cursor: fmt.Sprintf("%d:%s", row.At.UnixMilli(), row.ID)}
+	}
+	return &EventHistoryConnection{Edges: edges, PageInfo: pageInfo(edges, hasNext, func(e *EventHistoryEdge) string { return e.Cursor })}, nil
 }
 
 // Mutation returns MutationResolver implementation.
