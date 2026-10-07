@@ -22,6 +22,10 @@ env:
   # existing seated tickets' limits are audited: ticket-service defaults
   # maxPerUser to 1, so turning this on would cut those events to one seat each.
   SEATED_CAP_ENFORCED: "false"
+  # Organizer permission checks against user-service. "log" records would-deny
+  # and never blocks; move to "on" per environment once the comparison is clean.
+  ACCOUNTS_GRPC_ADDR: "user-service:50053"
+  AUTHZ_ENFORCED: "log"
 
 secretRef: venue-service-secrets  # contains DATABASE_URL, REDIS_URL, KAFKA_BROKERS, optional KAFKA_SECURITY_PROTOCOL/KAFKA_SASL_MECHANISM/KAFKA_SASL_USERNAME/KAFKA_SASL_PASSWORD/KAFKA_SSL_CA_LOCATION, X_USER_ID_SIGNING_KEY
 

@@ -400,6 +400,8 @@ services:
       LOG_LEVEL: info
       VENUE_SERVICE_ADDR: venue-service:50052
       X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
+      ACCOUNTS_GRPC_ADDR: user-service:50053
+      AUTHZ_ENFORCED: log
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       # Search backend — defaults to mongo (CI-safe; no OpenSearch required).
       # Enable indexed search with:
@@ -569,6 +571,8 @@ services:
       LOG_LEVEL: info
       TICKET_SERVICE_URL: ticket-service:50051
       X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
+      ACCOUNTS_GRPC_ADDR: user-service:50053
+      AUTHZ_ENFORCED: log
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       postgres-venue:
@@ -605,6 +609,8 @@ services:
       QR_SIGNING_KEY: "${QR_SIGNING_KEY}"
       TICKET_SERVICE_URL: ticket-service:50051
       X_USER_ID_SIGNING_KEY: "${X_USER_ID_SIGNING_KEY}"
+      ACCOUNTS_GRPC_ADDR: user-service:50053
+      AUTHZ_ENFORCED: log
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: attendance-service
     depends_on:
