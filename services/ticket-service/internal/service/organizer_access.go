@@ -73,10 +73,23 @@ func normalizeActingAccount(id string) (string, error) {
 	if id == "" {
 		return "", nil
 	}
-	if _, err := uuid.Parse(id); err != nil {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
 		return "", ErrActingAccountInvalid
 	}
-	return id, nil
+	return parsed.String(), nil
+}
+
+// actingAccount reads the X-Organizer-Account selector. Only enforcement
+// rejects a header that does not parse; otherwise it is treated as unset (and
+// logged) so the old behaviour is unchanged.
+func (s *TicketService) actingAccount(raw string) (string, error) {
+	id, err := normalizeActingAccount(raw)
+	if err != nil && !s.enforcing() {
+		s.log.Warn("ignoring malformed organizer account header")
+		return "", nil
+	}
+	return id, err
 }
 
 func withUser(c security.TrustedCaller, userID string) security.TrustedCaller {
@@ -237,15 +250,6 @@ func auditResource(ticketID string) string { return "ticket:" + ticketID }
 func traceID(ctx context.Context) string {
 	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
 		return sc.TraceID().String()
-	}
-	return ""
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
 	}
 	return ""
 }

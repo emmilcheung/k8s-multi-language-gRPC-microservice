@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -482,4 +483,51 @@ func TestEventHistory_ShouldReportNotFound_WhenEventIsUnknown(t *testing.T) {
 	_, err := svc.EventHistory(context.Background(), security.TrustedCaller{UserID: "x"}, "nope", 10, "")
 
 	assert.True(t, errors.Is(err, repository.ErrTicketNotFound))
+}
+
+func TestActingAccount_ShouldChangeNothingOutsideEnforcement_WhenTheHeaderIsMalformed(t *testing.T) {
+	for _, mode := range []authz.Mode{authz.ModeOff, authz.ModeLog} {
+		t.Run(string(mode), func(t *testing.T) {
+			repo := newMockRepo()
+			seedTicket(repo, "t1", "creator", acctA)
+			svc, logs := svcWithAuthz(repo, mode, &fakeAuthz{mode: mode})
+
+			updated, err := svc.UpdateTicket(context.Background(), updateAs("creator", "not-an-id"))
+			require.NoError(t, err, "the owner could edit before accounts existed and still can")
+			assert.Equal(t, "Gala 2", updated.Title)
+
+			created, err := svc.CreateTicket(context.Background(), createAs("creator", "not-an-id"))
+			require.NoError(t, err)
+			assert.Empty(t, created.AccountID, "a header that does not parse is treated as unset")
+			assert.GreaterOrEqual(t, logs.FilterMessage("ignoring malformed organizer account header").Len(), 2)
+		})
+	}
+}
+
+func TestAuditHistory_ShouldNeverCreditAnUnverifiedActingAccount(t *testing.T) {
+	// log mode: the old owner check decides, so the header is not verified by anything
+	repo := newMockRepo()
+	seedTicket(repo, "t1", "creator", acctA)
+	svc, _ := svcWithAuthz(repo, authz.ModeLog, &fakeAuthz{mode: authz.ModeLog})
+
+	updated, err := svc.UpdateTicket(context.Background(), updateAs("creator", acctB))
+	require.NoError(t, err)
+	assert.Equal(t, acctA, updated.Outbox[0].Audit.ActorAccountID, "an edit is credited to the event's own account")
+
+	created, err := svc.CreateTicket(context.Background(), createAs("creator", acctB))
+	require.NoError(t, err)
+	assert.Empty(t, created.Outbox[0].Audit.ActorAccountID, "the permission service did not allow acctB, so it is not recorded")
+}
+
+func TestActingAccount_ShouldReachThePermissionServiceInCanonicalForm(t *testing.T) {
+	const canonical = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	repo := newMockRepo()
+	f := &fakeAuthz{members: map[string]string{"mgr|" + canonical: "EVENT_MANAGER"}}
+	svc, _ := svcWithAuthz(repo, authz.ModeOn, f)
+
+	got, err := svc.CreateTicket(context.Background(), createAs("mgr", strings.ToUpper(canonical)))
+
+	require.NoError(t, err)
+	assert.Equal(t, canonical, got.AccountID)
+	assert.Equal(t, canonical, f.calls[0].Scope.AccountID)
 }

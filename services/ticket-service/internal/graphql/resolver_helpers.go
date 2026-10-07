@@ -2,12 +2,16 @@ package graph
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
 	"time"
 
+	"github.com/acme/ticket-service/internal/authz"
 	"github.com/acme/ticket-service/internal/repository"
+	"github.com/acme/ticket-service/internal/service"
+	"go.uber.org/zap"
 )
 
 func intPriceToDecimalString(price int) string {
@@ -98,4 +102,20 @@ func mapHistoryEntry(row repository.AuditRecord) *EventHistoryEntry {
 		entry.Reason = &reason
 	}
 	return entry
+}
+
+// organizerError wraps a service error for the client. Failures of the
+// permission check carry internal detail (addresses, rpc text), so the client
+// gets a generic message and the cause goes to the log.
+func (r *Resolver) organizerError(op string, err error) error {
+	switch {
+	case errors.Is(err, authz.ErrAuthzUnavailable):
+		return fmt.Errorf("%s: permission service is temporarily unavailable", op)
+	case errors.Is(err, service.ErrPermissionCheckFailed):
+		if r.Log != nil {
+			r.Log.Error("permission check failed", zap.String("operation", op), zap.Error(err))
+		}
+		return fmt.Errorf("%s: an unexpected error occurred", op)
+	}
+	return fmt.Errorf("%s: %w", op, err)
 }

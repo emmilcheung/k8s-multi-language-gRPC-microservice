@@ -157,7 +157,7 @@ func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInpu
 	}
 
 	caller := withUser(input.Caller, input.UserID)
-	acting, err := normalizeActingAccount(input.ActingAccountID)
+	acting, err := s.actingAccount(input.ActingAccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,7 @@ func (s *TicketService) CreateTicket(ctx context.Context, input CreateTicketInpu
 	}
 	created := repository.NewTicketOutboxEvent(repository.OutboxEventTypeTicketCreated, buildOutboxPayload(ticket))
 	created.RecordAudit(audit.Entry{
-		ActorUserID: caller.UserID, ActorAccountID: acting,
+		ActorUserID: caller.UserID, ActorAccountID: accountID,
 		Action: permEventCreate, Resource: auditResource(ticket.ID),
 		After:   map[string]any{"title": ticket.Title, "price": ticket.Price, "quota": ticket.Quota, "category": ticket.Category, "accountId": accountID},
 		TraceID: traceID(ctx),
@@ -240,7 +240,7 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 	}
 
 	caller := withUser(input.Caller, input.UserID)
-	acting, err := normalizeActingAccount(input.ActingAccountID)
+	acting, err := s.actingAccount(input.ActingAccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +326,7 @@ func (s *TicketService) UpdateTicket(ctx context.Context, input UpdateTicketInpu
 	}
 
 	updated := repository.NewTicketOutboxEvent(repository.OutboxEventTypeTicketUpdated, buildOutboxPayload(ticket))
-	updated.RecordAudit(editAudit(ctx, caller.UserID, firstNonEmpty(acting, ticket.AccountID), before, *ticket))
+	updated.RecordAudit(editAudit(ctx, caller.UserID, ticket.AccountID, before, *ticket))
 	ticket.PendingOutbox = []repository.TicketOutboxEvent{updated}
 
 	if err := s.repo.Update(ctx, ticket); err != nil {

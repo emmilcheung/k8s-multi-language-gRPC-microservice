@@ -49,7 +49,7 @@ func (r *mutationResolver) CreateTicket(ctx context.Context, input CreateTicketI
 
 	t, err := r.TicketService.CreateTicket(ctx, svcInput)
 	if err != nil {
-		return nil, fmt.Errorf("createTicket: %w", err)
+		return nil, r.organizerError("createTicket", err)
 	}
 	return mapTicketToGQL(t), nil
 }
@@ -95,7 +95,7 @@ func (r *mutationResolver) UpdateTicket(ctx context.Context, id string, input Up
 
 	t, err := r.TicketService.UpdateTicket(ctx, svcInput)
 	if err != nil {
-		return nil, fmt.Errorf("updateTicket: %w", err)
+		return nil, r.organizerError("updateTicket", err)
 	}
 	return mapTicketToGQL(t), nil
 }
@@ -350,7 +350,7 @@ func (r *queryResolver) EventsByAccount(ctx context.Context, accountID string, f
 	}
 	tickets, err := r.TicketService.EventsByAccount(ctx, callerFromContext(ctx), accountID, limit+1, cursor)
 	if err != nil {
-		return nil, fmt.Errorf("eventsByAccount: %w", err)
+		return nil, r.organizerError("eventsByAccount", err)
 	}
 	hasNext := len(tickets) > limit
 	if hasNext {
@@ -372,7 +372,7 @@ func (r *queryResolver) EventHistory(ctx context.Context, eventID string, first 
 	}
 	rows, err := r.TicketService.EventHistory(ctx, callerFromContext(ctx), eventID, limit+1, cursor)
 	if err != nil {
-		return nil, fmt.Errorf("eventHistory: %w", err)
+		return nil, r.organizerError("eventHistory", err)
 	}
 	hasNext := len(rows) > limit
 	if hasNext {

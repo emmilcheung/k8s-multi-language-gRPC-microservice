@@ -3,6 +3,8 @@ package graph_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -80,10 +82,14 @@ func (r *stubReads) ListAuditByResource(_ context.Context, _ string, limit int, 
 type memberAuthz struct {
 	allowed map[string]bool // user|account
 	calls   atomic.Int32
+	err     error
 }
 
 func (a *memberAuthz) Check(_ context.Context, c security.TrustedCaller, _ string, s authz.Scope) (authz.Decision, error) {
 	a.calls.Add(1)
+	if a.err != nil {
+		return authz.Decision{}, a.err
+	}
 	if a.allowed[c.UserID+"|"+s.AccountID] {
 		return authz.Decision{Allowed: true, Reason: authz.ReasonAllowed}, nil
 	}
@@ -214,4 +220,27 @@ func TestBuyerQueries_ShouldNeverCallThePermissionService(t *testing.T) {
 		assert.Empty(t, got.Errors, q)
 	}
 	assert.EqualValues(t, 0, a.calls.Load(), "browsing must work when the permission service is down")
+}
+
+func TestPermissionFailures_ShouldReachTheClientAsGenericMessages(t *testing.T) {
+	repo := &stubRepo{tickets: map[string]*repository.Ticket{"t1": ticketIn("t1", orgA, time.Now())}}
+	m := `mutation { updateTicket(id: "t1", input: {title: "Renamed"}) { title } }`
+	for name, tc := range map[string]struct {
+		cause error
+		want  string
+	}{
+		"unavailable": {fmt.Errorf("%w: dial tcp 10.0.0.5:9090: refused", authz.ErrAuthzUnavailable), "temporarily unavailable"},
+		"failed":      {errors.New("rpc error: InvalidArgument: scope.account_id is empty"), "unexpected error"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := newServer(t, repo, &stubReads{}, &memberAuthz{err: tc.cause})
+
+			got := run(t, svc, "mgr", orgA, m)
+
+			require.NotEmpty(t, got.Errors)
+			assert.Contains(t, got.Errors[0].Message, tc.want)
+			assert.NotContains(t, got.Errors[0].Message, "10.0.0.5")
+			assert.NotContains(t, got.Errors[0].Message, "scope.account_id")
+		})
+	}
 }
