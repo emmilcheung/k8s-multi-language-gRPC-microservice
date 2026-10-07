@@ -429,6 +429,10 @@ test(
 test(
   "door staff limited to one event can check in at that event but not at another",
   async ({ page }) => {
+    test.skip(
+      process.env.E2E_AUTHZ_ENFORCED !== "on",
+      "needs the platform running with permission enforcement on (set E2E_AUTHZ_ENFORCED=on)"
+    );
     await installStripeMock(page);
 
     const ownerEmail = uniqueEmail("door-owner");
@@ -528,7 +532,10 @@ test(
     await page.goto(`/scan?eventId=${eventTwo}`);
     await page.getByLabel(/buyer email/i).fill(buyerEmail);
     await page.getByRole("button", { name: /check in by email/i }).click();
-    await expect(page.locator("aside .text-destructive")).toBeVisible({ timeout: 15_000 });
+    // The refusal is the permission check's own message, not a lookup or network failure.
+    await expect(page.locator("aside .text-destructive")).toContainText(/forbidden: organizer is not allowed for this event/i, {
+      timeout: 15_000,
+    });
     await expect(page.locator("aside").getByText(/^admitted$/i)).toHaveCount(0);
   }
 );

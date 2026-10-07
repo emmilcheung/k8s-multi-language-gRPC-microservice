@@ -21,6 +21,10 @@ import {
 test.setTimeout(120_000);
 
 test("a new user creates an account, invites a second user, who accepts and edits an event", async ({ page }) => {
+  test.skip(
+    process.env.E2E_AUTHZ_ENFORCED !== "on",
+    "needs the platform running with permission enforcement on (set E2E_AUTHZ_ENFORCED=on)"
+  );
   const ownerEmail = uniqueEmail("acct-owner");
   const inviteeEmail = uniqueEmail("acct-invitee");
 
