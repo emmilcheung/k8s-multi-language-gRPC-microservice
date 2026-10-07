@@ -176,6 +176,11 @@ func (h *PlanHandler) Create(c echo.Context) error {
 		return e
 	}
 	var actorAccount string
+	if h.venueRepo == nil && h.access.org.Enforcing() {
+		// Without the venue the owning account cannot be resolved, so nothing can be authorized.
+		h.log.Error("plan create: venue repository is not configured while enforcing permissions")
+		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+	}
 	if h.access.org.Checking() && h.venueRepo != nil {
 		venue, verr := h.venueRepo.FindByID(ctx, req.VenueID)
 		switch {

@@ -22,7 +22,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Permissions from the docs/19 table that venue-service asks about.
+// Permissions from the organizer permission table (which account role may do what) that venue-service asks about.
 const (
 	permVenueCreate      = "venue.create"
 	permVenueEditProfile = "venue.edit_profile"

@@ -17,7 +17,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// Permissions from the docs/19 table that ticket-service asks about.
+// Permissions from the organizer permission table (which account role may do what) that ticket-service asks about.
 const (
 	permEventCreate = "event.create"
 	permEventEdit   = "event.edit"

@@ -158,3 +158,15 @@ func TestPlanCreate_RefusesATicketTheAccountDoesNotOwn(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, rec.Code)
 	assert.True(t, created)
 }
+
+func TestPlanCreate_FailsClosedWhenEnforcingWithoutAVenueRepository(t *testing.T) {
+	created := false
+	planRepo := &stubPlanRepo{createFn: func(_ context.Context, p *repository.SeatingPlan) error { created = true; return nil }}
+	h := handler.NewPlanHandler(planRepo, &nopSectionRepo{}, newSignatureValidator(), zap.NewNop()).
+		WithAccess(accessFor(authz.ModeOn, &allowAll{allowed: true}, acctA), nil)
+
+	rec := do(t, http.MethodPost, "/api/seating-plans", map[string]any{"venueId": "v1", "ticketId": "t1", "name": "Plan"},
+		map[string]string{"X-User-Id": "u1", "X-Organizer-Account": acctA}, h.Create)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.False(t, created, "without a venue the owning account is unknown, so no plan may be written")
+}
