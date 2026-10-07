@@ -11,14 +11,14 @@ func TestRedactPersonalData_ShouldBlankEmailAndAttendeeNames_WhenPresent(t *test
 		"status":        "ACTIVE",
 		"contactEmail":  "a@b.com",
 		"attendee_name": "Ada Lovelace",
-		"nested":        map[string]any{"buyerName": "Bob", "seats": 2},
+		"nested":        map[string]any{"buyerName": "Bob", "seats": float64(2)},
 		"list":          []any{map[string]any{"firstName": "Eve", "row": "A"}},
 	})
 	assert.Equal(t, map[string]any{
 		"status":        "ACTIVE",
 		"contactEmail":  "[redacted]",
 		"attendee_name": "[redacted]",
-		"nested":        map[string]any{"buyerName": "[redacted]", "seats": 2},
+		"nested":        map[string]any{"buyerName": "[redacted]", "seats": float64(2)},
 		"list":          []any{map[string]any{"firstName": "[redacted]", "row": "A"}},
 	}, got)
 }
@@ -26,4 +26,22 @@ func TestRedactPersonalData_ShouldBlankEmailAndAttendeeNames_WhenPresent(t *test
 func TestRedactPersonalData_ShouldKeepPlainName_WhenItNamesAnEventOrOrganizer(t *testing.T) {
 	got := RedactPersonalData(map[string]any{"name": "Spring Gala"})
 	assert.Equal(t, map[string]any{"name": "Spring Gala"}, got)
+}
+
+type typedHolder struct {
+	AttendeeEmail string `json:"attendeeEmail"`
+	Row           string `json:"row"`
+}
+
+func TestRedactPersonalData_ShouldBlankPersonalDataInsideTypedNestedValues(t *testing.T) {
+	got := RedactPersonalData(map[string]any{
+		"rows":    []map[string]any{{"firstName": "Eve", "row": "A"}},
+		"labels":  map[string]string{"buyerEmail": "e@x.com", "zone": "Z"},
+		"holders": []typedHolder{{AttendeeEmail: "a@b.com", Row: "B"}},
+	})
+	assert.Equal(t, map[string]any{
+		"rows":    []any{map[string]any{"firstName": "[redacted]", "row": "A"}},
+		"labels":  map[string]any{"buyerEmail": "[redacted]", "zone": "Z"},
+		"holders": []any{map[string]any{"attendeeEmail": "[redacted]", "row": "B"}},
+	}, got)
 }

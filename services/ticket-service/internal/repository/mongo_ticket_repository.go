@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/acme/ticket-service/internal/audit"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/acme/ticket-service/internal/audit"
 	"github.com/acme/ticket-service/internal/cache"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"

@@ -26,4 +26,16 @@ describe("audit never keeps attendee names or emails", () => {
       name: "Main Hall",
     });
   });
+
+  it("redacts personal data inside nested arrays of objects and keeps dates intact", () => {
+    const when = new Date("2026-01-01T00:00:00Z");
+    const out = redactPersonalData({
+      rows: [[{ holderEmail: "a@b.com" }]],
+      starts: when,
+    });
+    expect(out).toEqual({
+      rows: [[{ holderEmail: "[redacted]" }]],
+      starts: when,
+    });
+  });
 });

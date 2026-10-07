@@ -53,7 +53,7 @@ func isPersonalKey(key string) bool {
 func redactValue(v any) any {
 	switch x := v.(type) {
 	case map[string]any:
-		return RedactPersonalData(x)
+		return redactMap(x)
 	case []any:
 		out := make([]any, len(x))
 		for i, e := range x {
@@ -66,8 +66,26 @@ func redactValue(v any) any {
 }
 
 // RedactPersonalData returns a copy with personal values blanked; the key stays
-// so the history still shows that the field changed.
+// so the history still shows that the field changed. The input is first
+// normalized through JSON, so typed values ([]map[string]any, map[string]string,
+// structs) are walked exactly like generic ones. Input that cannot be encoded
+// is replaced wholesale rather than stored unchecked.
 func RedactPersonalData(data map[string]any) map[string]any {
+	if data == nil {
+		return nil
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return map[string]any{"unredactable": redacted}
+	}
+	var generic map[string]any
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return map[string]any{"unredactable": redacted}
+	}
+	return redactMap(generic)
+}
+
+func redactMap(data map[string]any) map[string]any {
 	out := make(map[string]any, len(data))
 	for k, v := range data {
 		if isPersonalKey(k) {

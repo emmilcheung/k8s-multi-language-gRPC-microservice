@@ -41,7 +41,7 @@ function isPersonalKey(key: string): boolean {
 
 function redactValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactValue);
-  if (value && typeof value === "object") {
+  if (value && typeof value === "object" && !(value instanceof Date)) {
     return redactPersonalData(value as Record<string, unknown>);
   }
   return value;
