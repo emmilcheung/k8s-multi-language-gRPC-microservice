@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { Logger, Module } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { UserIdSignatureValidator } from "./user-id-signature.validator";
 import { PlatformRolesVerifier } from "./platform-roles.verifier";
@@ -20,6 +20,12 @@ import { PlatformRolesVerifier } from "./platform-roles.verifier";
           "X_USER_ID_SIGNING_KEY",
           "",
         );
+        if (!signingKey) {
+          // Production refuses an empty key at startup (see envSchema).
+          new Logger("SecurityModule").warn(
+            "X_USER_ID_SIGNING_KEY is not set: request identity signatures cannot be verified",
+          );
+        }
         return new UserIdSignatureValidator(signingKey);
       },
       inject: [ConfigService],

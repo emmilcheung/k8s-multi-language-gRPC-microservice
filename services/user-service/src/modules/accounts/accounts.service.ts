@@ -25,6 +25,10 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const hashInvitationToken = (token: string): string =>
   createHash("sha256").update(token).digest("hex");
 
+// Invitation tokens are 43 characters; anything far longer cannot be one and is
+// not worth hashing.
+const MAX_INVITATION_TOKEN_LENGTH = 200;
+
 const DEFAULT_PERSONAL_ACCOUNT_NAME = "Personal account";
 
 @Injectable()
@@ -247,6 +251,9 @@ export class AccountsService {
     token: string,
     userId: string,
   ): Promise<{ account: OrganizerAccount; role: Roles }> {
+    if (token.length > MAX_INVITATION_TOKEN_LENGTH) {
+      throw new NotFoundException("This invitation link is not valid");
+    }
     const result = await this.repository.acceptInvitation(
       hashInvitationToken(token),
       userId,
@@ -260,6 +267,10 @@ export class AccountsService {
         throw new ConflictException("This invitation has already been used");
       case "ALREADY_MEMBER":
         throw new ConflictException("You are already a member of this account");
+      case "SUSPENDED":
+        throw new ForbiddenException(
+          "This account is suspended and cannot take new members",
+        );
     }
     const account = await this.repository.getAccount(
       result.invitation.accountId,

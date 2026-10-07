@@ -14,6 +14,18 @@ const issues = (env: Record<string, string>) => {
   return result.success ? [] : result.error.issues.map((i) => i.path.join("."));
 };
 
+describe("PUBLIC_WEB_URL config", () => {
+  it("accepts only http(s) origins, since it becomes the host of invitation links", () => {
+    expect(issues({ PUBLIC_WEB_URL: "https://shop.example.com" })).toEqual([]);
+    expect(issues({ PUBLIC_WEB_URL: "javascript://x/%0Aalert(1)" })).toContain(
+      "PUBLIC_WEB_URL",
+    );
+    expect(issues({ PUBLIC_WEB_URL: "ftp://shop.example.com" })).toContain(
+      "PUBLIC_WEB_URL",
+    );
+  });
+});
+
 describe("GRPC_PORT config", () => {
   it("refuses to start when GRPC_PORT is not a port number", () => {
     expect(issues({ GRPC_PORT: "not-a-port" })).toContain("GRPC_PORT");

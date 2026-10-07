@@ -43,7 +43,6 @@ interface Caller {
 
 const MAX_NAME = 120;
 const MAX_EVENT_IDS = 200;
-const MAX_EVENT_ID = 64;
 const NOT_ALLOWED = "You are not allowed to do this";
 const INTERNAL = "Something went wrong. Try again.";
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -232,7 +231,7 @@ export class AccountsResolver {
         await this.authorize(caller, "account.manage_team", input.accountId);
         if (
           input.eventIds.length > MAX_EVENT_IDS ||
-          input.eventIds.some((e) => !e.trim() || e.length > MAX_EVENT_ID)
+          input.eventIds.some((e) => !isUuid(e))
         ) {
           throw new BadRequestException("Event list is not valid");
         }

@@ -39,6 +39,9 @@ async function newAccount(owner = "o1", name = "Acme") {
   return res.account!.id;
 }
 
+const EVENT_1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+const EVENT_2 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
+
 async function invite(
   accountId: string,
   email: string,
@@ -226,6 +229,21 @@ describe("accounts API (PostgreSQL)", () => {
     expect(res.userErrors[0].code).toBe("NOT_ALLOWED");
   });
 
+  it("an invitation to a suspended account cannot be accepted, and a huge token is just not valid", async () => {
+    const accountId = await newAccount();
+    const token = await invite(accountId, "late@acme.test", "DOOR_STAFF");
+    await api.suspendAccount({ accountId, reason: "chargebacks" }, admin());
+
+    const res = await api.acceptInvitation(token, as("late"));
+    const huge = await api.acceptInvitation("x".repeat(5000), as("late"));
+
+    expect(res.userErrors[0].code).toBe("NOT_ALLOWED");
+    expect(
+      await rows("SELECT 1 FROM memberships WHERE user_id = 'late'"),
+    ).toEqual([]);
+    expect(huge.userErrors[0].code).toBe("NOT_FOUND");
+  });
+
   it("an admin cannot hand out ownership", async () => {
     const accountId = await newAccount();
     await api.acceptInvitation(
@@ -306,20 +324,25 @@ describe("accounts API (PostgreSQL)", () => {
     );
 
     const ok = await api.setDoorStaffEvents(
-      { accountId, userId: "door", eventIds: ["e1", "e2"] },
+      { accountId, userId: "door", eventIds: [EVENT_1, EVENT_2] },
+      as("o1"),
+    );
+    const notUuid = await api.setDoorStaffEvents(
+      { accountId, userId: "door", eventIds: ["e1"] },
       as("o1"),
     );
     const bad = await api.setDoorStaffEvents(
-      { accountId, userId: "mgr", eventIds: ["e1"] },
+      { accountId, userId: "mgr", eventIds: [EVENT_1] },
       as("o1"),
     );
 
-    expect(ok.member?.eventIds.sort()).toEqual(["e1", "e2"]);
+    expect(ok.member?.eventIds.sort()).toEqual([EVENT_1, EVENT_2]);
     expect(bad.userErrors[0].code).toBe("INVALID");
+    expect(notUuid.userErrors[0].code).toBe("INVALID");
     const members = await api.accountMembers(accountId, as("o1"));
     expect(members.find((m) => m.userId === "door")?.eventIds.sort()).toEqual([
-      "e1",
-      "e2",
+      EVENT_1,
+      EVENT_2,
     ]);
   });
 

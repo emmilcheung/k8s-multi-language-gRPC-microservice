@@ -31,10 +31,12 @@ export class GrpcExceptionFilter implements ExceptionFilter {
         return throwError(() => ({ code, message: exception.message }));
       }
     }
+    // The raw message and stack can carry query parameters, so only the error
+    // type and database code are logged.
+    const dbCode = (exception as { cause?: { code?: string } } | null)?.cause
+      ?.code;
     this.logger.error(
-      exception instanceof Error
-        ? (exception.stack ?? exception.message)
-        : String(exception),
+      `grpc request failed: ${exception instanceof Error ? exception.name : "unknown"}${dbCode ? ` (${dbCode})` : ""}`,
     );
     return throwError(() => ({
       code: status.INTERNAL,

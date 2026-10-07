@@ -69,7 +69,7 @@ class FakeRepository {
     return account;
   }
 
-  async findProfileDisplayName(_userId: string): Promise<string | undefined> {
+  async findProfileDisplayName(): Promise<string | undefined> {
     return undefined;
   }
 

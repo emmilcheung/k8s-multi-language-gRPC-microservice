@@ -309,7 +309,14 @@ export class AccountsRepository {
     userId: string,
   ): Promise<
     | { outcome: "ACCEPTED"; invitation: Invitation }
-    | { outcome: "NOT_FOUND" | "USED" | "EXPIRED" | "ALREADY_MEMBER" }
+    | {
+        outcome:
+          | "NOT_FOUND"
+          | "USED"
+          | "EXPIRED"
+          | "ALREADY_MEMBER"
+          | "SUSPENDED";
+      }
   > {
     return this.db.transaction(async (tx) => {
       const [invitation] = await tx
@@ -331,6 +338,10 @@ export class AccountsRepository {
       }
 
       const txRepo = new AccountsRepository(tx as unknown as DrizzleDB);
+      const account = await txRepo.getAccount(invitation.accountId);
+      if (account?.status === "SUSPENDED") {
+        return { outcome: "SUSPENDED" as const };
+      }
       if (await txRepo.findMembership(invitation.accountId, userId)) {
         return { outcome: "ALREADY_MEMBER" as const };
       }
