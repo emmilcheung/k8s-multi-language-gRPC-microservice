@@ -75,4 +75,13 @@ export class AccountsGrpcController {
       ),
     };
   }
+
+  @GrpcMethod("AccountsService", "EnsureVenueManager")
+  async ensureVenueManager(req: { user_id: string; venue_id: string }) {
+    if (!req.user_id || !req.venue_id) {
+      throw new BadRequestException("user_id and venue_id are required");
+    }
+    await this.accounts.ensureVenueManager(req.user_id, req.venue_id);
+    return {};
+  }
 }

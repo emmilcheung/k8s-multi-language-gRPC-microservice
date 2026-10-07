@@ -6,12 +6,15 @@ import {
   membershipEventScopes,
   memberships,
   organizerAccounts,
+  userProfiles,
 } from "../../database/schema";
+import { record } from "../audit/audit";
 import { DRIZZLE_DB, type DrizzleDB } from "../../database/database.module";
 import { Roles } from "./roles";
 
 const ACCOUNT = "ORGANIZER_ACCOUNT" as const;
 const VENUE = "VENUE" as const;
+const SYSTEM_ACTOR = "system";
 
 @Injectable()
 export class AccountsRepository {
@@ -215,6 +218,40 @@ export class AccountsRepository {
         .where(eq(organizerAccounts.personalForUserId, userId))
         .limit(1);
       return existing;
+    });
+  }
+
+  async findProfileDisplayName(userId: string): Promise<string | undefined> {
+    const [profile] = await this.db
+      .select({ displayName: userProfiles.displayName })
+      .from(userProfiles)
+      .where(eq(userProfiles.userId, userId))
+      .limit(1);
+    return profile?.displayName ?? undefined;
+  }
+
+  // Idempotent: an existing membership on the venue, whatever its role, is
+  // left alone and writes no audit row.
+  async ensureVenueManager(userId: string, venueId: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(memberships)
+        .values({
+          userId,
+          resourceType: VENUE,
+          resourceId: venueId,
+          role: Roles.VENUE_MANAGER,
+          createdBy: SYSTEM_ACTOR,
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (!created) return;
+      await record(tx, {
+        actorUserId: SYSTEM_ACTOR,
+        action: "venue.manager_ensured",
+        resource: `venue:${venueId}`,
+        after: { userId, role: Roles.VENUE_MANAGER },
+      });
     });
   }
 

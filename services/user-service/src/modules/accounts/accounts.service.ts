@@ -29,16 +29,22 @@ export class AccountsService {
     return this.repository.createAccountWithOwner(input);
   }
 
-  // The display name is only used when the account is first created.
+  // The name is only used when the account is first created: the one passed
+  // in, else the user's profile display name, else a generic one.
   async ensurePersonalAccount(
     userId: string,
     displayName?: string,
   ): Promise<string> {
-    const account = await this.repository.ensurePersonalAccount(
-      userId,
-      displayName?.trim() || DEFAULT_PERSONAL_ACCOUNT_NAME,
-    );
+    const name =
+      displayName?.trim() ||
+      (await this.repository.findProfileDisplayName(userId))?.trim() ||
+      DEFAULT_PERSONAL_ACCOUNT_NAME;
+    const account = await this.repository.ensurePersonalAccount(userId, name);
     return account.id;
+  }
+
+  ensureVenueManager(userId: string, venueId: string): Promise<void> {
+    return this.repository.ensureVenueManager(userId, venueId);
   }
 
   async getAccount(accountId: string): Promise<OrganizerAccount> {

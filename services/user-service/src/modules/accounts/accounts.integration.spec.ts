@@ -60,6 +60,8 @@ beforeEach(async () => {
   await pool.query("DELETE FROM invitations");
   await pool.query("DELETE FROM memberships");
   await pool.query("DELETE FROM organizer_accounts");
+  await pool.query("DELETE FROM user_profiles");
+  await pool.query("DELETE FROM audit_log");
 });
 
 const count = async (sql: string, params: unknown[] = []) =>
@@ -183,5 +185,37 @@ describe("accounts (PostgreSQL)", () => {
        VALUES ('v1', 'u1', 'we run it') RETURNING status, claimant_account_id`,
     );
     expect(rows[0]).toEqual({ status: "PENDING", claimant_account_id: null });
+  });
+
+  it("a personal account created without a name takes the owner's profile display name", async () => {
+    await pool.query(
+      "INSERT INTO user_profiles (user_id, display_name) VALUES ('u1', 'Ada Lovelace')",
+    );
+
+    const id = await service.ensurePersonalAccount("u1");
+
+    expect((await service.getAccount(id)).name).toBe("Ada Lovelace");
+  });
+
+  it("a personal account for someone with no profile name falls back to a generic name", async () => {
+    const id = await service.ensurePersonalAccount("no-profile");
+
+    expect((await service.getAccount(id)).name).toBe("Personal account");
+  });
+
+  it("making someone venue manager twice leaves one membership and one audit row", async () => {
+    await service.ensureVenueManager("u1", "venue-1");
+    await service.ensureVenueManager("u1", "venue-1");
+
+    expect(
+      await count(
+        "SELECT count(*) AS n FROM memberships WHERE user_id = 'u1' AND resource_type = 'VENUE' AND resource_id = 'venue-1' AND role = 'VENUE_MANAGER'",
+      ),
+    ).toBe(1);
+    expect(
+      await count(
+        "SELECT count(*) AS n FROM audit_log WHERE action = 'venue.manager_ensured' AND resource = 'venue:venue-1'",
+      ),
+    ).toBe(1);
   });
 });

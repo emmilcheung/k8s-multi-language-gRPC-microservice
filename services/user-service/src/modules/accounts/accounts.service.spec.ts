@@ -64,6 +64,10 @@ class FakeRepository {
     return account;
   }
 
+  async findProfileDisplayName(_userId: string): Promise<string | undefined> {
+    return undefined;
+  }
+
   async ensurePersonalAccount(userId: string, name: string) {
     const existing = this.accounts.find((a) => a.personalForUserId === userId);
     if (existing) return existing;

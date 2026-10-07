@@ -218,6 +218,28 @@ describe("accounts gRPC server (PostgreSQL)", () => {
     ]);
   });
 
+  it("EnsureVenueManager lets the venue's creator keep editing it, and repeating it changes nothing", async () => {
+    const edit = (user: string) =>
+      call<{ allowed: boolean }>(accountsClient, "CheckPermission", {
+        user_id: user,
+        permission: "venue.edit_profile",
+        venue_id: "venue-1",
+      });
+    expect((await edit("creator")).allowed).toBe(false);
+
+    await call(accountsClient, "EnsureVenueManager", {
+      user_id: "creator",
+      venue_id: "venue-1",
+    });
+    await call(accountsClient, "EnsureVenueManager", {
+      user_id: "creator",
+      venue_id: "venue-1",
+    });
+
+    expect((await edit("creator")).allowed).toBe(true);
+    expect((await edit("someone-else")).allowed).toBe(false);
+  });
+
   it("GetAccount returns display data, and NOT_FOUND for an account that does not exist", async () => {
     const account = await accounts.createAccount({
       name: "Acme",
