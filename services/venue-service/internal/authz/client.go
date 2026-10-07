@@ -29,6 +29,10 @@ const (
 	callTimeout = 300 * time.Millisecond
 	// maxCacheEntries stops a flood of distinct requests from growing memory.
 	maxCacheEntries = 10_000
+	// unavailableWindow is how long log mode skips user-service after a failed
+	// call, so an outage does not add the call timeout to every request. It is
+	// also the minimum gap between "unavailable" warnings.
+	unavailableWindow = 5 * time.Second
 )
 
 // Decision reasons. ReasonAllowed is set when the request is permitted.
@@ -44,7 +48,8 @@ const (
 )
 
 // ErrAuthzUnavailable means user-service could not answer in time. Callers
-// that enforce map it to 503 for organizer writes. It is never cached.
+// that enforce map it to 503 for organizer writes. Only log mode remembers it,
+// briefly, to skip the call; enforcing modes ask again every time.
 var ErrAuthzUnavailable = errors.New("authz: user-service unavailable")
 
 // Mode is the AUTHZ_ENFORCED setting.
@@ -101,6 +106,9 @@ type Client struct {
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
+	// downUntil and lastWarn are only used in log mode.
+	downUntil time.Time
+	lastWarn  time.Time
 }
 
 // Option customises a Client.
@@ -148,8 +156,10 @@ func (c *Client) Check(ctx context.Context, caller security.TrustedCaller, perm 
 			return Decision{Reason: ReasonUnknown}, err
 		}
 		decisions.WithLabelValues(string(c.mode), "unavailable", ReasonUnavailable).Inc()
-		c.log.Warn("authz would-check unavailable",
-			zap.String("permission", perm), zap.String("userId", caller.UserID), zap.Error(err))
+		if c.shouldWarnUnavailable() {
+			c.log.Warn("authz would-check unavailable",
+				zap.String("permission", perm), zap.Error(err))
+		}
 		return Decision{Allowed: true, Reason: ReasonUnavailable}, nil
 	}
 
@@ -171,7 +181,9 @@ func (c *Client) Check(ctx context.Context, caller security.TrustedCaller, perm 
 	return d, nil
 }
 
-// lookup returns the cached or fresh answer. Errors are never cached.
+// lookup returns the cached or fresh answer. Errors are never cached, except
+// that log mode skips the call for unavailableWindow after one fails to answer.
+// On mode always asks, so the skip can never turn into a grant or a stale deny.
 func (c *Client) lookup(ctx context.Context, caller security.TrustedCaller, perm string, scope Scope) (Decision, error) {
 	if c.rpc == nil {
 		return Decision{}, fmt.Errorf("%w: ACCOUNTS_GRPC_ADDR is not configured", ErrAuthzUnavailable)
@@ -180,6 +192,10 @@ func (c *Client) lookup(ctx context.Context, caller security.TrustedCaller, perm
 	key := cacheKey(caller, perm, scope)
 	if d, ok := c.cached(key); ok {
 		return d, nil
+	}
+
+	if c.mode == ModeLog && c.skipping() {
+		return Decision{}, fmt.Errorf("%w: skipping the call after a recent failure", ErrAuthzUnavailable)
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, callTimeout)
@@ -196,12 +212,39 @@ func (c *Client) lookup(ctx context.Context, caller security.TrustedCaller, perm
 		if status.Code(err) == codes.InvalidArgument {
 			return Decision{}, fmt.Errorf("authz: user-service rejected the request: %w", err)
 		}
+		if c.mode == ModeLog {
+			c.markDown()
+		}
 		return Decision{}, fmt.Errorf("%w: %v", ErrAuthzUnavailable, err)
 	}
 
 	d := Decision{Allowed: resp.GetAllowed(), Reason: reasonName(resp)}
 	c.store(key, d)
 	return d, nil
+}
+
+func (c *Client) skipping() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now().Before(c.downUntil)
+}
+
+func (c *Client) markDown() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.downUntil = c.now().Add(unavailableWindow)
+}
+
+// shouldWarnUnavailable lets one warning through per unavailableWindow.
+func (c *Client) shouldWarnUnavailable() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	if now.Sub(c.lastWarn) < unavailableWindow {
+		return false
+	}
+	c.lastWarn = now
+	return true
 }
 
 func reasonName(resp *accountsv1.CheckPermissionResponse) string {

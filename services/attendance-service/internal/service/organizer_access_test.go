@@ -387,3 +387,30 @@ func (s *savedPolicies) Upsert(context.Context, *repository.AttendancePolicy) er
 	s.saves++
 	return nil
 }
+
+type blockingTickets struct{ stopped chan error }
+
+func (b blockingTickets) LookupTicketOwnership(ctx context.Context, _ string) (TicketOwner, error) {
+	<-ctx.Done()
+	b.stopped <- ctx.Err()
+	return TicketOwner{}, ctx.Err()
+}
+
+func TestTheLogModeScanComparisonStopsAtItsOwnBudget(t *testing.T) {
+	stopped := make(chan error, 1)
+	tokens := fakeTokens{events: map[string]string{"token-x": eventX}}
+	access := NewOrganizerAccess(&fakeAuthz{}, authz.ModeLog, blockingTickets{stopped}, tokens, nil, nil, zap.NewNop())
+
+	// The request context never ends, as when a slow ticket lookup holds it for seconds.
+	start := time.Now()
+	_, err := access.AuthorizeScanToken(context.Background(), security.TrustedCaller{UserID: "door"}, "", "token-x")
+	require.NoError(t, err)
+	assert.Less(t, time.Since(start), 2*logModeBudget, "a scan must not wait past the comparison budget")
+
+	select {
+	case err := <-stopped:
+		assert.ErrorIs(t, err, context.DeadlineExceeded, "the comparison must be cut off by its own deadline, not left running")
+	case <-time.After(2 * time.Second):
+		t.Fatal("the comparison kept running after its budget")
+	}
+}

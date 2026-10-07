@@ -358,3 +358,47 @@ func TestParseModeRejectsUnknownValues(t *testing.T) {
 		t.Error("a typo must fail startup instead of silently disabling enforcement")
 	}
 }
+
+func TestDuringAPermissionServiceOutageInLogModeRepeatedCallsDoNotEachWaitForTheTimeout(t *testing.T) {
+	rpc := &fakeAccounts{}
+	c, clock, logs := newTestClient(ModeLog, rpc)
+	rpc.set(nil, status.Error(codes.DeadlineExceeded, "slow"))
+
+	for i := 0; i < 5; i++ {
+		d, err := c.Check(context.Background(), alice, "event.edit", scope)
+		if err != nil || !d.Allowed {
+			t.Fatalf("log mode must never block, got %+v err=%v", d, err)
+		}
+	}
+	if rpc.calls != 1 {
+		t.Errorf("only the first call may wait on the dead service, got %d calls", rpc.calls)
+	}
+	if n := logs.FilterMessage("authz would-check unavailable").Len(); n != 1 {
+		t.Errorf("an outage must log one warning per window, got %d", n)
+	}
+
+	clock.advance(unavailableWindow + time.Second)
+	rpc.set(allow(), nil)
+	if _, err := c.Check(context.Background(), alice, "event.edit", scope); err != nil {
+		t.Fatal(err)
+	}
+	if rpc.calls != 2 {
+		t.Errorf("after the window the service must be asked again so recovery is noticed, got %d calls", rpc.calls)
+	}
+}
+
+func TestOnModeStillRefusesWithUnavailableDuringAnOutage(t *testing.T) {
+	rpc := &fakeAccounts{}
+	c, _, _ := newTestClient(ModeOn, rpc)
+	rpc.set(nil, status.Error(codes.Unavailable, "down"))
+
+	for i := 0; i < 3; i++ {
+		d, err := c.Check(context.Background(), alice, "event.edit", scope)
+		if !errors.Is(err, ErrAuthzUnavailable) || d.Allowed {
+			t.Fatalf("on mode must fail closed every time, got %+v err=%v", d, err)
+		}
+	}
+	if rpc.calls != 3 {
+		t.Errorf("on mode must keep asking so it recovers the moment the service does, got %d calls", rpc.calls)
+	}
+}

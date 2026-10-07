@@ -21,7 +21,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// Permissions from the docs/19 table that attendance-service asks about.
+// Permissions from the organizer permission table (which account role may do what) that attendance-service asks about.
 const (
 	PermAttendanceScan = "attendance.scan"
 	PermEventEdit      = "event.edit"
@@ -221,11 +221,15 @@ func (a *OrganizerAccess) AuthorizeScanToken(ctx context.Context, caller securit
 	if !a.logging() {
 		return a.AuthorizeEvent(ctx, caller, acting, PermAttendanceScan, claims.EventID, false)
 	}
-	// The goroutine lets the bound hold even if a lookup ignores its context.
+	// The comparison gets its own deadline: the request context can live for the
+	// full ticket lookup, and the goroutine lets the bound hold even if a lookup
+	// ignores its context.
+	cmpCtx, cancel := context.WithTimeout(context.Background(), logModeBudget)
 	done := make(chan struct{})
 	go func() {
+		defer cancel()
 		defer close(done)
-		_, _ = a.AuthorizeEvent(ctx, caller, acting, PermAttendanceScan, claims.EventID, false)
+		_, _ = a.AuthorizeEvent(cmpCtx, caller, acting, PermAttendanceScan, claims.EventID, false)
 	}()
 	select {
 	case <-done:
