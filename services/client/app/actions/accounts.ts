@@ -68,7 +68,8 @@ export async function getNavAccess(): Promise<{ organizer: boolean; admin: boole
       await rememberAccount(selected);
     }
     return { organizer: ids.length > 0, admin };
-  } catch {
+  } catch (error) {
+    console.error("Could not load organizer accounts for the nav:", error instanceof Error ? error.message : "unknown error");
     return { organizer: false, admin };
   }
 }

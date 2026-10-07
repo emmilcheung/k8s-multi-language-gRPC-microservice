@@ -60,6 +60,10 @@ vi.mock("@/lib/graphql/execute", () => ({
   executeQuery: (...args: unknown[]) => executeQueryMock(...args),
   executePublicQuery: (...args: unknown[]) => executePublicQueryMock(...args),
 }));
+// The acting-account lookup has its own tests; here it just reports "no account".
+vi.mock("@/lib/organizer-access", () => ({
+  resolveActingAccountId: vi.fn(async () => null),
+}));
 vi.mock("@/lib/graphql/execute-public", () => ({
   executePublicQuery: (...args: unknown[]) => executePublicQueryMock(...args),
 }));

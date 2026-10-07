@@ -4,7 +4,7 @@ import { executeQuery } from "@/lib/graphql/execute";
 import { AttendancePolicyDocument, TicketDetailDocument } from "@/lib/graphql/generated";
 import { readCurrentUserIdFromToken } from "@/lib/server-utils";
 import { ScannerClient } from "@/components/scanner-client";
-import { belongsToOrganizerAccount } from "@/lib/organizer-access";
+import { resolveActingAccountId } from "@/lib/organizer-access";
 
 interface Props {
   searchParams: Promise<{ eventId?: string }>;
@@ -29,15 +29,16 @@ export default async function ScanPage({ searchParams }: Props) {
 
   const cookie = cookieStore.toString();
 
+  const accountId = (await resolveActingAccountId(cookie)) ?? undefined;
   const [ticketData, policyData] = await Promise.all([
-    executeQuery(TicketDetailDocument, { id: eventId }, { cookie }).catch(() => null),
-    executeQuery(AttendancePolicyDocument, { eventId }, { cookie }).catch(() => null),
+    executeQuery(TicketDetailDocument, { id: eventId }, { cookie, accountId }).catch(() => null),
+    executeQuery(AttendancePolicyDocument, { eventId }, { cookie, accountId }).catch(() => null),
   ]);
 
   if (!ticketData?.ticket) {
     notFound();
   }
-  if (ticketData.ticket.userId !== currentUserId && !(await belongsToOrganizerAccount(cookie))) {
+  if (ticketData.ticket.userId !== currentUserId && !accountId) {
     notFound();
   }
   if (!policyData?.attendancePolicy?.requireQrForEntry) {

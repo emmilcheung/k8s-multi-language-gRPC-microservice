@@ -11,7 +11,7 @@ import { executeQuery } from "@/lib/graphql/execute";
 import { AttendancePageDocument, TicketDetailDocument, UserLookupDocument } from "@/lib/graphql/generated";
 import { readCurrentUserIdFromToken } from "@/lib/server-utils";
 import type { AttendanceCheckInItem } from "@/lib/types";
-import { belongsToOrganizerAccount } from "@/lib/organizer-access";
+import { resolveActingAccountId } from "@/lib/organizer-access";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -31,13 +31,14 @@ export default async function OrganizerAttendancePage({ params }: Props) {
   }
 
   const cookie = cookieStore.toString();
+  const accountId = (await resolveActingAccountId(cookie)) ?? undefined;
   const [attendanceData, ticketDetailData] = await Promise.all([
-    executeQuery(AttendancePageDocument, { id }, { cookie }).catch(() => notFound()),
-    executeQuery(TicketDetailDocument, { id }, { cookie }).catch(() => null),
+    executeQuery(AttendancePageDocument, { id }, { cookie, accountId }).catch(() => notFound()),
+    executeQuery(TicketDetailDocument, { id }, { cookie, accountId }).catch(() => null),
   ]);
 
   const ticket = attendanceData.ticket;
-  if (!ticket || (ticket.userId !== currentUserId && !(await belongsToOrganizerAccount(cookie)))) {
+  if (!ticket || (ticket.userId !== currentUserId && !accountId)) {
     notFound();
   }
 
@@ -81,7 +82,7 @@ export default async function OrganizerAttendancePage({ params }: Props) {
         const lookupData = await executeQuery(
           UserLookupDocument,
           { id: buyerUserID },
-          { cookie }
+          { cookie, accountId }
         );
         if (lookupData.userLookup?.email) {
           buyerEmailsByUserID.set(buyerUserID, lookupData.userLookup.email);

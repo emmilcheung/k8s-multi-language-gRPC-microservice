@@ -2,7 +2,7 @@ import type { TypedDocumentNode } from "@graphql-typed-document-node/core";
 import type { AnyVariables, OperationContext } from "urql";
 import { createGraphQLClient, toApiError } from "@/lib/graphql-client";
 import { getValidAccessToken } from "@/lib/server-utils";
-import { organizerAccountHeaders } from "@/lib/organizer-account";
+import { ORGANIZER_ACCOUNT_HEADER, organizerAccountHeaders } from "@/lib/organizer-account";
 import { ACCESS_TOKEN_COOKIE } from "@/lib/session-cookies";
 
 interface ExecuteOptions {
@@ -12,6 +12,12 @@ interface ExecuteOptions {
   revalidate?: number;
   /** Optional wall-clock timeout override for this operation. */
   timeoutMs?: number;
+  /** Acting organizer account for this call; used when no account is remembered yet. */
+  accountId?: string;
+}
+
+async function accountHeaders(accountId?: string): Promise<Record<string, string>> {
+  return accountId ? { [ORGANIZER_ACCOUNT_HEADER]: accountId } : organizerAccountHeaders();
 }
 
 async function resolveCookie(provided?: string): Promise<string | undefined> {
@@ -32,7 +38,7 @@ export async function executeQuery<TData, TVariables extends AnyVariables>(
   options: ExecuteOptions = {},
 ): Promise<TData> {
   const cookie = await resolveCookie(options.cookie);
-  const client = createGraphQLClient(cookie, options.timeoutMs, await organizerAccountHeaders());
+  const client = createGraphQLClient(cookie, options.timeoutMs, await accountHeaders(options.accountId));
   const context: Partial<OperationContext> = {
     requestPolicy: "network-only",
   };
@@ -63,7 +69,7 @@ export async function executeMutation<TData, TVariables extends AnyVariables>(
   options: ExecuteOptions = {},
 ): Promise<TData> {
   const cookie = await resolveCookie(options.cookie);
-  const client = createGraphQLClient(cookie, options.timeoutMs, await organizerAccountHeaders());
+  const client = createGraphQLClient(cookie, options.timeoutMs, await accountHeaders(options.accountId));
   const result = await client.mutation(document, variables).toPromise();
   if (result.error) throw toApiError(result.error);
   if (result.data === undefined) {
