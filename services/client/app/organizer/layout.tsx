@@ -6,7 +6,7 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { executeQuery } from "@/lib/graphql/execute";
 import { MyAccountsDocument } from "@/lib/graphql/generated";
 import { readSelectedAccountId, resolveSelectedAccountId } from "@/lib/organizer-account";
-import { canManageTeam } from "@/lib/team-roles";
+import { canManageEvents, canManageTeam } from "@/lib/team-roles";
 import { cn } from "@/lib/utils";
 
 async function loadAccounts(): Promise<{ id: string; name: string; role: string }[]> {
@@ -28,7 +28,8 @@ export default async function OrganizerLayout({
     accounts.map((a) => a.id),
     await readSelectedAccountId()
   );
-  const showTeam = canManageTeam(accounts.find((a) => a.id === selectedId)?.role);
+  const selectedRole = accounts.find((a) => a.id === selectedId)?.role;
+  const showTeam = canManageTeam(selectedRole);
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-8">
@@ -58,10 +59,12 @@ export default async function OrganizerLayout({
                 Team
               </Link>
             )}
-            <Link href="/venues" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-1.5")}>
-              <Building2 className="size-3.5" />
-              Venues
-            </Link>
+            {canManageEvents(selectedRole) && (
+              <Link href="/venues" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-1.5")}>
+                <Building2 className="size-3.5" />
+                Venues
+              </Link>
+            )}
             <Link href="/organizer/new-account" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-1.5")}>
               New organizer account
             </Link>

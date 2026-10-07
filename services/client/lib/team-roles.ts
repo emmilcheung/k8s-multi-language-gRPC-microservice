@@ -11,3 +11,18 @@ export const TEAM_ROLES: { value: string; label: string }[] = [
 export function canManageTeam(role: string | undefined): boolean {
   return role === "OWNER" || role === "ADMIN";
 }
+
+/** Owners, admins and event managers create events and venues for the account. */
+export function canManageEvents(role: string | undefined): boolean {
+  return role === "OWNER" || role === "ADMIN" || role === "EVENT_MANAGER";
+}
+
+/** Door staff are the only role kept out of sales figures. */
+export function canSeeSales(role: string | undefined): boolean {
+  return canManageEvents(role) || role === "FINANCE";
+}
+
+/** Everyone who works the door may scan; finance may not. */
+export function canScan(role: string | undefined): boolean {
+  return canManageEvents(role) || role === "DOOR_STAFF";
+}
