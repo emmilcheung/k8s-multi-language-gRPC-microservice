@@ -346,6 +346,24 @@ describe("accounts API (PostgreSQL)", () => {
     ]);
   });
 
+  it("door staff see their own event limit in their accounts, since they may not read the team", async () => {
+    const accountId = await newAccount();
+    await api.acceptInvitation(
+      await invite(accountId, "d@acme.test", "DOOR_STAFF"),
+      as("door"),
+    );
+    await api.setDoorStaffEvents(
+      { accountId, userId: "door", eventIds: [EVENT_1] },
+      as("o1"),
+    );
+
+    const [door] = await api.myAccounts(as("door"));
+    const [owner] = await api.myAccounts(as("o1"));
+
+    expect(door).toMatchObject({ role: "DOOR_STAFF", eventIds: [EVENT_1] });
+    expect(owner).toMatchObject({ role: "OWNER", eventIds: [] });
+  });
+
   it("only team managers see the member list, and buyers see no account", async () => {
     const accountId = await newAccount();
 

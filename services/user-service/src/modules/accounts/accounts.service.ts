@@ -72,7 +72,7 @@ export class AccountsService {
 
   listAccountsForUser(
     userId: string,
-  ): Promise<{ account: OrganizerAccount; role: Roles }[]> {
+  ): Promise<{ account: OrganizerAccount; role: Roles; eventIds: string[] }[]> {
     return this.repository.listAccountsForUser(userId);
   }
 

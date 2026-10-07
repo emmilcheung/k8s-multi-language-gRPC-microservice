@@ -103,6 +103,8 @@ type Account {
 type MyAccount {
   account: Account!
   role: AccountRole!
+  # Door staff only: the events you are limited to. Empty means every event.
+  eventIds: [ID!]!
 }
 
 type AccountMember {

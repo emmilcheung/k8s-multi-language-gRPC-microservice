@@ -83,9 +83,13 @@ export class AccountsRepository {
 
   async listAccountsForUser(
     userId: string,
-  ): Promise<{ account: OrganizerAccount; role: Roles }[]> {
+  ): Promise<{ account: OrganizerAccount; role: Roles; eventIds: string[] }[]> {
     const rows = await this.db
-      .select({ account: organizerAccounts, role: memberships.role })
+      .select({
+        account: organizerAccounts,
+        role: memberships.role,
+        membershipId: memberships.id,
+      })
       .from(memberships)
       .innerJoin(
         organizerAccounts,
@@ -98,7 +102,23 @@ export class AccountsRepository {
         ),
       )
       .orderBy(organizerAccounts.createdAt, organizerAccounts.id);
-    return rows;
+    if (rows.length === 0) return [];
+    const scopes = await this.db
+      .select()
+      .from(membershipEventScopes)
+      .where(
+        inArray(
+          membershipEventScopes.membershipId,
+          rows.map((r) => r.membershipId),
+        ),
+      );
+    return rows.map(({ account, role, membershipId }) => ({
+      account,
+      role,
+      eventIds: scopes
+        .filter((s) => s.membershipId === membershipId)
+        .map((s) => s.eventId),
+    }));
   }
 
   async listEventScopes(membershipId: string): Promise<string[]> {

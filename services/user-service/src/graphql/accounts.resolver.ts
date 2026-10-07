@@ -71,9 +71,10 @@ export class AccountsResolver {
   async myAccounts(@Context() ctx: GqlContext) {
     const { userId } = this.caller(ctx);
     const rows = await this.accounts.listAccountsForUser(userId);
-    return rows.map(({ account, role }) => ({
+    return rows.map(({ account, role, eventIds }) => ({
       account: this.toAccount(account),
       role,
+      eventIds,
     }));
   }
 
