@@ -1,6 +1,7 @@
 "use server";
 // app/actions/auth.ts — Server Actions for authentication flows.
 
+import { ORGANIZER_ACCOUNT_COOKIE } from "@/lib/organizer-account";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ApiError } from "@/lib/api";
@@ -174,6 +175,15 @@ export async function signin(
     return { error: "An unexpected error occurred." };
   }
 
+  // Sign-out forgets the acting organizer account; pick the user's first one
+  // again so organizer pages work straight away. Best effort.
+  try {
+    const { rememberDefaultAccount } = await import("@/lib/default-account");
+    await rememberDefaultAccount();
+  } catch {
+    // The nav bar picks an account on the next page view.
+  }
+
   // After OAuth2-initiated signin, return the browser to the authorize endpoint.
   // Guard against open-redirect: only allow trusted origins.
   redirect(isSafeRedirect(next) ? next : "/");
@@ -203,5 +213,6 @@ export async function signout(): Promise<void> {
   cookieStore.delete(ACCESS_TOKEN_COOKIE);
   cookieStore.delete(REFRESH_TOKEN_COOKIE);
   cookieStore.delete({ name: LOGGED_IN_HINT_COOKIE, path: "/" });
+  cookieStore.delete({ name: ORGANIZER_ACCOUNT_COOKIE, path: "/" });
   redirect("/auth/signin");
 }

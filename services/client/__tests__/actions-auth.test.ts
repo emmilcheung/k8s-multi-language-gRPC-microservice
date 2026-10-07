@@ -164,6 +164,8 @@ describe("auth server actions", () => {
     expect(cookieDelete).toHaveBeenCalledWith("token");
     expect(cookieDelete).toHaveBeenCalledWith("refreshToken");
     expect(cookieDelete).toHaveBeenCalledWith({ name: "logged_in", path: "/" });
+    // The next person on a shared browser must not inherit the previous account.
+    expect(cookieDelete).toHaveBeenCalledWith({ name: "organizer_account", path: "/" });
     expect(redirectMock).toHaveBeenCalledWith("/auth/signin");
   });
 

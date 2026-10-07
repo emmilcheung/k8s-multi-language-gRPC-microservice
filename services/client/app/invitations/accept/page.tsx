@@ -33,7 +33,7 @@ export default async function AcceptInvitationPage({
       <CardHeader>
         <CardTitle>Join an organizer team</CardTitle>
         <CardDescription>
-          Accept to join the team with the role you were invited for. The invitation must be sent to your email.
+          Accepting adds you to the team with the role you were invited for. Anyone who holds this link can join, so only accept invitations from someone you trust.
         </CardDescription>
       </CardHeader>
       <CardContent>

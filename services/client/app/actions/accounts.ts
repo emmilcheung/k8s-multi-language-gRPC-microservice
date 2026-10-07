@@ -8,6 +8,7 @@
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { unexpectedFailure } from "@/lib/action-failure";
 import { executeMutation, executeQuery } from "@/lib/graphql/execute";
 import {
   AcceptInvitationDocument,
@@ -20,9 +21,9 @@ import {
   type AccountRole,
 } from "@/lib/graphql/generated";
 import {
-  ORGANIZER_ACCOUNT_COOKIE,
   isAccountId,
   readSelectedAccountId,
+  rememberAccount,
   resolveSelectedAccountId,
 } from "@/lib/organizer-account";
 import { readRolesFromToken } from "@/lib/server-utils";
@@ -37,22 +38,7 @@ export interface AccountActionState {
 }
 
 const ACCOUNT_ROLES: AccountRole[] = ["OWNER", "ADMIN", "EVENT_MANAGER", "FINANCE", "DOOR_STAFF"];
-const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-async function rememberAccount(accountId: string): Promise<void> {
-  (await cookies()).set(ORGANIZER_ACCOUNT_COOKIE, accountId, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: ONE_YEAR_SECONDS,
-  });
-}
-
-function failure(error: unknown, fallback: string): AccountActionState {
-  return { error: error instanceof Error && error.message ? error.message : fallback };
-}
 
 function text(formData: FormData, name: string): string {
   const value = formData.get(name);
@@ -98,7 +84,7 @@ export async function selectOrganizerAccount(accountId: string): Promise<{ error
     revalidatePath("/organizer", "layout");
     return {};
   } catch (error) {
-    return failure(error, "Could not switch organizer account.");
+    return unexpectedFailure("Could not switch organizer account", error);
   }
 }
 
@@ -129,7 +115,7 @@ export async function createOrganizerAccountAction(
     }
     await rememberAccount(result.account.id);
   } catch (error) {
-    return failure(error, "Could not create the organizer account.");
+    return unexpectedFailure("Could not create the organizer account", error);
   }
   redirect("/organizer");
 }
@@ -157,7 +143,7 @@ export async function inviteMemberAction(
     revalidatePath("/organizer/team");
     return { message: `Invitation created for ${email}.`, acceptLink: result.acceptLink };
   } catch (error) {
-    return failure(error, "Could not create the invitation.");
+    return unexpectedFailure("Could not create the invitation", error);
   }
 }
 
@@ -181,7 +167,7 @@ export async function changeMemberRoleAction(
     revalidatePath("/organizer/team");
     return { message: "Role updated." };
   } catch (error) {
-    return failure(error, "Could not change the role.");
+    return unexpectedFailure("Could not change the role", error);
   }
 }
 
@@ -203,7 +189,7 @@ export async function removeMemberAction(
     revalidatePath("/organizer/team");
     return { message: "Member removed." };
   } catch (error) {
-    return failure(error, "Could not remove the member.");
+    return unexpectedFailure("Could not remove the member", error);
   }
 }
 
@@ -233,7 +219,7 @@ export async function setDoorStaffEventsAction(
           : "Door staff can scan every event of this account.",
     };
   } catch (error) {
-    return failure(error, "Could not save the door staff events.");
+    return unexpectedFailure("Could not save the door staff events", error);
   }
 }
 
@@ -253,7 +239,7 @@ export async function acceptInvitationAction(
     }
     await rememberAccount(result.account.id);
   } catch (error) {
-    return failure(error, "Could not accept the invitation.");
+    return unexpectedFailure("Could not accept the invitation", error);
   }
   redirect("/organizer");
 }

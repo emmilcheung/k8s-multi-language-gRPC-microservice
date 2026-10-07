@@ -5,13 +5,14 @@
 // Who may act is decided by the services; the admin pages are hidden from
 // everyone else as a convenience only.
 
-import { ApiError, serverApi } from "@/lib/api";
+import { serverApi } from "@/lib/api";
 import { executeMutation, executeQuery } from "@/lib/graphql/execute";
 import {
   DecideVenueClaimDocument,
   SuspendAccountDocument,
   UserLookupDocument,
 } from "@/lib/graphql/generated";
+import { GENERIC_ACTION_ERROR, unexpectedFailure } from "@/lib/action-failure";
 import { isAccountId } from "@/lib/organizer-account";
 
 export interface AdminActionState {
@@ -37,10 +38,6 @@ function reasonOf(formData: FormData): { reason: string } | { error: string } {
   return { reason };
 }
 
-function failure(error: unknown, fallback: string): AdminActionState {
-  return { error: error instanceof Error && error.message ? error.message : fallback };
-}
-
 export async function decideVenueClaimAction(
   _prev: AdminActionState,
   formData: FormData,
@@ -48,7 +45,7 @@ export async function decideVenueClaimAction(
   const claimId = text(formData, "claimId");
   const decision = text(formData, "decision");
   const reason = reasonOf(formData);
-  if (!claimId) return { error: "Enter the claim id." };
+  if (!isAccountId(claimId)) return { error: GENERIC_ACTION_ERROR };
   if (decision !== "APPROVE" && decision !== "REJECT") return { error: "Choose approve or reject." };
   if ("error" in reason) return reason;
 
@@ -61,7 +58,7 @@ export async function decideVenueClaimAction(
       message: `Claim ${decision === "APPROVE" ? "approved" : "rejected"}.`,
     };
   } catch (error) {
-    return failure(error, "Could not decide the claim.");
+    return unexpectedFailure("Could not decide the claim", error);
   }
 }
 
@@ -83,7 +80,7 @@ export async function suspendAccountAction(
     }
     return { message: `${result.account.name} is suspended.` };
   } catch (error) {
-    return failure(error, "Could not suspend the account.");
+    return unexpectedFailure("Could not suspend the account", error);
   }
 }
 
@@ -104,6 +101,7 @@ export async function changePlatformRoleAction(
     const lookup = await executeQuery(UserLookupDocument, { email });
     const userId = lookup.userLookup?.id;
     if (!userId) return { error: "No user has that email." };
+    if (!isAccountId(userId)) return { error: GENERIC_ACTION_ERROR };
 
     await serverApi(`/admin/users/${userId}/roles`, {
       method: "POST",
@@ -116,7 +114,6 @@ export async function changePlatformRoleAction(
           : `${role} removed from ${email}. Their sessions end at the next token refresh.`,
     };
   } catch (error) {
-    if (error instanceof ApiError) return { error: error.message };
-    return failure(error, "Could not change the platform role.");
+    return unexpectedFailure("Could not change the platform role", error);
   }
 }

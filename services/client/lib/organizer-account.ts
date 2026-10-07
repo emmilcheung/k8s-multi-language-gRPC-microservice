@@ -39,3 +39,16 @@ export async function organizerAccountHeaders(): Promise<Record<string, string>>
   const accountId = await readSelectedAccountId();
   return accountId ? { [ORGANIZER_ACCOUNT_HEADER]: accountId } : {};
 }
+
+const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
+
+/** Remembers the acting account for this browser. */
+export async function rememberAccount(accountId: string): Promise<void> {
+  (await cookies()).set(ORGANIZER_ACCOUNT_COOKIE, accountId, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: ONE_YEAR_SECONDS,
+  });
+}
