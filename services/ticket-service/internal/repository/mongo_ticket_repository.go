@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/acme/ticket-service/internal/audit"
 	"regexp"
 	"strconv"
 	"strings"
@@ -143,6 +144,20 @@ type TicketOutboxEvent struct {
 	ClaimToken    string              `bson:"claimToken,omitempty" json:"-"`
 	LeaseUntil    *time.Time          `bson:"leaseUntil,omitempty" json:"-"`
 	LastError     string              `bson:"lastError,omitempty" json:"-"`
+	// Audit rides in the same single-document update as the event; the relay
+	// writes it to audit_log keyed by ID, so a replayed event writes it once.
+	Audit *audit.Entry `bson:"audit,omitempty" json:"-"`
+}
+
+// RecordAudit attaches an audit entry to the event, so it commits in the same
+// document update as the change that produced the event. Personal data is
+// blanked here, before it is stored anywhere.
+func (e *TicketOutboxEvent) RecordAudit(entry audit.Entry) {
+	if entry.At.IsZero() {
+		entry.At = time.Now().UTC()
+	}
+	redacted := entry.Redacted()
+	e.Audit = &redacted
 }
 
 // ClaimedOutboxEvent is a flattened relay work item claimed from a ticket document.
@@ -323,6 +338,7 @@ type MongoTicketRepository struct {
 	client       *mongo.Client
 	collection   *mongo.Collection
 	reservations *mongo.Collection
+	auditLog     *mongo.Collection
 	quota        cache.QuotaManager // optional; nil means no Redis quota gate
 	log          *zap.Logger        // never nil; defaults to a no-op logger
 	ownsClient   bool               // true when this repository dialled the client and may disconnect it
@@ -396,10 +412,16 @@ func newMongoTicketRepository(ctx context.Context, client *mongo.Client, dbName 
 		return nil, fmt.Errorf("ensure reservation indexes: %w", err)
 	}
 
+	auditColl := db.Collection("audit_log")
+	if err := ensureAuditIndexes(ctx, auditColl); err != nil {
+		return nil, fmt.Errorf("ensure audit indexes: %w", err)
+	}
+
 	repo := &MongoTicketRepository{
 		client:       client,
 		collection:   coll,
 		reservations: resvColl,
+		auditLog:     auditColl,
 		log:          zap.NewNop(),
 		ownsClient:   ownsClient,
 	}
@@ -587,6 +609,36 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection) error {
 		},
 	})
 	return err
+}
+
+// audit_log rows are keyed by the outbox event id (_id), which is what makes a
+// replayed event write its entry once.
+func ensureAuditIndexes(ctx context.Context, coll *mongo.Collection) error {
+	_, err := coll.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "resource", Value: 1}, {Key: "at", Value: -1}},
+		Options: options.Index().SetName("idx_resource_at"),
+	})
+	return err
+}
+
+// WriteAuditEntry stores an audit entry under the outbox event id. It is
+// idempotent: writing the same event id again leaves the first row untouched.
+func (r *MongoTicketRepository) WriteAuditEntry(ctx context.Context, eventID string, entry audit.Entry) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	if entry.At.IsZero() {
+		entry.At = time.Now().UTC()
+	}
+	_, err := r.auditLog.UpdateOne(ctx,
+		bson.M{"_id": eventID},
+		bson.M{"$setOnInsert": entry.Redacted()},
+		options.UpdateOne().SetUpsert(true),
+	)
+	if err != nil {
+		return fmt.Errorf("write audit entry: %w", err)
+	}
+	return nil
 }
 
 func ensureReservationIndexes(ctx context.Context, coll *mongo.Collection) error {
