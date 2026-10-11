@@ -15,13 +15,13 @@ const callerUser = "550e8400-e29b-41d4-a716-446655440000"
 
 func signRoles(userID, roles string, minute int64, key string) string {
 	h := hmac.New(sha256.New, []byte(key))
-	h.Write([]byte(fmt.Sprintf("%s|%s|%d", userID, roles, minute)))
+	fmt.Fprintf(h, "%s|%s|%d", userID, roles, minute)
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
 func signUserID(userID string, minute int64, key string) string {
 	h := hmac.New(sha256.New, []byte(key))
-	h.Write([]byte(fmt.Sprintf("%s|%d", userID, minute)))
+	fmt.Fprintf(h, "%s|%d", userID, minute)
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 

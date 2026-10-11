@@ -77,6 +77,6 @@ func (v *CallerVerifier) validRolesSignature(userID, roles, signature string) bo
 
 func (v *CallerVerifier) rolesSignature(userID, roles string, minute int64) string {
 	h := hmac.New(sha256.New, []byte(v.signingKey))
-	h.Write([]byte(fmt.Sprintf("%s|%s|%d", userID, roles, minute)))
+	fmt.Fprintf(h, "%s|%s|%d", userID, roles, minute)
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
