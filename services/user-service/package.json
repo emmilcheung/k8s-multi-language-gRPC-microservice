@@ -20,7 +20,8 @@
       "multer": "2.4.0",
       "@grpc/grpc-js": "1.14.5",
       "@graphql-tools/utils": "12.0.3",
-      "proxy-addr": "2.0.8"
+      "proxy-addr": "2.0.8",
+      "fast-copy": "4.1.0"
     }
   },
   "engines": {
