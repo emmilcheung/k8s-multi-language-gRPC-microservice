@@ -45,6 +45,12 @@ infra          # Kong, observability stack, cert-manager
 - The index build blocks writes to `orders` while it runs. Outside a small table, build it first by hand, outside a transaction, and let the migration's `IF NOT EXISTS` make it a no-op:
   `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_orders_reservation_id ON orders (reservation_id) WHERE reservation_id IS NOT NULL;`
   A failed concurrent build leaves an invalid index that `IF NOT EXISTS` skips silently: check `pg_index.indisvalid` and drop it before retrying.
+- Organizer accounts must be released in this order. The organizer console lists events by owning account, so an event without one is missing from its creator's console. With `AUTHZ_ENFORCED=on`, it is refused outright.
+  1. Deploy user-service, then ticket, venue and attendance services with `AUTHZ_ENFORCED=log`. Venue migrations 008–010 run on startup. Migration 010 makes new venues default to `UNVERIFIED`, so a venue created by an old pod during the rollout can land unverified; a platform admin verifies it.
+  2. Run `backfill-accounts` in venue-service, then in ticket-service, with `BACKFILL_DRY_RUN=true` first. Both are idempotent and resumable. Run them outside on-sale windows.
+  3. Deploy the client. Before this point, events created through the old client have no owning account.
+  4. Run both backfills again, to pick up events created between steps 2 and 3. The dry run must then report nothing pending.
+  5. Only then switch to `AUTHZ_ENFORCED=on`. This is a separate owner decision.
 
 ## EKS-Specific
 
