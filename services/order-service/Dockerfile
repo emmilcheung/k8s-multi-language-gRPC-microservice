@@ -29,7 +29,7 @@ COPY services/order-service/src/ src/
 RUN mvn package -DskipTests -q
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM eclipse-temurin:21-jre-alpine@sha256:6ad8ed080d9be96b61438ec3ce99388e294af216ed57356000c06070e85c5d5d AS runtime
+FROM eclipse-temurin:21-jre-alpine@sha256:51ab5e3302e7141ce665ca3ea85e8b5cd648eafbc3c0c90dd79d6537684e4555 AS runtime
 
 # Non-root user (AGENTS.md §10.1)
 RUN apk upgrade --no-cache && addgroup -S app && adduser -S app -G app
