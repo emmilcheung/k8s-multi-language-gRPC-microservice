@@ -23,7 +23,8 @@
       "ws": "8.21.0",
       "multer": "2.4.0",
       "@grpc/grpc-js": "1.14.5",
-      "@opentelemetry/core": "2.8.0"
+      "@opentelemetry/core": "2.8.0",
+      "fast-copy": "4.1.0"
     }
   },
   "engines": {

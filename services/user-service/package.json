@@ -18,7 +18,9 @@
       "undici": "6.24.0",
       "ws": "8.21.0",
       "multer": "2.4.0",
-      "@grpc/grpc-js": "1.14.5"
+      "@grpc/grpc-js": "1.14.5",
+      "@graphql-tools/utils": "12.0.3",
+      "proxy-addr": "2.0.8"
     }
   },
   "engines": {
@@ -44,11 +46,11 @@
     "@apollo/server": "^5.5.0",
     "@apollo/subgraph": "^2.13.3",
     "@as-integrations/express5": "^1.0.0",
-    "@nestjs/apollo": "^13.2.5",
+    "@nestjs/apollo": "^13.4.5",
     "@nestjs/common": "^11.1.18",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.1.18",
-    "@nestjs/graphql": "^13.2.5",
+    "@nestjs/graphql": "^13.4.5",
     "@nestjs/platform-express": "^11.1.18",
     "@willsoto/nestjs-prometheus": "^6.1.0",
     "class-transformer": "^0.5.1",
