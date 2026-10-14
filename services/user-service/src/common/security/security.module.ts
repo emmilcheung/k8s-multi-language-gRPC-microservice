@@ -22,8 +22,10 @@ import { PlatformRolesVerifier } from "./platform-roles.verifier";
         );
         if (!signingKey) {
           // Production refuses an empty key at startup (see envSchema).
+          // The variable is not named here: CI fails any log line that
+          // mentions a secret's name.
           new Logger("SecurityModule").warn(
-            "X_USER_ID_SIGNING_KEY is not set: request identity signatures cannot be verified",
+            "Request identity key is not configured: request identity signatures cannot be verified",
           );
         }
         return new UserIdSignatureValidator(signingKey);
