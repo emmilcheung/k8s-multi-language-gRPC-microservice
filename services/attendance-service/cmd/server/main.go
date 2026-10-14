@@ -10,6 +10,7 @@ import (
 	"time"
 
 	gqlhandler "github.com/99designs/gqlgen/graphql/handler"
+	"github.com/acme/attendance-service/internal/authz"
 	"github.com/acme/attendance-service/internal/config"
 	gqlgraph "github.com/acme/attendance-service/internal/graphql"
 	"github.com/acme/attendance-service/internal/handler"
@@ -27,11 +28,13 @@ import (
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	accountsv1 "github.com/org/ticketing/libs/grpc-stubs/go/accounts/v1"
 	ticketsv1 "github.com/org/ticketing/libs/grpc-stubs/go/tickets/v1"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 func main() {
@@ -119,7 +122,8 @@ func main() {
 		log.Fatal("failed to connect to ticket-service", zap.String("url", cfg.TicketServiceURL), zap.Error(err))
 	}
 	defer ticketConn.Close() //nolint:errcheck
-	ticketLookup := service.NewGRPCTicketOwnerLookup(ticketsv1.NewTicketServiceClient(ticketConn), 0)
+	ticketClient := ticketsv1.NewTicketServiceClient(ticketConn)
+	ticketLookup := service.NewGRPCTicketOwnerLookup(ticketClient, 0)
 	userLookup := service.NewHTTPUserIdentityLookup(cfg.AuthServiceURL, nil, 0)
 
 	// Service
@@ -128,6 +132,33 @@ func main() {
 	// QR token generator
 	qrGen := qr.NewGenerator(cfg.QRSigningKey)
 	scanSvc := service.NewScanService(credRepo, scanRepo, qrGen, log)
+
+	// Organizer and door-staff permission check. Without an address (allowed
+	// unless AUTHZ_ENFORCED=on, which config rejects) the client has no
+	// connection and logging mode records "unavailable" while the old owner
+	// check decides.
+	var accountsRPC accountsv1.AccountsServiceClient
+	if cfg.AccountsGRPCAddr != "" && cfg.AuthzMode != authz.ModeOff {
+		accountsConn, err := grpc.NewClient(
+			cfg.AccountsGRPCAddr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:                30 * time.Second,
+				Timeout:             10 * time.Second,
+				PermitWithoutStream: true,
+			}),
+		)
+		if err != nil {
+			log.Fatal("failed to dial user-service accounts", zap.Error(err), zap.String("addr", cfg.AccountsGRPCAddr))
+		}
+		defer accountsConn.Close() //nolint:errcheck
+		accountsRPC = accountsv1.NewAccountsServiceClient(accountsConn)
+	}
+	orgAccess := service.NewOrganizerAccess(
+		authz.New(cfg.AuthzMode, accountsRPC, log), cfg.AuthzMode,
+		service.NewGRPCTicketOwnershipLookup(ticketClient, 0), qrGen,
+		pgrepo.NewTxRunner(pool), security.NewCallerVerifier(cfg.UserIDSigningKey), log)
+	log.Info("organizer authz configured", zap.String("mode", string(cfg.AuthzMode)), zap.Bool("accountsConnected", accountsRPC != nil))
 
 	// IssuanceService: implements kafka.OrderEventHandler and issues admission
 	// credentials for each completed order event (WS2).
@@ -164,8 +195,8 @@ func main() {
 
 	// Handlers
 	healthHandler := handler.NewHealthHandler(dbChecker, kafkaChecker, log)
-	attendanceHandler := handler.NewAttendanceHandler(svc, log)
-	scanHandler := handler.NewScanHandler(scanSvc, svc, log)
+	attendanceHandler := handler.NewAttendanceHandler(svc, log).WithAccess(orgAccess)
+	scanHandler := handler.NewScanHandler(scanSvc, svc, log).WithAccess(orgAccess)
 
 	// Health routes (no auth)
 	e.GET("/healthz/live", healthHandler.Live)
@@ -176,7 +207,7 @@ func main() {
 	e.Use(echoprometheus.NewMiddleware("http"))
 
 	// GraphQL (no auth at transport; auth via context in resolvers)
-	gqlResolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: scanSvc}
+	gqlResolver := &gqlgraph.Resolver{Svc: svc, ScanSvc: scanSvc, Access: orgAccess}
 	gqlServer := gqlhandler.NewDefaultServer(gqlgraph.NewExecutableSchema(gqlgraph.Config{
 		Resolvers: gqlResolver,
 	}))

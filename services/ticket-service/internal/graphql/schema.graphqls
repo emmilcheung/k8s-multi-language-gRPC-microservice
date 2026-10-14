@@ -84,6 +84,29 @@ type SavedEventConnection {
   pageInfo: PageInfo!
 }
 
+# One entry of an event's change history. before/after are JSON objects holding
+# only the fields that changed.
+type EventHistoryEntry {
+  id: ID!
+  at: String!
+  actorUserId: ID!
+  actorAccountId: ID
+  action: String!
+  before: String
+  after: String
+  reason: String
+}
+
+type EventHistoryEdge {
+  node: EventHistoryEntry!
+  cursor: String!
+}
+
+type EventHistoryConnection {
+  edges: [EventHistoryEdge!]!
+  pageInfo: PageInfo!
+}
+
 type Query {
   # Legacy: returns the full list, no filter. Kept for backward compatibility.
   # Prefer `ticketsConnection` for new operations.
@@ -93,6 +116,10 @@ type Query {
   ticket(id: ID!): Ticket
   # User's saved events (tickets)
   savedEvents(first: Int, after: String): SavedEventConnection!
+  # An organizer account's events, newest first. Requires event.view on the account.
+  eventsByAccount(accountId: ID!, first: Int, after: String): TicketConnection!
+  # Change history of one event, newest first. Requires event.view on the event's account.
+  eventHistory(eventId: ID!, first: Int, after: String): EventHistoryConnection!
 }
 
 type Mutation {

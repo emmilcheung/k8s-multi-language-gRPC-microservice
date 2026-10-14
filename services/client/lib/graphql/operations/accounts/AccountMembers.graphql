@@ -1,0 +1,8 @@
+query AccountMembers($accountId: ID!) {
+  accountMembers(accountId: $accountId) {
+    userId
+    role
+    eventIds
+    joinedAt
+  }
+}

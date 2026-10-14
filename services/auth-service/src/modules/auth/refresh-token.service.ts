@@ -379,4 +379,19 @@ export class RefreshTokenService {
       );
     }
   }
+
+  /**
+   * Delete every refresh session of a user, browser and OAuth alike. Used when
+   * a platform role is removed so the user cannot mint a fresh access token
+   * under the old role. Returns how many sessions were listed.
+   */
+  async revokeAllForUser(userId: string): Promise<number> {
+    const indexKey = this.userSessionsKey(userId);
+    const sessionIds = await this.redis.smembers(indexKey);
+    await this.redis.del(
+      ...sessionIds.map((sessionId) => this.sessionKey(sessionId)),
+      indexKey,
+    );
+    return sessionIds.length;
+  }
 }

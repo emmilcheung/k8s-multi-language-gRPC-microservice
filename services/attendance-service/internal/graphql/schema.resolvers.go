@@ -22,19 +22,19 @@ func (r *mutationResolver) UpdateAttendancePolicy(ctx context.Context, eventID s
 	if organizerID == "" {
 		return nil, fmt.Errorf("unauthorized: organizer identity required")
 	}
-	if err := r.Svc.EnsureOrganizerOwnsEvent(ctx, eventID, organizerID); err != nil {
-		if errors.Is(err, service.ErrForbidden) {
-			return nil, fmt.Errorf("forbidden: organizer is not allowed for this event")
-		}
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, fmt.Errorf("not found: event not found")
-		}
+	caller, account, err := r.authorizeEvent(ctx, service.PermEventEdit, eventID, organizerID)
+	if err != nil {
 		return nil, err
 	}
 
 	policy, err := r.Svc.GetAttendancePolicy(ctx, eventID)
 	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return nil, err
+	}
+	var before *repository.AttendancePolicy
+	if policy != nil {
+		snapshot := *policy
+		before = &snapshot
 	}
 	if policy == nil {
 		policy = &repository.AttendancePolicy{
@@ -51,7 +51,7 @@ func (r *mutationResolver) UpdateAttendancePolicy(ctx context.Context, eventID s
 	if input.AllowManualOverride != nil {
 		policy.AllowManualOverride = *input.AllowManualOverride
 	}
-	if err := r.Svc.UpsertAttendancePolicy(ctx, policy); err != nil {
+	if err := r.Access.SavePolicy(ctx, r.Svc, caller, account, before, policy); err != nil {
 		return nil, err
 	}
 	return &AttendancePolicy{
@@ -66,6 +66,15 @@ func (r *mutationResolver) ValidateScan(ctx context.Context, token string) (*Sca
 	scannerUserID := userIDFromContext(ctx)
 	if scannerUserID == "" {
 		return nil, fmt.Errorf("unauthorized: scanner identity required")
+	}
+	if err := r.authorizeScanToken(ctx, scannerUserID, token); err != nil {
+		if errors.Is(err, service.ErrScanTokenUnverifiable) {
+			// Same answer the scanner gave for a bad signature, but nothing is
+			// recorded: the caller cannot be scoped to an event.
+			reason := string(service.ScanResultInvalidSignature)
+			return &ScanValidationResult{Valid: false, Reason: &reason}, nil
+		}
+		return nil, err
 	}
 	outcome, err := r.ScanSvc.Validate(ctx, token, "", scannerUserID, "graphql", nil)
 	if err != nil {
@@ -110,13 +119,8 @@ func (r *mutationResolver) RecordCheckin(ctx context.Context, input RecordChecki
 		}
 		return nil, err
 	}
-	if err := r.Svc.EnsureOrganizerOwnsEvent(ctx, cred.EventID, scannerUserID); err != nil {
-		if errors.Is(err, service.ErrForbidden) {
-			return nil, fmt.Errorf("forbidden: organizer is not allowed for this event")
-		}
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, fmt.Errorf("not found: event not found")
-		}
+	_, _, err = r.authorizeEvent(ctx, service.PermAttendanceScan, cred.EventID, scannerUserID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -161,13 +165,8 @@ func (r *mutationResolver) RecordCheckinByUserID(ctx context.Context, input Reco
 	if scannerUserID == "" {
 		return nil, fmt.Errorf("unauthorized: scanner identity required")
 	}
-	if err := r.Svc.EnsureOrganizerOwnsEvent(ctx, input.EventID, scannerUserID); err != nil {
-		if errors.Is(err, service.ErrForbidden) {
-			return nil, fmt.Errorf("forbidden: organizer is not allowed for this event")
-		}
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, fmt.Errorf("not found: event not found")
-		}
+	_, _, err := r.authorizeEvent(ctx, service.PermAttendanceScan, input.EventID, scannerUserID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -294,13 +293,8 @@ func (r *queryResolver) AttendancePolicy(ctx context.Context, eventID string) (*
 	if organizerID == "" {
 		return nil, fmt.Errorf("unauthorized: organizer identity required")
 	}
-	if err := r.Svc.EnsureOrganizerOwnsEvent(ctx, eventID, organizerID); err != nil {
-		if errors.Is(err, service.ErrForbidden) {
-			return nil, fmt.Errorf("forbidden: organizer is not allowed for this event")
-		}
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, fmt.Errorf("not found: event not found")
-		}
+	_, _, err := r.authorizeEvent(ctx, service.PermEventView, eventID, organizerID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -328,13 +322,8 @@ func (r *queryResolver) AttendanceSummary(ctx context.Context, eventID string) (
 	if organizerID == "" {
 		return nil, fmt.Errorf("unauthorized: organizer identity required")
 	}
-	if err := r.Svc.EnsureOrganizerOwnsEvent(ctx, eventID, organizerID); err != nil {
-		if errors.Is(err, service.ErrForbidden) {
-			return nil, fmt.Errorf("forbidden: organizer is not allowed for this event")
-		}
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, fmt.Errorf("not found: event not found")
-		}
+	_, _, err := r.authorizeEvent(ctx, service.PermEventView, eventID, organizerID)
+	if err != nil {
 		return nil, err
 	}
 	summary, err := r.Svc.GetAttendanceSummary(ctx, eventID)
@@ -355,13 +344,8 @@ func (r *queryResolver) EventCheckins(ctx context.Context, eventID string, first
 	if organizerID == "" {
 		return nil, fmt.Errorf("unauthorized: organizer identity required")
 	}
-	if err := r.Svc.EnsureOrganizerOwnsEvent(ctx, eventID, organizerID); err != nil {
-		if errors.Is(err, service.ErrForbidden) {
-			return nil, fmt.Errorf("forbidden: organizer is not allowed for this event")
-		}
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, fmt.Errorf("not found: event not found")
-		}
+	_, _, err := r.authorizeEvent(ctx, service.PermEventView, eventID, organizerID)
+	if err != nil {
 		return nil, err
 	}
 	if after != nil && *after != "" {

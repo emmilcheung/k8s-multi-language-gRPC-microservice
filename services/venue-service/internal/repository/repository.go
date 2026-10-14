@@ -69,15 +69,26 @@ const (
 
 // Venue represents a physical or virtual event location.
 type Venue struct {
-	ID          string    `db:"id"          json:"id"`
-	OrganizerID string    `db:"organizer_id" json:"organizerId"`
-	Name        string    `db:"name"         json:"name"`
-	Capacity    int       `db:"capacity"     json:"capacity"`
-	Timezone    string    `db:"timezone"     json:"timezone"`
-	Address     string    `db:"address"      json:"address"`
-	CreatedAt   time.Time `db:"created_at"   json:"createdAt"`
-	UpdatedAt   time.Time `db:"updated_at"   json:"updatedAt"`
+	ID          string `db:"id"          json:"id"`
+	OrganizerID string `db:"organizer_id" json:"organizerId"`
+	Name        string `db:"name"         json:"name"`
+	Capacity    int    `db:"capacity"     json:"capacity"`
+	Timezone    string `db:"timezone"     json:"timezone"`
+	Address     string `db:"address"      json:"address"`
+	// Status is VenueStatusUnverified until a platform admin verifies the venue.
+	Status string `db:"status" json:"status"`
+	// CreatedByAccountID is the organizer account that created the venue; empty
+	// for venues created before accounts existed and not yet backfilled.
+	CreatedByAccountID string    `db:"created_by_account_id" json:"createdByAccountId,omitempty"`
+	CreatedAt          time.Time `db:"created_at"   json:"createdAt"`
+	UpdatedAt          time.Time `db:"updated_at"   json:"updatedAt"`
 }
+
+// Venue verification states.
+const (
+	VenueStatusUnverified = "UNVERIFIED"
+	VenueStatusVerified   = "VERIFIED"
+)
 
 // SeatingPlan links a set of sections to a specific ticket.
 // ticket_id is required and must be set at creation (ticket-first model).

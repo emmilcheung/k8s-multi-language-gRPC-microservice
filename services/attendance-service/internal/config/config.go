@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/acme/attendance-service/internal/authz"
 )
 
 const minSigningKeyLength = 32
@@ -32,6 +34,9 @@ type Config struct {
 	UserIDSigningKey      string
 	OTELEndpoint          string        // optional; schema-validated if present
 	QRTokenTTL            time.Duration // configurable via QR_TOKEN_TTL; 0 means use service default (48h)
+	// AuthzMode is AUTHZ_ENFORCED (off | log | on); AccountsGRPCAddr is user-service's gRPC address.
+	AuthzMode        authz.Mode
+	AccountsGRPCAddr string
 }
 
 // Load reads configuration from environment variables and validates all required fields.
@@ -131,6 +136,15 @@ func Load() (*Config, error) {
 		}
 	}
 
+	authzMode, err := authz.ParseMode(getEnv("AUTHZ_ENFORCED", string(authz.ModeLog)))
+	if err != nil {
+		errs = append(errs, "AUTHZ_ENFORCED "+err.Error())
+	}
+	accountsGRPCAddr := strings.TrimSpace(os.Getenv("ACCOUNTS_GRPC_ADDR"))
+	if authzMode == authz.ModeOn && accountsGRPCAddr == "" {
+		errs = append(errs, "ACCOUNTS_GRPC_ADDR is required when AUTHZ_ENFORCED=on")
+	}
+
 	if len(errs) > 0 {
 		return nil, errors.New(strings.Join(errs, "; "))
 	}
@@ -153,6 +167,8 @@ func Load() (*Config, error) {
 		UserIDSigningKey:      userIDSigningKey,
 		OTELEndpoint:          otelEndpoint,
 		QRTokenTTL:            qrTokenTTL,
+		AuthzMode:             authzMode,
+		AccountsGRPCAddr:      accountsGRPCAddr,
 	}, nil
 }
 

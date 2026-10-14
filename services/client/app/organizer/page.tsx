@@ -7,8 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { executeQuery } from "@/lib/graphql/execute";
-import { AttendancePageDocument, OrganizerTicketsDocument } from "@/lib/graphql/generated";
-import { readCurrentUserIdFromToken } from "@/lib/server-utils";
+import {
+  AccountEventsDocument,
+  AttendancePageDocument,
+  MyAccountsDocument,
+  TicketDetailDocument,
+} from "@/lib/graphql/generated";
+import { readSelectedAccountId, resolveSelectedAccountId } from "@/lib/organizer-account";
+import { canManageEvents, canScan, canSeeSales } from "@/lib/team-roles";
 import { cn } from "@/lib/utils";
 
 type OrganizerEventRow = {
@@ -18,8 +24,16 @@ type OrganizerEventRow = {
   startsAt: string;
   sold: number;
   priceDecimal: string;
-  admitted: number;
-  denied: number;
+  // null when the attendance service refuses this caller the event.
+  attendance: { admitted: number; denied: number } | null;
+};
+
+type OrganizerTicket = {
+  id: string;
+  title: string;
+  sold: number;
+  priceDecimal: string;
+  event?: { title?: string | null; venueName?: string | null; startsAt?: string | null } | null;
 };
 
 const moneyFormatter = new Intl.NumberFormat("en-US", {
@@ -42,25 +56,44 @@ function grossForRow(row: OrganizerEventRow): number {
   return Math.round(parseFloat(row.priceDecimal) * 100) * row.sold;
 }
 
-async function getOrganizerRows(cookie: string, currentUserId: string): Promise<OrganizerEventRow[]> {
-  const data = await executeQuery(OrganizerTicketsDocument, {}, { cookie });
-  const ownedTickets = data.tickets.filter(
-    (ticket) => ticket.userId === currentUserId && ticket.event?.startsAt
-  );
+// Door staff limited to some events may not list the account's events, so
+// they get exactly the events they work.
+async function loadEvents(cookie: string, accountId: string, doorEventIds: string[]): Promise<OrganizerTicket[]> {
+  if (doorEventIds.length > 0) {
+    const found = await Promise.all(
+      doorEventIds.map((id) =>
+        executeQuery(TicketDetailDocument, { id }, { cookie, accountId })
+          .then((data) => data.ticket)
+          .catch(() => null)
+      )
+    );
+    return found.filter((ticket): ticket is NonNullable<typeof ticket> => ticket !== null);
+  }
+  const data = await executeQuery(AccountEventsDocument, { accountId }, { cookie });
+  return data.eventsByAccount.edges.map((edge) => edge.node);
+}
+
+async function getOrganizerRows(cookie: string, accountId: string, doorEventIds: string[]): Promise<OrganizerEventRow[]> {
+  const events = (await loadEvents(cookie, accountId, doorEventIds)).filter((ticket) => ticket.event?.startsAt);
 
   const rows = await Promise.all(
-    ownedTickets.map(async (ticket) => {
-      const attendance = await executeQuery(AttendancePageDocument, { id: ticket.id }, { cookie });
+    events.map(async (ticket) => {
+      // One refused event (the team member may not read it) must not fail the whole page.
+      const attendance = await executeQuery(AttendancePageDocument, { id: ticket.id }, { cookie, accountId }).catch(
+        () => null
+      );
 
       return {
         id: ticket.id,
         title: ticket.event?.title?.trim() || ticket.title,
         venueName: ticket.event?.venueName?.trim() || null,
-        startsAt: ticket.event!.startsAt,
+        startsAt: ticket.event!.startsAt!,
         sold: ticket.sold,
         priceDecimal: ticket.priceDecimal,
-        admitted: attendance.attendanceSummary?.totalAdmitted ?? 0,
-        denied: attendance.attendanceSummary?.totalDenied ?? 0,
+        attendance: attendance && {
+          admitted: attendance.attendanceSummary?.totalAdmitted ?? 0,
+          denied: attendance.attendanceSummary?.totalDenied ?? 0,
+        },
       };
     })
   );
@@ -75,33 +108,58 @@ export default async function OrganizerPage() {
     redirect("/auth/signin");
   }
 
-  const currentUserId = readCurrentUserIdFromToken(token);
-  if (!currentUserId) {
-    redirect("/auth/signin");
+  const { myAccounts } = await executeQuery(MyAccountsDocument, {}, { cookie: cookieStore.toString() });
+  const accountId = resolveSelectedAccountId(
+    myAccounts.map((m) => m.account.id),
+    await readSelectedAccountId()
+  );
+  const membership = myAccounts.find((m) => m.account.id === accountId);
+  const role = membership?.role;
+  if (!accountId) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Organizer dashboard</CardTitle>
+          <CardDescription>
+            Create an organizer account to sell tickets, or accept an invitation to join a team.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Link href="/organizer/new-account" className={buttonVariants({ size: "sm" })}>
+            Create organizer account
+          </Link>
+        </CardContent>
+      </Card>
+    );
   }
 
-  const rows = await getOrganizerRows(cookieStore.toString(), currentUserId);
+  const doorEventIds = role === "DOOR_STAFF" ? (membership?.eventIds ?? []) : [];
+  const rows = await getOrganizerRows(cookieStore.toString(), accountId, doorEventIds);
+  const showSales = canSeeSales(role);
+  const showScanner = canScan(role);
   const now = getCurrentTime();
   const activeRows = rows.filter((row) => new Date(row.startsAt).getTime() >= now);
   const grossSales = rows.reduce((sum, row) => sum + grossForRow(row), 0);
   const totalSold = rows.reduce((sum, row) => sum + row.sold, 0);
-  const totalCheckedIn = rows.reduce((sum, row) => sum + row.admitted, 0);
+  const totalCheckedIn = rows.reduce((sum, row) => sum + (row.attendance?.admitted ?? 0), 0);
 
   if (rows.length === 0) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>Organizer dashboard</CardTitle>
-          <CardDescription>No owned events were found for this account yet.</CardDescription>
+          <CardDescription>This organizer account has no events yet.</CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-3">
-          <Link href="/tickets/new" className={buttonVariants({ size: "sm" })}>
-            Create event
-          </Link>
-          <Link href="/venues" className={buttonVariants({ variant: "outline", size: "sm" })}>
-            Manage venues
-          </Link>
-        </CardContent>
+        {canManageEvents(role) && (
+          <CardContent className="flex flex-wrap gap-3">
+            <Link href="/tickets/new" className={buttonVariants({ size: "sm" })}>
+              Create event
+            </Link>
+            <Link href="/venues" className={buttonVariants({ variant: "outline", size: "sm" })}>
+              Manage venues
+            </Link>
+          </CardContent>
+        )}
       </Card>
     );
   }
@@ -110,18 +168,22 @@ export default async function OrganizerPage() {
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="flex flex-col gap-6">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Card>
-            <CardContent className="space-y-1 pt-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-mute">Gross sales</p>
-              <p className="text-2xl font-semibold text-ink">{moneyFormatter.format(grossSales / 100)}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="space-y-1 pt-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-mute">Tickets sold</p>
-              <p className="text-2xl font-semibold text-ink">{totalSold}</p>
-            </CardContent>
-          </Card>
+          {showSales && (
+            <>
+              <Card>
+                <CardContent className="space-y-1 pt-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-mute">Gross sales</p>
+                  <p className="text-2xl font-semibold text-ink">{moneyFormatter.format(grossSales / 100)}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="space-y-1 pt-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-mute">Tickets sold</p>
+                  <p className="text-2xl font-semibold text-ink">{totalSold}</p>
+                </CardContent>
+              </Card>
+            </>
+          )}
           <Card>
             <CardContent className="space-y-1 pt-5">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-mute">Active events</p>
@@ -154,27 +216,37 @@ export default async function OrganizerPage() {
                     {row.venueName ? ` · ${row.venueName}` : ""}
                   </p>
                   <div className="flex flex-wrap gap-2 text-xs text-mute">
-                    <Badge tone="neutral">{row.sold} sold</Badge>
-                    <Badge tone="ok">{row.admitted} admitted</Badge>
-                    <Badge tone={row.denied > 0 ? "bad" : "neutral"}>{row.denied} denied</Badge>
+                    {showSales && <Badge tone="neutral">{row.sold} sold</Badge>}
+                    {row.attendance && (
+                      <>
+                        <Badge tone="ok">{row.attendance.admitted} admitted</Badge>
+                        <Badge tone={row.attendance.denied > 0 ? "bad" : "neutral"}>
+                          {row.attendance.denied} denied
+                        </Badge>
+                      </>
+                    )}
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Link
-                    href={`/organizer/events/${row.id}/attendance`}
-                    className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
-                  >
-                    Attendance monitor
-                    <ArrowRight className="size-3.5" />
-                  </Link>
-                  <Link
-                    href={`/scan?eventId=${row.id}`}
-                    className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-1.5")}
-                  >
-                    <QrCode className="size-3.5" />
-                    Open scanner
-                  </Link>
-                </div>
+                {row.attendance && (
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href={`/organizer/events/${row.id}/attendance`}
+                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
+                    >
+                      Attendance monitor
+                      <ArrowRight className="size-3.5" />
+                    </Link>
+                    {showScanner && (
+                      <Link
+                        href={`/scan?eventId=${row.id}`}
+                        className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "gap-1.5")}
+                      >
+                        <QrCode className="size-3.5" />
+                        Open scanner
+                      </Link>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </CardContent>

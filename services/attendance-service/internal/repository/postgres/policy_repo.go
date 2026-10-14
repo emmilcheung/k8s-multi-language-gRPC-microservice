@@ -58,7 +58,7 @@ func (r *PolicyRepo) Upsert(ctx context.Context, policy *repository.AttendancePo
 		        allow_manual_override = EXCLUDED.allow_manual_override,
 		        updated_at            = now()`
 
-	_, err := r.db.Exec(ctx, q,
+	_, err := conn(ctx, r.db).Exec(ctx, q,
 		policy.ID, policy.EventID, policy.TicketID, policy.OrganizerID,
 		policy.RequireQRForEntry, policy.AllowManualOverride,
 	)

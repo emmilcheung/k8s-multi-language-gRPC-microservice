@@ -18,6 +18,7 @@ import { TicketForm } from "@/components/ticket-form";
 import { SeatingPlanPreview } from "@/components/seating-plan-preview";
 import { updateTicket } from "@/app/actions/tickets";
 import { fetchPriceTiers } from "@/app/actions/venues";
+import { resolveActingAccountId } from "@/lib/organizer-access";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -63,9 +64,11 @@ export default async function OrganizerEventEditPage({ params }: Props) {
 
   const cookie = cookieStore.toString();
 
+  const accountId = (await resolveActingAccountId(cookie)) ?? undefined;
+
   let ticketData: Ticket;
   try {
-    const data = await executeQuery(TicketDetailDocument, { id }, { cookie });
+    const data = await executeQuery(TicketDetailDocument, { id }, { cookie, accountId });
     if (!data.ticket) {
       notFound();
     }
@@ -102,7 +105,7 @@ export default async function OrganizerEventEditPage({ params }: Props) {
     notFound();
   }
 
-  if (ticketData.userId !== currentUserId) {
+  if (ticketData.userId !== currentUserId && !accountId) {
     notFound();
   }
 
@@ -143,7 +146,7 @@ export default async function OrganizerEventEditPage({ params }: Props) {
   const policyResult = await executeQuery(
     AttendancePolicyDocument,
     { eventId: id },
-    { cookie: `token=${token}` }
+    { cookie: `token=${token}`, accountId }
   ).catch(() => null);
   if (
     policyResult?.attendancePolicy?.requireQrForEntry === true ||

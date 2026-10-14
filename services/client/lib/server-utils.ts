@@ -7,6 +7,7 @@
 
 import { cookies } from "next/headers";
 import { traceHeaders } from "@/lib/tracing";
+import { organizerAccountHeaders } from "@/lib/organizer-account";
 import {
   ACCESS_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
@@ -69,6 +70,23 @@ export function readCurrentUserIdFromToken(token?: string): string | null {
     return payload.sub ?? null;
   } catch {
     return null;
+  }
+}
+
+/** Platform roles in the access token. Presentation only: the services check the signed copy Kong forwards. */
+export function readRolesFromToken(token?: string): string[] {
+  if (!token) return [];
+  try {
+    const payloadB64 = token.split(".")[1];
+    if (!payloadB64) return [];
+    const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8")) as {
+      roles?: unknown;
+    };
+    return Array.isArray(payload.roles)
+      ? payload.roles.filter((r): r is string => typeof r === "string")
+      : [];
+  } catch {
+    return [];
   }
 }
 
@@ -209,6 +227,7 @@ export async function authHeaders(request?: RequestWithCookies): Promise<Headers
   return {
     "Content-Type": "application/json",
     ...traceHeaders(),
+    ...(await organizerAccountHeaders()),
     ...(token ? { Cookie: `${ACCESS_TOKEN_COOKIE}=${token}` } : {}),
   };
 }

@@ -19,6 +19,27 @@ type CreateTicketInput struct {
 	Event      *TicketEventInput `json:"event"`
 }
 
+type EventHistoryConnection struct {
+	Edges    []*EventHistoryEdge `json:"edges"`
+	PageInfo *PageInfo           `json:"pageInfo"`
+}
+
+type EventHistoryEdge struct {
+	Node   *EventHistoryEntry `json:"node"`
+	Cursor string             `json:"cursor"`
+}
+
+type EventHistoryEntry struct {
+	ID             string  `json:"id"`
+	At             string  `json:"at"`
+	ActorUserID    string  `json:"actorUserId"`
+	ActorAccountID *string `json:"actorAccountId,omitempty"`
+	Action         string  `json:"action"`
+	Before         *string `json:"before,omitempty"`
+	After          *string `json:"after,omitempty"`
+	Reason         *string `json:"reason,omitempty"`
+}
+
 type Mutation struct {
 }
 

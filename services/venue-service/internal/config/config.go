@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/acme/venue-service/internal/authz"
 )
 
 // Config holds all configuration for venue-service.
@@ -32,6 +34,9 @@ type Config struct {
 	// turning it on before the seated tickets' limits are reviewed would cut
 	// existing events to one seat per buyer.
 	SeatedCapEnforced bool
+	// AuthzMode is AUTHZ_ENFORCED (off | log | on); AccountsGRPCAddr is user-service's gRPC address.
+	AuthzMode        authz.Mode
+	AccountsGRPCAddr string
 }
 
 // Load reads configuration from environment variables and validates all required fields.
@@ -118,6 +123,15 @@ func Load() (*Config, error) {
 		errs = append(errs, fmt.Sprintf("SEATED_CAP_ENFORCED must be true or false, got %q", seatedCapStr))
 	}
 
+	authzMode, err := authz.ParseMode(getEnv("AUTHZ_ENFORCED", string(authz.ModeLog)))
+	if err != nil {
+		errs = append(errs, "AUTHZ_ENFORCED "+err.Error())
+	}
+	accountsGRPCAddr := strings.TrimSpace(os.Getenv("ACCOUNTS_GRPC_ADDR"))
+	if authzMode == authz.ModeOn && accountsGRPCAddr == "" {
+		errs = append(errs, "ACCOUNTS_GRPC_ADDR is required when AUTHZ_ENFORCED=on")
+	}
+
 	if len(errs) > 0 {
 		return nil, errors.New(strings.Join(errs, "; "))
 	}
@@ -140,6 +154,8 @@ func Load() (*Config, error) {
 		HoldTTLSec:            holdTTLSec,
 		UserIDSigningKey:      userIDSigningKey,
 		SeatedCapEnforced:     seatedCapEnforced,
+		AuthzMode:             authzMode,
+		AccountsGRPCAddr:      accountsGRPCAddr,
 	}, nil
 }
 

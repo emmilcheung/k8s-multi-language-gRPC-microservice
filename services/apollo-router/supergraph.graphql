@@ -25,6 +25,49 @@ directive @link(url: String, as: String, for: link__Purpose, import: [link__Impo
 
 directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
 
+type AcceptInvitationPayload
+  @join__type(graph: USERS)
+{
+  account: Account
+  role: AccountRole
+  userErrors: [UserError!]!
+}
+
+type Account
+  @join__type(graph: USERS)
+{
+  id: ID!
+  name: String!
+  contactEmail: String
+  status: AccountStatus!
+}
+
+type AccountMember
+  @join__type(graph: USERS)
+{
+  userId: ID!
+  role: AccountRole!
+  eventIds: [ID!]!
+  joinedAt: String!
+}
+
+enum AccountRole
+  @join__type(graph: USERS)
+{
+  OWNER @join__enumValue(graph: USERS)
+  ADMIN @join__enumValue(graph: USERS)
+  EVENT_MANAGER @join__enumValue(graph: USERS)
+  FINANCE @join__enumValue(graph: USERS)
+  DOOR_STAFF @join__enumValue(graph: USERS)
+}
+
+enum AccountStatus
+  @join__type(graph: USERS)
+{
+  ACTIVE @join__enumValue(graph: USERS)
+  SUSPENDED @join__enumValue(graph: USERS)
+}
+
 type AdmissionPass
   @join__type(graph: ATTENDANCE, key: "id")
 {
@@ -94,6 +137,14 @@ input BillingAddressInput
   country: String!
 }
 
+input ChangeMemberRoleInput
+  @join__type(graph: USERS)
+{
+  accountId: ID!
+  userId: ID!
+  role: AccountRole!
+}
+
 enum CheckinSource
   @join__type(graph: ATTENDANCE)
 {
@@ -107,6 +158,20 @@ input CreateOrderInput
 {
   ticketId: ID!
   quantity: Int!
+}
+
+input CreateOrganizerAccountInput
+  @join__type(graph: USERS)
+{
+  name: String!
+  contactEmail: String
+}
+
+type CreateOrganizerAccountPayload
+  @join__type(graph: USERS)
+{
+  account: Account
+  userErrors: [UserError!]!
 }
 
 input CreatePaymentInput
@@ -186,6 +251,21 @@ enum CredentialStatus
   EXPIRED @join__enumValue(graph: ATTENDANCE)
 }
 
+input DecideVenueClaimInput
+  @join__type(graph: USERS)
+{
+  claimId: ID!
+  decision: VenueClaimDecision!
+  reason: String!
+}
+
+type DecideVenueClaimPayload
+  @join__type(graph: USERS)
+{
+  claim: VenueClaim
+  userErrors: [UserError!]!
+}
+
 type EventCheckin
   @join__type(graph: ATTENDANCE)
 {
@@ -196,6 +276,69 @@ type EventCheckin
   userId: ID
   checkedInAt: String!
   source: CheckinSource!
+}
+
+type EventHistoryConnection
+  @join__type(graph: TICKETS)
+{
+  edges: [EventHistoryEdge!]!
+  pageInfo: PageInfo!
+}
+
+type EventHistoryEdge
+  @join__type(graph: TICKETS)
+{
+  node: EventHistoryEntry!
+  cursor: String!
+}
+
+type EventHistoryEntry
+  @join__type(graph: TICKETS)
+{
+  id: ID!
+  at: String!
+  actorUserId: ID!
+  actorAccountId: ID
+  action: String!
+  before: String
+  after: String
+  reason: String
+}
+
+type Invitation
+  @join__type(graph: USERS)
+{
+  id: ID!
+  accountId: ID!
+  email: String!
+  role: AccountRole!
+  status: InvitationStatus!
+  expiresAt: String!
+}
+
+enum InvitationStatus
+  @join__type(graph: USERS)
+{
+  PENDING @join__enumValue(graph: USERS)
+  ACCEPTED @join__enumValue(graph: USERS)
+  REVOKED @join__enumValue(graph: USERS)
+  EXPIRED @join__enumValue(graph: USERS)
+}
+
+input InviteMemberInput
+  @join__type(graph: USERS)
+{
+  accountId: ID!
+  email: String!
+  role: AccountRole!
+}
+
+type InviteMemberPayload
+  @join__type(graph: USERS)
+{
+  invitation: Invitation
+  acceptLink: String
+  userErrors: [UserError!]!
 }
 
 input join__ContextArgument {
@@ -235,6 +378,13 @@ enum link__Purpose {
   EXECUTION
 }
 
+type MemberPayload
+  @join__type(graph: USERS)
+{
+  member: AccountMember
+  userErrors: [UserError!]!
+}
+
 type Mutation
   @join__type(graph: ATTENDANCE)
   @join__type(graph: AUTH)
@@ -267,6 +417,15 @@ type Mutation
   updateProfile(input: UpdateProfileInput!): UserProfile! @join__field(graph: USERS)
   updatePreferences(input: UpdatePreferencesInput!): UserPreferences! @join__field(graph: USERS)
   updateBillingAddress(input: BillingAddressInput!): BillingAddress! @join__field(graph: USERS)
+  createOrganizerAccount(input: CreateOrganizerAccountInput!): CreateOrganizerAccountPayload! @join__field(graph: USERS)
+  inviteMember(input: InviteMemberInput!): InviteMemberPayload! @join__field(graph: USERS)
+  acceptInvitation(token: String!): AcceptInvitationPayload! @join__field(graph: USERS)
+  changeMemberRole(input: ChangeMemberRoleInput!): MemberPayload! @join__field(graph: USERS)
+  removeMember(input: RemoveMemberInput!): RemoveMemberPayload! @join__field(graph: USERS)
+  setDoorStaffEvents(input: SetDoorStaffEventsInput!): MemberPayload! @join__field(graph: USERS)
+  submitVenueClaim(input: SubmitVenueClaimInput!): SubmitVenueClaimPayload! @join__field(graph: USERS)
+  decideVenueClaim(input: DecideVenueClaimInput!): DecideVenueClaimPayload! @join__field(graph: USERS)
+  suspendAccount(input: SuspendAccountInput!): SuspendAccountPayload! @join__field(graph: USERS)
   createVenue(input: CreateVenueInput!): Venue! @join__field(graph: VENUES)
   updateVenue(id: ID!, input: UpdateVenueInput!): Venue! @join__field(graph: VENUES)
   createSection(venueId: ID!, input: CreateSectionInput!): VenueSection! @join__field(graph: VENUES)
@@ -278,6 +437,14 @@ type Mutation
   createPriceTier(planId: ID!, input: CreatePriceTierInput!): PriceTier! @join__field(graph: VENUES)
   holdSeats(planId: ID!, seatIds: [ID!]!): SeatHoldResult! @join__field(graph: VENUES)
   releaseSeats(planId: ID!, seatIds: [ID!]!): Boolean! @join__field(graph: VENUES)
+}
+
+type MyAccount
+  @join__type(graph: USERS)
+{
+  account: Account!
+  role: AccountRole!
+  eventIds: [ID!]!
 }
 
 type Order
@@ -417,6 +584,12 @@ type Query
   ticketsConnection(filter: TicketFilter, first: Int, after: String): TicketConnection! @join__field(graph: TICKETS)
   ticket(id: ID!): Ticket @join__field(graph: TICKETS)
   savedEvents(first: Int, after: String): SavedEventConnection! @join__field(graph: TICKETS)
+  eventsByAccount(accountId: ID!, first: Int, after: String): TicketConnection! @join__field(graph: TICKETS)
+  eventHistory(eventId: ID!, first: Int, after: String): EventHistoryConnection! @join__field(graph: TICKETS)
+  myAccounts: [MyAccount!]! @join__field(graph: USERS)
+  account(id: ID!): Account @join__field(graph: USERS)
+  accountMembers(accountId: ID!): [AccountMember!]! @join__field(graph: USERS)
+  myInvitations: [Invitation!]! @join__field(graph: USERS)
   venues: [Venue!]! @join__field(graph: VENUES)
   venue(id: ID!): Venue @join__field(graph: VENUES)
   seatingPlans(venueId: ID!): [SeatingPlan!]! @join__field(graph: VENUES)
@@ -471,6 +644,20 @@ input RegisterPaymentMethodInput
   setAsDefault: Boolean
   consentAccepted: Boolean!
   consentVersion: String!
+}
+
+input RemoveMemberInput
+  @join__type(graph: USERS)
+{
+  accountId: ID!
+  userId: ID!
+}
+
+type RemoveMemberPayload
+  @join__type(graph: USERS)
+{
+  removed: Boolean!
+  userErrors: [UserError!]!
 }
 
 input RequestRefundInput
@@ -563,6 +750,43 @@ type Session
   createdAt: String!
   lastUsedAt: String
   current: Boolean!
+}
+
+input SetDoorStaffEventsInput
+  @join__type(graph: USERS)
+{
+  accountId: ID!
+  userId: ID!
+  eventIds: [ID!]!
+}
+
+input SubmitVenueClaimInput
+  @join__type(graph: USERS)
+{
+  venueId: ID!
+  accountId: ID
+  evidenceText: String
+}
+
+type SubmitVenueClaimPayload
+  @join__type(graph: USERS)
+{
+  claim: VenueClaim
+  userErrors: [UserError!]!
+}
+
+input SuspendAccountInput
+  @join__type(graph: USERS)
+{
+  accountId: ID!
+  reason: String!
+}
+
+type SuspendAccountPayload
+  @join__type(graph: USERS)
+{
+  account: Account
+  userErrors: [UserError!]!
 }
 
 type Ticket
@@ -754,6 +978,14 @@ type User
   billingAddress: BillingAddress @join__field(graph: USERS) @tag(name: "pii")
 }
 
+type UserError
+  @join__type(graph: USERS)
+{
+  field: [String!]
+  message: String!
+  code: String!
+}
+
 type UserLookupResult
   @join__type(graph: AUTH)
 {
@@ -788,6 +1020,31 @@ type Venue
   capacity: Int!
   timezone: String!
   address: String!
+}
+
+type VenueClaim
+  @join__type(graph: USERS)
+{
+  id: ID!
+  venueId: ID!
+  accountId: ID
+  status: VenueClaimStatus!
+  reason: String
+}
+
+enum VenueClaimDecision
+  @join__type(graph: USERS)
+{
+  APPROVE @join__enumValue(graph: USERS)
+  REJECT @join__enumValue(graph: USERS)
+}
+
+enum VenueClaimStatus
+  @join__type(graph: USERS)
+{
+  PENDING @join__enumValue(graph: USERS)
+  APPROVED @join__enumValue(graph: USERS)
+  REJECTED @join__enumValue(graph: USERS)
 }
 
 type VenueSection

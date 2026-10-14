@@ -1,6 +1,6 @@
 {{- if .Values.networkPolicy.enabled }}
 # NetworkPolicy for user-service
-# Ingress: Kong (HTTP:3004)
+# Ingress: Kong (HTTP:3004) + ticket/venue/attendance/order-service (gRPC:50053)
 # Egress:  PostgreSQL (5432), DNS (53)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -25,6 +25,23 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.service.port }}
+    # Allow gRPC permission checks from the services that guard organizer and staff operations
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ticket-service
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: venue-service
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: attendance-service
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: order-service
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.grpcPort }}
   egress:
     # DNS resolution
     - ports:

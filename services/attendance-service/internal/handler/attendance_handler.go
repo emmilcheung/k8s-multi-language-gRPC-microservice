@@ -15,13 +15,20 @@ import (
 
 // AttendanceHandler handles buyer and organizer attendance REST endpoints.
 type AttendanceHandler struct {
-	svc service.AttendanceService
-	log *zap.Logger
+	svc    service.AttendanceService
+	access *service.OrganizerAccess
+	log    *zap.Logger
 }
 
 // NewAttendanceHandler creates a new AttendanceHandler.
 func NewAttendanceHandler(svc service.AttendanceService, log *zap.Logger) *AttendanceHandler {
 	return &AttendanceHandler{svc: svc, log: log}
+}
+
+// WithAccess sends organizer checks through the permission service.
+func (h *AttendanceHandler) WithAccess(access *service.OrganizerAccess) *AttendanceHandler {
+	h.access = access
+	return h
 }
 
 // GetTicket handles GET /api/attendance/tickets/:ticketId
@@ -68,7 +75,11 @@ func (h *AttendanceHandler) GetEventSettings(c echo.Context) error {
 	if organizerID == "" {
 		return jsonError(c, http.StatusUnauthorized, "MISSING_USER_ID", "organizer identity required")
 	}
-	if err := h.svc.EnsureOrganizerOwnsEvent(c.Request().Context(), eventID, organizerID); err != nil {
+	_, _, err := authorizeEvent(c, h.svc, h.access, service.PermEventView, eventID, organizerID)
+	if err != nil {
+		if done, rerr := accessFailure(c, h.log, err); done {
+			return rerr
+		}
 		switch {
 		case errors.Is(err, repository.ErrNotFound):
 			return jsonError(c, http.StatusNotFound, "NOT_FOUND", "event not found")
@@ -112,7 +123,11 @@ func (h *AttendanceHandler) PatchEventSettings(c echo.Context) error {
 	if organizerID == "" {
 		return jsonError(c, http.StatusUnauthorized, "MISSING_USER_ID", "organizer identity required")
 	}
-	if err := h.svc.EnsureOrganizerOwnsEvent(c.Request().Context(), eventID, organizerID); err != nil {
+	caller, account, err := authorizeEvent(c, h.svc, h.access, service.PermEventEdit, eventID, organizerID)
+	if err != nil {
+		if done, rerr := accessFailure(c, h.log, err); done {
+			return rerr
+		}
 		switch {
 		case errors.Is(err, repository.ErrNotFound):
 			return jsonError(c, http.StatusNotFound, "NOT_FOUND", "event not found")
@@ -141,6 +156,11 @@ func (h *AttendanceHandler) PatchEventSettings(c echo.Context) error {
 		h.log.Error("PatchEventSettings: fetch error", zap.Error(err))
 		return jsonError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 	}
+	var before *repository.AttendancePolicy
+	if policy != nil {
+		snapshot := *policy
+		before = &snapshot
+	}
 	if policy == nil {
 		policy = &repository.AttendancePolicy{
 			ID:                  uuid.New().String(),
@@ -158,7 +178,7 @@ func (h *AttendanceHandler) PatchEventSettings(c echo.Context) error {
 		policy.AllowManualOverride = *body.AllowManualOverride
 	}
 
-	if err := h.svc.UpsertAttendancePolicy(c.Request().Context(), policy); err != nil {
+	if err := h.access.SavePolicy(c.Request().Context(), h.svc, caller, account, before, policy); err != nil {
 		h.log.Error("PatchEventSettings: upsert error", zap.Error(err))
 		return jsonError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 	}
@@ -181,7 +201,11 @@ func (h *AttendanceHandler) GetEventSummary(c echo.Context) error {
 	if organizerID == "" {
 		return jsonError(c, http.StatusUnauthorized, "MISSING_USER_ID", "organizer identity required")
 	}
-	if err := h.svc.EnsureOrganizerOwnsEvent(c.Request().Context(), eventID, organizerID); err != nil {
+	_, _, err := authorizeEvent(c, h.svc, h.access, service.PermEventView, eventID, organizerID)
+	if err != nil {
+		if done, rerr := accessFailure(c, h.log, err); done {
+			return rerr
+		}
 		switch {
 		case errors.Is(err, repository.ErrNotFound):
 			return jsonError(c, http.StatusNotFound, "NOT_FOUND", "event not found")
@@ -218,7 +242,11 @@ func (h *AttendanceHandler) GetEventCheckIns(c echo.Context) error {
 	if organizerID == "" {
 		return jsonError(c, http.StatusUnauthorized, "MISSING_USER_ID", "organizer identity required")
 	}
-	if err := h.svc.EnsureOrganizerOwnsEvent(c.Request().Context(), eventID, organizerID); err != nil {
+	_, _, err := authorizeEvent(c, h.svc, h.access, service.PermEventView, eventID, organizerID)
+	if err != nil {
+		if done, rerr := accessFailure(c, h.log, err); done {
+			return rerr
+		}
 		switch {
 		case errors.Is(err, repository.ErrNotFound):
 			return jsonError(c, http.StatusNotFound, "NOT_FOUND", "event not found")

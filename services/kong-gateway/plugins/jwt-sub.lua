@@ -6,6 +6,15 @@
 --   * X-User-Id       — the "sub" claim value
 --   * X-User-Roles    — comma-separated list of roles from the "roles" claim array
 --   * X-User-Id-Sig   — base64(HMAC-SHA256(signing_key, userId .. "|" .. minute))
+--   * X-User-Roles-Sig — base64(HMAC-SHA256(signing_key, userId .. "|" .. roles .. "|" .. minute)),
+--                        sent only together with X-User-Roles. Services that act on roles
+--                        verify it; X-User-Roles alone is unauthenticated inside the mesh.
+--
+-- Client-supplied X-User-Roles / X-User-Roles-Sig are always cleared first, so a token
+-- without roles can never carry a forged copy through. Delegated OAuth tokens (they carry
+-- a client_id) never produce roles headers: platform roles belong to first-party sessions.
+-- X-Organizer-Account is not touched here: it is a selector the services verify, and the
+-- gateway forwards it unchanged.
 --
 -- Why post-function instead of request-transformer:
 --   Kong OSS DB-less mode stores `kong.ctx.shared.authenticated_jwt_token` as a
@@ -286,6 +295,9 @@ local function hmac_sha256_base64(key, message)
   return ngx.encode_base64(digest)
 end
 
+kong.service.request.clear_header("X-User-Roles")
+kong.service.request.clear_header("X-User-Roles-Sig")
+
 local token_str = kong.ctx.shared.authenticated_jwt_token
 if type(token_str) == "string" then
   local b64_payload = token_str:match("^[^.]+%.([^.]+)%.")
@@ -302,13 +314,17 @@ if type(token_str) == "string" then
         -- Example JWT payload:  "roles":["organizer", "buyer"]
         -- Resulting header:     X-User-Roles: organizer,buyer
         local roles_list = {}
+        -- A client_id marks a delegated (OAuth/MCP) token: it never yields roles.
+        local delegated = payload_json:find('"client_id"%s*:') ~= nil
         for role in payload_json:gmatch('"roles"%s*:%s*%[([^%]]+)%]') do
           for r in role:gmatch('"([^"]+)"') do
             table.insert(roles_list, r)
           end
         end
-        if #roles_list > 0 then
-          kong.service.request.set_header("X-User-Roles", table.concat(roles_list, ","))
+        local roles_header = nil
+        if #roles_list > 0 and not delegated then
+          roles_header = table.concat(roles_list, ",")
+          kong.service.request.set_header("X-User-Roles", roles_header)
         end
 
         local signing_key = [=[SIGNING_KEY_PLACEHOLDER]=]
@@ -320,6 +336,15 @@ if type(token_str) == "string" then
           )
           if signature then
             kong.service.request.set_header("X-User-Id-Sig", signature)
+          end
+          if roles_header then
+            local roles_signature = hmac_sha256_base64(
+              signing_key,
+              sub .. "|" .. roles_header .. "|" .. current_minute
+            )
+            if roles_signature then
+              kong.service.request.set_header("X-User-Roles-Sig", roles_signature)
+            end
           end
         end
       end

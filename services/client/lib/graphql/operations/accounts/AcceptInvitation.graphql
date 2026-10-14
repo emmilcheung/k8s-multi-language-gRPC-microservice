@@ -1,0 +1,13 @@
+mutation AcceptInvitation($token: String!) {
+  acceptInvitation(token: $token) {
+    account {
+      id
+      name
+    }
+    role
+    userErrors {
+      message
+      code
+    }
+  }
+}

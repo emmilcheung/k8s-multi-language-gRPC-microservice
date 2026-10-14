@@ -11,6 +11,7 @@
 #   POST /api/users/signup|signin|signout  → auth-service   (public)
 #   GET  /api/users/currentuser            → auth-service   (JWT required)
 #   GET  /api/users/lookup                 → auth-service   (JWT required)
+#   POST /admin/users/{id}/roles           → auth-service   (JWT required, no OAuth tokens)
 #   GET  /.well-known/jwks.json            → auth-service   (public)
 #   GET  /.well-known/oauth-authorization-server → auth-service (public)
 #   GET  /api/tickets/*                    → ticket-service (public)
@@ -288,6 +289,29 @@ services:
         paths:
           - ~/api/users/sessions/[^/]+$
         methods: [DELETE]
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              cookie_names: [{{JWT_COOKIE_NAME}}]
+              header_names: [Authorization]
+              claims_to_verify: [exp]
+          - name: post-function
+            config:
+              access:
+                - |
+                  {{OAUTH_DENY_LUA}}
+                - |
+                  {{JWT_SUB_LUA}}
+
+      # Protected: platform role changes. Kong only verifies the token and
+      # refuses OAuth tokens; auth-service checks platform_admin itself from its
+      # own database.
+      - name: auth-admin-roles
+        paths:
+          - ~/admin/users/[^/]+/roles$
+        methods: [POST]
         strip_path: false
         plugins:
           - name: jwt
@@ -939,6 +963,7 @@ services:
                   kong.service.request.clear_header("X-User-Id")
                   kong.service.request.clear_header("X-User-Id-Sig")
                   kong.service.request.clear_header("X-User-Roles")
+                  kong.service.request.clear_header("X-User-Roles-Sig")
                   local auth = kong.request.get_header("Authorization")
                   local cookie = kong.request.get_header("Cookie")
                   local has_cookie_token = cookie and cookie:find("{{JWT_COOKIE_NAME}}=", 1, true) ~= nil
@@ -1025,6 +1050,7 @@ services:
                 headers:
                   - X-User-Id
                   - X-User-Roles
+                  - X-User-Roles-Sig
                   - X-User-Id-Sig
           # Replaces the global limiter for this route; per source IP because the
           # caller is unauthenticated at the edge.
@@ -1131,6 +1157,7 @@ plugins:
         headers:
           - X-User-Id
           - X-User-Roles
+          - X-User-Roles-Sig
 
   # Inject a correlation ID on every request for distributed tracing
   - name: correlation-id

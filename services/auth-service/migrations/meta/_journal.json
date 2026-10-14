@@ -15,6 +15,13 @@
       "when": 1700000001000,
       "tag": "002_add_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1700000002000,
+      "tag": "003_audit_log",
+      "breakpoints": true
     }
   ]
 }

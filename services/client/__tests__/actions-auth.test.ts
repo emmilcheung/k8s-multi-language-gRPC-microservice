@@ -145,6 +145,20 @@ describe("auth server actions", () => {
     expect(redirectMock).toHaveBeenCalledWith("/");
   });
 
+  it("signin makes no accounts or GraphQL call, so it never waits on another service", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: { get: vi.fn().mockReturnValue("token=jwt.token.value; HttpOnly; Path=/") },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await signin({}, makeForm("user@example.com", "password123"));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/signin");
+    expect(cookieSet).not.toHaveBeenCalledWith("organizer_account", expect.anything(), expect.anything());
+  });
+
   it("signout revokes upstream session and clears both local cookies", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchMock);
@@ -164,6 +178,8 @@ describe("auth server actions", () => {
     expect(cookieDelete).toHaveBeenCalledWith("token");
     expect(cookieDelete).toHaveBeenCalledWith("refreshToken");
     expect(cookieDelete).toHaveBeenCalledWith({ name: "logged_in", path: "/" });
+    // The next person on a shared browser must not inherit the previous account.
+    expect(cookieDelete).toHaveBeenCalledWith({ name: "organizer_account", path: "/" });
     expect(redirectMock).toHaveBeenCalledWith("/auth/signin");
   });
 

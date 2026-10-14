@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Button } from "@/components/ui/button";
 import { signout } from "@/app/actions/auth";
+import { getNavAccess } from "@/app/actions/accounts";
 import { LOGGED_IN_HINT_COOKIE } from "@/lib/session-cookies";
 import { cn } from "@/lib/utils";
 import {
@@ -17,11 +18,14 @@ import {
   UserPlus,
   Settings,
   Home,
+  Briefcase,
+  ShieldCheck,
 } from "lucide-react";
 
 export function NavBar() {
   const [mounted, setMounted] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [access, setAccess] = useState({ organizer: false, admin: false });
   const pathname = usePathname();
 
   // Resolve session state client-side from the non-httpOnly hint cookie so the
@@ -37,6 +41,21 @@ export function NavBar() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoggedIn(loggedIn);
     setMounted(true);
+    if (!loggedIn) {
+      setAccess({ organizer: false, admin: false });
+      return;
+    }
+    // Presentation only: organizer links show to members and the admin link to
+    // platform admins; the services enforce every permission themselves.
+    let cancelled = false;
+    getNavAccess()
+      .then((next) => {
+        if (!cancelled) setAccess(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [pathname]);
 
   return (
@@ -63,26 +82,63 @@ export function NavBar() {
         >
           {isLoggedIn ? (
             <>
-              <Link
-                href="/tickets/new"
-                className={cn(
-                  buttonVariants({ variant: "ghost", size: "sm" }),
-                  "gap-1.5 text-mute hover:text-ink text-xs font-medium"
-                )}
-              >
-                <Tag className="size-3.5" />
-                Sell
-              </Link>
-              <Link
-                href="/venues"
-                className={cn(
-                  buttonVariants({ variant: "ghost", size: "sm" }),
-                  "gap-1.5 text-mute hover:text-ink text-xs font-medium"
-                )}
-              >
-                <Building2 className="size-3.5" />
-                Venues
-              </Link>
+              {access.organizer ? (
+                <>
+                  <Link
+                    href="/organizer"
+                    className={cn(
+                      buttonVariants({ variant: "ghost", size: "sm" }),
+                      "gap-1.5 text-mute hover:text-ink text-xs font-medium"
+                    )}
+                  >
+                    <Briefcase className="size-3.5" />
+                    Organizer console
+                  </Link>
+                  <Link
+                    href="/tickets/new"
+                    className={cn(
+                      buttonVariants({ variant: "ghost", size: "sm" }),
+                      "gap-1.5 text-mute hover:text-ink text-xs font-medium"
+                    )}
+                  >
+                    <Tag className="size-3.5" />
+                    Sell
+                  </Link>
+                  <Link
+                    href="/venues"
+                    className={cn(
+                      buttonVariants({ variant: "ghost", size: "sm" }),
+                      "gap-1.5 text-mute hover:text-ink text-xs font-medium"
+                    )}
+                  >
+                    <Building2 className="size-3.5" />
+                    Venues
+                  </Link>
+                </>
+              ) : (
+                <Link
+                  href="/organizer/new-account"
+                  className={cn(
+                    buttonVariants({ variant: "ghost", size: "sm" }),
+                    "gap-1.5 text-mute hover:text-ink text-xs font-medium"
+                  )}
+                >
+                  <Briefcase className="size-3.5" />
+                  Become an organizer
+                </Link>
+              )}
+              {access.admin && (
+                <Link
+                  href="/admin"
+                  className={cn(
+                    buttonVariants({ variant: "ghost", size: "sm" }),
+                    "gap-1.5 text-mute hover:text-ink text-xs font-medium"
+                  )}
+                >
+                  <ShieldCheck className="size-3.5" />
+                  Admin
+                </Link>
+              )}
               <Link
                 href="/orders"
                 className={cn(
@@ -151,10 +207,33 @@ export function NavBar() {
                 <Home className="size-4" />
                 Browse
               </Link>
-              <Link href="/tickets/new" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
-                <Tag className="size-4" />
-                Sell
-              </Link>
+              {access.organizer ? (
+                <>
+                  <Link href="/organizer" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
+                    <Briefcase className="size-4" />
+                    Organizer console
+                  </Link>
+                  <Link href="/tickets/new" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
+                    <Tag className="size-4" />
+                    Sell
+                  </Link>
+                  <Link href="/venues" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
+                    <Building2 className="size-4" />
+                    Venues
+                  </Link>
+                </>
+              ) : (
+                <Link href="/organizer/new-account" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
+                  <Briefcase className="size-4" />
+                  Become an organizer
+                </Link>
+              )}
+              {access.admin && (
+                <Link href="/admin" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
+                  <ShieldCheck className="size-4" />
+                  Admin
+                </Link>
+              )}
               <Link href="/orders" className="inline-flex flex-col items-center gap-0.5 text-[11px] text-mute">
                 <LayoutDashboard className="size-4" />
                 Orders

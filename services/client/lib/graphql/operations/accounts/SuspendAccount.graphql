@@ -1,0 +1,13 @@
+mutation SuspendAccount($input: SuspendAccountInput!) {
+  suspendAccount(input: $input) {
+    account {
+      id
+      name
+      status
+    }
+    userErrors {
+      message
+      code
+    }
+  }
+}

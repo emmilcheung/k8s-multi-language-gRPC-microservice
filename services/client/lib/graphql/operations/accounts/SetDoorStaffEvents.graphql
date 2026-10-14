@@ -1,0 +1,12 @@
+mutation SetDoorStaffEvents($input: SetDoorStaffEventsInput!) {
+  setDoorStaffEvents(input: $input) {
+    member {
+      userId
+      eventIds
+    }
+    userErrors {
+      message
+      code
+    }
+  }
+}

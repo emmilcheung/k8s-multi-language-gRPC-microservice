@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/acme/ticket-service/internal/audit"
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/repository"
 	"github.com/stretchr/testify/assert"
@@ -20,6 +21,18 @@ type stubRelayRepo struct {
 	ackErr     error
 	requeues   []requeueCall
 	requeueErr error
+	audits     []auditCall
+	auditErr   error
+}
+
+type auditCall struct {
+	eventID string
+	entry   audit.Entry
+}
+
+func (s *stubRelayRepo) WriteAuditEntry(_ context.Context, eventID string, entry audit.Entry) error {
+	s.audits = append(s.audits, auditCall{eventID: eventID, entry: entry})
+	return s.auditErr
 }
 
 type ackCall struct {
@@ -306,6 +319,10 @@ type recordingRelayRepo struct {
 	cancel    context.CancelFunc
 }
 
+func (s *recordingRelayRepo) WriteAuditEntry(context.Context, string, audit.Entry) error {
+	return nil
+}
+
 func (s *recordingRelayRepo) ClaimPendingOutboxEvents(_ context.Context, _ time.Duration, _ int) ([]repository.ClaimedOutboxEvent, error) {
 	now := time.Now()
 	if !s.last.IsZero() {
@@ -341,4 +358,50 @@ func TestRelay_TicketEventData_CarriesCategoryAndCreatedAt(t *testing.T) {
 	got := buildTicketEventData(payload) // the relay's payload->event mapper (see Step 3)
 	require.Equal(t, "MUSIC", got.Category)
 	require.Equal(t, created.Format(time.RFC3339), got.CreatedAt)
+}
+
+func TestRelayProcessClaimedEvent_ShouldWriteAuditEntryBeforeAcknowledging(t *testing.T) {
+	repo := &stubRelayRepo{}
+	relay := NewRelay(repo, &stubRelayProducer{}, zap.NewNop())
+	entry := &audit.Entry{ActorUserID: "u1", Action: "event.update", Resource: "ticket:t1"}
+
+	err := relay.processClaimedEvent(context.Background(), repository.ClaimedOutboxEvent{
+		TicketID: "t1",
+		Event: repository.TicketOutboxEvent{
+			ID: "evt-1", Type: repository.OutboxEventTypeTicketUpdated, ClaimToken: "c", Audit: entry,
+		},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, repo.audits, 1)
+	assert.Equal(t, "evt-1", repo.audits[0].eventID, "the outbox event id is the idempotency key")
+	assert.Len(t, repo.acked, 1)
+}
+
+func TestRelayProcessClaimedEvent_ShouldNotAcknowledge_WhenAuditWriteFails(t *testing.T) {
+	repo := &stubRelayRepo{auditErr: errors.New("mongo down")}
+	relay := NewRelay(repo, &stubRelayProducer{}, zap.NewNop())
+
+	err := relay.processClaimedEvent(context.Background(), repository.ClaimedOutboxEvent{
+		TicketID: "t1",
+		Event: repository.TicketOutboxEvent{
+			ID: "evt-1", Type: repository.OutboxEventTypeTicketUpdated, ClaimToken: "c",
+			Audit: &audit.Entry{ActorUserID: "u1", Action: "a", Resource: "r"},
+		},
+	})
+
+	require.Error(t, err)
+	assert.Empty(t, repo.acked, "an unacknowledged event is retried, so the audit entry is never lost")
+	assert.Len(t, repo.requeues, 1)
+}
+
+func TestRelayProcessClaimedEvent_ShouldSkipAudit_WhenEventCarriesNone(t *testing.T) {
+	repo := &stubRelayRepo{}
+	relay := NewRelay(repo, &stubRelayProducer{}, zap.NewNop())
+
+	require.NoError(t, relay.processClaimedEvent(context.Background(), repository.ClaimedOutboxEvent{
+		TicketID: "t1",
+		Event:    repository.TicketOutboxEvent{ID: "evt-1", Type: repository.OutboxEventTypeTicketUpdated, ClaimToken: "c"},
+	}))
+	assert.Empty(t, repo.audits)
 }

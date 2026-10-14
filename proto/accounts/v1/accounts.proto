@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package acme.accounts.v1;
+
+option go_package = "github.com/org/ticketing/libs/grpc-stubs/go/accounts/v1";
+option java_multiple_files = true;
+option java_outer_classname = "AccountsProto";
+option java_package = "com.ticketing.accounts.grpc";
+
+// AccountsService is the single permission decision point for organizer,
+// venue-team and staff operations. Callers pass the platform roles they read
+// from the verified X-User-Roles header; this service never looks them up.
+// Buyer paths must not call it.
+service AccountsService {
+  // CheckPermission decides whether user_id may perform permission on the
+  // given resource. A denial is a normal response (allowed = false), not a
+  // gRPC error. INVALID_ARGUMENT means the request itself is malformed
+  // (empty user_id, unknown permission name).
+  rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+  // ListMyAccounts lists the organizer accounts the user belongs to (console account switcher).
+  rpc ListMyAccounts(ListMyAccountsRequest) returns (ListMyAccountsResponse);
+  // GetAccount returns display data for one account; NOT_FOUND if it does not exist.
+  rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
+  // EnsurePersonalAccount returns the user's personal organizer account,
+  // creating it (with the user as OWNER) on first call. Idempotent.
+  rpc EnsurePersonalAccount(EnsurePersonalAccountRequest) returns (EnsurePersonalAccountResponse);
+  // EnsureVenueManager gives the user the VENUE_MANAGER role on the venue,
+  // doing nothing if they already hold a membership on it. Idempotent.
+  rpc EnsureVenueManager(EnsureVenueManagerRequest) returns (EnsureVenueManagerResponse);
+}
+
+enum ReasonCode {
+  // Set when allowed is true.
+  REASON_CODE_UNSPECIFIED = 0;
+  // The user has no membership on the account (or venue) the permission applies to.
+  REASON_CODE_NOT_MEMBER = 1;
+  // The user's role does not carry the permission.
+  REASON_CODE_ROLE_LACKS_PERMISSION = 2;
+  // The account is suspended and the permission is not a view permission.
+  REASON_CODE_ACCOUNT_SUSPENDED = 3;
+  // Door staff limited to listed events, and the event is not one of them.
+  REASON_CODE_OUT_OF_SCOPE = 4;
+}
+
+enum AccountStatus {
+  ACCOUNT_STATUS_UNSPECIFIED = 0;
+  ACCOUNT_STATUS_ACTIVE = 1;
+  ACCOUNT_STATUS_SUSPENDED = 2;
+}
+
+message CheckPermissionRequest {
+  string user_id = 1;
+  // Platform roles (platform_admin, platform_support) from the verified token.
+  repeated string platform_roles = 2;
+  // Permission name from the permission table, for example "event.publish".
+  string permission = 3;
+  // The organizer account that owns the resource. Required for account permissions.
+  string account_id = 4;
+  // The venue the permission applies to. Required for venue-team permissions.
+  string venue_id = 5;
+  // The event acted on. Needed to evaluate door staff limited to listed events.
+  string event_id = 6;
+}
+
+message CheckPermissionResponse {
+  bool allowed = 1;
+  ReasonCode reason_code = 2;
+}
+
+message Account {
+  string id = 1;
+  string name = 2;
+  AccountStatus status = 3;
+}
+
+message AccountMembership {
+  Account account = 1;
+  // OWNER, ADMIN, EVENT_MANAGER, FINANCE or DOOR_STAFF.
+  string role = 2;
+}
+
+message ListMyAccountsRequest {
+  string user_id = 1;
+}
+
+message ListMyAccountsResponse {
+  repeated AccountMembership accounts = 1;
+}
+
+message GetAccountRequest {
+  string account_id = 1;
+}
+
+message GetAccountResponse {
+  Account account = 1;
+}
+
+message EnsurePersonalAccountRequest {
+  string user_id = 1;
+  // Used only when the account is created; ignored afterwards.
+  string display_name = 2;
+}
+
+message EnsurePersonalAccountResponse {
+  string account_id = 1;
+}
+
+message EnsureVenueManagerRequest {
+  string user_id = 1;
+  string venue_id = 2;
+}
+
+message EnsureVenueManagerResponse {}

@@ -64,6 +64,20 @@ func (g *Generator) Generate(claims Claims) (string, error) {
 // Verify decodes and validates a token.
 // Returns ErrTokenInvalid, ErrTokenExpired, or ErrTokenMalformed on failure.
 func (g *Generator) Verify(token string) (*Claims, error) {
+	claims, err := g.VerifySigned(token)
+	if err != nil {
+		return nil, err
+	}
+	if time.Now().After(claims.ExpiresAt) {
+		return nil, ErrTokenExpired
+	}
+	return claims, nil
+}
+
+// VerifySigned checks the signature and decodes the claims without looking at
+// expiry, so an expired token whose signature is good still names its event.
+// Returns ErrTokenInvalid or ErrTokenMalformed on failure.
+func (g *Generator) VerifySigned(token string) (*Claims, error) {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
 		return nil, ErrTokenMalformed
@@ -89,11 +103,6 @@ func (g *Generator) Verify(token string) (*Claims, error) {
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return nil, ErrTokenMalformed
 	}
-
-	if time.Now().After(claims.ExpiresAt) {
-		return nil, ErrTokenExpired
-	}
-
 	return &claims, nil
 }
 

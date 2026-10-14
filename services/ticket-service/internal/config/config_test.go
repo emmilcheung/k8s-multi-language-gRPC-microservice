@@ -143,3 +143,55 @@ func TestLoad_InvalidSearchBackend_IsRejected(t *testing.T) {
 	require.Contains(t, err.Error(), "SEARCH_BACKEND")
 	require.Contains(t, err.Error(), `"elastic"`)
 }
+
+// Enforcement must default to log so a deploy ahead of user-service blocks
+// nothing, and a missing address must stop startup only when enforcing.
+func TestLoad_AuthzDefaultsToLogAndNeedsNoAddress(t *testing.T) {
+	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	t.Setenv("AUTHZ_ENFORCED", "")
+	t.Setenv("ACCOUNTS_GRPC_ADDR", "")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "log", string(cfg.AuthzMode))
+	assert.Equal(t, "", cfg.AccountsGRPCAddr)
+}
+
+func TestLoad_AuthzOnWithoutAddressFailsStartup(t *testing.T) {
+	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	t.Setenv("AUTHZ_ENFORCED", "on")
+	t.Setenv("ACCOUNTS_GRPC_ADDR", "")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ACCOUNTS_GRPC_ADDR")
+
+	t.Setenv("ACCOUNTS_GRPC_ADDR", "user-service:50053")
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "on", string(cfg.AuthzMode))
+	assert.Equal(t, "user-service:50053", cfg.AccountsGRPCAddr)
+}
+
+func TestLoad_AuthzOffNeedsNoAddress(t *testing.T) {
+	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	t.Setenv("AUTHZ_ENFORCED", "off")
+	t.Setenv("ACCOUNTS_GRPC_ADDR", "")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "off", string(cfg.AuthzMode))
+}
+
+func TestLoad_AuthzTypoFailsStartup(t *testing.T) {
+	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	t.Setenv("KAFKA_BROKERS", "localhost:9092")
+	t.Setenv("AUTHZ_ENFORCED", "enforce")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AUTHZ_ENFORCED")
+}

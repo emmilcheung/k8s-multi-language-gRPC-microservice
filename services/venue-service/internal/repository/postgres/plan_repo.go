@@ -44,7 +44,7 @@ func (r *PlanRepo) Create(ctx context.Context, p *repository.SeatingPlan) error 
 		pricingMode = "single"
 	}
 
-	return r.pool.QueryRow(ctx, q,
+	return conn(ctx, r.pool).QueryRow(ctx, q,
 		p.VenueID, p.TicketID, p.OrganizerID, p.Name, maxSeats, assignmentMode, pricingMode,
 	).Scan(&p.ID, &p.Status, &p.LayoutJSON, &p.Version, &p.AssignmentMode, &p.PricingMode, &p.CreatedAt, &p.UpdatedAt)
 }
@@ -58,7 +58,7 @@ func (r *PlanRepo) FindByID(ctx context.Context, id string) (*repository.Seating
 		WHERE id = $1`
 
 	p := &repository.SeatingPlan{}
-	err := r.pool.QueryRow(ctx, q, id).Scan(
+	err := conn(ctx, r.pool).QueryRow(ctx, q, id).Scan(
 		&p.ID, &p.VenueID, &p.TicketID, &p.OrganizerID, &p.Name,
 		&p.Status, &p.MaxSeatsPerOrder, &p.LayoutJSON, &p.Version, &p.AssignmentMode, &p.PricingMode,
 		&p.CreatedAt, &p.UpdatedAt,
@@ -85,7 +85,7 @@ func (r *PlanRepo) FindByIDs(ctx context.Context, ids []string) ([]*repository.S
 		FROM seating_plans
 		WHERE id = ANY($1)`
 
-	rows, err := r.pool.Query(ctx, q, ids)
+	rows, err := conn(ctx, r.pool).Query(ctx, q, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (r *PlanRepo) ListByVenue(ctx context.Context, venueID, organizerID string)
 		WHERE venue_id = $1 AND organizer_id = $2
 		ORDER BY created_at DESC`
 
-	rows, err := r.pool.Query(ctx, q, venueID, organizerID)
+	rows, err := conn(ctx, r.pool).Query(ctx, q, venueID, organizerID)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func (r *PlanRepo) ListActivePlans(ctx context.Context) ([]*repository.SeatingPl
 		WHERE status = 'active'
 		ORDER BY created_at ASC`
 
-	rows, err := r.pool.Query(ctx, q)
+	rows, err := conn(ctx, r.pool).Query(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func (r *PlanRepo) ListByTicket(ctx context.Context, ticketID, organizerID strin
 		WHERE ticket_id = $1 AND organizer_id = $2
 		ORDER BY created_at DESC`
 
-	rows, err := r.pool.Query(ctx, q, ticketID, organizerID)
+	rows, err := conn(ctx, r.pool).Query(ctx, q, ticketID, organizerID)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +226,7 @@ func (r *PlanRepo) Activate(ctx context.Context, planID string, expectedVersion 
 	// Check at least one section exists.
 	var sectionCount int
 	const countQ = `SELECT COUNT(*) FROM sections WHERE plan_id = $1`
-	if err := r.pool.QueryRow(ctx, countQ, planID).Scan(&sectionCount); err != nil {
+	if err := conn(ctx, r.pool).QueryRow(ctx, countQ, planID).Scan(&sectionCount); err != nil {
 		return err
 	}
 	if sectionCount == 0 {
@@ -241,7 +241,7 @@ func (r *PlanRepo) Activate(ctx context.Context, planID string, expectedVersion 
 		RETURNING id`
 
 	var id string
-	err = r.pool.QueryRow(ctx, q, planID, expectedVersion).Scan(&id)
+	err = conn(ctx, r.pool).QueryRow(ctx, q, planID, expectedVersion).Scan(&id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return repository.ErrVersionConflict
@@ -274,7 +274,7 @@ func (r *PlanRepo) Deactivate(ctx context.Context, planID, organizerID string) e
 		RETURNING id`
 
 	var id string
-	err = r.pool.QueryRow(ctx, q, planID, organizerID).Scan(&id)
+	err = conn(ctx, r.pool).QueryRow(ctx, q, planID, organizerID).Scan(&id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return repository.ErrPlanNotActive
@@ -304,7 +304,7 @@ func (r *PlanRepo) Update(ctx context.Context, p *repository.SeatingPlan) error 
 		pricingMode = "single"
 	}
 
-	err := r.pool.QueryRow(ctx, q, p.Name, p.MaxSeatsPerOrder, assignmentMode, pricingMode, p.ID, p.OrganizerID).
+	err := conn(ctx, r.pool).QueryRow(ctx, q, p.Name, p.MaxSeatsPerOrder, assignmentMode, pricingMode, p.ID, p.OrganizerID).
 		Scan(&updatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -329,7 +329,7 @@ func (r *PlanRepo) SaveLayout(ctx context.Context, planID, organizerID string, l
 		RETURNING id`
 
 	var id string
-	err := r.pool.QueryRow(ctx, q, layoutJSON, planID, organizerID).Scan(&id)
+	err := conn(ctx, r.pool).QueryRow(ctx, q, layoutJSON, planID, organizerID).Scan(&id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Could be not found, wrong organizer, or not in draft.

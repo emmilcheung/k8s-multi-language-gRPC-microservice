@@ -1,6 +1,7 @@
 "use server";
 // app/actions/auth.ts — Server Actions for authentication flows.
 
+import { ORGANIZER_ACCOUNT_COOKIE } from "@/lib/organizer-account";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ApiError } from "@/lib/api";
@@ -203,5 +204,6 @@ export async function signout(): Promise<void> {
   cookieStore.delete(ACCESS_TOKEN_COOKIE);
   cookieStore.delete(REFRESH_TOKEN_COOKIE);
   cookieStore.delete({ name: LOGGED_IN_HINT_COOKIE, path: "/" });
+  cookieStore.delete({ name: ORGANIZER_ACCOUNT_COOKIE, path: "/" });
   redirect("/auth/signin");
 }

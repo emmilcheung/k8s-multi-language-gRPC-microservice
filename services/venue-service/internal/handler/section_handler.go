@@ -5,8 +5,10 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/acme/venue-service/internal/audit"
 	"github.com/acme/venue-service/internal/repository"
 	"github.com/acme/venue-service/internal/security"
+	"github.com/acme/venue-service/internal/service"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
@@ -17,6 +19,7 @@ type SectionHandler struct {
 	sectionRepo   repository.SectionRepository
 	priceTierRepo PriceTierRepository
 	validator     *security.UserIDSignatureValidator
+	access        *Access
 	log           *zap.Logger
 }
 
@@ -39,8 +42,38 @@ func NewSectionHandler(
 		sectionRepo:   sectionRepo,
 		priceTierRepo: priceTierRepo,
 		validator:     validator,
+		access:        legacyAccess(log),
 		log:           log,
 	}
+}
+
+// WithAccess sends organizer writes through the permission check.
+func (h *SectionHandler) WithAccess(a *Access) *SectionHandler {
+	h.access = a
+	return h
+}
+
+// authorizePlan loads the plan and checks the caller may change it. When
+// handled is true the response has been written.
+func (h *SectionHandler) authorizePlan(c echo.Context, organizerID, planID string) (plan *repository.SeatingPlan, actorUser, actorAccount string, handled bool, err error) {
+	ctx := c.Request().Context()
+	plan, ferr := h.planRepo.FindByID(ctx, planID)
+	if ferr != nil {
+		if errors.Is(ferr, repository.ErrPlanNotFound) {
+			return nil, "", "", true, c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
+		}
+		h.log.Error("plan lookup failed", zap.Error(ferr), zap.String("planId", planID))
+		return nil, "", "", true, c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+	}
+	caller, acting, cerr := h.access.Caller(c, organizerID)
+	if done, e := h.access.Fail(c, h.log, cerr, 0, ""); done {
+		return nil, "", "", true, e
+	}
+	account, aerr := h.access.org.AuthorizePlanEdit(ctx, caller, acting, plan)
+	if done, e := h.access.Fail(c, h.log, aerr, http.StatusForbidden, "not the plan owner"); done {
+		return nil, "", "", true, e
+	}
+	return plan, caller.UserID, account, false, nil
 }
 
 // RegisterRoutes attaches section and price-tier routes to the given plan group.
@@ -81,17 +114,9 @@ func (h *SectionHandler) CreateSection(c echo.Context) error {
 
 	planID := c.Param("planId")
 
-	// Ownership check.
-	plan, err := h.planRepo.FindByID(c.Request().Context(), planID)
-	if err != nil {
-		if errors.Is(err, repository.ErrPlanNotFound) {
-			return c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
-		}
-		h.log.Error("section create: plan lookup failed", zap.Error(err), zap.String("planId", planID))
-		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
-	}
-	if plan.OrganizerID != organizerID {
-		return c.JSON(http.StatusForbidden, errorResponse("not the plan owner"))
+	plan, actorUser, actorAccount, handled, err := h.authorizePlan(c, organizerID, planID)
+	if handled {
+		return err
 	}
 	if plan.Status != repository.PlanStatusDraft {
 		return c.JSON(http.StatusConflict, errorResponse("cannot add sections to an active or inactive plan"))
@@ -117,18 +142,19 @@ func (h *SectionHandler) CreateSection(c echo.Context) error {
 		PriceTierID: req.PriceTierID,
 	}
 
-	if err := h.sectionRepo.CreateSection(c.Request().Context(), s); err != nil {
+	ctx := c.Request().Context()
+	err = h.access.org.Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, actorUser, actorAccount, service.ActionSectionCreate, "seating_plan:"+planID, nil,
+			map[string]any{"sectionId": s.ID, "name": s.Name, "type": req.Type, "rowCount": s.RowCount, "columnCount": s.ColumnCount})
+	}, func(ctx context.Context) error {
+		if err := h.sectionRepo.CreateSection(ctx, s); err != nil {
+			return err
+		}
+		// Auto-generate seat rows for the new section.
+		return h.sectionRepo.BulkInsertSeats(ctx, s.ID, planID, req.Type, req.PriceTierID, req.RowCount, req.ColumnCount)
+	})
+	if err != nil {
 		h.log.Error("section create failed", zap.Error(err), zap.String("planId", planID))
-		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
-	}
-
-	// Auto-generate seat rows for the new section.
-	if err := h.sectionRepo.BulkInsertSeats(
-		c.Request().Context(),
-		s.ID, planID, req.Type, req.PriceTierID, req.RowCount, req.ColumnCount,
-	); err != nil {
-		h.log.Error("section seat generation failed", zap.Error(err),
-			zap.String("sectionId", s.ID), zap.String("planId", planID))
 		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
 	}
 
@@ -174,17 +200,9 @@ func (h *SectionHandler) CreatePriceTier(c echo.Context) error {
 
 	planID := c.Param("planId")
 
-	// Ownership check.
-	plan, err := h.planRepo.FindByID(c.Request().Context(), planID)
-	if err != nil {
-		if errors.Is(err, repository.ErrPlanNotFound) {
-			return c.JSON(http.StatusNotFound, errorResponse("seating plan not found"))
-		}
-		h.log.Error("price-tier create: plan lookup failed", zap.Error(err), zap.String("planId", planID))
-		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
-	}
-	if plan.OrganizerID != organizerID {
-		return c.JSON(http.StatusForbidden, errorResponse("not the plan owner"))
+	plan, actorUser, actorAccount, handled, err := h.authorizePlan(c, organizerID, planID)
+	if handled {
+		return err
 	}
 	if plan.Status != repository.PlanStatusDraft {
 		return c.JSON(http.StatusConflict, errorResponse("cannot add price tiers to an active or inactive plan"))
@@ -207,7 +225,12 @@ func (h *SectionHandler) CreatePriceTier(c echo.Context) error {
 		Price:  req.Price,
 	}
 
-	if err := h.priceTierRepo.Create(c.Request().Context(), t); err != nil {
+	ctx := c.Request().Context()
+	err = h.access.org.Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, actorUser, actorAccount, service.ActionPriceTierCreate, "seating_plan:"+planID, nil,
+			map[string]any{"priceTierId": t.ID, "name": t.Name, "price": t.Price})
+	}, func(ctx context.Context) error { return h.priceTierRepo.Create(ctx, t) })
+	if err != nil {
 		h.log.Error("price-tier create failed", zap.Error(err), zap.String("planId", planID))
 		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
 	}

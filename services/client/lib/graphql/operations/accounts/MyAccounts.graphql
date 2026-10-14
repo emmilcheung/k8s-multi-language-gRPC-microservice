@@ -1,0 +1,12 @@
+query MyAccounts {
+  myAccounts {
+    role
+    eventIds
+    account {
+      id
+      name
+      contactEmail
+      status
+    }
+  }
+}

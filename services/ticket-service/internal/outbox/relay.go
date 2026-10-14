@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/acme/ticket-service/internal/audit"
 	"github.com/acme/ticket-service/internal/kafka"
 	"github.com/acme/ticket-service/internal/repository"
 	"go.uber.org/zap"
@@ -24,6 +25,7 @@ const (
 type relayRepository interface {
 	ClaimPendingOutboxEvents(ctx context.Context, leaseDuration time.Duration, limit int) ([]repository.ClaimedOutboxEvent, error)
 	AcknowledgeOutboxEvent(ctx context.Context, ticketID, eventID, claimToken string) error
+	WriteAuditEntry(ctx context.Context, eventID string, entry audit.Entry) error
 	RequeueOutboxEvent(ctx context.Context, ticketID, eventID, claimToken, lastErr string, attempts int, nextAttemptAt time.Time) error
 }
 
@@ -126,7 +128,12 @@ func (r *Relay) processBatch(ctx context.Context) (int, error) {
 }
 
 func (r *Relay) processClaimedEvent(ctx context.Context, item repository.ClaimedOutboxEvent) error {
-	err := r.publish(ctx, item.Event)
+	// Written before the event is acknowledged and keyed by the event id, so a
+	// retry or a replay after a crash cannot lose it or write it twice.
+	err := r.writeAudit(ctx, item.Event)
+	if err == nil {
+		err = r.publish(ctx, item.Event)
+	}
 	if err == nil {
 		if ackErr := r.repo.AcknowledgeOutboxEvent(ctx, item.TicketID, item.Event.ID, item.Event.ClaimToken); ackErr != nil {
 			return fmt.Errorf("ack outbox event: %w", ackErr)
@@ -140,6 +147,16 @@ func (r *Relay) processClaimedEvent(ctx context.Context, item repository.Claimed
 		return fmt.Errorf("requeue outbox event: %w", requeueErr)
 	}
 	return err
+}
+
+func (r *Relay) writeAudit(ctx context.Context, event repository.TicketOutboxEvent) error {
+	if event.Audit == nil {
+		return nil
+	}
+	if err := r.repo.WriteAuditEntry(ctx, event.ID, *event.Audit); err != nil {
+		return fmt.Errorf("write audit entry: %w", err)
+	}
+	return nil
 }
 
 func buildTicketEventData(payload repository.TicketOutboxPayload) kafka.TicketEventData {

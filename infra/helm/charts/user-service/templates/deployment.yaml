@@ -75,6 +75,9 @@ spec:
             - name: http
               containerPort: {{ .Values.service.port }}
               protocol: TCP
+            - name: grpc
+              containerPort: {{ .Values.service.grpcPort }}
+              protocol: TCP
           volumeMounts:
             - name: tmp
               mountPath: /tmp

@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
+	"github.com/acme/venue-service/internal/audit"
 	"github.com/acme/venue-service/internal/repository"
 	"github.com/acme/venue-service/internal/security"
+	"github.com/acme/venue-service/internal/service"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 )
@@ -15,6 +18,7 @@ type VenueSectionHandler struct {
 	venueRepo     repository.VenueRepository
 	vsSectionRepo repository.VenueSectionRepository
 	validator     *security.UserIDSignatureValidator
+	access        *Access
 	log           *zap.Logger
 }
 
@@ -29,8 +33,38 @@ func NewVenueSectionHandler(
 		venueRepo:     venueRepo,
 		vsSectionRepo: vsSectionRepo,
 		validator:     validator,
+		access:        legacyAccess(log),
 		log:           log,
 	}
+}
+
+// WithAccess sends organizer writes through the permission check.
+func (h *VenueSectionHandler) WithAccess(a *Access) *VenueSectionHandler {
+	h.access = a
+	return h
+}
+
+// authorize loads the venue and checks the caller may edit it. When it returns
+// handled=true the response has been written.
+func (h *VenueSectionHandler) authorize(c echo.Context, organizerID, venueID string) (caller string, actorAccount string, handled bool, err error) {
+	ctx := c.Request().Context()
+	venue, ferr := h.venueRepo.FindByID(ctx, venueID)
+	if ferr != nil {
+		if errors.Is(ferr, repository.ErrVenueNotFound) {
+			return "", "", true, c.JSON(http.StatusNotFound, errorResponse("venue not found"))
+		}
+		h.log.Error("venue section: venue lookup failed", zap.Error(ferr))
+		return "", "", true, c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
+	}
+	tc, acting, cerr := h.access.Caller(c, organizerID)
+	if done, e := h.access.Fail(c, h.log, cerr, 0, ""); done {
+		return "", "", true, e
+	}
+	account, aerr := h.access.org.AuthorizeVenueEdit(ctx, tc, acting, venue)
+	if done, e := h.access.Fail(c, h.log, aerr, http.StatusForbidden, "not the venue owner"); done {
+		return "", "", true, e
+	}
+	return tc.UserID, account, false, nil
 }
 
 // RegisterRoutes attaches venue section routes to /api/venues/:venueId.
@@ -77,17 +111,10 @@ func (h *VenueSectionHandler) Create(c echo.Context) error {
 
 	venueID := c.Param("venueId")
 
-	// Ownership check — only the venue owner may add template sections.
-	venue, err := h.venueRepo.FindByID(c.Request().Context(), venueID)
-	if err != nil {
-		if errors.Is(err, repository.ErrVenueNotFound) {
-			return c.JSON(http.StatusNotFound, errorResponse("venue not found"))
-		}
-		h.log.Error("venue section create: venue lookup failed", zap.Error(err))
-		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
-	}
-	if venue.OrganizerID != organizerID {
-		return c.JSON(http.StatusForbidden, errorResponse("not the venue owner"))
+	// Only the venue's editors may add template sections.
+	actorUser, actorAccount, handled, err := h.authorize(c, organizerID, venueID)
+	if handled {
+		return err
 	}
 
 	var req createVenueSectionRequest
@@ -116,7 +143,11 @@ func (h *VenueSectionHandler) Create(c echo.Context) error {
 		DisplayOrder: req.DisplayOrder,
 	}
 
-	if err := h.vsSectionRepo.Create(c.Request().Context(), vs); err != nil {
+	ctx := c.Request().Context()
+	err = h.access.org.Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, actorUser, actorAccount, service.ActionVenueSectionCreate, "venue_section:"+vs.ID, nil, venueSectionFields(vs))
+	}, func(ctx context.Context) error { return h.vsSectionRepo.Create(ctx, vs) })
+	if err != nil {
 		h.log.Error("venue section create failed", zap.Error(err), zap.String("venueId", venueID))
 		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
 	}
@@ -139,20 +170,16 @@ func (h *VenueSectionHandler) Delete(c echo.Context) error {
 	venueID := c.Param("venueId")
 	sectionID := c.Param("sectionId")
 
-	// Ownership check.
-	venue, err := h.venueRepo.FindByID(c.Request().Context(), venueID)
-	if err != nil {
-		if errors.Is(err, repository.ErrVenueNotFound) {
-			return c.JSON(http.StatusNotFound, errorResponse("venue not found"))
-		}
-		h.log.Error("venue section delete: venue lookup failed", zap.Error(err))
-		return c.JSON(http.StatusInternalServerError, errorResponse("internal error"))
-	}
-	if venue.OrganizerID != organizerID {
-		return c.JSON(http.StatusForbidden, errorResponse("not the venue owner"))
+	actorUser, actorAccount, handled, err := h.authorize(c, organizerID, venueID)
+	if handled {
+		return err
 	}
 
-	if err := h.vsSectionRepo.Delete(c.Request().Context(), sectionID, venueID); err != nil {
+	ctx := c.Request().Context()
+	err = h.access.org.Audited(ctx, func() audit.Entry {
+		return service.ChangeEntry(ctx, actorUser, actorAccount, service.ActionVenueSectionDelete, "venue_section:"+sectionID, map[string]any{"deleted": false}, map[string]any{"deleted": true})
+	}, func(ctx context.Context) error { return h.vsSectionRepo.Delete(ctx, sectionID, venueID) })
+	if err != nil {
 		if errors.Is(err, repository.ErrSectionNotFound) {
 			return c.JSON(http.StatusNotFound, errorResponse("section not found"))
 		}
@@ -161,4 +188,11 @@ func (h *VenueSectionHandler) Delete(c echo.Context) error {
 	}
 
 	return c.NoContent(http.StatusNoContent)
+}
+
+func venueSectionFields(vs *repository.VenueSection) map[string]any {
+	return map[string]any{
+		"venueId": vs.VenueID, "name": vs.Name, "type": string(vs.Type),
+		"rowCount": vs.RowCount, "columnCount": vs.ColumnCount, "displayOrder": vs.DisplayOrder,
+	}
 }

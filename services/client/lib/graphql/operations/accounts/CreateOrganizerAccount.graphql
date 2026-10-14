@@ -1,0 +1,12 @@
+mutation CreateOrganizerAccount($input: CreateOrganizerAccountInput!) {
+  createOrganizerAccount(input: $input) {
+    account {
+      id
+      name
+    }
+    userErrors {
+      message
+      code
+    }
+  }
+}

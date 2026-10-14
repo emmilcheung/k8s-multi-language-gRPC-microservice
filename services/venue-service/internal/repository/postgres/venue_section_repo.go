@@ -31,7 +31,7 @@ func (r *VenueSectionRepo) Create(ctx context.Context, vs *repository.VenueSecti
 		posJSON = "{}"
 	}
 
-	return r.pool.QueryRow(ctx, q,
+	return conn(ctx, r.pool).QueryRow(ctx, q,
 		vs.VenueID, vs.Name, string(vs.Type), vs.RowCount, vs.ColumnCount,
 		posJSON, vs.DisplayOrder,
 	).Scan(&vs.ID, &vs.CreatedAt, &vs.UpdatedAt)
@@ -46,7 +46,7 @@ func (r *VenueSectionRepo) FindByID(ctx context.Context, id string) (*repository
 		WHERE  id = $1`
 
 	vs := &repository.VenueSection{}
-	err := r.pool.QueryRow(ctx, q, id).Scan(
+	err := conn(ctx, r.pool).QueryRow(ctx, q, id).Scan(
 		&vs.ID, &vs.VenueID, &vs.Name, &vs.Type,
 		&vs.RowCount, &vs.ColumnCount, &vs.PositionJSON,
 		&vs.DisplayOrder, &vs.CreatedAt, &vs.UpdatedAt,
@@ -69,7 +69,7 @@ func (r *VenueSectionRepo) ListByVenue(ctx context.Context, venueID string) ([]*
 		WHERE  venue_id = $1
 		ORDER  BY display_order, created_at`
 
-	rows, err := r.pool.Query(ctx, q, venueID)
+	rows, err := conn(ctx, r.pool).Query(ctx, q, venueID)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func (r *VenueSectionRepo) Update(ctx context.Context, vs *repository.VenueSecti
 		posJSON = "{}"
 	}
 
-	err := r.pool.QueryRow(ctx, q,
+	err := conn(ctx, r.pool).QueryRow(ctx, q,
 		vs.Name, string(vs.Type), vs.RowCount, vs.ColumnCount,
 		posJSON, vs.DisplayOrder, vs.ID, vs.VenueID,
 	).Scan(&vs.UpdatedAt)
@@ -121,7 +121,7 @@ func (r *VenueSectionRepo) Update(ctx context.Context, vs *repository.VenueSecti
 // venueID is used as an ownership guard.
 func (r *VenueSectionRepo) Delete(ctx context.Context, id, venueID string) error {
 	const q = `DELETE FROM venue_sections WHERE id = $1 AND venue_id = $2`
-	tag, err := r.pool.Exec(ctx, q, id, venueID)
+	tag, err := conn(ctx, r.pool).Exec(ctx, q, id, venueID)
 	if err != nil {
 		return err
 	}

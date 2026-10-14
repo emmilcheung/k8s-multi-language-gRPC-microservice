@@ -288,7 +288,7 @@ if [[ -z "${RT_BLOCK}" ]]; then
   echo "FAIL: the /mcp route has no request-transformer plugin" >&2
   exit 1
 fi
-for h in X-User-Id X-User-Roles X-User-Id-Sig; do
+for h in X-User-Id X-User-Roles X-User-Roles-Sig X-User-Id-Sig; do
   if ! grep -qE -- "^ +- ${h}\$" <<<"${RT_BLOCK}"; then
     echo "FAIL: the /mcp request-transformer does not remove inbound ${h}" >&2
     exit 1
@@ -332,11 +332,23 @@ echo "PASS: the scope guard embeds the API audience derived from the OAuth issue
 # Guard counts unchanged by the new routes (they carry no jwt plugin).
 SCOPE_N="$(grep -c '{{SCOPE_CHECK_LUA:' "${GATEWAY_DIR}/config/kong.base.yml")"
 DENY_N="$(grep -c '{{OAUTH_DENY_LUA}}' "${GATEWAY_DIR}/config/kong.base.yml")"
-if [[ "${SCOPE_N}" != "11" || "${DENY_N}" != "19" ]]; then
-  echo "FAIL: guard counts changed (scope=${SCOPE_N} deny=${DENY_N}, expected 11/19); a new jwt route needs a deliberate guard" >&2
+if [[ "${SCOPE_N}" != "11" || "${DENY_N}" != "20" ]]; then
+  echo "FAIL: guard counts changed (scope=${SCOPE_N} deny=${DENY_N}, expected 11/20); a new jwt route needs a deliberate guard" >&2
   exit 1
 fi
-echo "PASS: guard counts are SCOPE 11 / DENY 19"
+echo "PASS: guard counts are SCOPE 11 / DENY 20"
+
+# The platform role route refuses OAuth tokens (guard first) and still sets the
+# identity headers; it is POST-only.
+ROLES_BLOCK="$(route_block "${WORK}/mcp.yml" auth-admin-roles)"
+if [[ -z "${ROLES_BLOCK}" ]] || ! grep -q -- '- name: jwt$' <<<"${ROLES_BLOCK}" \
+   || ! grep -q 'methods: \[POST\]' <<<"${ROLES_BLOCK}" \
+   || ! grep -q 'This route is not available to OAuth clients' <<<"${ROLES_BLOCK}" \
+   || ! grep -q 'X-User-Id' <<<"${ROLES_BLOCK}"; then
+  echo "FAIL: auth-admin-roles must be a POST jwt route with the OAuth deny guard and identity headers" >&2
+  exit 1
+fi
+echo "PASS: the platform role route is JWT-protected and refuses OAuth tokens"
 
 # The issuer is a build input: missing or malformed must fail loud, never fall
 # back to a hard-coded origin. dev/staging/prod have no values-file default.

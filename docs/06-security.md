@@ -8,6 +8,7 @@
 - Services receive a verified identity via a forwarded header (e.g. `X-User-Id`, `X-User-Roles`) injected by Kong after token validation — services must not re-validate the token.
 - Internal gRPC calls propagate identity via **gRPC metadata** headers (same header names as above).
 - JWTs: short-lived access tokens (15 min), long-lived refresh tokens stored server-side (Redis) and rotatable. RS256 signing — public keys distributed to Kong via JWKS endpoint.
+- **Removing access takes a little time.** Removing a platform role only revokes the user's refresh sessions. The access token already issued still carries the role until it expires, 15 minutes by default (the JWT expiry setting), because Kong checks the signature and expiry and nothing else, so the longest a removed platform role keeps working is that expiry. Removing someone from an organizer account takes effect within 30 seconds, the lifetime of the permission-check answers that ticket-service, venue-service and attendance-service keep.
 
 ### Consuming Service Pattern
 

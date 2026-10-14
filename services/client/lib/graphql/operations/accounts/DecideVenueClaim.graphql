@@ -1,0 +1,12 @@
+mutation DecideVenueClaim($input: DecideVenueClaimInput!) {
+  decideVenueClaim(input: $input) {
+    claim {
+      id
+      status
+    }
+    userErrors {
+      message
+      code
+    }
+  }
+}

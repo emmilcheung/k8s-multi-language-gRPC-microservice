@@ -28,6 +28,10 @@ headers:
       - propagate:
           named: x-user-id-sig
       - propagate:
+          named: x-user-roles-sig
+      - propagate:
+          named: x-organizer-account
+      - propagate:
           named: traceparent
       - propagate:
           named: tracestate
